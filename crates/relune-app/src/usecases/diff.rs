@@ -12,16 +12,14 @@ use relune_core::{ChangeKind, diff_schemas};
 #[allow(clippy::needless_pass_by_value)]
 pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     // Step 1: Resolve schemas
-    let before_schema = schema_from_input(&request.before)?;
-    let after_schema = schema_from_input(&request.after)?;
+    let (before_schema, mut diagnostics) = schema_from_input(&request.before)?;
+    let (after_schema, after_diagnostics) = schema_from_input(&request.after)?;
+    diagnostics.extend(after_diagnostics);
 
     // Step 2: Compute diff
     let diff = diff_schemas(&before_schema, &after_schema);
 
-    Ok(DiffResult {
-        diff,
-        diagnostics: vec![],
-    })
+    Ok(DiffResult { diff, diagnostics })
 }
 
 /// Format diff result as human-readable text.

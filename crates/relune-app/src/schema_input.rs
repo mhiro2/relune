@@ -1,32 +1,45 @@
 //! Resolve [`relune_core::Schema`] from [`crate::request::InputSource`].
 
-use relune_core::Schema;
-use relune_parser_sql::parse_sql_to_schema_with_dialect;
+use relune_core::{Diagnostic, Schema};
+use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
 
 use crate::error::AppError;
 use crate::request::InputSource;
 
 /// Load a schema from the given input source.
-pub(crate) fn schema_from_input(input: &InputSource) -> Result<Schema, AppError> {
+pub(crate) fn schema_from_input(
+    input: &InputSource,
+) -> Result<(Schema, Vec<Diagnostic>), AppError> {
     match input {
         InputSource::SqlText { sql, dialect } => {
-            Ok(parse_sql_to_schema_with_dialect(sql, *dialect)?)
+            let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, *dialect);
+            match output.schema {
+                Some(schema) => Ok((schema, output.diagnostics)),
+                None => Err(AppError::input("Failed to parse SQL: no schema produced")),
+            }
         }
         InputSource::SqlFile { path, dialect } => {
             let sql = std::fs::read_to_string(path)?;
-            Ok(parse_sql_to_schema_with_dialect(&sql, *dialect)?)
+            let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, *dialect);
+            match output.schema {
+                Some(schema) => Ok((schema, output.diagnostics)),
+                None => Err(AppError::input("Failed to parse SQL: no schema produced")),
+            }
         }
         InputSource::SchemaJson { json } => {
             let export: relune_core::export::SchemaExport = serde_json::from_str(json)?;
-            Ok(relune_core::export::import_schema(&export))
+            Ok((relune_core::export::import_schema(&export), vec![]))
         }
         InputSource::SchemaJsonFile { path } => {
             let json = std::fs::read_to_string(path)?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(&json)?;
-            Ok(relune_core::export::import_schema(&export))
+            Ok((relune_core::export::import_schema(&export), vec![]))
         }
         #[cfg(feature = "introspect")]
-        InputSource::DbUrl { url } => schema_from_db_url(url),
+        InputSource::DbUrl { url } => {
+            let schema = schema_from_db_url(url)?;
+            Ok((schema, vec![]))
+        }
     }
 }
 
@@ -53,7 +66,7 @@ mod tests {
     #[test]
     fn from_sql_text() {
         let input = InputSource::sql_text("CREATE TABLE t (id INT PRIMARY KEY);");
-        let schema = schema_from_input(&input).expect("schema");
+        let (schema, _diagnostics) = schema_from_input(&input).expect("schema");
         assert_eq!(schema.tables.len(), 1);
     }
 

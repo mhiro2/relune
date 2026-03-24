@@ -12,7 +12,7 @@ use relune_core::Schema;
 #[allow(clippy::needless_pass_by_value)]
 pub fn inspect(request: InspectRequest) -> Result<InspectResult, AppError> {
     // Parse input
-    let schema = schema_from_input(&request.input)?;
+    let (schema, diagnostics) = schema_from_input(&request.input)?;
 
     // Build summary
     let summary = SchemaSummary::from(&schema);
@@ -27,7 +27,7 @@ pub fn inspect(request: InspectRequest) -> Result<InspectResult, AppError> {
     Ok(InspectResult {
         summary,
         table,
-        diagnostics: vec![],
+        diagnostics,
     })
 }
 

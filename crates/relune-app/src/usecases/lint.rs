@@ -12,7 +12,7 @@ use relune_core::{LintIssue, LintRuleId, Severity, lint_schema};
 #[allow(clippy::needless_pass_by_value)]
 pub fn lint(request: LintRequest) -> Result<LintResult, AppError> {
     // Parse input
-    let schema = schema_from_input(&request.input)?;
+    let (schema, diagnostics) = schema_from_input(&request.input)?;
 
     // Run lint
     let mut lint_result = lint_schema(&schema);
@@ -34,7 +34,7 @@ pub fn lint(request: LintRequest) -> Result<LintResult, AppError> {
     Ok(LintResult {
         issues: lint_result.issues,
         stats: lint_result.stats,
-        diagnostics: vec![],
+        diagnostics,
     })
 }
 
