@@ -6,27 +6,33 @@ use crate::result::ExportResult;
 use crate::schema_input::schema_from_input;
 use relune_core::Schema;
 use relune_layout::{
-    LayoutConfig, LayoutGraph, LayoutGraphBuilder, LayoutRequest, build_layout_with_config,
-    layout_graph_to_d2, layout_graph_to_dot, layout_graph_to_mermaid,
+    FocusExtractor, LayoutConfig, LayoutGraph, LayoutGraphBuilder, LayoutRequest,
+    build_layout_with_config, layout_graph_to_d2, layout_graph_to_dot, layout_graph_to_mermaid,
 };
 
-fn graph_for_export(request: &ExportRequest, schema: &Schema) -> LayoutGraph {
+fn graph_for_export(request: &ExportRequest, schema: &Schema) -> Result<LayoutGraph, AppError> {
     let layout_request = LayoutRequest {
         filter: request.filter.clone(),
         focus: request.focus.clone(),
         grouping: request.grouping,
         collapse_join_tables: false,
     };
-    LayoutGraphBuilder::new()
+    let mut graph = LayoutGraphBuilder::new()
         .request(layout_request)
-        .build(schema)
+        .build(schema);
+    if let Some(ref focus) = request.focus {
+        graph = FocusExtractor
+            .extract(&graph, focus)
+            .map_err(relune_layout::LayoutError::from)?;
+    }
+    Ok(graph)
 }
 
 /// Execute an export request.
 #[allow(clippy::needless_pass_by_value)] // Owned request matches other usecases and CLI call sites.
 pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
     // Parse input
-    let schema = schema_from_input(&request.input)?;
+    let (schema, diagnostics) = schema_from_input(&request.input)?;
     let stats = schema.stats();
 
     // Build content based on format
@@ -36,7 +42,7 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
             serde_json::to_string_pretty(&export)?
         }
         ExportFormat::GraphJson => {
-            let graph = graph_for_export(&request, &schema);
+            let graph = graph_for_export(&request, &schema)?;
             serde_json::to_string_pretty(&graph)?
         }
         ExportFormat::LayoutJson => {
@@ -50,14 +56,14 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
             let positioned = build_layout_with_config(&schema, &layout_request, &config)?;
             serde_json::to_string_pretty(&positioned)?
         }
-        ExportFormat::Mermaid => layout_graph_to_mermaid(&graph_for_export(&request, &schema)),
-        ExportFormat::D2 => layout_graph_to_d2(&graph_for_export(&request, &schema)),
-        ExportFormat::Dot => layout_graph_to_dot(&graph_for_export(&request, &schema)),
+        ExportFormat::Mermaid => layout_graph_to_mermaid(&graph_for_export(&request, &schema)?),
+        ExportFormat::D2 => layout_graph_to_d2(&graph_for_export(&request, &schema)?),
+        ExportFormat::Dot => layout_graph_to_dot(&graph_for_export(&request, &schema)?),
     };
 
     Ok(ExportResult {
         content,
-        diagnostics: vec![],
+        diagnostics,
         stats,
     })
 }

@@ -3,7 +3,9 @@
 use std::time::Instant;
 
 use relune_core::SchemaStats;
-use relune_layout::{LayoutConfig, LayoutGraphBuilder, LayoutRequest, build_layout_with_config};
+use relune_layout::{
+    FocusExtractor, LayoutConfig, LayoutGraphBuilder, LayoutRequest, build_layout_with_config,
+};
 use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
 use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg};
 use tracing::{debug, info_span};
@@ -21,7 +23,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
 
     // Step 1: Parse input
     let parse_start = Instant::now();
-    let schema = {
+    let (schema, diagnostics) = {
         let _span = info_span!("parse").entered();
         schema_from_input(&request.input)?
     };
@@ -44,11 +46,17 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     let layout_config = LayoutConfig::from(&request.layout);
     let graph = {
         let _span = info_span!("graph_build").entered();
-        LayoutGraphBuilder::new()
+        let mut g = LayoutGraphBuilder::new()
             .filter(request.filter.clone())
             .focus(request.focus.clone())
             .grouping(request.grouping)
-            .build(&schema)
+            .build(&schema);
+        if let Some(ref focus) = request.focus {
+            g = FocusExtractor
+                .extract(&g, focus)
+                .map_err(relune_layout::LayoutError::from)?;
+        }
+        g
     };
     let graph_time = graph_start.elapsed();
 
@@ -81,7 +89,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
 
     Ok(RenderResult {
         content,
-        diagnostics: vec![],
+        diagnostics,
         stats: render_stats,
     })
 }
