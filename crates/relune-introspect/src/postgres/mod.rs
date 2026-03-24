@@ -84,7 +84,7 @@ use crate::error::IntrospectError;
 ///     introspect_postgres(url).await
 /// }
 /// ```
-#[instrument(skip_all, fields(database_url = %database_url))]
+#[instrument(skip_all, fields(database_url = %crate::url::mask_credentials(database_url)))]
 pub async fn introspect_postgres(database_url: &str) -> Result<Schema, IntrospectError> {
     info!("Starting PostgreSQL introspection");
 

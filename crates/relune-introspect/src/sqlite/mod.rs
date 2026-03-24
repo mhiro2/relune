@@ -12,7 +12,7 @@ use crate::error::IntrospectError;
 ///
 /// Accepts URLs understood by `sqlx`, for example `sqlite://path/to.db`,
 /// `sqlite:///absolute/path.db`, or `sqlite::memory:`.
-#[instrument(skip_all, fields(database_url = %database_url))]
+#[instrument(skip_all, fields(database_url = %crate::url::mask_credentials(database_url)))]
 pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectError> {
     info!("Starting SQLite introspection");
 
