@@ -157,16 +157,17 @@ impl PostgresCatalog {
                 tc.conname AS constraint_name,
                 src_ns.nspname AS schema_name,
                 src_cls.relname AS from_table,
-                array_agg(src_attr.attname ORDER BY src_attr.attnum) AS from_columns,
+                array_agg(src_attr.attname ORDER BY u.ord) AS from_columns,
                 dst_cls.relname AS to_table,
-                array_agg(dst_attr.attname ORDER BY dst_attr.attnum) AS to_columns
+                array_agg(dst_attr.attname ORDER BY u.ord) AS to_columns
             FROM pg_catalog.pg_constraint tc
             INNER JOIN pg_catalog.pg_class src_cls ON src_cls.oid = tc.conrelid
             INNER JOIN pg_catalog.pg_namespace src_ns ON src_ns.oid = src_cls.relnamespace
             INNER JOIN pg_catalog.pg_class dst_cls ON dst_cls.oid = tc.confrelid
             INNER JOIN pg_catalog.pg_namespace dst_ns ON dst_ns.oid = dst_cls.relnamespace
-            INNER JOIN pg_catalog.pg_attribute src_attr ON src_attr.attrelid = tc.conrelid AND src_attr.attnum = ANY(tc.conkey)
-            INNER JOIN pg_catalog.pg_attribute dst_attr ON dst_attr.attrelid = tc.confrelid AND dst_attr.attnum = ANY(tc.confkey)
+            CROSS JOIN LATERAL UNNEST(tc.conkey, tc.confkey) WITH ORDINALITY AS u(src_attnum, dst_attnum, ord)
+            INNER JOIN pg_catalog.pg_attribute src_attr ON src_attr.attrelid = tc.conrelid AND src_attr.attnum = u.src_attnum
+            INNER JOIN pg_catalog.pg_attribute dst_attr ON dst_attr.attrelid = tc.confrelid AND dst_attr.attnum = u.dst_attnum
             WHERE tc.contype = 'f'
                 AND src_ns.nspname NOT IN ('pg_catalog', 'information_schema')
                 AND src_ns.nspname NOT LIKE 'pg_%'
