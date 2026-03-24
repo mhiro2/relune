@@ -6,7 +6,7 @@
 use relune_app::{
     ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy,
     InspectFormat, InspectRequest, LayoutAlgorithm, LayoutDirection, LayoutSpec, OutputFormat,
-    RenderRequest, RouteStyle,
+    RenderOptions, RenderRequest, RouteStyle,
 };
 use serde::{Deserialize, Serialize};
 
@@ -132,6 +132,7 @@ impl WasmRenderRequest {
             focus,
             grouping,
             layout,
+            options: RenderOptions::default(),
             output_path: None, // Not applicable in WASM
         })
     }

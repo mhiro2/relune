@@ -66,9 +66,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
         let _span = info_span!("render", format = ?request.output_format).entered();
         match request.output_format {
             OutputFormat::Svg => render_svg_output(&positioned, &stats, request.options),
-            OutputFormat::Html => {
-                render_html_output(&positioned, &graph, &stats, request.options)?
-            }
+            OutputFormat::Html => render_html_output(&positioned, &graph, &stats, request.options)?,
             OutputFormat::GraphJson => serde_json::to_string_pretty(&graph)?,
             OutputFormat::SchemaJson => {
                 let export = relune_core::export::export_schema(&schema);

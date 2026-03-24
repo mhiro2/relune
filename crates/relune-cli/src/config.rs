@@ -46,6 +46,7 @@ use crate::cli::{
 
 /// Root configuration structure.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReluneConfig {
     /// Render command configuration.
     #[serde(default)]
@@ -66,6 +67,7 @@ pub struct ReluneConfig {
 
 /// Configuration for the render command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RenderConfig {
     /// Output format.
     #[serde(default)]
@@ -104,6 +106,7 @@ pub struct RenderConfig {
 
 /// Configuration for the inspect command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InspectConfig {
     /// Output format.
     #[serde(default)]
@@ -112,6 +115,7 @@ pub struct InspectConfig {
 
 /// Configuration for the export command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExportConfig {
     /// Export format.
     #[serde(default)]
@@ -135,6 +139,7 @@ pub struct ExportConfig {
 
 /// Configuration for the lint command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LintConfig {
     /// Output format.
     #[serde(default)]
@@ -146,6 +151,7 @@ pub struct LintConfig {
 
 /// Configuration for the diff command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DiffConfig {
     /// Output format.
     #[serde(default)]
@@ -304,7 +310,7 @@ impl ReluneConfig {
         MergedInspectConfig {
             format: args
                 .format
-                .or(self.inspect.format.map(Into::into))
+                .or_else(|| self.inspect.format.map(Into::into))
                 .unwrap_or_default(),
         }
     }
@@ -316,7 +322,7 @@ impl ReluneConfig {
     ) -> Result<MergedExportConfig, ConfigError> {
         let format = args
             .format
-            .or(self.export.format.map(Into::into))
+            .or_else(|| self.export.format.map(Into::into))
             .ok_or_else(|| {
                 ConfigError::InvalidValue(
                     "Export format must be provided via --format or config export.format"
@@ -342,9 +348,9 @@ impl ReluneConfig {
         MergedLintConfig {
             format: args
                 .format
-                .or(self.lint.format.map(Into::into))
+                .or_else(|| self.lint.format.map(Into::into))
                 .unwrap_or_default(),
-            deny: args.deny.or(self.lint.deny.map(Into::into)),
+            deny: args.deny.or_else(|| self.lint.deny.map(Into::into)),
         }
     }
 
@@ -499,6 +505,34 @@ mod tests {
     }
 
     #[test]
+    fn test_load_unknown_nested_key_fails() {
+        let path = fixtures_dir().join("unknown_nested_key.toml");
+        let result = ReluneConfig::from_file(&path);
+
+        assert!(result.is_err());
+        match result {
+            Err(ConfigError::Parse(error)) => {
+                assert!(error.to_string().contains("unknown field `tehme`"));
+            }
+            _ => panic!("Expected Parse error for unknown nested key"),
+        }
+    }
+
+    #[test]
+    fn test_load_unknown_root_key_fails() {
+        let path = fixtures_dir().join("unknown_root_key.toml");
+        let result = ReluneConfig::from_file(&path);
+
+        assert!(result.is_err());
+        match result {
+            Err(ConfigError::Parse(error)) => {
+                assert!(error.to_string().contains("unknown field `unknown_field`"));
+            }
+            _ => panic!("Expected Parse error for unknown root key"),
+        }
+    }
+
+    #[test]
     fn test_merge_render_args_cli_overrides_config() {
         // Load config with specific values
         let config = ReluneConfig::default();
@@ -557,7 +591,7 @@ mod tests {
             db_url: None,
             format: None,
             out: None,
-            focus: None,     // Not specified - should use config
+            focus: None, // Not specified - should use config
             depth: None,
             group_by: None,  // Not specified - should use config
             include: vec![], // Empty - should use config
@@ -705,7 +739,9 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_export_args(&args).expect("export format should be resolved");
+        let merged = config
+            .merge_export_args(&args)
+            .expect("export format should be resolved");
         assert_eq!(merged.format, ExportFormat::GraphJson);
         assert_eq!(merged.focus, Some("config_focus".to_string()));
         assert_eq!(merged.depth, 5);

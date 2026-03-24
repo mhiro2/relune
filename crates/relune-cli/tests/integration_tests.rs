@@ -623,6 +623,52 @@ mod lint_tests {
 }
 
 // ============================================================================
+// Config Validation Tests
+// ============================================================================
+
+mod config_validation_tests {
+    use super::*;
+
+    #[test]
+    fn config_typo_fails_fast() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+
+        fs::write(&config_path, "[render]\ntehme = \"dark\"\n").unwrap();
+
+        let mut cmd = relune();
+        cmd.arg("--config")
+            .arg(&config_path)
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("unknown field `tehme`"));
+    }
+
+    #[test]
+    fn config_unknown_root_key_fails_fast() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+
+        fs::write(&config_path, "unknown_field = true\n").unwrap();
+
+        let mut cmd = relune();
+        cmd.arg("--config")
+            .arg(&config_path)
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("unknown field `unknown_field`"));
+    }
+}
+
+// ============================================================================
 // Doctor Command Tests
 // ============================================================================
 

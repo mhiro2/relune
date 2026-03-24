@@ -2,6 +2,8 @@
 
 Relune optionally reads a **TOML** file passed with **`-c` / `--config`**. Values from the file are merged with **CLI flags**; flags take precedence where both apply.
 
+Unknown keys are rejected during config load. Typoed fields fail fast instead of being ignored.
+
 **Merge order**
 
 1. Built-in defaults  
