@@ -1,0 +1,902 @@
+---
+source: crates/relune-parser-sql/src/lib.rs
+expression: snapshot_data
+---
+{
+  "diagnostics": [],
+  "schema": {
+    "enums": [],
+    "tables": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "email",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "manager_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "department",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "hire_date",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(12,2)",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "salary",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "is_active",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "manager_id"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "employees"
+          }
+        ],
+        "id": 1,
+        "indexes": [
+          {
+            "columns": [
+              "manager_id"
+            ],
+            "is_unique": false,
+            "name": "idx_employees_manager_id"
+          },
+          {
+            "columns": [
+              "department"
+            ],
+            "is_unique": false,
+            "name": "idx_employees_department"
+          }
+        ],
+        "name": "employees",
+        "schema_name": null,
+        "stable_id": "employees"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "slug",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "parent_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "level",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(1000)",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "path",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "sort_order",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "parent_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "categories"
+          }
+        ],
+        "id": 2,
+        "indexes": [
+          {
+            "columns": [
+              "parent_id"
+            ],
+            "is_unique": false,
+            "name": "idx_categories_parent_id"
+          },
+          {
+            "columns": [
+              "slug"
+            ],
+            "is_unique": false,
+            "name": "idx_categories_slug"
+          }
+        ],
+        "name": "categories",
+        "schema_name": null,
+        "stable_id": "categories"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "parent_org_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "org_type",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "parent_org_id"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "organizations"
+          }
+        ],
+        "id": 3,
+        "indexes": [
+          {
+            "columns": [
+              "parent_org_id"
+            ],
+            "is_unique": false,
+            "name": "idx_organizations_parent"
+          }
+        ],
+        "name": "organizations",
+        "schema_name": null,
+        "stable_id": "organizations"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "post_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "parent_comment_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "author_name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "content",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "depth",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "parent_comment_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "threaded_comments"
+          }
+        ],
+        "id": 4,
+        "indexes": [
+          {
+            "columns": [
+              "parent_comment_id"
+            ],
+            "is_unique": false,
+            "name": "idx_threaded_comments_parent"
+          },
+          {
+            "columns": [
+              "post_id"
+            ],
+            "is_unique": false,
+            "name": "idx_threaded_comments_post"
+          }
+        ],
+        "name": "threaded_comments",
+        "schema_name": null,
+        "stable_id": "threaded_comments"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "cycle_c_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "cycle_c_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "cycle_c"
+          }
+        ],
+        "id": 5,
+        "indexes": [
+          {
+            "columns": [
+              "cycle_c_id"
+            ],
+            "is_unique": false,
+            "name": "idx_cycle_a_ref"
+          }
+        ],
+        "name": "cycle_a",
+        "schema_name": null,
+        "stable_id": "cycle_a"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "cycle_a_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "cycle_a_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "cycle_a"
+          }
+        ],
+        "id": 6,
+        "indexes": [
+          {
+            "columns": [
+              "cycle_a_id"
+            ],
+            "is_unique": false,
+            "name": "idx_cycle_b_ref"
+          }
+        ],
+        "name": "cycle_b",
+        "schema_name": null,
+        "stable_id": "cycle_b"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "cycle_b_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "cycle_b_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "cycle_b"
+          }
+        ],
+        "id": 7,
+        "indexes": [
+          {
+            "columns": [
+              "cycle_b_id"
+            ],
+            "is_unique": false,
+            "name": "idx_cycle_c_ref"
+          }
+        ],
+        "name": "cycle_c",
+        "schema_name": null,
+        "stable_id": "cycle_c"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "lead_project_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(15,2)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "budget",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "lead_project_id"
+            ],
+            "name": "fk_departments_lead_project",
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "projects"
+          }
+        ],
+        "id": 8,
+        "indexes": [
+          {
+            "columns": [
+              "lead_project_id"
+            ],
+            "is_unique": false,
+            "name": "idx_departments_lead_project"
+          }
+        ],
+        "name": "departments",
+        "schema_name": null,
+        "stable_id": "departments"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "department_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "status",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "start_date",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "end_date",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "department_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "departments"
+          }
+        ],
+        "id": 9,
+        "indexes": [
+          {
+            "columns": [
+              "department_id"
+            ],
+            "is_unique": false,
+            "name": "idx_projects_department"
+          }
+        ],
+        "name": "projects",
+        "schema_name": null,
+        "stable_id": "projects"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "email",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "default_team_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "default_team_id"
+            ],
+            "name": "fk_users_default_team",
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "teams"
+          }
+        ],
+        "id": 10,
+        "indexes": [],
+        "name": "users",
+        "schema_name": null,
+        "stable_id": "users"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "organization_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "organization_id"
+            ],
+            "name": "fk_teams_organization",
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "organizations_ref"
+          }
+        ],
+        "id": 11,
+        "indexes": [],
+        "name": "teams",
+        "schema_name": null,
+        "stable_id": "teams"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "owner_user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "owner_user_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 12,
+        "indexes": [],
+        "name": "organizations_ref",
+        "schema_name": null,
+        "stable_id": "organizations_ref"
+      }
+    ],
+    "views": []
+  }
+}

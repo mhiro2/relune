@@ -1,0 +1,31 @@
+[package]
+name = "relune-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "relune"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+relune-app = { path = "../relune-app", features = ["introspect"] }
+relune-core = { path = "../relune-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml = "0.8"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0"
+insta.workspace = true
+predicates = "3.1"
+tempfile = "3"
+
+[lints]
+workspace = true

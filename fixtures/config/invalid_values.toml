@@ -1,0 +1,4 @@
+# Valid TOML but invalid config values
+[render]
+format = "invalid_format"
+theme = "purple"

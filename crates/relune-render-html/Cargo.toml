@@ -1,0 +1,19 @@
+[package]
+name = "relune-render-html"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+relune-core = { path = "../relune-core" }
+relune-layout = { path = "../relune-layout" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true

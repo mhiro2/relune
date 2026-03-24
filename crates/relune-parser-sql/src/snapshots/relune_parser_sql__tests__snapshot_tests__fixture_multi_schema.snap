@@ -1,0 +1,676 @@
+---
+source: crates/relune-parser-sql/src/lib.rs
+expression: snapshot_data
+---
+{
+  "diagnostics": [
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"public\", quote_style: None, span: Span(Location(5,29)..Location(5,35)) })])), if_not_exists: true, with: None, options: None, default_collate_spec: None, clone: None }. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"inventory\", quote_style: None, span: Span(Location(8,29)..Location(8,38)) })])), if_not_exists: true, with: None, options: None, default_collate_spec: None, clone: None }. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"sales\", quote_style: None, span: Span(Location(11,29)..Location(11,34)) })])), if_not_exists: true, with: None, options: None, default_collate_spec: None, clone: None }. This statement will be skipped.",
+      "severity": "warning"
+    }
+  ],
+  "schema": {
+    "enums": [],
+    "tables": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "email",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "role",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "is_active",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 1,
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": false,
+            "name": "idx_public_users_email"
+          }
+        ],
+        "name": "users",
+        "schema_name": "public",
+        "stable_id": "public.users"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "author_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(500)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "title",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "content",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "status",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "published_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "author_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "public.users"
+          }
+        ],
+        "id": 2,
+        "indexes": [
+          {
+            "columns": [
+              "author_id"
+            ],
+            "is_unique": false,
+            "name": "idx_public_posts_author_id"
+          },
+          {
+            "columns": [
+              "status"
+            ],
+            "is_unique": false,
+            "name": "idx_public_posts_status"
+          }
+        ],
+        "name": "posts",
+        "schema_name": "public",
+        "stable_id": "public.posts"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "sku",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(500)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(10,2)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "unit_cost",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "reorder_level",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "is_discontinued",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 3,
+        "indexes": [
+          {
+            "columns": [
+              "sku"
+            ],
+            "is_unique": false,
+            "name": "idx_inventory_products_sku"
+          }
+        ],
+        "name": "products",
+        "schema_name": "inventory",
+        "stable_id": "inventory.products"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "product_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(20)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "warehouse_code",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "quantity_on_hand",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "quantity_reserved",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "last_counted_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "product_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "inventory.products"
+          }
+        ],
+        "id": 4,
+        "indexes": [
+          {
+            "columns": [
+              "product_id"
+            ],
+            "is_unique": false,
+            "name": "idx_inventory_stock_product_id"
+          },
+          {
+            "columns": [
+              "warehouse_code"
+            ],
+            "is_unique": false,
+            "name": "idx_inventory_stock_warehouse"
+          }
+        ],
+        "name": "stock",
+        "schema_name": "inventory",
+        "stable_id": "inventory.stock"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "customer_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "order_number",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "status",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(10,2)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "total_amount",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "order_date",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "shipped_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "customer_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "public.users"
+          }
+        ],
+        "id": 5,
+        "indexes": [
+          {
+            "columns": [
+              "customer_id"
+            ],
+            "is_unique": false,
+            "name": "idx_sales_orders_customer_id"
+          },
+          {
+            "columns": [
+              "status"
+            ],
+            "is_unique": false,
+            "name": "idx_sales_orders_status"
+          },
+          {
+            "columns": [
+              "order_date"
+            ],
+            "is_unique": false,
+            "name": "idx_sales_orders_order_date"
+          }
+        ],
+        "name": "orders",
+        "schema_name": "sales",
+        "stable_id": "sales.orders"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "order_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "product_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "quantity",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(10,2)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "unit_price",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(10,2)",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "line_total",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "order_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "sales.orders"
+          },
+          {
+            "from_columns": [
+              "product_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "inventory.products"
+          }
+        ],
+        "id": 6,
+        "indexes": [
+          {
+            "columns": [
+              "order_id"
+            ],
+            "is_unique": false,
+            "name": "idx_sales_order_items_order_id"
+          },
+          {
+            "columns": [
+              "product_id"
+            ],
+            "is_unique": false,
+            "name": "idx_sales_order_items_product_id"
+          }
+        ],
+        "name": "order_items",
+        "schema_name": "sales",
+        "stable_id": "sales.order_items"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "order_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(20)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "warehouse_code",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "tracking_number",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "carrier",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "status",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "shipped_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "delivered_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "order_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "sales.orders"
+          }
+        ],
+        "id": 7,
+        "indexes": [
+          {
+            "columns": [
+              "order_id"
+            ],
+            "is_unique": false,
+            "name": "idx_sales_shipments_order_id"
+          }
+        ],
+        "name": "shipments",
+        "schema_name": "sales",
+        "stable_id": "sales.shipments"
+      }
+    ],
+    "views": []
+  }
+}

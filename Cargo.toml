@@ -1,0 +1,64 @@
+[workspace]
+members = [
+  "crates/relune-core",
+  "crates/relune-layout",
+  "crates/relune-parser-sql",
+  "crates/relune-render-svg",
+  "crates/relune-render-html",
+  "crates/relune-app",
+  "crates/relune-cli",
+  "crates/relune-wasm",
+  "crates/relune-testkit",
+  "crates/relune-introspect",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/mhiro2/relune"
+rust-version = "1.94"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+insta = { version = "1.43", features = ["json"] }
+petgraph = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlparser = "0.61"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow some pedantic/nursery lints that are too noisy
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
+significant_drop_tightening = "allow"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = "thin"
+strip = true

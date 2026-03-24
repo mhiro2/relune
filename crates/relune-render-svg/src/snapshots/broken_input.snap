@@ -1,0 +1,14 @@
+---
+source: crates/relune-render-svg/src/lib.rs
+expression: snapshot_data
+---
+{
+  "diagnostics": [
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Unterminated string literal at Line: 165, Column: 31",
+      "severity": "error"
+    }
+  ],
+  "svg": null
+}

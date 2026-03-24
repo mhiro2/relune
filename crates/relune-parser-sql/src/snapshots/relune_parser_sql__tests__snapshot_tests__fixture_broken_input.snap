@@ -1,0 +1,15 @@
+---
+source: crates/relune-parser-sql/src/lib.rs
+assertion_line: 863
+expression: snapshot_data
+---
+{
+  "diagnostics": [
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Unterminated string literal at Line: 165, Column: 31",
+      "severity": "error"
+    }
+  ],
+  "schema": null
+}

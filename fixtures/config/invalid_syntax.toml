@@ -1,0 +1,3 @@
+# Invalid TOML syntax - unclosed bracket
+[render
+format = "svg"

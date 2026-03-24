@@ -1,0 +1,26 @@
+repository: mhiro2/relune
+
+coverage:
+  paths:
+    - lcov.info
+  exclude:
+    - crates/relune-render-html/src/js/**
+    - crates/relune-render-html/ts/**
+    - crates/**/src/snapshots/**.snap
+
+diff:
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}/octocov-report
+
+comment:
+  if: is_pull_request
+  hideFooterLink: false
+
+summary:
+  if: is_pull_request
+  hideFooterLink: false
+
+report:
+  if: is_default_branch
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}/octocov-report

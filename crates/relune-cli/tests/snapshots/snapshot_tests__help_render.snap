@@ -1,0 +1,120 @@
+---
+source: crates/relune-cli/tests/snapshot_tests.rs
+expression: stdout
+---
+Render an ERD from SQL, schema JSON, or database metadata
+
+Usage: relune render [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>
+          Path to configuration file (TOML; merges with CLI flags)
+
+      --sql <FILE>
+          Read SQL DDL from a file
+
+      --color <COLOR>
+          Colorize output
+
+          Possible values:
+          - auto:   Colorize if output is a terminal
+          - always: Always colorize output
+          - never:  Never colorize output
+          
+          [default: auto]
+
+      --sql-text <TEXT>
+          Read SQL DDL directly from a string
+
+      --schema-json <FILE>
+          Read a normalized schema JSON file
+
+  -v, --verbose...
+          Increase log verbosity (can be repeated)
+
+      --db-url <URL>
+          Database URL for live introspection: `postgres://`, `mysql://`, `mariadb://`, or `sqlite:`
+          (no SQL file)
+
+  -q, --quiet
+          Reduce non-error output
+
+      --dialect <DIALECT>
+          SQL dialect for parsing (auto-detected if omitted)
+
+          Possible values:
+          - auto:     Automatically detect dialect from SQL content
+          - postgres: `PostgreSQL` dialect
+          - mysql:    `MySQL` dialect
+          - sqlite:   `SQLite` dialect
+          
+          [default: auto]
+
+  -f, --format <FORMAT>
+          Output format
+
+          Possible values:
+          - svg:         SVG output
+          - html:        Self-contained HTML with embedded SVG
+          - graph-json:  Graph JSON (intermediate representation)
+          - schema-json: Schema JSON (normalized export)
+          
+          [default: svg]
+
+  -o, --out <FILE>
+          Output file path; stdout if omitted
+
+      --focus <TABLE>
+          Center the graph on a table
+
+      --depth <N>
+          Traversal depth for focus mode
+          
+          [default: 1]
+
+      --group-by <GROUP_BY>
+          Grouping mode
+
+          Possible values:
+          - none:   No grouping
+          - schema: Group by schema name
+          - prefix: Group by table name prefix
+
+      --include <TABLE>
+          Explicitly include only these tables
+
+      --exclude <TABLE>
+          Exclude tables from output
+
+      --theme <THEME>
+          Visual theme
+
+          Possible values:
+          - light: Light theme
+          - dark:  Dark theme
+          
+          [default: light]
+
+      --layout <LAYOUT>
+          Layout algorithm
+
+          Possible values:
+          - hierarchical:   Standard hierarchical layout
+          - force-directed: Force-directed layout
+
+      --edge-style <EDGE_STYLE>
+          Edge routing style
+
+          Possible values:
+          - straight:   Single straight segment between nodes
+          - orthogonal: Axis-aligned orthogonal polyline
+          - curved:     Cubic curved edge
+
+      --stats
+          Print render statistics to stderr
+
+      --fail-on-warning
+          Exit with non-zero code if warnings are emitted
+
+  -h, --help
+          Print help (see a summary with '-h')

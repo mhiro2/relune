@@ -1,0 +1,69 @@
+---
+source: crates/relune-cli/tests/snapshot_tests.rs
+expression: stdout
+---
+Inspect schema metadata or details for a specific table
+
+Usage: relune inspect [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>
+          Path to configuration file (TOML; merges with CLI flags)
+
+      --sql <FILE>
+          Read SQL DDL from a file
+
+      --color <COLOR>
+          Colorize output
+
+          Possible values:
+          - auto:   Colorize if output is a terminal
+          - always: Always colorize output
+          - never:  Never colorize output
+          
+          [default: auto]
+
+      --sql-text <TEXT>
+          Read SQL DDL directly from a string
+
+      --schema-json <FILE>
+          Read a normalized schema JSON file
+
+  -v, --verbose...
+          Increase log verbosity (can be repeated)
+
+      --db-url <URL>
+          Database URL for live introspection: `postgres://`, `mysql://`, `mariadb://`, or `sqlite:`
+          (no SQL file)
+
+  -q, --quiet
+          Reduce non-error output
+
+      --dialect <DIALECT>
+          SQL dialect for parsing (auto-detected if omitted)
+
+          Possible values:
+          - auto:     Automatically detect dialect from SQL content
+          - postgres: `PostgreSQL` dialect
+          - mysql:    `MySQL` dialect
+          - sqlite:   `SQLite` dialect
+          
+          [default: auto]
+
+      --table <NAME>
+          Table to inspect
+
+      --summary
+          Print schema summary (default behavior when --table not specified)
+
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text output
+          - json: JSON output
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

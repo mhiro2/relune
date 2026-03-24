@@ -1,0 +1,728 @@
+//! Configuration file support for relune CLI.
+//!
+//! Config files are TOML format and support the following structure:
+//! ```toml
+//! [render]
+//! format = "svg"  # svg, html, graph-json, schema-json
+//! theme = "light" # light, dark
+//! layout = "hierarchical" # hierarchical, force-directed
+//! edge_style = "straight" # straight, orthogonal, curved
+//! group_by = "none" # none, schema, prefix
+//! focus = "table_name"
+//! depth = 1
+//! include = ["table1", "table2"]
+//! exclude = ["table3"]
+//! show_legend = false
+//! show_stats = false
+//!
+//! [inspect]
+//! format = "text" # text, json
+//!
+//! [export]
+//! format = "schema-json" # schema-json, graph-json, layout-json, mermaid, d2, dot
+//! group_by = "none"
+//! layout = "hierarchical"
+//! edge_style = "straight"
+//! focus = "table_name"
+//! depth = 1
+//!
+//! [diff]
+//! format = "text" # text, json
+//! dialect = "auto" # auto, postgres, mysql, sqlite
+//! ```
+//!
+//! Config layering order (later overrides earlier):
+//! 1. Built-in defaults
+//! 2. Config file
+//! 3. CLI flags
+
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::cli::{
+    DialectArg, DiffFormat, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg, LintSeverity,
+    RenderFormat, Theme,
+};
+
+/// Root configuration structure.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReluneConfig {
+    /// Render command configuration.
+    #[serde(default)]
+    pub render: RenderConfig,
+    /// Inspect command configuration.
+    #[serde(default)]
+    pub inspect: InspectConfig,
+    /// Export command configuration.
+    #[serde(default)]
+    pub export: ExportConfig,
+    /// Lint command configuration.
+    #[serde(default)]
+    pub lint: LintConfig,
+    /// Diff command configuration.
+    #[serde(default)]
+    pub diff: DiffConfig,
+}
+
+/// Configuration for the render command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RenderConfig {
+    /// Output format.
+    #[serde(default)]
+    pub format: Option<RenderFormat>,
+    /// Visual theme.
+    #[serde(default)]
+    pub theme: Option<Theme>,
+    /// Layout algorithm.
+    #[serde(default)]
+    pub layout: Option<LayoutAlgorithmArg>,
+    /// Edge routing style.
+    #[serde(default)]
+    pub edge_style: Option<EdgeStyleArg>,
+    /// Grouping mode.
+    #[serde(default)]
+    pub group_by: Option<GroupByMode>,
+    /// Focus table name.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Focus depth.
+    #[serde(default)]
+    pub depth: Option<u32>,
+    /// Tables to include.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Tables to exclude.
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Show legend in output.
+    #[serde(default)]
+    pub show_legend: Option<bool>,
+    /// Show statistics.
+    #[serde(default)]
+    pub show_stats: Option<bool>,
+}
+
+/// Configuration for the inspect command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InspectConfig {
+    /// Output format.
+    #[serde(default)]
+    pub format: Option<InspectFormatConfig>,
+}
+
+/// Configuration for the export command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExportConfig {
+    /// Export format.
+    #[serde(default)]
+    pub format: Option<ExportFormatConfig>,
+    /// Grouping mode.
+    #[serde(default)]
+    pub group_by: Option<GroupByMode>,
+    /// Layout algorithm.
+    #[serde(default)]
+    pub layout: Option<LayoutAlgorithmArg>,
+    /// Edge routing style.
+    #[serde(default)]
+    pub edge_style: Option<EdgeStyleArg>,
+    /// Focus table name.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Focus depth.
+    #[serde(default)]
+    pub depth: Option<u32>,
+}
+
+/// Configuration for the lint command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LintConfig {
+    /// Output format.
+    #[serde(default)]
+    pub format: Option<LintFormatConfig>,
+    /// Minimum severity that causes non-zero exit.
+    #[serde(default)]
+    pub deny: Option<LintSeverityConfig>,
+}
+
+/// Configuration for the diff command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiffConfig {
+    /// Output format.
+    #[serde(default)]
+    pub format: Option<DiffFormat>,
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
+}
+
+/// Inspect format configuration (mirrors CLI `InspectFormat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InspectFormatConfig {
+    Text,
+    Json,
+}
+
+/// Export format configuration (mirrors CLI `ExportFormat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[allow(clippy::enum_variant_names)]
+pub enum ExportFormatConfig {
+    SchemaJson,
+    GraphJson,
+    LayoutJson,
+    Mermaid,
+    D2,
+    Dot,
+}
+
+/// Lint format configuration (mirrors CLI `LintFormat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintFormatConfig {
+    Text,
+    Json,
+}
+
+/// Lint severity configuration (mirrors CLI `LintSeverity`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintSeverityConfig {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+/// Error type for config operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Failed to read config file: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to parse config file: {0}")]
+    Parse(#[from] toml::de::Error),
+
+    #[error("Invalid config value: {0}")]
+    #[allow(dead_code)]
+    InvalidValue(String),
+}
+
+impl ReluneConfig {
+    /// Load configuration from a file.
+    pub fn from_file(path: &Path) -> Result<Self, ConfigError> {
+        let content = std::fs::read_to_string(path)?;
+        let config: Self = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    /// Load configuration from a file, returning default if file doesn't exist.
+    #[allow(dead_code)]
+    pub fn from_file_or_default(path: &Path) -> Result<Self, ConfigError> {
+        if path.exists() {
+            Self::from_file(path)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    /// Merge CLI render args into this config.
+    /// CLI args take precedence over config file values.
+    pub fn merge_render_args(&self, args: &crate::cli::RenderArgs) -> MergedRenderConfig {
+        MergedRenderConfig {
+            format: args.format, // CLI always wins for format (has default)
+            theme: args.theme,   // CLI always wins for theme (has default)
+            layout: args.layout.or(self.render.layout).unwrap_or_default(),
+            edge_style: args
+                .edge_style
+                .or(self.render.edge_style)
+                .unwrap_or_default(),
+            group_by: args.group_by.or(self.render.group_by),
+            focus: args.focus.clone().or_else(|| self.render.focus.clone()),
+            depth: if args.depth == 1 {
+                self.render.depth.unwrap_or(1)
+            } else {
+                args.depth
+            },
+            include: if args.include.is_empty() {
+                self.render.include.clone()
+            } else {
+                args.include.clone()
+            },
+            exclude: if args.exclude.is_empty() {
+                self.render.exclude.clone()
+            } else {
+                args.exclude.clone()
+            },
+            show_legend: args.stats || self.render.show_legend.unwrap_or(false),
+            show_stats: args.stats || self.render.show_stats.unwrap_or(false),
+        }
+    }
+
+    /// Merge CLI inspect args into this config.
+    #[allow(clippy::unused_self)]
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn merge_inspect_args(&self, args: &crate::cli::InspectArgs) -> MergedInspectConfig {
+        MergedInspectConfig {
+            format: args.format,
+        }
+    }
+
+    /// Merge CLI export args into this config.
+    pub fn merge_export_args(&self, args: &crate::cli::ExportArgs) -> MergedExportConfig {
+        MergedExportConfig {
+            format: args.format,
+            group_by: args.group_by.or(self.export.group_by),
+            layout: args.layout.or(self.export.layout).unwrap_or_default(),
+            edge_style: args
+                .edge_style
+                .or(self.export.edge_style)
+                .unwrap_or_default(),
+            focus: args.focus.clone().or_else(|| self.export.focus.clone()),
+            depth: if args.depth == 1 {
+                self.export.depth.unwrap_or(1)
+            } else {
+                args.depth
+            },
+        }
+    }
+
+    /// Merge CLI lint args into this config.
+    pub fn merge_lint_args(&self, args: &crate::cli::LintArgs) -> MergedLintConfig {
+        MergedLintConfig {
+            format: args.format,
+            deny: args.deny.or_else(|| {
+                self.lint.deny.map(|s| match s {
+                    LintSeverityConfig::Error => LintSeverity::Error,
+                    LintSeverityConfig::Warning => LintSeverity::Warning,
+                    LintSeverityConfig::Info => LintSeverity::Info,
+                    LintSeverityConfig::Hint => LintSeverity::Hint,
+                })
+            }),
+        }
+    }
+
+    /// Merge CLI diff args into this config.
+    pub fn merge_diff_args(&self, args: &crate::cli::DiffArgs) -> MergedDiffConfig {
+        MergedDiffConfig {
+            format: args.format.or(self.diff.format).unwrap_or_default(),
+            dialect: args.dialect.or(self.diff.dialect).unwrap_or_default(),
+        }
+    }
+}
+
+/// Merged render configuration after combining config file and CLI args.
+#[derive(Debug, Clone)]
+pub struct MergedRenderConfig {
+    pub format: RenderFormat,
+    pub theme: Theme,
+    pub layout: LayoutAlgorithmArg,
+    pub edge_style: EdgeStyleArg,
+    pub group_by: Option<GroupByMode>,
+    pub focus: Option<String>,
+    pub depth: u32,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    #[allow(dead_code)]
+    pub show_legend: bool,
+    pub show_stats: bool,
+}
+
+/// Merged inspect configuration.
+#[derive(Debug, Clone)]
+pub struct MergedInspectConfig {
+    pub format: crate::cli::InspectFormat,
+}
+
+/// Merged export configuration.
+#[derive(Debug, Clone)]
+pub struct MergedExportConfig {
+    pub format: crate::cli::ExportFormat,
+    pub group_by: Option<GroupByMode>,
+    pub layout: LayoutAlgorithmArg,
+    pub edge_style: EdgeStyleArg,
+    pub focus: Option<String>,
+    pub depth: u32,
+}
+
+/// Merged lint configuration.
+#[derive(Debug, Clone)]
+pub struct MergedLintConfig {
+    pub format: crate::cli::LintFormat,
+    pub deny: Option<crate::cli::LintSeverity>,
+}
+
+/// Merged diff configuration.
+#[derive(Debug, Clone)]
+pub struct MergedDiffConfig {
+    pub format: DiffFormat,
+    pub dialect: DialectArg,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{DiffArgs, EdgeStyleArg, InspectFormat, LayoutAlgorithmArg, RenderArgs};
+    use std::path::PathBuf;
+
+    fn fixtures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures")
+            .join("config")
+    }
+
+    #[test]
+    fn test_load_valid_full_config() {
+        let path = fixtures_dir().join("valid_full.toml");
+        let config = ReluneConfig::from_file(&path).expect("Failed to load valid_full.toml");
+
+        assert_eq!(config.render.format, Some(RenderFormat::Html));
+        assert_eq!(config.render.theme, Some(Theme::Dark));
+        assert_eq!(
+            config.render.layout,
+            Some(LayoutAlgorithmArg::ForceDirected)
+        );
+        assert_eq!(config.render.edge_style, Some(EdgeStyleArg::Orthogonal));
+        assert_eq!(config.render.group_by, Some(GroupByMode::Schema));
+        assert_eq!(config.render.focus, Some("users".to_string()));
+        assert_eq!(config.render.depth, Some(2));
+        assert_eq!(config.render.include, vec!["users", "posts", "comments"]);
+        assert_eq!(config.render.exclude, vec!["migrations", "audit_logs"]);
+        assert_eq!(config.render.show_legend, Some(true));
+        assert_eq!(config.render.show_stats, Some(true));
+
+        // Check inspect config
+        assert!(matches!(
+            config.inspect.format,
+            Some(InspectFormatConfig::Json)
+        ));
+
+        // Check export config
+        assert!(matches!(
+            config.export.format,
+            Some(ExportFormatConfig::GraphJson)
+        ));
+        assert_eq!(config.export.layout, Some(LayoutAlgorithmArg::Hierarchical));
+        assert_eq!(config.export.edge_style, Some(EdgeStyleArg::Curved));
+        assert_eq!(config.diff.format, Some(DiffFormat::Json));
+        assert_eq!(config.diff.dialect, Some(DialectArg::Postgres));
+    }
+
+    #[test]
+    fn test_load_partial_config() {
+        let path = fixtures_dir().join("valid_partial.toml");
+        let config = ReluneConfig::from_file(&path).expect("Failed to load valid_partial.toml");
+
+        // Only some fields should be set
+        assert_eq!(config.render.theme, Some(Theme::Light));
+        assert_eq!(config.render.group_by, Some(GroupByMode::Schema));
+        assert_eq!(config.render.exclude, vec!["temp_*"]);
+
+        // Others should be None or default
+        assert_eq!(config.render.format, None);
+        assert_eq!(config.render.focus, None);
+    }
+
+    #[test]
+    fn test_load_empty_config() {
+        let path = fixtures_dir().join("empty.toml");
+        let config = ReluneConfig::from_file(&path).expect("Failed to load empty.toml");
+
+        // All values should be defaults
+        assert_eq!(config.render.format, None);
+        assert_eq!(config.render.theme, None);
+    }
+
+    #[test]
+    fn test_load_invalid_syntax() {
+        let path = fixtures_dir().join("invalid_syntax.toml");
+        let result = ReluneConfig::from_file(&path);
+
+        assert!(result.is_err());
+        match result {
+            Err(ConfigError::Parse(_)) => {}
+            _ => panic!("Expected Parse error for invalid TOML syntax"),
+        }
+    }
+
+    #[test]
+    fn test_merge_render_args_cli_overrides_config() {
+        // Load config with specific values
+        let config = ReluneConfig::default();
+
+        // Create CLI args with different values
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: RenderFormat::Svg, // CLI specifies svg
+            out: None,
+            focus: Some("posts".to_string()), // CLI specifies different focus
+            depth: 3,                         // CLI specifies different depth
+            group_by: Some(GroupByMode::Prefix), // CLI specifies different group_by
+            include: vec!["a".to_string()],   // CLI specifies different include
+            exclude: vec!["b".to_string()],   // CLI specifies different exclude
+            theme: Theme::Light,              // CLI specifies light theme
+            layout: Some(LayoutAlgorithmArg::Hierarchical),
+            edge_style: Some(EdgeStyleArg::Straight),
+            stats: true,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_render_args(&args);
+
+        // CLI values should win
+        assert_eq!(merged.format, RenderFormat::Svg);
+        assert_eq!(merged.theme, Theme::Light);
+        assert_eq!(merged.layout, LayoutAlgorithmArg::Hierarchical);
+        assert_eq!(merged.edge_style, EdgeStyleArg::Straight);
+        assert_eq!(merged.focus, Some("posts".to_string()));
+        assert_eq!(merged.depth, 3);
+        assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
+        assert_eq!(merged.include, vec!["a"]);
+        assert_eq!(merged.exclude, vec!["b"]);
+    }
+
+    #[test]
+    fn test_merge_render_args_config_used_when_cli_not_specified() {
+        // Create config with specific values
+        let mut config = ReluneConfig::default();
+        config.render.focus = Some("config_table".to_string());
+        config.render.depth = Some(5);
+        config.render.group_by = Some(GroupByMode::Schema);
+        config.render.include = vec!["config_include".to_string()];
+
+        // Create CLI args with minimal values (defaults)
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: RenderFormat::Svg, // has default
+            out: None,
+            focus: None,     // Not specified - should use config
+            depth: 1,        // Default value - should use config
+            group_by: None,  // Not specified - should use config
+            include: vec![], // Empty - should use config
+            exclude: vec![],
+            theme: Theme::Light, // has default
+            layout: None,
+            edge_style: None,
+            stats: false,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_render_args(&args);
+
+        // Config values should be used when CLI uses defaults
+        assert_eq!(merged.focus, Some("config_table".to_string()));
+        assert_eq!(merged.depth, 5); // Config value, not CLI default
+        assert_eq!(merged.group_by, Some(GroupByMode::Schema));
+        assert_eq!(merged.include, vec!["config_include"]);
+    }
+
+    #[test]
+    fn test_merge_render_args_cli_explicit_overrides_config() {
+        // Create config with specific values
+        let mut config = ReluneConfig::default();
+        config.render.focus = Some("config_table".to_string());
+        config.render.depth = Some(5);
+        config.render.group_by = Some(GroupByMode::Schema);
+        config.render.include = vec!["config_include".to_string()];
+        config.render.exclude = vec!["config_exclude".to_string()];
+
+        // Create CLI args with explicit values (non-defaults)
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: RenderFormat::Html, // CLI explicitly specifies html
+            out: None,
+            focus: Some("cli_table".to_string()), // CLI explicitly specifies focus
+            depth: 10,                            // CLI explicitly specifies depth
+            group_by: Some(GroupByMode::Prefix),  // CLI explicitly specifies group_by
+            include: vec!["cli_include".to_string()], // CLI explicitly specifies include
+            exclude: vec!["cli_exclude".to_string()], // CLI explicitly specifies exclude
+            theme: Theme::Dark,                   // CLI explicitly specifies dark
+            layout: Some(LayoutAlgorithmArg::ForceDirected),
+            edge_style: Some(EdgeStyleArg::Orthogonal),
+            stats: true,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_render_args(&args);
+
+        // CLI values should always win when explicitly provided
+        assert_eq!(merged.format, RenderFormat::Html);
+        assert_eq!(merged.theme, Theme::Dark);
+        assert_eq!(merged.layout, LayoutAlgorithmArg::ForceDirected);
+        assert_eq!(merged.edge_style, EdgeStyleArg::Orthogonal);
+        assert_eq!(merged.focus, Some("cli_table".to_string()));
+        assert_eq!(merged.depth, 10);
+        assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
+        assert_eq!(merged.include, vec!["cli_include"]);
+        assert_eq!(merged.exclude, vec!["cli_exclude"]);
+    }
+
+    #[test]
+    fn test_from_file_or_default_missing_file() {
+        let path = PathBuf::from("/nonexistent/path/config.toml");
+        let config = ReluneConfig::from_file_or_default(&path).expect("Should return default");
+
+        // Should be all defaults
+        assert_eq!(config.render.format, None);
+        assert_eq!(config.render.theme, None);
+        assert_eq!(config.render.focus, None);
+    }
+
+    #[test]
+    fn test_from_file_or_default_existing_file() {
+        let path = fixtures_dir().join("valid_partial.toml");
+        let config = ReluneConfig::from_file_or_default(&path).expect("Should load config");
+
+        // Should have loaded values
+        assert_eq!(config.render.theme, Some(Theme::Light));
+        assert_eq!(config.render.group_by, Some(GroupByMode::Schema));
+    }
+
+    #[test]
+    fn test_config_error_display() {
+        let parse_error =
+            ConfigError::Parse(toml::from_str::<ReluneConfig>("invalid").unwrap_err());
+        assert!(parse_error.to_string().contains("Failed to parse"));
+
+        let io_error = ConfigError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert!(io_error.to_string().contains("Failed to read"));
+
+        let invalid_error = ConfigError::InvalidValue("bad value".to_string());
+        assert!(invalid_error.to_string().contains("Invalid config value"));
+    }
+
+    #[test]
+    fn test_merge_inspect_args() {
+        let config = ReluneConfig::default();
+        let args = crate::cli::InspectArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            table: None,
+            summary: false,
+            format: InspectFormat::Json,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_inspect_args(&args);
+        assert_eq!(merged.format, InspectFormat::Json);
+    }
+
+    #[test]
+    fn test_merge_export_args() {
+        let mut config = ReluneConfig::default();
+        config.export.focus = Some("config_focus".to_string());
+        config.export.depth = Some(5);
+        config.export.layout = Some(LayoutAlgorithmArg::ForceDirected);
+        config.export.edge_style = Some(EdgeStyleArg::Orthogonal);
+
+        let args = crate::cli::ExportArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: crate::cli::ExportFormat::SchemaJson,
+            out: None,
+            focus: None, // Not specified - should use config
+            depth: 1,    // Default - should use config
+            group_by: None,
+            layout: None,
+            edge_style: None,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_export_args(&args);
+        assert_eq!(merged.format, crate::cli::ExportFormat::SchemaJson);
+        assert_eq!(merged.focus, Some("config_focus".to_string()));
+        assert_eq!(merged.depth, 5);
+        assert_eq!(merged.layout, LayoutAlgorithmArg::ForceDirected);
+        assert_eq!(merged.edge_style, EdgeStyleArg::Orthogonal);
+    }
+
+    #[test]
+    fn test_merge_lint_args() {
+        let mut config = ReluneConfig::default();
+        config.lint.deny = Some(LintSeverityConfig::Warning);
+
+        let args = crate::cli::LintArgs {
+            sql: None,
+            db_url: None,
+            schema_json: None,
+            format: crate::cli::LintFormat::Json,
+            rules: vec![],
+            deny: None, // Not specified - should use config
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_lint_args(&args);
+        assert_eq!(merged.format, crate::cli::LintFormat::Json);
+        assert_eq!(merged.deny, Some(crate::cli::LintSeverity::Warning));
+    }
+
+    #[test]
+    fn test_merge_diff_args_config_used_when_cli_not_specified() {
+        let mut config = ReluneConfig::default();
+        config.diff.format = Some(DiffFormat::Json);
+        config.diff.dialect = Some(DialectArg::Mysql);
+
+        let args = DiffArgs {
+            before: None,
+            before_sql_text: None,
+            before_schema_json: None,
+            after: None,
+            after_sql_text: None,
+            after_schema_json: None,
+            dialect: None,
+            format: None,
+            out: None,
+        };
+
+        let merged = config.merge_diff_args(&args);
+        assert_eq!(merged.format, DiffFormat::Json);
+        assert_eq!(merged.dialect, DialectArg::Mysql);
+    }
+
+    #[test]
+    fn test_merge_diff_args_cli_overrides_config() {
+        let mut config = ReluneConfig::default();
+        config.diff.format = Some(DiffFormat::Text);
+        config.diff.dialect = Some(DialectArg::Auto);
+
+        let args = DiffArgs {
+            before: None,
+            before_sql_text: None,
+            before_schema_json: None,
+            after: None,
+            after_sql_text: None,
+            after_schema_json: None,
+            dialect: Some(DialectArg::Sqlite),
+            format: Some(DiffFormat::Json),
+            out: None,
+        };
+
+        let merged = config.merge_diff_args(&args);
+        assert_eq!(merged.format, DiffFormat::Json);
+        assert_eq!(merged.dialect, DialectArg::Sqlite);
+    }
+}

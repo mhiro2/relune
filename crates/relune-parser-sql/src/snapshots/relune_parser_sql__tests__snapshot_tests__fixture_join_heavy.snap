@@ -1,0 +1,2255 @@
+---
+source: crates/relune-parser-sql/src/lib.rs
+expression: snapshot_data
+---
+{
+  "diagnostics": [],
+  "schema": {
+    "enums": [],
+    "tables": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "slug",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "plan",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "is_active",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "JSONB",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "settings",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "updated_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 1,
+        "indexes": [
+          {
+            "columns": [
+              "slug"
+            ],
+            "is_unique": false,
+            "name": "idx_tenants_slug"
+          },
+          {
+            "columns": [
+              "plan"
+            ],
+            "is_unique": false,
+            "name": "idx_tenants_plan"
+          }
+        ],
+        "name": "tenants",
+        "schema_name": null,
+        "stable_id": "tenants"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "email",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "password_hash",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "first_name",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "last_name",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "is_active",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "last_login_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          }
+        ],
+        "id": 2,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_users_tenant_id"
+          },
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": false,
+            "name": "idx_users_email"
+          },
+          {
+            "columns": [
+              "tenant_id",
+              "email"
+            ],
+            "is_unique": false,
+            "name": "idx_users_tenant_email"
+          }
+        ],
+        "name": "users",
+        "schema_name": null,
+        "stable_id": "users"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "is_system",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          }
+        ],
+        "id": 3,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_roles_tenant_id"
+          }
+        ],
+        "name": "roles",
+        "schema_name": null,
+        "stable_id": "roles"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "role_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "assigned_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "assigned_by",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          },
+          {
+            "from_columns": [
+              "role_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "roles"
+          },
+          {
+            "from_columns": [
+              "assigned_by"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 4,
+        "indexes": [
+          {
+            "columns": [
+              "user_id"
+            ],
+            "is_unique": false,
+            "name": "idx_user_roles_user_id"
+          },
+          {
+            "columns": [
+              "role_id"
+            ],
+            "is_unique": false,
+            "name": "idx_user_roles_role_id"
+          }
+        ],
+        "name": "user_roles",
+        "schema_name": null,
+        "stable_id": "user_roles"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "resource",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "action",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 5,
+        "indexes": [],
+        "name": "permissions",
+        "schema_name": null,
+        "stable_id": "permissions"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "role_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "permission_id",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "role_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "roles"
+          },
+          {
+            "from_columns": [
+              "permission_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "permissions"
+          }
+        ],
+        "id": 6,
+        "indexes": [
+          {
+            "columns": [
+              "role_id"
+            ],
+            "is_unique": false,
+            "name": "idx_role_permissions_role_id"
+          },
+          {
+            "columns": [
+              "permission_id"
+            ],
+            "is_unique": false,
+            "name": "idx_role_permissions_perm_id"
+          }
+        ],
+        "name": "role_permissions",
+        "schema_name": null,
+        "stable_id": "role_permissions"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "status",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "start_date",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "end_date",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "created_by",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 10,
+            "is_primary_key": false,
+            "name": "updated_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "created_by"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 7,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_projects_tenant_id"
+          },
+          {
+            "columns": [
+              "status"
+            ],
+            "is_unique": false,
+            "name": "idx_projects_status"
+          },
+          {
+            "columns": [
+              "created_by"
+            ],
+            "is_unique": false,
+            "name": "idx_projects_created_by"
+          }
+        ],
+        "name": "projects",
+        "schema_name": null,
+        "stable_id": "projects"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          }
+        ],
+        "id": 8,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_teams_tenant_id"
+          }
+        ],
+        "name": "teams",
+        "schema_name": null,
+        "stable_id": "teams"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "project_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "team_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "access_level",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "added_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "project_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "projects"
+          },
+          {
+            "from_columns": [
+              "team_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "teams"
+          }
+        ],
+        "id": 9,
+        "indexes": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "is_unique": false,
+            "name": "idx_project_teams_project"
+          },
+          {
+            "columns": [
+              "team_id"
+            ],
+            "is_unique": false,
+            "name": "idx_project_teams_team"
+          }
+        ],
+        "name": "project_teams",
+        "schema_name": null,
+        "stable_id": "project_teams"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "team_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "role",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "joined_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "team_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "teams"
+          },
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 10,
+        "indexes": [
+          {
+            "columns": [
+              "team_id"
+            ],
+            "is_unique": false,
+            "name": "idx_team_members_team"
+          },
+          {
+            "columns": [
+              "user_id"
+            ],
+            "is_unique": false,
+            "name": "idx_team_members_user"
+          }
+        ],
+        "name": "team_members",
+        "schema_name": null,
+        "stable_id": "team_members"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(7)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "color",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          }
+        ],
+        "id": 11,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_tags_tenant"
+          }
+        ],
+        "name": "tags",
+        "schema_name": null,
+        "stable_id": "tags"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "project_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "assignee_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "reporter_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(500)",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "title",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "status",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "priority",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 10,
+            "is_primary_key": false,
+            "name": "due_date",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(6,2)",
+            "id": 11,
+            "is_primary_key": false,
+            "name": "estimated_hours",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 12,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 13,
+            "is_primary_key": false,
+            "name": "updated_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "project_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "projects"
+          },
+          {
+            "from_columns": [
+              "assignee_id"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          },
+          {
+            "from_columns": [
+              "reporter_id"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 12,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_tasks_tenant_id"
+          },
+          {
+            "columns": [
+              "project_id"
+            ],
+            "is_unique": false,
+            "name": "idx_tasks_project_id"
+          },
+          {
+            "columns": [
+              "assignee_id"
+            ],
+            "is_unique": false,
+            "name": "idx_tasks_assignee"
+          },
+          {
+            "columns": [
+              "status"
+            ],
+            "is_unique": false,
+            "name": "idx_tasks_status"
+          },
+          {
+            "columns": [
+              "priority"
+            ],
+            "is_unique": false,
+            "name": "idx_tasks_priority"
+          },
+          {
+            "columns": [
+              "due_date"
+            ],
+            "is_unique": false,
+            "name": "idx_tasks_due_date"
+          }
+        ],
+        "name": "tasks",
+        "schema_name": null,
+        "stable_id": "tasks"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "task_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "tag_id",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "task_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tasks"
+          },
+          {
+            "from_columns": [
+              "tag_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tags"
+          }
+        ],
+        "id": 13,
+        "indexes": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "is_unique": false,
+            "name": "idx_task_tags_task"
+          },
+          {
+            "columns": [
+              "tag_id"
+            ],
+            "is_unique": false,
+            "name": "idx_task_tags_tag"
+          }
+        ],
+        "name": "task_tags",
+        "schema_name": null,
+        "stable_id": "task_tags"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "task_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "depends_on_task_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "dependency_type",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "task_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tasks"
+          },
+          {
+            "from_columns": [
+              "depends_on_task_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tasks"
+          }
+        ],
+        "id": 14,
+        "indexes": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "is_unique": false,
+            "name": "idx_task_deps_task"
+          },
+          {
+            "columns": [
+              "depends_on_task_id"
+            ],
+            "is_unique": false,
+            "name": "idx_task_deps_depends"
+          }
+        ],
+        "name": "task_dependencies",
+        "schema_name": null,
+        "stable_id": "task_dependencies"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "author_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "commentable_type",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "commentable_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "content",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "parent_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "updated_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "author_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          },
+          {
+            "from_columns": [
+              "parent_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "comments"
+          }
+        ],
+        "id": 15,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_comments_tenant"
+          },
+          {
+            "columns": [
+              "author_id"
+            ],
+            "is_unique": false,
+            "name": "idx_comments_author"
+          },
+          {
+            "columns": [
+              "commentable_type",
+              "commentable_id"
+            ],
+            "is_unique": false,
+            "name": "idx_comments_commentable"
+          }
+        ],
+        "name": "comments",
+        "schema_name": null,
+        "stable_id": "comments"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "uploader_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "attachable_type",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "attachable_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "filename",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "content_type",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BIGINT",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "file_size",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(500)",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "storage_path",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 10,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "uploader_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 16,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_attachments_tenant"
+          },
+          {
+            "columns": [
+              "uploader_id"
+            ],
+            "is_unique": false,
+            "name": "idx_attachments_uploader"
+          },
+          {
+            "columns": [
+              "attachable_type",
+              "attachable_id"
+            ],
+            "is_unique": false,
+            "name": "idx_attachments_attachable"
+          }
+        ],
+        "name": "attachments",
+        "schema_name": null,
+        "stable_id": "attachments"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "notification_type",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "title",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "content",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "related_type",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "related_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "is_read",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 10,
+            "is_primary_key": false,
+            "name": "read_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 11,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 17,
+        "indexes": [
+          {
+            "columns": [
+              "user_id"
+            ],
+            "is_unique": false,
+            "name": "idx_notifications_user"
+          },
+          {
+            "columns": [
+              "user_id",
+              "is_read"
+            ],
+            "is_unique": false,
+            "name": "idx_notifications_unread"
+          }
+        ],
+        "name": "notifications",
+        "schema_name": null,
+        "stable_id": "notifications"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "actor_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "activity_type",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(50)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "subject_type",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "subject_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "JSONB",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "metadata",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "actor_id"
+            ],
+            "name": null,
+            "on_delete": "set_null",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 18,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_activities_tenant"
+          },
+          {
+            "columns": [
+              "actor_id"
+            ],
+            "is_unique": false,
+            "name": "idx_activities_actor"
+          },
+          {
+            "columns": [
+              "subject_type",
+              "subject_id"
+            ],
+            "is_unique": false,
+            "name": "idx_activities_subject"
+          },
+          {
+            "columns": [
+              "created_at"
+            ],
+            "is_unique": false,
+            "name": "idx_activities_created"
+          }
+        ],
+        "name": "activities",
+        "schema_name": null,
+        "stable_id": "activities"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "task_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "watching_since",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "task_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tasks"
+          },
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 19,
+        "indexes": [
+          {
+            "columns": [
+              "task_id"
+            ],
+            "is_unique": false,
+            "name": "idx_task_watchers_task"
+          },
+          {
+            "columns": [
+              "user_id"
+            ],
+            "is_unique": false,
+            "name": "idx_task_watchers_user"
+          }
+        ],
+        "name": "task_watchers",
+        "schema_name": null,
+        "stable_id": "task_watchers"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "project_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "watching_since",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "project_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "projects"
+          },
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 20,
+        "indexes": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "is_unique": false,
+            "name": "idx_project_watchers_project"
+          },
+          {
+            "columns": [
+              "user_id"
+            ],
+            "is_unique": false,
+            "name": "idx_project_watchers_user"
+          }
+        ],
+        "name": "project_watchers",
+        "schema_name": null,
+        "stable_id": "project_watchers"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "display_name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "description",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(500)",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "icon_url",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "JSONB",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "config_schema",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 21,
+        "indexes": [],
+        "name": "integration_types",
+        "schema_name": null,
+        "stable_id": "integration_types"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "tenant_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "integration_type_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "JSONB",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "config",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "credentials_encrypted",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "is_active",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "last_sync_at",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP WITH TIME ZONE",
+            "id": 9,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "tenant_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tenants"
+          },
+          {
+            "from_columns": [
+              "integration_type_id"
+            ],
+            "name": null,
+            "on_delete": "restrict",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "integration_types"
+          }
+        ],
+        "id": 22,
+        "indexes": [
+          {
+            "columns": [
+              "tenant_id"
+            ],
+            "is_unique": false,
+            "name": "idx_integrations_tenant"
+          },
+          {
+            "columns": [
+              "integration_type_id"
+            ],
+            "is_unique": false,
+            "name": "idx_integrations_type"
+          }
+        ],
+        "name": "integrations",
+        "schema_name": null,
+        "stable_id": "integrations"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "project_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "integration_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(255)",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "external_project_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "BOOLEAN",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "sync_enabled",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "JSONB",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "config",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "project_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "projects"
+          },
+          {
+            "from_columns": [
+              "integration_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "integrations"
+          }
+        ],
+        "id": 23,
+        "indexes": [
+          {
+            "columns": [
+              "project_id"
+            ],
+            "is_unique": false,
+            "name": "idx_project_integrations_project"
+          },
+          {
+            "columns": [
+              "integration_id"
+            ],
+            "is_unique": false,
+            "name": "idx_project_integrations_integration"
+          }
+        ],
+        "name": "project_integrations",
+        "schema_name": null,
+        "stable_id": "project_integrations"
+      }
+    ],
+    "views": []
+  }
+}

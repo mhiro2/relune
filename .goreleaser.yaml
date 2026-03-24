@@ -1,0 +1,88 @@
+version: 2
+
+project_name: relune
+
+builds:
+  - id: relune-darwin
+    builder: rust
+    binary: relune
+    command: build
+    targets:
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+    flags:
+      - --release
+      - -p=relune-cli
+  - id: relune-linux
+    builder: rust
+    binary: relune
+    tool: cargo
+    command: zigbuild
+    targets:
+      - x86_64-unknown-linux-musl
+      - aarch64-unknown-linux-musl
+    flags:
+      - --release
+      - -p=relune-cli
+
+archives:
+  - id: relune-darwin-archive
+    ids:
+      - relune-darwin
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: relune-linux-archive
+    ids:
+      - relune-linux
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+sboms:
+  - artifacts: archive
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+
+homebrew_casks:
+  - name: relune
+    ids:
+      - relune-darwin-archive
+    binaries:
+      - relune
+    description: Schema visualization and analysis for developers
+    homepage: https://github.com/mhiro2/relune
+    url:
+      verified: github.com/mhiro2/relune/
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/relune"]
+          end
+    repository:
+      owner: mhiro2
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+
+release:
+  github:
+    owner: mhiro2
+    name: relune
+  draft: false
+  prerelease: auto

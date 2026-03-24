@@ -1,0 +1,3 @@
+# Minimal configuration - only render section with one option
+[render]
+theme = "dark"

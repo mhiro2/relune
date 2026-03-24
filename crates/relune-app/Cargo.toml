@@ -1,0 +1,30 @@
+[package]
+name = "relune-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Application orchestration layer for relune"
+
+[dependencies]
+relune-core = { path = "../relune-core" }
+relune-parser-sql = { path = "../relune-parser-sql" }
+relune-layout = { path = "../relune-layout" }
+relune-render-svg = { path = "../relune-render-svg" }
+relune-render-html = { path = "../relune-render-html" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+relune-introspect = { path = "../relune-introspect", optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+introspect = ["dep:relune-introspect", "dep:tokio"]
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true

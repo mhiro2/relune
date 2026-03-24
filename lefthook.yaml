@@ -1,0 +1,19 @@
+output:
+  - summary
+  - meta
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt-check:
+      run: make fmt-check
+    lint:
+      run: make lint
+
+pre-push:
+  parallel: true
+  commands:
+    test:
+      run: make test
+    license-check:
+      run: make license-check

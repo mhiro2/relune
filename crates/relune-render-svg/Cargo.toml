@@ -1,0 +1,19 @@
+[package]
+name = "relune-render-svg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+relune-core = { path = "../relune-core" }
+relune-layout = { path = "../relune-layout" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+insta.workspace = true
+relune-parser-sql = { path = "../relune-parser-sql" }
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -1,0 +1,67 @@
+---
+source: crates/relune-cli/tests/snapshot_tests.rs
+expression: stdout
+---
+Compare two schemas and show differences
+
+Usage: relune diff [OPTIONS]
+
+Options:
+      --before <FILE>
+          Baseline SQL or schema JSON file
+
+  -c, --config <CONFIG>
+          Path to configuration file (TOML; merges with CLI flags)
+
+      --before-sql-text <TEXT>
+          Baseline SQL DDL directly from a string
+
+      --color <COLOR>
+          Colorize output
+
+          Possible values:
+          - auto:   Colorize if output is a terminal
+          - always: Always colorize output
+          - never:  Never colorize output
+          
+          [default: auto]
+
+      --before-schema-json <FILE>
+          Baseline normalized schema JSON file
+
+  -v, --verbose...
+          Increase log verbosity (can be repeated)
+
+      --after <FILE>
+          Updated SQL or schema JSON file
+
+  -q, --quiet
+          Reduce non-error output
+
+      --after-sql-text <TEXT>
+          Updated SQL DDL directly from a string
+
+      --after-schema-json <FILE>
+          Updated normalized schema JSON file
+
+      --dialect <DIALECT>
+          SQL dialect for parsing (auto-detected if omitted)
+
+          Possible values:
+          - auto:     Automatically detect dialect from SQL content
+          - postgres: `PostgreSQL` dialect
+          - mysql:    `MySQL` dialect
+          - sqlite:   `SQLite` dialect
+
+  -f, --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text output
+          - json: JSON output
+
+  -o, --out <FILE>
+          Output file path; stdout if omitted
+
+  -h, --help
+          Print help (see a summary with '-h')

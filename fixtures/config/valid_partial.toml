@@ -1,0 +1,11 @@
+# Partial configuration - only some options
+
+[render]
+theme = "light"
+group_by = "schema"
+exclude = ["temp_*"]
+
+# inspect section omitted (uses defaults)
+
+[export]
+format = "schema-json"

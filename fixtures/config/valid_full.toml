@@ -1,0 +1,29 @@
+# Complete configuration example with all options
+
+[render]
+format = "html"
+theme = "dark"
+layout = "force-directed"
+edge_style = "orthogonal"
+group_by = "schema"
+focus = "users"
+depth = 2
+include = ["users", "posts", "comments"]
+exclude = ["migrations", "audit_logs"]
+show_legend = true
+show_stats = true
+
+[inspect]
+format = "json"
+
+[export]
+format = "graph-json"
+group_by = "prefix"
+layout = "hierarchical"
+edge_style = "curved"
+focus = "posts"
+depth = 3
+
+[diff]
+format = "json"
+dialect = "postgres"

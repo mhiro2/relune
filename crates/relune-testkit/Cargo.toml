@@ -1,0 +1,14 @@
+[package]
+name = "relune-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+insta.workspace = true
+relune-core = { path = "../relune-core" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

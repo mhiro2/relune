@@ -1,0 +1,332 @@
+---
+source: crates/relune-parser-sql/src/lib.rs
+expression: snapshot_data
+---
+{
+  "diagnostics": [],
+  "schema": {
+    "enums": [],
+    "tables": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "username",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "email",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "bio",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 1,
+        "indexes": [],
+        "name": "users",
+        "schema_name": null,
+        "stable_id": "users"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "author_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "title",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "slug",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "body",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 6,
+            "is_primary_key": false,
+            "name": "published",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 7,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 8,
+            "is_primary_key": false,
+            "name": "updated_at",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "author_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 2,
+        "indexes": [
+          {
+            "columns": [
+              "author_id"
+            ],
+            "is_unique": false,
+            "name": "idx_posts_author"
+          },
+          {
+            "columns": [
+              "slug"
+            ],
+            "is_unique": false,
+            "name": "idx_posts_slug"
+          }
+        ],
+        "name": "posts",
+        "schema_name": null,
+        "stable_id": "posts"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 3,
+        "indexes": [],
+        "name": "tags",
+        "schema_name": null,
+        "stable_id": "tags"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "post_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": true,
+            "name": "tag_id",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "post_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "posts"
+          },
+          {
+            "from_columns": [
+              "tag_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "tags"
+          }
+        ],
+        "id": 4,
+        "indexes": [],
+        "name": "post_tags",
+        "schema_name": null,
+        "stable_id": "post_tags"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "post_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "body",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 5,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "post_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "posts"
+          },
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "on_delete": "cascade",
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "users"
+          }
+        ],
+        "id": 5,
+        "indexes": [
+          {
+            "columns": [
+              "post_id"
+            ],
+            "is_unique": false,
+            "name": "idx_comments_post"
+          },
+          {
+            "columns": [
+              "user_id"
+            ],
+            "is_unique": false,
+            "name": "idx_comments_user"
+          }
+        ],
+        "name": "comments",
+        "schema_name": null,
+        "stable_id": "comments"
+      }
+    ],
+    "views": []
+  }
+}
