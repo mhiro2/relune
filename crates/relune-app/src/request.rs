@@ -119,6 +119,41 @@ pub enum OutputFormat {
     SchemaJson,
 }
 
+/// Theme selection for rendered output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RenderTheme {
+    /// Light theme.
+    Light,
+    /// Dark theme.
+    #[default]
+    Dark,
+}
+
+/// Rendering options shared across output formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderOptions {
+    /// Color theme for the rendered output.
+    #[serde(default)]
+    pub theme: RenderTheme,
+    /// Whether to include a legend in the rendered output.
+    #[serde(default)]
+    pub show_legend: bool,
+    /// Whether to include summary statistics in the rendered output.
+    #[serde(default)]
+    pub show_stats: bool,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self {
+            theme: RenderTheme::default(),
+            show_legend: true,
+            show_stats: true,
+        }
+    }
+}
+
 /// Request to render an ERD diagram.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RenderRequest {
@@ -138,6 +173,9 @@ pub struct RenderRequest {
     /// Layout specification.
     #[serde(default)]
     pub layout: LayoutSpec,
+    /// Rendering options.
+    #[serde(default)]
+    pub options: RenderOptions,
     /// Optional output file path. If None, output goes to stdout.
     pub output_path: Option<PathBuf>,
 }

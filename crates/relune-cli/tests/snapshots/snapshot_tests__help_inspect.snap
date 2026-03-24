@@ -57,13 +57,11 @@ Options:
           Print schema summary (default behavior when --table not specified)
 
       --format <FORMAT>
-          Output format
+          Output format. Defaults to `text` after config merge
 
           Possible values:
           - text: Human-readable text output
           - json: JSON output
-          
-          [default: text]
 
   -h, --help
           Print help (see a summary with '-h')

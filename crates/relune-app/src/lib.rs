@@ -38,7 +38,8 @@ pub mod usecases;
 // Re-export request types
 pub use request::{
     DiffFormat, DiffRequest, ExportFormat, ExportRequest, InputSource, InspectFormat,
-    InspectRequest, LintFormat, LintRequest, OutputFormat, RenderRequest,
+    InspectRequest, LintFormat, LintRequest, OutputFormat, RenderOptions, RenderRequest,
+    RenderTheme,
 };
 
 // Re-export result types

@@ -85,7 +85,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `focus`, `depth` | Same as CLI |
 
-**`export` and `--format`:** The CLI requires `--format` on each `export` run, so you always choose the output format on the command line. The file can still supply **`group_by`**, **`layout`**, **`edge_style`**, **`focus`**, and **`depth`** when you do not override them with flags.
+`export.format` can be set in the config file and overridden with `--format`. If neither config nor CLI provides a format, the command fails fast.
 
 ---
 
@@ -93,6 +93,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 
 | Key | Values |
 |-----|--------|
+| `format` | `text`, `json` |
 | `deny` | `error`, `warning`, `info`, `hint` — minimum severity for a non-zero exit when not overridden by `--deny` |
 
 ---

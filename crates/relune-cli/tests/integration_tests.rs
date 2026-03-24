@@ -31,6 +31,16 @@ fn ecommerce_fixture() -> PathBuf {
     fixtures_dir().join("ecommerce.sql")
 }
 
+fn config_fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("fixtures")
+        .join("config")
+}
+
 // ============================================================================
 // Render Command Tests
 // ============================================================================
@@ -265,6 +275,26 @@ mod render_tests {
             .assert()
             .failure();
     }
+
+    #[test]
+    fn render_uses_config_format_and_theme() {
+        let mut cmd = relune();
+        let output = cmd
+            .arg("--config")
+            .arg(config_fixtures_dir().join("valid_full.toml"))
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        assert!(stdout.contains("<!DOCTYPE html>") || stdout.contains("<html"));
+        assert!(
+            stdout.contains("#0f172a") || stdout.contains("#111827"),
+            "HTML output should use the configured dark theme"
+        );
+    }
 }
 
 // ============================================================================
@@ -418,7 +448,26 @@ mod export_tests {
             .arg("--sql")
             .arg(simple_blog_fixture())
             .assert()
-            .failure();
+            .failure()
+            .code(2);
+    }
+
+    #[test]
+    fn export_uses_config_format() {
+        let mut cmd = relune();
+        let output = cmd
+            .arg("--config")
+            .arg(config_fixtures_dir().join("valid_full.toml"))
+            .arg("export")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("Output should be valid JSON");
+        assert!(parsed.is_object(), "Graph JSON should be a JSON object");
     }
 }
 
@@ -512,6 +561,24 @@ mod inspect_tests {
     }
 
     #[test]
+    fn inspect_uses_config_format() {
+        let mut cmd = relune();
+        let output = cmd
+            .arg("--config")
+            .arg(config_fixtures_dir().join("valid_full.toml"))
+            .arg("inspect")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("Output should be valid JSON");
+        assert!(parsed.is_object(), "Inspect JSON should be an object");
+    }
+
+    #[test]
     fn inspect_nonexistent_table() {
         let mut cmd = relune();
         cmd.arg("inspect")
@@ -521,6 +588,37 @@ mod inspect_tests {
             .arg("nonexistent_table")
             .assert()
             .failure();
+    }
+}
+
+// ============================================================================
+// Lint Command Tests
+// ============================================================================
+
+mod lint_tests {
+    use super::*;
+
+    #[test]
+    fn lint_uses_config_format() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+
+        fs::write(&config_path, "[lint]\nformat = \"json\"\n").unwrap();
+
+        let mut cmd = relune();
+        let output = cmd
+            .arg("--config")
+            .arg(&config_path)
+            .arg("lint")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("Output should be valid JSON");
+        assert!(parsed.is_object(), "Lint JSON should be an object");
     }
 }
 

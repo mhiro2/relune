@@ -21,7 +21,7 @@ pub fn run_export(
     let input = resolve_input(args)?;
 
     // Merge config file with CLI args
-    let merged = config.merge_export_args(args);
+    let merged = config.merge_export_args(args)?;
 
     // Convert merged format to app format
     let export_format = match merged.format {

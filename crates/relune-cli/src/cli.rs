@@ -99,9 +99,9 @@ pub struct RenderArgs {
     // -------------------------------------------------------------------------
     // Output options
     // -------------------------------------------------------------------------
-    /// Output format.
-    #[arg(short = 'f', long = "format", value_enum, default_value = "svg")]
-    pub format: RenderFormat,
+    /// Output format. Defaults to `svg` after config merge.
+    #[arg(short = 'f', long = "format", value_enum)]
+    pub format: Option<RenderFormat>,
 
     /// Output file path; stdout if omitted.
     #[arg(short = 'o', long = "out", value_name = "FILE")]
@@ -114,9 +114,9 @@ pub struct RenderArgs {
     #[arg(long = "focus", value_name = "TABLE")]
     pub focus: Option<String>,
 
-    /// Traversal depth for focus mode.
-    #[arg(long = "depth", value_name = "N", default_value = "1")]
-    pub depth: u32,
+    /// Traversal depth for focus mode. Defaults to `1` after config merge.
+    #[arg(long = "depth", value_name = "N")]
+    pub depth: Option<u32>,
 
     /// Grouping mode.
     #[arg(long = "group-by", value_enum)]
@@ -130,9 +130,9 @@ pub struct RenderArgs {
     #[arg(long = "exclude", value_name = "TABLE")]
     pub exclude: Vec<String>,
 
-    /// Visual theme.
-    #[arg(long = "theme", value_enum, default_value = "light")]
-    pub theme: Theme,
+    /// Visual theme. Defaults to `light` after config merge.
+    #[arg(long = "theme", value_enum)]
+    pub theme: Option<Theme>,
 
     /// Layout algorithm.
     #[arg(long = "layout", value_enum)]
@@ -303,9 +303,9 @@ pub struct InspectArgs {
     #[arg(long = "summary")]
     pub summary: bool,
 
-    /// Output format.
-    #[arg(long = "format", value_enum, default_value = "text")]
-    pub format: InspectFormat,
+    /// Output format. Defaults to `text` after config merge.
+    #[arg(long = "format", value_enum)]
+    pub format: Option<InspectFormat>,
 }
 
 /// Output format for inspect command.
@@ -352,9 +352,9 @@ pub struct ExportArgs {
     // -------------------------------------------------------------------------
     // Export options
     // -------------------------------------------------------------------------
-    /// Export format.
-    #[arg(long = "format", value_enum, required = true)]
-    pub format: ExportFormat,
+    /// Export format. Required unless provided by `export.format` in config.
+    #[arg(long = "format", value_enum)]
+    pub format: Option<ExportFormat>,
 
     /// Output file path; stdout if omitted.
     #[arg(short = 'o', long = "out", value_name = "FILE")]
@@ -364,9 +364,9 @@ pub struct ExportArgs {
     #[arg(long = "focus", value_name = "TABLE")]
     pub focus: Option<String>,
 
-    /// Focus depth.
-    #[arg(long = "depth", value_name = "N", default_value = "1")]
-    pub depth: u32,
+    /// Focus depth. Defaults to `1` after config merge.
+    #[arg(long = "depth", value_name = "N")]
+    pub depth: Option<u32>,
 
     /// Grouping mode.
     #[arg(long = "group-by", value_enum)]
@@ -429,9 +429,9 @@ pub struct LintArgs {
     // -------------------------------------------------------------------------
     // Lint options
     // -------------------------------------------------------------------------
-    /// Output format.
-    #[arg(long = "format", value_enum, default_value = "text")]
-    pub format: LintFormat,
+    /// Output format. Defaults to `text` after config merge.
+    #[arg(long = "format", value_enum)]
+    pub format: Option<LintFormat>,
 
     /// Restrict execution to specific rules (can be repeated).
     #[arg(long = "rules", value_name = "RULE")]

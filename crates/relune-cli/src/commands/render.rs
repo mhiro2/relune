@@ -2,12 +2,12 @@
 
 use anyhow::{Context, Result, bail};
 
-use crate::cli::{ColorWhen, GroupByMode, RenderArgs, RenderFormat};
+use crate::cli::{ColorWhen, GroupByMode, RenderArgs, RenderFormat, Theme};
 use crate::config::ReluneConfig;
 use crate::output::{DiagnosticPrinter, OutputWriter, print_stats, print_success};
 use relune_app::{
     FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, InputSource, LayoutSpec, OutputFormat,
-    RenderRequest, render,
+    RenderOptions, RenderRequest, RenderTheme, render,
 };
 
 /// Run the render command.
@@ -52,9 +52,6 @@ pub fn run_render(
         },
     };
 
-    // Theme is not wired through the app layer yet.
-    let _ = merged.theme;
-
     let layout = LayoutSpec {
         algorithm: merged.layout.into(),
         edge_style: merged.edge_style.into(),
@@ -69,6 +66,14 @@ pub fn run_render(
         focus,
         grouping,
         layout,
+        options: RenderOptions {
+            theme: match merged.theme {
+                Theme::Light => RenderTheme::Light,
+                Theme::Dark => RenderTheme::Dark,
+            },
+            show_legend: merged.show_legend,
+            show_stats: merged.show_stats,
+        },
         ..Default::default()
     };
 

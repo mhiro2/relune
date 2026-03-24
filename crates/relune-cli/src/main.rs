@@ -116,6 +116,8 @@ fn get_exit_code(error: &anyhow::Error) -> u8 {
         || error_string.contains("not found")
         || error_string.contains("Failed to load config")
         || error_string.contains("Failed to parse config")
+        || error_string.contains("Invalid config value")
+        || error_string.contains("Export format must be provided")
     {
         return 2;
     }

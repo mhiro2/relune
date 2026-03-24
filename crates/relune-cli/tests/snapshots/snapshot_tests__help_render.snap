@@ -51,15 +51,13 @@ Options:
           [default: auto]
 
   -f, --format <FORMAT>
-          Output format
+          Output format. Defaults to `svg` after config merge
 
           Possible values:
           - svg:         SVG output
           - html:        Self-contained HTML with embedded SVG
           - graph-json:  Graph JSON (intermediate representation)
           - schema-json: Schema JSON (normalized export)
-          
-          [default: svg]
 
   -o, --out <FILE>
           Output file path; stdout if omitted
@@ -68,9 +66,7 @@ Options:
           Center the graph on a table
 
       --depth <N>
-          Traversal depth for focus mode
-          
-          [default: 1]
+          Traversal depth for focus mode. Defaults to `1` after config merge
 
       --group-by <GROUP_BY>
           Grouping mode
@@ -87,13 +83,11 @@ Options:
           Exclude tables from output
 
       --theme <THEME>
-          Visual theme
+          Visual theme. Defaults to `light` after config merge
 
           Possible values:
           - light: Light theme
           - dark:  Dark theme
-          
-          [default: light]
 
       --layout <LAYOUT>
           Layout algorithm

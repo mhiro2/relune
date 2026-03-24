@@ -41,8 +41,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
-    DialectArg, DiffFormat, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg, LintSeverity,
-    RenderFormat, Theme,
+    DialectArg, DiffFormat, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg, RenderFormat, Theme,
 };
 
 /// Root configuration structure.
@@ -195,6 +194,48 @@ pub enum LintSeverityConfig {
     Hint,
 }
 
+impl From<InspectFormatConfig> for crate::cli::InspectFormat {
+    fn from(value: InspectFormatConfig) -> Self {
+        match value {
+            InspectFormatConfig::Text => Self::Text,
+            InspectFormatConfig::Json => Self::Json,
+        }
+    }
+}
+
+impl From<ExportFormatConfig> for crate::cli::ExportFormat {
+    fn from(value: ExportFormatConfig) -> Self {
+        match value {
+            ExportFormatConfig::SchemaJson => Self::SchemaJson,
+            ExportFormatConfig::GraphJson => Self::GraphJson,
+            ExportFormatConfig::LayoutJson => Self::LayoutJson,
+            ExportFormatConfig::Mermaid => Self::Mermaid,
+            ExportFormatConfig::D2 => Self::D2,
+            ExportFormatConfig::Dot => Self::Dot,
+        }
+    }
+}
+
+impl From<LintFormatConfig> for crate::cli::LintFormat {
+    fn from(value: LintFormatConfig) -> Self {
+        match value {
+            LintFormatConfig::Text => Self::Text,
+            LintFormatConfig::Json => Self::Json,
+        }
+    }
+}
+
+impl From<LintSeverityConfig> for crate::cli::LintSeverity {
+    fn from(value: LintSeverityConfig) -> Self {
+        match value {
+            LintSeverityConfig::Error => Self::Error,
+            LintSeverityConfig::Warning => Self::Warning,
+            LintSeverityConfig::Info => Self::Info,
+            LintSeverityConfig::Hint => Self::Hint,
+        }
+    }
+}
+
 /// Error type for config operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -231,8 +272,8 @@ impl ReluneConfig {
     /// CLI args take precedence over config file values.
     pub fn merge_render_args(&self, args: &crate::cli::RenderArgs) -> MergedRenderConfig {
         MergedRenderConfig {
-            format: args.format, // CLI always wins for format (has default)
-            theme: args.theme,   // CLI always wins for theme (has default)
+            format: args.format.or(self.render.format).unwrap_or_default(),
+            theme: args.theme.or(self.render.theme).unwrap_or_default(),
             layout: args.layout.or(self.render.layout).unwrap_or_default(),
             edge_style: args
                 .edge_style
@@ -240,11 +281,7 @@ impl ReluneConfig {
                 .unwrap_or_default(),
             group_by: args.group_by.or(self.render.group_by),
             focus: args.focus.clone().or_else(|| self.render.focus.clone()),
-            depth: if args.depth == 1 {
-                self.render.depth.unwrap_or(1)
-            } else {
-                args.depth
-            },
+            depth: args.depth.or(self.render.depth).unwrap_or(1),
             include: if args.include.is_empty() {
                 self.render.include.clone()
             } else {
@@ -265,14 +302,30 @@ impl ReluneConfig {
     #[allow(clippy::missing_const_for_fn)]
     pub fn merge_inspect_args(&self, args: &crate::cli::InspectArgs) -> MergedInspectConfig {
         MergedInspectConfig {
-            format: args.format,
+            format: args
+                .format
+                .or(self.inspect.format.map(Into::into))
+                .unwrap_or_default(),
         }
     }
 
     /// Merge CLI export args into this config.
-    pub fn merge_export_args(&self, args: &crate::cli::ExportArgs) -> MergedExportConfig {
-        MergedExportConfig {
-            format: args.format,
+    pub fn merge_export_args(
+        &self,
+        args: &crate::cli::ExportArgs,
+    ) -> Result<MergedExportConfig, ConfigError> {
+        let format = args
+            .format
+            .or(self.export.format.map(Into::into))
+            .ok_or_else(|| {
+                ConfigError::InvalidValue(
+                    "Export format must be provided via --format or config export.format"
+                        .to_string(),
+                )
+            })?;
+
+        Ok(MergedExportConfig {
+            format,
             group_by: args.group_by.or(self.export.group_by),
             layout: args.layout.or(self.export.layout).unwrap_or_default(),
             edge_style: args
@@ -280,26 +333,18 @@ impl ReluneConfig {
                 .or(self.export.edge_style)
                 .unwrap_or_default(),
             focus: args.focus.clone().or_else(|| self.export.focus.clone()),
-            depth: if args.depth == 1 {
-                self.export.depth.unwrap_or(1)
-            } else {
-                args.depth
-            },
-        }
+            depth: args.depth.or(self.export.depth).unwrap_or(1),
+        })
     }
 
     /// Merge CLI lint args into this config.
     pub fn merge_lint_args(&self, args: &crate::cli::LintArgs) -> MergedLintConfig {
         MergedLintConfig {
-            format: args.format,
-            deny: args.deny.or_else(|| {
-                self.lint.deny.map(|s| match s {
-                    LintSeverityConfig::Error => LintSeverity::Error,
-                    LintSeverityConfig::Warning => LintSeverity::Warning,
-                    LintSeverityConfig::Info => LintSeverity::Info,
-                    LintSeverityConfig::Hint => LintSeverity::Hint,
-                })
-            }),
+            format: args
+                .format
+                .or(self.lint.format.map(Into::into))
+                .unwrap_or_default(),
+            deny: args.deny.or(self.lint.deny.map(Into::into)),
         }
     }
 
@@ -363,7 +408,10 @@ pub struct MergedDiffConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{DiffArgs, EdgeStyleArg, InspectFormat, LayoutAlgorithmArg, RenderArgs};
+    use crate::cli::{
+        DiffArgs, EdgeStyleArg, ExportFormat, InspectFormat, LayoutAlgorithmArg, LintFormat,
+        RenderArgs,
+    };
     use std::path::PathBuf;
 
     fn fixtures_dir() -> PathBuf {
@@ -461,14 +509,14 @@ mod tests {
             sql_text: None,
             schema_json: None,
             db_url: None,
-            format: RenderFormat::Svg, // CLI specifies svg
+            format: Some(RenderFormat::Svg), // CLI specifies svg
             out: None,
             focus: Some("posts".to_string()), // CLI specifies different focus
-            depth: 3,                         // CLI specifies different depth
+            depth: Some(3),                   // CLI specifies different depth
             group_by: Some(GroupByMode::Prefix), // CLI specifies different group_by
             include: vec!["a".to_string()],   // CLI specifies different include
             exclude: vec!["b".to_string()],   // CLI specifies different exclude
-            theme: Theme::Light,              // CLI specifies light theme
+            theme: Some(Theme::Light),        // CLI specifies light theme
             layout: Some(LayoutAlgorithmArg::Hierarchical),
             edge_style: Some(EdgeStyleArg::Straight),
             stats: true,
@@ -494,6 +542,8 @@ mod tests {
     fn test_merge_render_args_config_used_when_cli_not_specified() {
         // Create config with specific values
         let mut config = ReluneConfig::default();
+        config.render.format = Some(RenderFormat::Html);
+        config.render.theme = Some(Theme::Dark);
         config.render.focus = Some("config_table".to_string());
         config.render.depth = Some(5);
         config.render.group_by = Some(GroupByMode::Schema);
@@ -505,14 +555,14 @@ mod tests {
             sql_text: None,
             schema_json: None,
             db_url: None,
-            format: RenderFormat::Svg, // has default
+            format: None,
             out: None,
             focus: None,     // Not specified - should use config
-            depth: 1,        // Default value - should use config
+            depth: None,
             group_by: None,  // Not specified - should use config
             include: vec![], // Empty - should use config
             exclude: vec![],
-            theme: Theme::Light, // has default
+            theme: None,
             layout: None,
             edge_style: None,
             stats: false,
@@ -523,6 +573,8 @@ mod tests {
         let merged = config.merge_render_args(&args);
 
         // Config values should be used when CLI uses defaults
+        assert_eq!(merged.format, RenderFormat::Html);
+        assert_eq!(merged.theme, Theme::Dark);
         assert_eq!(merged.focus, Some("config_table".to_string()));
         assert_eq!(merged.depth, 5); // Config value, not CLI default
         assert_eq!(merged.group_by, Some(GroupByMode::Schema));
@@ -545,14 +597,14 @@ mod tests {
             sql_text: None,
             schema_json: None,
             db_url: None,
-            format: RenderFormat::Html, // CLI explicitly specifies html
+            format: Some(RenderFormat::Html), // CLI explicitly specifies html
             out: None,
             focus: Some("cli_table".to_string()), // CLI explicitly specifies focus
-            depth: 10,                            // CLI explicitly specifies depth
+            depth: Some(10),                      // CLI explicitly specifies depth
             group_by: Some(GroupByMode::Prefix),  // CLI explicitly specifies group_by
             include: vec!["cli_include".to_string()], // CLI explicitly specifies include
             exclude: vec!["cli_exclude".to_string()], // CLI explicitly specifies exclude
-            theme: Theme::Dark,                   // CLI explicitly specifies dark
+            theme: Some(Theme::Dark),             // CLI explicitly specifies dark
             layout: Some(LayoutAlgorithmArg::ForceDirected),
             edge_style: Some(EdgeStyleArg::Orthogonal),
             stats: true,
@@ -621,7 +673,7 @@ mod tests {
             db_url: None,
             table: None,
             summary: false,
-            format: InspectFormat::Json,
+            format: Some(InspectFormat::Json),
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -632,6 +684,7 @@ mod tests {
     #[test]
     fn test_merge_export_args() {
         let mut config = ReluneConfig::default();
+        config.export.format = Some(ExportFormatConfig::GraphJson);
         config.export.focus = Some("config_focus".to_string());
         config.export.depth = Some(5);
         config.export.layout = Some(LayoutAlgorithmArg::ForceDirected);
@@ -642,18 +695,18 @@ mod tests {
             sql_text: None,
             schema_json: None,
             db_url: None,
-            format: crate::cli::ExportFormat::SchemaJson,
+            format: None,
             out: None,
             focus: None, // Not specified - should use config
-            depth: 1,    // Default - should use config
+            depth: None,
             group_by: None,
             layout: None,
             edge_style: None,
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_export_args(&args);
-        assert_eq!(merged.format, crate::cli::ExportFormat::SchemaJson);
+        let merged = config.merge_export_args(&args).expect("export format should be resolved");
+        assert_eq!(merged.format, ExportFormat::GraphJson);
         assert_eq!(merged.focus, Some("config_focus".to_string()));
         assert_eq!(merged.depth, 5);
         assert_eq!(merged.layout, LayoutAlgorithmArg::ForceDirected);
@@ -661,22 +714,51 @@ mod tests {
     }
 
     #[test]
+    fn test_merge_export_args_requires_format() {
+        let config = ReluneConfig::default();
+        let args = crate::cli::ExportArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            focus: None,
+            depth: None,
+            group_by: None,
+            layout: None,
+            edge_style: None,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let error = config
+            .merge_export_args(&args)
+            .expect_err("missing export format should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("Export format must be provided via --format or config export.format")
+        );
+    }
+
+    #[test]
     fn test_merge_lint_args() {
         let mut config = ReluneConfig::default();
+        config.lint.format = Some(LintFormatConfig::Json);
         config.lint.deny = Some(LintSeverityConfig::Warning);
 
         let args = crate::cli::LintArgs {
             sql: None,
             db_url: None,
             schema_json: None,
-            format: crate::cli::LintFormat::Json,
+            format: None,
             rules: vec![],
             deny: None, // Not specified - should use config
             dialect: crate::cli::DialectArg::Auto,
         };
 
         let merged = config.merge_lint_args(&args);
-        assert_eq!(merged.format, crate::cli::LintFormat::Json);
+        assert_eq!(merged.format, LintFormat::Json);
         assert_eq!(merged.deny, Some(crate::cli::LintSeverity::Warning));
     }
 

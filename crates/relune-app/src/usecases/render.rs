@@ -4,12 +4,12 @@ use std::time::Instant;
 
 use relune_core::SchemaStats;
 use relune_layout::{LayoutConfig, LayoutGraphBuilder, LayoutRequest, build_layout_with_config};
-use relune_render_html::HtmlRenderOptions;
+use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
 use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg};
 use tracing::{debug, info_span};
 
 use crate::error::AppError;
-use crate::request::{OutputFormat, RenderRequest};
+use crate::request::{OutputFormat, RenderOptions, RenderRequest, RenderTheme};
 use crate::result::{RenderResult, RenderStats};
 use crate::schema_input::schema_from_input;
 
@@ -65,8 +65,10 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     let content = {
         let _span = info_span!("render", format = ?request.output_format).entered();
         match request.output_format {
-            OutputFormat::Svg => render_svg_output(&positioned, &stats),
-            OutputFormat::Html => render_html_output(&positioned, &graph, &stats)?,
+            OutputFormat::Svg => render_svg_output(&positioned, &stats, request.options),
+            OutputFormat::Html => {
+                render_html_output(&positioned, &graph, &stats, request.options)?
+            }
             OutputFormat::GraphJson => serde_json::to_string_pretty(&graph)?,
             OutputFormat::SchemaJson => {
                 let export = relune_core::export::export_schema(&schema);
@@ -87,11 +89,15 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
 }
 
 /// Render to SVG format.
-fn render_svg_output(positioned: &relune_layout::PositionedGraph, _stats: &SchemaStats) -> String {
+fn render_svg_output(
+    positioned: &relune_layout::PositionedGraph,
+    _stats: &SchemaStats,
+    options: RenderOptions,
+) -> String {
     let options = SvgRenderOptions {
-        theme: SvgTheme::Dark,
-        show_legend: true,
-        show_stats: true,
+        theme: map_svg_theme(options.theme),
+        show_legend: options.show_legend,
+        show_stats: options.show_stats,
         embed_css: true,
         compact: false,
         show_tooltips: true,
@@ -104,12 +110,13 @@ fn render_html_output(
     positioned: &relune_layout::PositionedGraph,
     graph: &relune_layout::LayoutGraph,
     _stats: &SchemaStats,
+    options: RenderOptions,
 ) -> Result<String, AppError> {
     // First render SVG
     let svg_options = SvgRenderOptions {
-        theme: SvgTheme::Dark,
-        show_legend: true,
-        show_stats: true,
+        theme: map_svg_theme(options.theme),
+        show_legend: options.show_legend,
+        show_stats: options.show_stats,
         embed_css: true,
         compact: false,
         show_tooltips: true,
@@ -117,10 +124,28 @@ fn render_html_output(
     let svg = render_svg(positioned, svg_options);
 
     // Then wrap in HTML
-    let html_options = HtmlRenderOptions::default();
+    let html_options = HtmlRenderOptions {
+        theme: map_html_theme(options.theme),
+        include_legend: options.show_legend || options.show_stats,
+        ..Default::default()
+    };
     let html = relune_render_html::render_html(graph, &svg, &html_options)?;
 
     Ok(html)
+}
+
+const fn map_svg_theme(theme: RenderTheme) -> SvgTheme {
+    match theme {
+        RenderTheme::Light => SvgTheme::Light,
+        RenderTheme::Dark => SvgTheme::Dark,
+    }
+}
+
+const fn map_html_theme(theme: RenderTheme) -> HtmlTheme {
+    match theme {
+        RenderTheme::Light => HtmlTheme::Light,
+        RenderTheme::Dark => HtmlTheme::Dark,
+    }
 }
 
 #[cfg(test)]

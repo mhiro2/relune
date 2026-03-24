@@ -4,7 +4,7 @@ expression: stdout
 ---
 Export schema JSON, graph JSON, layout JSON, or diagram text (Mermaid / D2 / DOT)
 
-Usage: relune export [OPTIONS] --format <FORMAT>
+Usage: relune export [OPTIONS]
 
 Options:
   -c, --config <CONFIG>
@@ -51,7 +51,7 @@ Options:
           [default: auto]
 
       --format <FORMAT>
-          Export format
+          Export format. Required unless provided by `export.format` in config
 
           Possible values:
           - schema-json: Normalized schema JSON
@@ -68,9 +68,7 @@ Options:
           Optional focus table
 
       --depth <N>
-          Focus depth
-          
-          [default: 1]
+          Focus depth. Defaults to `1` after config merge
 
       --group-by <GROUP_BY>
           Grouping mode
