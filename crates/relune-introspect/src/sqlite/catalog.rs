@@ -20,7 +20,7 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
     let mut tables = Vec::new();
 
     for table_name in &table_names {
-        let q = quote_ident(table_name);
+        let q = quote_ident(table_name)?;
         tables.push(RawTable {
             table_name: table_name.clone(),
             schema_name: MAIN_SCHEMA.to_string(),
@@ -105,9 +105,15 @@ async fn list_views(pool: &SqlitePool) -> Result<Vec<RawView>, IntrospectError> 
         .collect())
 }
 
-fn quote_ident(name: &str) -> String {
+fn quote_ident(name: &str) -> Result<String, IntrospectError> {
+    if name.contains('\0') {
+        return Err(IntrospectError::metadata_mapping(format!(
+            "SQLite identifier contains NUL byte: {name:?}"
+        )));
+    }
+
     let escaped = name.replace('"', "\"\"");
-    format!(r#""{escaped}""#)
+    Ok(format!(r#""{escaped}""#))
 }
 
 fn ordinal_position_from_row(
@@ -264,7 +270,7 @@ async fn collect_table_indexes(
         if index_name.starts_with("sqlite_autoindex_") {
             continue;
         }
-        let quoted_idx = quote_ident(&index_name);
+        let quoted_idx = quote_ident(&index_name)?;
         let mut info = pragma_index_info(pool, &quoted_idx).await?;
         info.sort_by_key(|r| r.seqno);
         let col_names: Vec<String> = info.into_iter().filter_map(|r| r.name).collect();
@@ -286,6 +292,19 @@ async fn collect_table_indexes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_null_bytes_in_identifiers() {
+        let err = quote_ident("bad\0name").expect_err("NUL bytes must be rejected");
+        assert!(matches!(err, IntrospectError::MetadataMapping(_)));
+        assert!(err.to_string().contains("NUL byte"));
+    }
+
+    #[test]
+    fn quotes_identifiers_with_double_quotes() {
+        let quoted = quote_ident(r#"na"me"#).expect("identifier should be quoted");
+        assert_eq!(quoted, r#""na""me""#);
+    }
 
     #[test]
     fn rejects_oversized_ordinal_positions() {
