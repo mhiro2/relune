@@ -227,8 +227,10 @@ fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
 
 /// Parse SQL into a Schema, returning an error on fatal parse failures.
 ///
-/// This is a convenience function that wraps `parse_sql_to_schema_with_diagnostics`.
-/// Use the `_with_diagnostics` variant if you need to collect warnings and info messages.
+/// This is a convenience function that rejects error-level diagnostics.
+///
+/// Use the `_with_diagnostics` variant if you need to collect warnings and info messages
+/// while still receiving a partial schema.
 pub fn parse_sql_to_schema(input: &str) -> Result<Schema, ParseError> {
     parse_sql_to_schema_with_dialect(input, SqlDialect::Auto)
 }
@@ -239,17 +241,13 @@ pub fn parse_sql_to_schema_with_dialect(
     dialect: SqlDialect,
 ) -> Result<Schema, ParseError> {
     let output = parse_sql_to_schema_with_diagnostics_and_dialect(input, dialect);
-    if let Some(ref schema) = output.schema {
-        if output.has_errors() {
-            // Return schema but log that there were errors
-            // In strict mode, we could return an error here
-        }
-        Ok(schema.clone())
-    } else {
-        Err(ParseError::Schema(
-            "Failed to parse any valid schema elements".to_string(),
-        ))
+    if output.has_errors() {
+        return Err(ParseError::Schema(error_summary(&output)));
     }
+
+    output
+        .schema
+        .ok_or_else(|| ParseError::Schema("Failed to parse any valid schema elements".to_string()))
 }
 
 /// Parse SQL into a Schema with full diagnostics support (auto-detect dialect).
@@ -508,7 +506,10 @@ fn parse_create_table(
                     .collect();
 
                 foreign_keys.push(ForeignKey {
-                    name: option.name.as_ref().map(|ident| ident.value.clone()),
+                    name: option
+                        .name
+                        .as_ref()
+                        .map(|ident| normalize_identifier(&ident.value)),
                     from_columns: vec![from_column],
                     to_schema: None,
                     to_table,
@@ -553,7 +554,10 @@ fn parse_create_table(
                     .collect();
 
                 foreign_keys.push(ForeignKey {
-                    name: foreign_key.name.as_ref().map(|ident| ident.value.clone()),
+                    name: foreign_key
+                        .name
+                        .as_ref()
+                        .map(|ident| normalize_identifier(&ident.value)),
                     from_columns: from_cols,
                     to_schema: None,
                     to_table,
@@ -643,7 +647,7 @@ fn parse_create_index(
             ident
                 .0
                 .first()
-                .map(object_name_part_to_string)
+                .map(|part| normalize_identifier(&object_name_part_to_string(part)))
                 .unwrap_or_default()
         }),
         columns: index_columns,
@@ -1037,7 +1041,10 @@ fn add_column_from_alter(
                 .collect();
 
             table.foreign_keys.push(ForeignKey {
-                name: option.name.as_ref().map(|ident| ident.value.clone()),
+                name: option
+                    .name
+                    .as_ref()
+                    .map(|ident| normalize_identifier(&ident.value)),
                 from_columns: vec![from_column],
                 to_schema: None,
                 to_table,
@@ -1066,7 +1073,10 @@ fn apply_add_table_constraint(
         }
         TableConstraint::Unique(unique) => {
             let col_names: Vec<String> = unique.columns.iter().map(extract_column_name).collect();
-            let index_name = unique.name.as_ref().map(|ident| ident.value.clone());
+            let index_name = unique
+                .name
+                .as_ref()
+                .map(|ident| normalize_identifier(&ident.value));
             table.indexes.push(Index {
                 name: index_name,
                 columns: col_names,
@@ -1087,7 +1097,10 @@ fn apply_add_table_constraint(
                 .collect();
 
             table.foreign_keys.push(ForeignKey {
-                name: foreign_key.name.as_ref().map(|ident| ident.value.clone()),
+                name: foreign_key
+                    .name
+                    .as_ref()
+                    .map(|ident| normalize_identifier(&ident.value)),
                 from_columns: from_cols,
                 to_schema: None,
                 to_table,
@@ -1272,6 +1285,29 @@ fn normalize_object_name(name: &ObjectName) -> String {
         .map(|part| normalize_identifier(&object_name_part_to_string(part)))
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn error_summary(output: &ParseOutput) -> String {
+    let messages = output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .map(|diagnostic| {
+            format!(
+                "{} {}: {}",
+                diagnostic.severity, diagnostic.code, diagnostic.message
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if messages.is_empty() {
+        "Failed to parse any valid schema elements".to_string()
+    } else {
+        format!(
+            "SQL parsing reported error diagnostics: {}",
+            messages.join("; ")
+        )
+    }
 }
 
 // Keep the old function name for backward compatibility
@@ -1508,6 +1544,43 @@ mod tests {
 
         assert!(output.schema.is_none());
         assert!(output.has_errors());
+    }
+
+    #[test]
+    fn strict_parse_rejects_error_diagnostics() {
+        let sql = "THIS IS NOT VALID SQL";
+
+        let err = parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres)
+            .expect_err("strict parsing should reject error diagnostics");
+        assert!(err.to_string().contains("error diagnostics"));
+    }
+
+    #[test]
+    fn normalizes_constraint_and_index_names_on_storage() {
+        let sql = r"
+        CREATE TABLE orgs (
+            id BIGINT PRIMARY KEY
+        );
+
+        CREATE TABLE users (
+            id BIGINT PRIMARY KEY,
+            org_id BIGINT,
+            email TEXT,
+            CONSTRAINT FK_USERS_ORG FOREIGN KEY (org_id) REFERENCES orgs(id)
+        );
+
+        CREATE INDEX IDX_USERS_EMAIL ON users (email);
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema
+            .tables
+            .iter()
+            .find(|table| table.name == "users")
+            .unwrap();
+
+        assert_eq!(users.foreign_keys[0].name.as_deref(), Some("fk_users_org"));
+        assert_eq!(users.indexes[0].name.as_deref(), Some("idx_users_email"));
     }
 
     #[test]
