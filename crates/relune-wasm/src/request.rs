@@ -74,11 +74,11 @@ impl WasmRenderRequest {
             Some(other) => return Err(format!("Unknown output format: {other}")),
         };
 
-        // Build focus spec
-        let focus = self.focus_table.as_ref().map(|table| FocusSpec {
-            table: table.clone(),
-            depth: self.depth.unwrap_or(1),
-        });
+        // Build focus spec (use FocusSpec::new to clamp depth to MAX_FOCUS_DEPTH)
+        let focus = self
+            .focus_table
+            .as_ref()
+            .map(|table| FocusSpec::new(table.clone(), self.depth.unwrap_or(1)));
 
         // Build filter spec
         let filter = FilterSpec {
@@ -238,11 +238,11 @@ impl WasmExportRequest {
             Some(other) => return Err(format!("Unknown export format: {other}")),
         };
 
-        // Build focus spec
-        let focus = self.focus_table.as_ref().map(|table| FocusSpec {
-            table: table.clone(),
-            depth: self.depth.unwrap_or(1),
-        });
+        // Build focus spec (use FocusSpec::new to clamp depth to MAX_FOCUS_DEPTH)
+        let focus = self
+            .focus_table
+            .as_ref()
+            .map(|table| FocusSpec::new(table.clone(), self.depth.unwrap_or(1)));
 
         // Build filter spec
         let filter = FilterSpec {
