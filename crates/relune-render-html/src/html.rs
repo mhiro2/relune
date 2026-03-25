@@ -3,6 +3,7 @@
 //! Embedded viewer scripts are generated from TypeScript in `ts/` into `src/js/` by `build.rs` (`pnpm run build`; outputs are gitignored).
 
 use crate::options::{HtmlRenderOptions, Theme};
+use relune_render_theme::get_colors;
 
 /// Escape JSON content for safe embedding in a script tag.
 pub fn escape_json_for_script(json: &str) -> String {
@@ -127,14 +128,7 @@ fn build_css(
     _enable_collapse: bool,
     enable_highlight: bool,
 ) -> String {
-    let (bg_color, text_color, border_color, node_bg, node_header_bg, edge_color) = match theme {
-        Theme::Light => (
-            "#ffffff", "#333333", "#e0e0e0", "#fafafa", "#f0f0f0", "#999999",
-        ),
-        Theme::Dark => (
-            "#1a1a2e", "#eaeaea", "#3a3a4e", "#252540", "#2a2a45", "#6a6a8e",
-        ),
-    };
+    let colors = get_colors(theme);
 
     let search_css = if enable_search {
         r"
@@ -605,6 +599,12 @@ fn build_css(
       opacity: 0.8;
     }}
 {search_css}{type_filter_css}{group_panel_css}{highlight_css}",
+        bg_color = colors.background,
+        text_color = colors.text_primary,
+        border_color = colors.node_stroke,
+        node_bg = colors.node_fill,
+        node_header_bg = colors.header_fill,
+        edge_color = colors.edge_stroke,
     )
 }
 
@@ -698,6 +698,7 @@ fn html_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 /// Indent SVG content for proper nesting in HTML.
@@ -732,6 +733,7 @@ mod tests {
         assert_eq!(html_escape("<script>"), "&lt;script&gt;");
         assert_eq!(html_escape("a & b"), "a &amp; b");
         assert_eq!(html_escape(r#""quoted""#), "&quot;quoted&quot;");
+        assert_eq!(html_escape("'quoted'"), "&#39;quoted&#39;");
     }
 
     #[test]
@@ -785,8 +787,8 @@ mod tests {
     fn test_css_dark_theme() {
         let css = build_css(Theme::Dark, true, false, false, false, false);
 
-        assert!(css.contains("--bg-color: #1a1a2e"));
-        assert!(css.contains("--text-color: #eaeaea"));
+        assert!(css.contains("--bg-color: #0f172a"));
+        assert!(css.contains("--text-color: #e2e8f0"));
     }
 
     #[test]
@@ -794,7 +796,7 @@ mod tests {
         let css = build_css(Theme::Light, true, false, false, false, false);
 
         assert!(css.contains("--bg-color: #ffffff"));
-        assert!(css.contains("--text-color: #333333"));
+        assert!(css.contains("--text-color: #1e293b"));
     }
 
     #[test]

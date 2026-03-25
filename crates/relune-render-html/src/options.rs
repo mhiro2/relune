@@ -2,15 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Visual theme for HTML output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum Theme {
-    /// Light theme with white background.
-    #[default]
-    Light,
-    /// Dark theme with dark background.
-    Dark,
-}
+pub use relune_render_theme::Theme;
 
 /// Options for HTML rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +50,7 @@ pub struct HtmlRenderOptions {
 impl Default for HtmlRenderOptions {
     fn default() -> Self {
         Self {
-            theme: Theme::default(),
+            theme: Theme::Light,
             title: None,
             include_legend: false,
             enable_pan_zoom: true,

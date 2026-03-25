@@ -202,8 +202,8 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        assert!(result.contains("--bg-color: #1a1a2e"));
-        assert!(result.contains("--text-color: #eaeaea"));
+        assert!(result.contains("--bg-color: #0f172a"));
+        assert!(result.contains("--text-color: #e2e8f0"));
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
         let result = render_html(&graph, svg, &options).unwrap();
 
         assert!(result.contains("--bg-color: #ffffff"));
-        assert!(result.contains("--text-color: #333333"));
+        assert!(result.contains("--text-color: #1e293b"));
     }
 
     #[test]

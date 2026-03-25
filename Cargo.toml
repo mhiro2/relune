@@ -3,6 +3,7 @@ members = [
   "crates/relune-core",
   "crates/relune-layout",
   "crates/relune-parser-sql",
+  "crates/relune-render-theme",
   "crates/relune-render-svg",
   "crates/relune-render-html",
   "crates/relune-app",

@@ -1983,6 +1983,7 @@ dependencies = [
  "insta",
  "relune-core",
  "relune-layout",
+ "relune-render-theme",
  "serde",
  "serde_json",
  "thiserror",
@@ -1996,6 +1997,15 @@ dependencies = [
  "relune-core",
  "relune-layout",
  "relune-parser-sql",
+ "relune-render-theme",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "relune-render-theme"
+version = "0.1.0"
+dependencies = [
  "serde",
  "serde_json",
 ]

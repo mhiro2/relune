@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 relune-core = { path = "../relune-core" }
 relune-layout = { path = "../relune-layout" }
+relune-render-theme = { path = "../relune-render-theme" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
