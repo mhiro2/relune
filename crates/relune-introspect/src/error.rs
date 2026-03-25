@@ -3,6 +3,7 @@
 //! This module defines error types for database introspection operations,
 //! including connection errors, query failures, and metadata mapping issues.
 
+use sqlx::Error as SqlxError;
 use thiserror::Error;
 
 /// Main error type for introspection operations.
@@ -68,13 +69,45 @@ impl IntrospectError {
     /// Check if this error is related to connection issues.
     #[must_use]
     pub const fn is_connection_error(&self) -> bool {
-        matches!(self, Self::Connection(_) | Self::InvalidDatabaseUrl(_))
+        matches!(
+            self,
+            Self::Connection(_) | Self::InvalidDatabaseUrl(_) | Self::Timeout(_)
+        )
     }
 
     /// Check if this error is a timeout.
     #[must_use]
     pub const fn is_timeout(&self) -> bool {
         matches!(self, Self::Timeout(_))
+    }
+}
+
+/// Convert a `sqlx` connect error into a sanitized introspection error.
+pub(crate) fn connect_error(
+    database_name: &'static str,
+    database_url: &str,
+    error: SqlxError,
+) -> IntrospectError {
+    match error {
+        SqlxError::Configuration(_) => {
+            IntrospectError::invalid_url(format!("{database_name} database URL is invalid"))
+        }
+        SqlxError::PoolTimedOut => {
+            IntrospectError::timeout(format!("{database_name} connection timed out"))
+        }
+        other => IntrospectError::connection(format!(
+            "{database_name} connection failed: {}",
+            sanitize_connect_error_message(database_url, &other.to_string())
+        )),
+    }
+}
+
+fn sanitize_connect_error_message(database_url: &str, message: &str) -> String {
+    let masked_url = crate::url::mask_credentials(database_url);
+    if masked_url == database_url {
+        message.to_string()
+    } else {
+        message.replace(database_url, &masked_url)
     }
 }
 
@@ -119,10 +152,63 @@ mod tests {
     fn test_is_connection_error() {
         let conn_err = IntrospectError::connection("refused");
         let url_err = IntrospectError::invalid_url("bad url");
+        let timeout_err = IntrospectError::timeout("slow");
         let query_err = IntrospectError::query("bad query");
 
         assert!(conn_err.is_connection_error());
         assert!(url_err.is_connection_error());
+        assert!(timeout_err.is_connection_error());
         assert!(!query_err.is_connection_error());
+    }
+
+    #[test]
+    fn test_connect_error_classification() {
+        let invalid = connect_error(
+            "PostgreSQL",
+            "postgres://user:pass@localhost/db",
+            SqlxError::Configuration(
+                std::io::Error::other("postgres://user:pass@localhost/db").into(),
+            ),
+        );
+        assert!(matches!(invalid, IntrospectError::InvalidDatabaseUrl(_)));
+        assert!(!invalid.to_string().contains("postgres://"));
+
+        let timeout = connect_error(
+            "MySQL",
+            "mysql://user:pass@localhost/db",
+            SqlxError::PoolTimedOut,
+        );
+        assert!(matches!(timeout, IntrospectError::Timeout(_)));
+
+        let connection = connect_error(
+            "SQLite",
+            "sqlite://tmp.db",
+            SqlxError::Io(std::io::Error::other("down")),
+        );
+        assert!(matches!(connection, IntrospectError::Connection(_)));
+        assert!(connection.to_string().contains("SQLite connection failed"));
+    }
+
+    #[test]
+    fn test_connect_error_masks_credentials_in_connection_message() {
+        let connection = connect_error(
+            "PostgreSQL",
+            "postgres://user:secret@localhost/db",
+            SqlxError::Io(std::io::Error::other(
+                "failed to connect to postgres://user:secret@localhost/db",
+            )),
+        );
+
+        assert!(matches!(connection, IntrospectError::Connection(_)));
+        assert!(
+            connection
+                .to_string()
+                .contains("postgres://***:***@localhost/db")
+        );
+        assert!(
+            !connection
+                .to_string()
+                .contains("postgres://user:secret@localhost/db")
+        );
     }
 }

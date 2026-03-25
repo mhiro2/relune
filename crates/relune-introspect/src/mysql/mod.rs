@@ -9,7 +9,7 @@ use relune_core::Schema;
 use sqlx::mysql::MySqlPoolOptions;
 use tracing::{debug, error, info, instrument};
 
-use crate::error::IntrospectError;
+use crate::error::{IntrospectError, connect_error};
 
 const MARIADB_SCHEME_PREFIX: &str = "mariadb://";
 
@@ -46,7 +46,7 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to connect to database");
-            IntrospectError::connection(e.to_string())
+            connect_error("MySQL", &connect_url, e)
         })?;
 
     debug!("Successfully connected to database");

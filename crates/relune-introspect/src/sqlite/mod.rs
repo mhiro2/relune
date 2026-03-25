@@ -6,7 +6,7 @@ use relune_core::Schema;
 use sqlx::sqlite::SqlitePoolOptions;
 use tracing::{debug, error, info, instrument};
 
-use crate::error::IntrospectError;
+use crate::error::{IntrospectError, connect_error};
 
 const POOL_MAX_CONNECTIONS: u32 = 1;
 
@@ -40,11 +40,7 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to connect to database");
-            if e.to_string().contains("invalid") {
-                IntrospectError::invalid_url(e.to_string())
-            } else {
-                IntrospectError::connection(e.to_string())
-            }
+            connect_error("SQLite", trimmed, e)
         })?;
 
     debug!("Successfully connected to database");

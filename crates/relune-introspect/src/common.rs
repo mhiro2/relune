@@ -205,41 +205,41 @@ pub fn map_schema(
     enums: Vec<RawEnum>,
 ) -> Result<Schema, IntrospectError> {
     // Build a set of primary key column identifiers for quick lookup
-    let pk_set: HashSet<(String, String, String)> = columns
+    let pk_set: HashSet<(&str, &str, &str)> = columns
         .iter()
         .filter(|c| c.is_primary_key)
         .map(|c| {
             (
-                c.schema_name.clone(),
-                c.table_name.clone(),
-                c.column_name.clone(),
+                c.schema_name.as_str(),
+                c.table_name.as_str(),
+                c.column_name.as_str(),
             )
         })
         .collect();
 
     // Group columns by table
-    let mut columns_by_table: HashMap<(String, String), Vec<&RawColumn>> = HashMap::new();
+    let mut columns_by_table: HashMap<(&str, &str), Vec<&RawColumn>> = HashMap::new();
     for col in columns {
         columns_by_table
-            .entry((col.schema_name.clone(), col.table_name.clone()))
+            .entry((col.schema_name.as_str(), col.table_name.as_str()))
             .or_default()
             .push(col);
     }
 
     // Group foreign keys by table
-    let mut fks_by_table: HashMap<(String, String), Vec<&RawForeignKey>> = HashMap::new();
+    let mut fks_by_table: HashMap<(&str, &str), Vec<&RawForeignKey>> = HashMap::new();
     for fk in foreign_keys {
         fks_by_table
-            .entry((fk.schema_name.clone(), fk.from_table.clone()))
+            .entry((fk.schema_name.as_str(), fk.from_table.as_str()))
             .or_default()
             .push(fk);
     }
 
     // Group indexes by table
-    let mut indexes_by_table: HashMap<(String, String), Vec<&RawIndex>> = HashMap::new();
+    let mut indexes_by_table: HashMap<(&str, &str), Vec<&RawIndex>> = HashMap::new();
     for idx in indexes {
         indexes_by_table
-            .entry((idx.schema_name.clone(), idx.table_name.clone()))
+            .entry((idx.schema_name.as_str(), idx.table_name.as_str()))
             .or_default()
             .push(idx);
     }
@@ -248,10 +248,13 @@ pub fn map_schema(
     let mapped_tables: Vec<Table> = tables
         .into_iter()
         .map(|raw_table| {
-            let key = (raw_table.schema_name.clone(), raw_table.table_name.clone());
-            let table_columns = columns_by_table.remove(&key).unwrap_or_default();
-            let table_fks = fks_by_table.remove(&key).unwrap_or_default();
-            let table_indexes = indexes_by_table.remove(&key).unwrap_or_default();
+            let key = (
+                raw_table.schema_name.as_str(),
+                raw_table.table_name.as_str(),
+            );
+            let table_columns = columns_by_table.get(&key).cloned().unwrap_or_default();
+            let table_fks = fks_by_table.get(&key).cloned().unwrap_or_default();
+            let table_indexes = indexes_by_table.get(&key).cloned().unwrap_or_default();
 
             map_table(raw_table, table_columns, &pk_set, table_fks, table_indexes)
         })
@@ -273,7 +276,7 @@ pub fn map_schema(
 fn map_table(
     raw_table: RawTable,
     columns: Vec<&RawColumn>,
-    pk_set: &HashSet<(String, String, String)>,
+    pk_set: &HashSet<(&str, &str, &str)>,
     foreign_keys: Vec<&RawForeignKey>,
     indexes: Vec<&RawIndex>,
 ) -> Table {
@@ -284,9 +287,9 @@ fn map_table(
         .into_iter()
         .map(|col| {
             let is_pk = pk_set.contains(&(
-                raw_table.schema_name.clone(),
-                raw_table.table_name.clone(),
-                col.column_name.clone(),
+                raw_table.schema_name.as_str(),
+                raw_table.table_name.as_str(),
+                col.column_name.as_str(),
             ));
             map_column(col, &stable_id, is_pk)
         })

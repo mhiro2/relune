@@ -45,7 +45,7 @@ use relune_core::Schema;
 use sqlx::postgres::PgPoolOptions;
 use tracing::{debug, error, info, instrument};
 
-use crate::error::IntrospectError;
+use crate::error::{IntrospectError, connect_error};
 
 /// Introspects a `PostgreSQL` database and extracts its schema metadata.
 ///
@@ -113,11 +113,7 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to connect to database");
-            if e.to_string().contains("invalid connection string") {
-                IntrospectError::invalid_url(e.to_string())
-            } else {
-                IntrospectError::connection(e.to_string())
-            }
+            connect_error("PostgreSQL", &database_url, e)
         })?;
 
     debug!("Successfully connected to database");
