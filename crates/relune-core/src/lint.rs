@@ -746,6 +746,7 @@ mod tests {
         ForeignKey {
             name: None,
             from_columns: from_columns.iter().map(ToString::to_string).collect(),
+            to_schema: None,
             to_table: to_table.to_string(),
             to_columns: vec!["id".to_string()],
             on_delete: ReferentialAction::NoAction,
@@ -1070,6 +1071,7 @@ mod tests {
             vec![ForeignKey {
                 name: None,
                 from_columns: vec!["user_ref".to_string()],
+                to_schema: None,
                 to_table: "users".to_string(),
                 to_columns: vec!["email".to_string()],
                 on_delete: ReferentialAction::NoAction,

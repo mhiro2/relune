@@ -688,6 +688,7 @@ mod tests {
                     foreign_keys: vec![ForeignKey {
                         name: None,
                         from_columns: vec!["a_id".to_string()],
+                        to_schema: None,
                         to_table: "a".to_string(),
                         to_columns: vec!["id".to_string()],
                         on_delete: ReferentialAction::NoAction,
@@ -746,6 +747,7 @@ mod tests {
                     foreign_keys: vec![ForeignKey {
                         name: None,
                         from_columns: vec!["a_id".to_string()],
+                        to_schema: None,
                         to_table: "a".to_string(),
                         to_columns: vec!["id".to_string()],
                         on_delete: ReferentialAction::NoAction,
@@ -770,6 +772,7 @@ mod tests {
                     foreign_keys: vec![ForeignKey {
                         name: None,
                         from_columns: vec!["a_id".to_string()],
+                        to_schema: None,
                         to_table: "a".to_string(),
                         to_columns: vec!["id".to_string()],
                         on_delete: ReferentialAction::NoAction,
@@ -795,6 +798,7 @@ mod tests {
                         ForeignKey {
                             name: None,
                             from_columns: vec!["b_id".to_string()],
+                            to_schema: None,
                             to_table: "b".to_string(),
                             to_columns: vec!["id".to_string()],
                             on_delete: ReferentialAction::NoAction,
@@ -803,6 +807,7 @@ mod tests {
                         ForeignKey {
                             name: None,
                             from_columns: vec!["c_id".to_string()],
+                            to_schema: None,
                             to_table: "c".to_string(),
                             to_columns: vec!["id".to_string()],
                             on_delete: ReferentialAction::NoAction,
@@ -829,6 +834,7 @@ mod tests {
                         ForeignKey {
                             name: None,
                             from_columns: vec!["b_id".to_string()],
+                            to_schema: None,
                             to_table: "b".to_string(),
                             to_columns: vec!["id".to_string()],
                             on_delete: ReferentialAction::NoAction,
@@ -837,6 +843,7 @@ mod tests {
                         ForeignKey {
                             name: None,
                             from_columns: vec!["c_id".to_string()],
+                            to_schema: None,
                             to_table: "c".to_string(),
                             to_columns: vec!["id".to_string()],
                             on_delete: ReferentialAction::NoAction,

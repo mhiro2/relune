@@ -214,6 +214,7 @@ fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignK
             schema_name: MAIN_SCHEMA.to_string(),
             from_table: from_table.to_string(),
             from_columns,
+            to_schema: None,
             to_table,
             to_columns,
         });

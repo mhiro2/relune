@@ -113,10 +113,13 @@ fn format_table_details(table: &TableDetails) -> String {
         output.push_str("\nForeign Keys:\n");
         for fk in &table.foreign_keys {
             let name = fk.name.as_deref().unwrap_or("(unnamed)");
+            let target = match &fk.to_schema {
+                Some(schema) => format!("{}.{}", schema, fk.to_table),
+                None => fk.to_table.clone(),
+            };
             let _ = writeln!(
                 output,
-                "  {name} -> {} ({})",
-                fk.to_table,
+                "  {name} -> {target} ({})",
                 fk.from_columns.join(", ")
             );
         }

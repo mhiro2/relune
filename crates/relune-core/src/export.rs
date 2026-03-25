@@ -70,6 +70,9 @@ pub struct ForeignKeyExport {
     pub name: Option<String>,
     /// Source column names.
     pub from_columns: Vec<String>,
+    /// Target schema name, if cross-schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_schema: Option<String>,
     /// Target table name.
     pub to_table: String,
     /// Target column names.
@@ -142,6 +145,7 @@ fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
     ForeignKeyExport {
         name: fk.name.clone(),
         from_columns: fk.from_columns.clone(),
+        to_schema: fk.to_schema.clone(),
         to_table: fk.to_table.clone(),
         to_columns: fk.to_columns.clone(),
         on_delete: to_action_str(fk.on_delete),
@@ -219,6 +223,7 @@ fn import_fk(export: &ForeignKeyExport) -> ForeignKey {
     ForeignKey {
         name: export.name.clone(),
         from_columns: export.from_columns.clone(),
+        to_schema: export.to_schema.clone(),
         to_table: export.to_table.clone(),
         to_columns: export.to_columns.clone(),
         on_delete: from_action_str(&export.on_delete),

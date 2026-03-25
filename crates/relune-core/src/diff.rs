@@ -192,6 +192,7 @@ impl ForeignKeyDiff {
         ForeignKeyExport {
             name: fk.name.clone(),
             from_columns: fk.from_columns.clone(),
+            to_schema: fk.to_schema.clone(),
             to_table: fk.to_table.clone(),
             to_columns: fk.to_columns.clone(),
             on_delete: to_action_str(fk.on_delete),
@@ -407,7 +408,10 @@ impl TableDiff {
     }
 
     fn fks_differ(a: &ForeignKey, b: &ForeignKey) -> bool {
-        a.from_columns != b.from_columns || a.to_table != b.to_table || a.to_columns != b.to_columns
+        a.from_columns != b.from_columns
+            || a.to_schema != b.to_schema
+            || a.to_table != b.to_table
+            || a.to_columns != b.to_columns
     }
 
     fn diff_indexes(
@@ -619,6 +623,7 @@ mod tests {
                         Some(name.to_string())
                     },
                     from_columns: from_cols.into_iter().map(ToString::to_string).collect(),
+                    to_schema: None,
                     to_table: to_table.to_string(),
                     to_columns: to_cols.into_iter().map(ToString::to_string).collect(),
                     on_delete: ReferentialAction::NoAction,

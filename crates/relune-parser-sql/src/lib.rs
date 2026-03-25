@@ -502,6 +502,7 @@ fn parse_create_table(
                 foreign_keys.push(ForeignKey {
                     name: option.name.as_ref().map(|ident| ident.value.clone()),
                     from_columns: vec![from_column],
+                    to_schema: None,
                     to_table,
                     to_columns,
                     on_delete: convert_referential_action(constraint.on_delete),
@@ -546,6 +547,7 @@ fn parse_create_table(
                 foreign_keys.push(ForeignKey {
                     name: foreign_key.name.as_ref().map(|ident| ident.value.clone()),
                     from_columns: from_cols,
+                    to_schema: None,
                     to_table,
                     to_columns: to_cols,
                     on_delete: convert_referential_action(foreign_key.on_delete),
@@ -1029,6 +1031,7 @@ fn add_column_from_alter(
             table.foreign_keys.push(ForeignKey {
                 name: option.name.as_ref().map(|ident| ident.value.clone()),
                 from_columns: vec![from_column],
+                to_schema: None,
                 to_table,
                 to_columns,
                 on_delete: convert_referential_action(constraint.on_delete),
@@ -1078,6 +1081,7 @@ fn apply_add_table_constraint(
             table.foreign_keys.push(ForeignKey {
                 name: foreign_key.name.as_ref().map(|ident| ident.value.clone()),
                 from_columns: from_cols,
+                to_schema: None,
                 to_table,
                 to_columns: to_cols,
                 on_delete: convert_referential_action(foreign_key.on_delete),

@@ -319,6 +319,9 @@ pub struct ForeignKey {
     pub name: Option<String>,
     /// Source column names.
     pub from_columns: Vec<String>,
+    /// Target schema name, if cross-schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_schema: Option<String>,
     /// Target table name.
     pub to_table: String,
     /// Target column names.

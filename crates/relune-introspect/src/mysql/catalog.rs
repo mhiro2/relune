@@ -117,6 +117,7 @@ impl MySqlCatalog {
                 CONVERT(kcu.TABLE_SCHEMA USING utf8mb4) AS schema_name,
                 CONVERT(kcu.TABLE_NAME USING utf8mb4) AS table_name,
                 CONVERT(kcu.COLUMN_NAME USING utf8mb4) AS column_name,
+                CONVERT(kcu.REFERENCED_TABLE_SCHEMA USING utf8mb4) AS referenced_schema,
                 CONVERT(kcu.REFERENCED_TABLE_NAME USING utf8mb4) AS referenced_table,
                 CONVERT(kcu.REFERENCED_COLUMN_NAME USING utf8mb4) AS referenced_column,
                 kcu.ORDINAL_POSITION AS ordinal_position
@@ -229,6 +230,7 @@ struct FkColumnRow {
     schema_name: String,
     table_name: String,
     column_name: String,
+    referenced_schema: String,
     referenced_table: String,
     referenced_column: String,
     ordinal_position: u64,
@@ -276,6 +278,7 @@ fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
         cols.sort_by_key(|r| r.ordinal_position);
         let from_columns: Vec<String> = cols.iter().map(|r| r.column_name.clone()).collect();
         let to_columns: Vec<String> = cols.iter().map(|r| r.referenced_column.clone()).collect();
+        let to_schema = cols.first().map(|r| r.referenced_schema.clone());
         let to_table = cols
             .first()
             .map(|r| r.referenced_table.clone())
@@ -285,6 +288,7 @@ fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
             schema_name: key.schema,
             from_table: key.table,
             from_columns,
+            to_schema,
             to_table,
             to_columns,
         });

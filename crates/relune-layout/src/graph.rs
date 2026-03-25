@@ -1003,6 +1003,7 @@ mod collapse_tests {
                         ForeignKey {
                             name: Some("fk_user_roles_user".to_string()),
                             from_columns: vec!["user_id".to_string()],
+                            to_schema: None,
                             to_table: "users".to_string(),
                             to_columns: vec!["id".to_string()],
                             on_delete: ReferentialAction::NoAction,
@@ -1011,6 +1012,7 @@ mod collapse_tests {
                         ForeignKey {
                             name: Some("fk_user_roles_role".to_string()),
                             from_columns: vec!["role_id".to_string()],
+                            to_schema: None,
                             to_table: "roles".to_string(),
                             to_columns: vec!["id".to_string()],
                             on_delete: ReferentialAction::NoAction,
@@ -1144,6 +1146,7 @@ mod collapse_tests {
                     foreign_keys: vec![ForeignKey {
                         name: Some("fk_posts_user".to_string()),
                         from_columns: vec!["user_id".to_string()],
+                        to_schema: None,
                         to_table: "users".to_string(),
                         to_columns: vec!["id".to_string()],
                         on_delete: ReferentialAction::NoAction,

@@ -158,6 +158,7 @@ impl PostgresCatalog {
                 src_ns.nspname AS schema_name,
                 src_cls.relname AS from_table,
                 array_agg(src_attr.attname ORDER BY u.ord) AS from_columns,
+                dst_ns.nspname AS to_schema,
                 dst_cls.relname AS to_table,
                 array_agg(dst_attr.attname ORDER BY u.ord) AS to_columns
             FROM pg_catalog.pg_constraint tc
@@ -173,7 +174,7 @@ impl PostgresCatalog {
                 AND src_ns.nspname NOT LIKE 'pg_%'
                 AND dst_ns.nspname NOT IN ('pg_catalog', 'information_schema')
                 AND dst_ns.nspname NOT LIKE 'pg_%'
-            GROUP BY tc.conname, src_ns.nspname, src_cls.relname, dst_cls.relname
+            GROUP BY tc.conname, src_ns.nspname, src_cls.relname, dst_ns.nspname, dst_cls.relname
             ORDER BY src_ns.nspname, src_cls.relname, tc.conname
             ",
         )
@@ -188,6 +189,7 @@ impl PostgresCatalog {
                 schema_name: row.schema_name,
                 from_table: row.from_table,
                 from_columns: row.from_columns.unwrap_or_default(),
+                to_schema: Some(row.to_schema),
                 to_table: row.to_table,
                 to_columns: row.to_columns.unwrap_or_default(),
             })
@@ -356,6 +358,7 @@ struct RawForeignKeyRow {
     schema_name: String,
     from_table: String,
     from_columns: Option<Vec<String>>,
+    to_schema: String,
     to_table: String,
     to_columns: Option<Vec<String>>,
 }
@@ -424,6 +427,7 @@ mod tests {
             schema_name: "public".to_string(),
             from_table: "posts".to_string(),
             from_columns: vec!["user_id".to_string()],
+            to_schema: Some("public".to_string()),
             to_table: "users".to_string(),
             to_columns: vec!["id".to_string()],
         };

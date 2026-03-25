@@ -829,6 +829,7 @@ mod tests {
                     foreign_keys: vec![ForeignKey {
                         name: Some("fk_posts_user".to_string()),
                         from_columns: vec!["user_id".to_string()],
+                        to_schema: None,
                         to_table: "users".to_string(),
                         to_columns: vec!["id".to_string()],
                         on_delete: ReferentialAction::NoAction,

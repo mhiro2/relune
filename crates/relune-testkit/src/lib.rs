@@ -142,6 +142,7 @@ impl TableBuilder {
         self.table.foreign_keys.push(ForeignKey {
             name: None,
             from_columns: from_columns.iter().map(|c| (*c).to_string()).collect(),
+            to_schema: None,
             to_table: to_table.to_string(),
             to_columns: to_columns.iter().map(|c| (*c).to_string()).collect(),
             on_delete: ReferentialAction::NoAction,
@@ -162,6 +163,7 @@ impl TableBuilder {
         self.table.foreign_keys.push(ForeignKey {
             name: Some(name.to_string()),
             from_columns: from_columns.iter().map(|c| (*c).to_string()).collect(),
+            to_schema: None,
             to_table: to_table.to_string(),
             to_columns: to_columns.iter().map(|c| (*c).to_string()).collect(),
             on_delete: ReferentialAction::NoAction,

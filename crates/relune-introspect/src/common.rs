@@ -62,6 +62,8 @@ pub struct RawForeignKey {
     pub from_table: String,
     /// Names of the columns in the source table.
     pub from_columns: Vec<String>,
+    /// Schema name of the referenced table.
+    pub to_schema: Option<String>,
     /// Name of the referenced table.
     pub to_table: String,
     /// Names of the columns in the referenced table.
@@ -294,6 +296,7 @@ fn map_foreign_key(raw_fk: &RawForeignKey) -> ForeignKey {
     ForeignKey {
         name: Some(raw_fk.constraint_name.clone()),
         from_columns: raw_fk.from_columns.clone(),
+        to_schema: raw_fk.to_schema.clone(),
         to_table: raw_fk.to_table.clone(),
         to_columns: raw_fk.to_columns.clone(),
         on_delete: ReferentialAction::NoAction,

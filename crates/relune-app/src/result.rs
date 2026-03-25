@@ -251,6 +251,9 @@ pub struct ForeignKeyDetails {
     pub name: Option<String>,
     /// Source columns.
     pub from_columns: Vec<String>,
+    /// Target schema, if cross-schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_schema: Option<String>,
     /// Target table.
     pub to_table: String,
     /// Target columns.
@@ -262,6 +265,7 @@ impl From<&relune_core::ForeignKey> for ForeignKeyDetails {
         Self {
             name: fk.name.clone(),
             from_columns: fk.from_columns.clone(),
+            to_schema: fk.to_schema.clone(),
             to_table: fk.to_table.clone(),
             to_columns: fk.to_columns.clone(),
         }
