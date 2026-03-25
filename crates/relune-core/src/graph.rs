@@ -77,6 +77,14 @@ pub enum GraphBuildError {
     /// A foreign key references a table that doesn't exist.
     #[error("foreign key references unknown table: {0}")]
     UnknownTable(String),
+    /// An enum reference is ambiguous across schemas.
+    #[error("ambiguous enum reference for table '{table}': '{data_type}'")]
+    AmbiguousEnumReference {
+        /// Table where the ambiguity was encountered.
+        table: String,
+        /// The ambiguous enum type name.
+        data_type: String,
+    },
 }
 
 impl SchemaGraph {
@@ -154,7 +162,7 @@ impl SchemaGraph {
                 .ok_or_else(|| GraphBuildError::UnknownTable(table.stable_id.clone()))?;
 
             Self::add_fk_edges(graph, from, table, ids, name_index)?;
-            Self::add_enum_ref_edges(graph, from, table, enum_index);
+            Self::add_enum_ref_edges(graph, from, table, enum_index)?;
         }
         Ok(())
     }
@@ -209,9 +217,9 @@ impl SchemaGraph {
         from: NodeIndex,
         table: &Table,
         enum_index: &EnumIndex,
-    ) {
+    ) -> Result<(), GraphBuildError> {
         for column in &table.columns {
-            if let Some(enum_idx) = enum_index.resolve(table, &column.data_type) {
+            if let Some(enum_idx) = enum_index.resolve(table, &column.data_type)? {
                 graph.add_edge(
                     from,
                     enum_idx,
@@ -227,6 +235,7 @@ impl SchemaGraph {
                 );
             }
         }
+        Ok(())
     }
 
     fn add_view_nodes(
@@ -307,25 +316,39 @@ impl EnumIndex {
         }
     }
 
-    fn resolve(&self, table: &Table, data_type: &str) -> Option<NodeIndex> {
+    fn resolve(
+        &self,
+        table: &Table,
+        data_type: &str,
+    ) -> Result<Option<NodeIndex>, GraphBuildError> {
         let data_type = data_type.to_lowercase();
 
-        if data_type.contains('.')
-            && let Some(&node_index) = self.exact.get(&data_type)
-        {
-            return Some(node_index);
+        if data_type.contains('.') {
+            return Ok(self.exact.get(&data_type).copied());
         }
 
-        let candidates = self.by_name.get(&data_type)?;
-        if let [(None | Some(_), node_index)] = candidates.as_slice() {
-            return Some(*node_index);
+        let Some(candidates) = self.by_name.get(&data_type) else {
+            return Ok(None);
+        };
+
+        if candidates.len() == 1 {
+            return Ok(Some(candidates[0].1));
         }
 
-        let table_schema = table.schema_name.as_deref()?.to_lowercase();
-        candidates
-            .iter()
-            .find(|(schema_name, _)| schema_name.as_deref() == Some(table_schema.as_str()))
-            .map(|(_, node_index)| *node_index)
+        if let Some(table_schema) = table.schema_name.as_deref().map(str::to_lowercase) {
+            let matching_candidates: Vec<&(Option<String>, NodeIndex)> = candidates
+                .iter()
+                .filter(|(schema_name, _)| schema_name.as_deref() == Some(table_schema.as_str()))
+                .collect();
+            if let [(_, node_index)] = matching_candidates.as_slice() {
+                return Ok(Some(*node_index));
+            }
+        }
+
+        Err(GraphBuildError::AmbiguousEnumReference {
+            table: table.qualified_name(),
+            data_type,
+        })
     }
 }
 
@@ -575,5 +598,32 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn from_schema_errors_on_ambiguous_unqualified_enum_reference() {
+        let schema = Schema {
+            tables: vec![make_table(
+                1,
+                "accounts",
+                None,
+                vec![
+                    make_column("id", "integer", false, true),
+                    make_column("status", "status", false, false),
+                ],
+                vec![],
+            )],
+            views: vec![],
+            enums: vec![
+                make_enum("status", Some("public"), &["active", "inactive"]),
+                make_enum("status", Some("auth"), &["open", "closed"]),
+            ],
+        };
+
+        let err = SchemaGraph::from_schema(&schema).expect_err("ambiguous enum should fail");
+        assert!(matches!(
+            err,
+            GraphBuildError::AmbiguousEnumReference { ref data_type, .. } if data_type == "status"
+        ));
     }
 }

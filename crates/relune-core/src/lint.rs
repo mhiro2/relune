@@ -543,7 +543,7 @@ fn column_list_has_prefix(index_cols: &[String], fk_cols: &[String]) -> bool {
 /// Returns whether the FK column list is covered by the table PK column order or any index prefix.
 fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
     if fk_cols.is_empty() {
-        return true;
+        return false;
     }
     let pk_cols: Vec<String> = table
         .columns
@@ -571,7 +571,7 @@ fn resolve_referenced_table<'a>(schema: &'a Schema, to_table: &str) -> Option<&'
 /// `true` when `to_columns` exactly matches the referenced table PK column list or some unique index column list.
 fn referenced_columns_are_unique(ref_table: &Table, to_columns: &[String]) -> bool {
     if to_columns.is_empty() {
-        return true;
+        return false;
     }
     let pk_cols: Vec<String> = ref_table
         .columns
@@ -597,6 +597,112 @@ fn fk_labels_for_message(fk: &ForeignKey) -> String {
             fk.to_columns.join(", ")
         )
     })
+}
+
+fn table_nullable_columns(table: &Table) -> HashMap<&str, bool> {
+    table
+        .columns
+        .iter()
+        .map(|column| (column.name.as_str(), column.nullable))
+        .collect()
+}
+
+/// Check: foreign key columns should be indexed.
+fn check_foreign_key_index_coverage(table: &Table, fk: &ForeignKey, result: &mut LintResult) {
+    if fk.from_columns.is_empty() || fk_columns_are_indexed(table, &fk.from_columns) {
+        return;
+    }
+
+    result.add_issue(
+        LintIssue::new(
+            LintRuleId::MissingForeignKeyIndex,
+            LintRuleId::MissingForeignKeyIndex.default_severity(),
+            format!(
+                "Foreign key on table '{}' ({}) has no index whose leading columns match {:?}",
+                table.name,
+                fk_labels_for_message(fk),
+                fk.from_columns
+            ),
+        )
+        .with_table(&table.name)
+        .with_hint(
+            "Add an index starting with the FK columns (same order) to speed joins and cascades",
+        ),
+    );
+}
+
+/// Check: nullable FK columns may encourage lazy loading.
+fn check_nullable_foreign_key_lazy_load(
+    table: &Table,
+    fk: &ForeignKey,
+    nullable_columns: &HashMap<&str, bool>,
+    result: &mut LintResult,
+) {
+    if fk.from_columns.is_empty() {
+        return;
+    }
+
+    let any_from_nullable = fk.from_columns.iter().any(|col_name| {
+        nullable_columns
+            .get(col_name.as_str())
+            .copied()
+            .unwrap_or(false)
+    });
+    if !any_from_nullable {
+        return;
+    }
+
+    result.add_issue(
+        LintIssue::new(
+            LintRuleId::NullableForeignKeyLazyLoad,
+            LintRuleId::NullableForeignKeyLazyLoad.default_severity(),
+            format!(
+                "Foreign key on table '{}' ({}) includes nullable column(s); optional relations often trigger per-row lookups (N+1) in ORMs",
+                table.name,
+                fk_labels_for_message(fk)
+            ),
+        )
+        .with_table(&table.name)
+        .with_hint(
+            "Use eager loading, joins, or dataloader patterns; consider NOT NULL if the relation is required",
+        ),
+    );
+}
+
+/// Check: FK targets should resolve to a primary or unique key.
+fn check_foreign_key_target_uniqueness(
+    schema: &Schema,
+    table: &Table,
+    fk: &ForeignKey,
+    result: &mut LintResult,
+) {
+    if fk.to_columns.is_empty() {
+        return;
+    }
+
+    let Some(ref_table) = resolve_referenced_table(schema, &fk.to_table) else {
+        return;
+    };
+    if referenced_columns_are_unique(ref_table, &fk.to_columns) {
+        return;
+    }
+
+    result.add_issue(
+        LintIssue::new(
+            LintRuleId::ForeignKeyNonUniqueTarget,
+            LintRuleId::ForeignKeyNonUniqueTarget.default_severity(),
+            format!(
+                "Foreign key on table '{}' ({}) references columns on '{}' that are not the full primary key or a unique index",
+                table.name,
+                fk_labels_for_message(fk),
+                ref_table.name
+            ),
+        )
+        .with_table(&table.name)
+        .with_hint(
+            "Point the FK at the referenced table primary key or a unique constraint with matching column order",
+        ),
+    );
 }
 
 /// Check: table and column identifiers use `snake_case`.
@@ -639,72 +745,12 @@ fn check_foreign_key_indexes_nullable_and_target(
     table: &Table,
     result: &mut LintResult,
 ) {
+    let nullable_columns = table_nullable_columns(table);
+
     for fk in &table.foreign_keys {
-        if !fk.from_columns.is_empty() && !fk_columns_are_indexed(table, &fk.from_columns) {
-            result.add_issue(
-                LintIssue::new(
-                    LintRuleId::MissingForeignKeyIndex,
-                    LintRuleId::MissingForeignKeyIndex.default_severity(),
-                    format!(
-                        "Foreign key on table '{}' ({}) has no index whose leading columns match {:?}",
-                        table.name,
-                        fk_labels_for_message(fk),
-                        fk.from_columns
-                    ),
-                )
-                .with_table(&table.name)
-                .with_hint(
-                    "Add an index starting with the FK columns (same order) to speed joins and cascades",
-                ),
-            );
-        }
-
-        let any_from_nullable = fk.from_columns.iter().any(|col_name| {
-            table
-                .columns
-                .iter()
-                .find(|c| c.name == *col_name)
-                .is_some_and(|c| c.nullable)
-        });
-        if any_from_nullable {
-            result.add_issue(
-                LintIssue::new(
-                    LintRuleId::NullableForeignKeyLazyLoad,
-                    LintRuleId::NullableForeignKeyLazyLoad.default_severity(),
-                    format!(
-                        "Foreign key on table '{}' ({}) includes nullable column(s); optional relations often trigger per-row lookups (N+1) in ORMs",
-                        table.name,
-                        fk_labels_for_message(fk)
-                    ),
-                )
-                .with_table(&table.name)
-                .with_hint(
-                    "Use eager loading, joins, or dataloader patterns; consider NOT NULL if the relation is required",
-                ),
-            );
-        }
-
-        if let Some(ref_table) = resolve_referenced_table(schema, &fk.to_table)
-            && !fk.to_columns.is_empty()
-            && !referenced_columns_are_unique(ref_table, &fk.to_columns)
-        {
-            result.add_issue(
-                LintIssue::new(
-                    LintRuleId::ForeignKeyNonUniqueTarget,
-                    LintRuleId::ForeignKeyNonUniqueTarget.default_severity(),
-                    format!(
-                        "Foreign key on table '{}' ({}) references columns on '{}' that are not the full primary key or a unique index",
-                        table.name,
-                        fk_labels_for_message(fk),
-                        ref_table.name
-                    ),
-                )
-                .with_table(&table.name)
-                .with_hint(
-                    "Point the FK at the referenced table primary key or a unique constraint with matching column order",
-                ),
-            );
-        }
+        check_foreign_key_index_coverage(table, fk, result);
+        check_nullable_foreign_key_lazy_load(table, fk, &nullable_columns, result);
+        check_foreign_key_target_uniqueness(schema, table, fk, result);
     }
 }
 
@@ -1024,6 +1070,18 @@ mod tests {
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::MissingForeignKeyIndex)
         );
+    }
+
+    #[test]
+    fn test_fk_columns_are_indexed_rejects_empty_fk_columns() {
+        let table = create_test_table(
+            "posts",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+
+        assert!(!fk_columns_are_indexed(&table, &[]));
     }
 
     #[test]

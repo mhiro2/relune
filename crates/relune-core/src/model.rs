@@ -189,15 +189,15 @@ impl Schema {
         table_columns: &HashMap<(String, String), HashSet<String>>,
         errors: &mut Vec<ValidationError>,
     ) {
-        // Column count mismatch
-        if !fk.from_columns.is_empty()
-            && !fk.to_columns.is_empty()
-            && fk.from_columns.len() != fk.to_columns.len()
+        // FK columns must be present on both sides and keep the same arity.
+        if fk.from_columns.is_empty()
+            || fk.to_columns.is_empty()
+            || fk.from_columns.len() != fk.to_columns.len()
         {
             errors.push(ValidationError {
                 table: Some(table.name.clone()),
                 message: format!(
-                    "FK column count mismatch: {} from_columns vs {} to_columns",
+                    "FK columns must be non-empty and have the same length: {} from_columns vs {} to_columns",
                     fk.from_columns.len(),
                     fk.to_columns.len()
                 ),
@@ -610,6 +610,46 @@ mod tests {
         };
         let errs = schema.validate();
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].message.contains("count mismatch"));
+        assert!(errs[0].message.contains("same length"));
+    }
+
+    #[test]
+    fn validate_fk_requires_both_column_lists() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk("users", &["user_id"], &[])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("non-empty"));
+    }
+
+    #[test]
+    fn validate_fk_rejects_both_empty_column_lists() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk("users", &[], &[])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("non-empty"));
     }
 }
