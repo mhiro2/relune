@@ -333,33 +333,50 @@ pub fn build_layout_with_config(
         debug!("Applied focus, resulting in {} nodes", graph.nodes.len());
     }
 
-    // Step 2b: Compute compacted config based on graph size
-    let _compacted = config.compute_compacted_config(graph.nodes.len());
-    if config.should_compact(graph.nodes.len()) {
+    // Step 2b: Compute compacted config based on graph size and apply if needed
+    let compacted = config.compute_compacted_config(graph.nodes.len());
+    let effective_config = if config.should_compact(graph.nodes.len()) {
         info!(
             "Large schema detected ({} nodes > {} threshold), applying compact mode",
             graph.nodes.len(),
             config.large_schema_threshold
         );
+        LayoutConfig {
+            horizontal_spacing: compacted.horizontal_spacing,
+            vertical_spacing: compacted.vertical_spacing,
+            node_width: compacted.node_width,
+            node_padding: compacted.node_padding,
+            show_columns: !compacted.hide_columns,
+            ..config.clone()
+        }
+    } else {
+        config.clone()
+    };
+
+    // Step 2c: If compact mode hides columns, strip them from graph nodes
+    if compacted.hide_columns {
+        for node in &mut graph.nodes {
+            node.columns.clear();
+        }
     }
 
     // Step 3: Assign coordinates based on layout mode
-    let (positioned_nodes, width, height) = match config.mode {
+    let (positioned_nodes, width, height) = match effective_config.mode {
         LayoutAlgorithm::Hierarchical => {
             // Hierarchical layout: assign ranks and order
             let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
             debug!("Assigned {} ranks", ranks.num_ranks);
             let ordered_nodes = order_nodes_within_layers(&graph, &ranks);
-            assign_coordinates(&graph, &ordered_nodes, config)
+            assign_coordinates(&graph, &ordered_nodes, &effective_config)
         }
         LayoutAlgorithm::ForceDirected => {
             // Force-directed layout
-            apply_force_layout(&graph, config)
+            apply_force_layout(&graph, &effective_config)
         }
     };
 
     // Step 4: Route edges
-    let positioned_edges = route_edges(&graph, &positioned_nodes, config);
+    let positioned_edges = route_edges(&graph, &positioned_nodes, &effective_config);
 
     // Step 5: Position groups
     let positioned_groups = position_groups(&graph.groups, &positioned_nodes);
