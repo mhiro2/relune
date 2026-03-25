@@ -24,6 +24,7 @@ pub fn run_render(
 
     // Merge config file with CLI args
     let merged = config.merge_render_args(args);
+    merged.validate_semantics()?;
 
     // Convert merged format to app format
     let output_format = match merged.format {

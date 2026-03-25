@@ -682,6 +682,52 @@ mod config_validation_tests {
         assert!(!output.status.success(), "invalid root config should fail");
         failure_snapshot("config_unknown_root_key", &output);
     }
+
+    #[test]
+    fn render_config_focus_conflict_fails_fast() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+
+        fs::write(
+            &config_path,
+            "[render]\nformat = \"svg\"\nfocus = \"users\"\ninclude = [\"posts\"]\n",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .output()
+            .expect("command should run");
+
+        assert!(
+            !output.status.success(),
+            "conflicting render config should fail"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("render.focus 'users' must be included"));
+    }
+
+    #[test]
+    fn render_depth_without_focus_fails_fast() {
+        let output = relune()
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--depth")
+            .arg("2")
+            .output()
+            .expect("command should run");
+
+        assert!(!output.status.success(), "depth without focus should fail");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("render.depth can only be set"));
+    }
 }
 
 // ============================================================================
@@ -965,6 +1011,46 @@ mod diff_tests {
         assert!(
             stdout.contains("No changes"),
             "JSON inputs should be treated as schema JSON"
+        );
+    }
+
+    #[test]
+    fn diff_schema_json_inputs_ignore_extension() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = simple_blog_fixture();
+        let before_json = temp.path().join("before.json");
+        let after_json = temp.path().join("after.json");
+        let before_sql = temp.path().join("before.sql");
+        let after_sql = temp.path().join("after.sql");
+
+        relune()
+            .arg("export")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--format")
+            .arg("schema-json")
+            .arg("--out")
+            .arg(&before_json)
+            .assert()
+            .success();
+
+        fs::copy(&before_json, &before_sql).expect("Failed to copy schema JSON to .sql path");
+        fs::copy(&before_json, &after_json).expect("Failed to duplicate schema JSON file");
+        fs::copy(&after_json, &after_sql).expect("Failed to copy schema JSON to .sql path");
+
+        let output = relune()
+            .arg("diff")
+            .arg("--before")
+            .arg(&before_sql)
+            .arg("--after")
+            .arg(&after_sql)
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        assert!(
+            stdout.contains("No changes"),
+            "schema JSON content should be detected even with a .sql extension"
         );
     }
 

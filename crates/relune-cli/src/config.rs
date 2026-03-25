@@ -363,6 +363,73 @@ impl ReluneConfig {
     }
 }
 
+fn validate_table_list(label: &str, values: &[String]) -> Result<(), ConfigError> {
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed != value {
+            return Err(ConfigError::InvalidValue(format!(
+                "{label} must contain non-empty table names without surrounding whitespace"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_focus_filters(
+    command: &str,
+    focus: Option<&str>,
+    depth: u32,
+    include: &[String],
+    exclude: &[String],
+) -> Result<(), ConfigError> {
+    validate_table_list(&format!("{command}.include"), include)?;
+    validate_table_list(&format!("{command}.exclude"), exclude)?;
+
+    if depth == 0 {
+        return Err(ConfigError::InvalidValue(format!(
+            "{command}.depth must be at least 1"
+        )));
+    }
+
+    if let Some(conflict) = include.iter().find(|table| exclude.contains(*table)) {
+        return Err(ConfigError::InvalidValue(format!(
+            "{command}.include and {command}.exclude cannot both contain '{conflict}'"
+        )));
+    }
+
+    let Some(raw_focus) = focus else {
+        if depth != 1 {
+            return Err(ConfigError::InvalidValue(format!(
+                "{command}.depth can only be set when {command}.focus is provided"
+            )));
+        }
+
+        return Ok(());
+    };
+
+    let focus = raw_focus.trim();
+    if focus.is_empty() || focus != raw_focus {
+        return Err(ConfigError::InvalidValue(format!(
+            "{command}.focus must contain a non-empty table name without surrounding whitespace"
+        )));
+    }
+
+    if !include.is_empty() && !include.iter().any(|table| table == focus) {
+        return Err(ConfigError::InvalidValue(format!(
+            "{command}.focus '{focus}' must be included when {command}.include is set"
+        )));
+    }
+
+    if exclude.iter().any(|table| table == focus) {
+        return Err(ConfigError::InvalidValue(format!(
+            "{command}.focus '{focus}' cannot be excluded"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Merged render configuration after combining config file and CLI args.
 #[derive(Debug, Clone)]
 pub struct MergedRenderConfig {
@@ -409,6 +476,26 @@ pub struct MergedLintConfig {
 pub struct MergedDiffConfig {
     pub format: DiffFormat,
     pub dialect: DialectArg,
+}
+
+impl MergedRenderConfig {
+    /// Validates semantic constraints for render configuration.
+    pub fn validate_semantics(&self) -> Result<(), ConfigError> {
+        validate_focus_filters(
+            "render",
+            self.focus.as_deref(),
+            self.depth,
+            &self.include,
+            &self.exclude,
+        )
+    }
+}
+
+impl MergedExportConfig {
+    /// Validates semantic constraints for export configuration.
+    pub fn validate_semantics(&self) -> Result<(), ConfigError> {
+        validate_focus_filters("export", self.focus.as_deref(), self.depth, &[], &[])
+    }
 }
 
 #[cfg(test)]
@@ -777,6 +864,139 @@ mod tests {
                 .to_string()
                 .contains("Export format must be provided via --format or config export.format")
         );
+    }
+
+    #[test]
+    fn test_validate_render_semantics_accepts_consistent_filters() {
+        let config = MergedRenderConfig {
+            format: RenderFormat::Svg,
+            theme: Theme::Light,
+            layout: LayoutAlgorithmArg::Hierarchical,
+            edge_style: EdgeStyleArg::Straight,
+            group_by: None,
+            focus: Some("users".to_string()),
+            depth: 2,
+            include: vec!["users".to_string(), "posts".to_string()],
+            exclude: vec!["comments".to_string()],
+            show_legend: false,
+            show_stats: false,
+        };
+
+        config
+            .validate_semantics()
+            .expect("consistent focus filters should be accepted");
+    }
+
+    #[test]
+    fn test_validate_render_semantics_rejects_depth_without_focus() {
+        let config = MergedRenderConfig {
+            format: RenderFormat::Svg,
+            theme: Theme::Light,
+            layout: LayoutAlgorithmArg::Hierarchical,
+            edge_style: EdgeStyleArg::Straight,
+            group_by: None,
+            focus: None,
+            depth: 2,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            show_legend: false,
+            show_stats: false,
+        };
+
+        let error = config
+            .validate_semantics()
+            .expect_err("depth without focus should be rejected");
+        assert!(error.to_string().contains("render.depth can only be set"));
+    }
+
+    #[test]
+    fn test_validate_render_semantics_rejects_conflicting_include_and_exclude() {
+        let config = MergedRenderConfig {
+            format: RenderFormat::Svg,
+            theme: Theme::Light,
+            layout: LayoutAlgorithmArg::Hierarchical,
+            edge_style: EdgeStyleArg::Straight,
+            group_by: None,
+            focus: Some("users".to_string()),
+            depth: 1,
+            include: vec!["users".to_string(), "posts".to_string()],
+            exclude: vec!["posts".to_string()],
+            show_legend: false,
+            show_stats: false,
+        };
+
+        let error = config
+            .validate_semantics()
+            .expect_err("overlapping filters should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("render.include and render.exclude cannot both contain 'posts'")
+        );
+    }
+
+    #[test]
+    fn test_validate_render_semantics_rejects_focus_not_in_include() {
+        let config = MergedRenderConfig {
+            format: RenderFormat::Svg,
+            theme: Theme::Light,
+            layout: LayoutAlgorithmArg::Hierarchical,
+            edge_style: EdgeStyleArg::Straight,
+            group_by: None,
+            focus: Some("users".to_string()),
+            depth: 1,
+            include: vec!["posts".to_string()],
+            exclude: Vec::new(),
+            show_legend: false,
+            show_stats: false,
+        };
+
+        let error = config
+            .validate_semantics()
+            .expect_err("focus outside the include list should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("render.focus 'users' must be included")
+        );
+    }
+
+    #[test]
+    fn test_validate_export_semantics_rejects_blank_focus() {
+        let config = MergedExportConfig {
+            format: crate::cli::ExportFormat::SchemaJson,
+            group_by: None,
+            layout: LayoutAlgorithmArg::Hierarchical,
+            edge_style: EdgeStyleArg::Straight,
+            focus: Some("   ".to_string()),
+            depth: 1,
+        };
+
+        let error = config
+            .validate_semantics()
+            .expect_err("blank export focus should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("export.focus must contain a non-empty table name")
+        );
+    }
+
+    #[test]
+    fn test_validate_export_semantics_rejects_depth_without_focus() {
+        let config = MergedExportConfig {
+            format: crate::cli::ExportFormat::SchemaJson,
+            group_by: None,
+            layout: LayoutAlgorithmArg::Hierarchical,
+            edge_style: EdgeStyleArg::Straight,
+            focus: None,
+            depth: 2,
+        };
+
+        let error = config
+            .validate_semantics()
+            .expect_err("depth without focus should be rejected");
+        assert!(error.to_string().contains("export.depth can only be set"));
     }
 
     #[test]

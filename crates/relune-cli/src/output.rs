@@ -197,3 +197,59 @@ pub fn print_success(message: &str, color: ColorWhen) {
         eprintln!("{message}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use relune_core::{Diagnostic, Severity, diagnostic::codes};
+
+    #[test]
+    fn diagnostic_printer_formats_plain_messages() {
+        let printer = DiagnosticPrinter::new(ColorWhen::Never);
+        let diagnostic = Diagnostic::warning(codes::lint_orphan_table(), "table has no parents")
+            .with_source("schema.sql");
+
+        assert_eq!(
+            printer.format_plain(&diagnostic),
+            "warning[LINT002]: table has no parents (in schema.sql)"
+        );
+    }
+
+    #[test]
+    fn diagnostic_printer_formats_colored_messages() {
+        let printer = DiagnosticPrinter::new(ColorWhen::Always);
+        let diagnostic = Diagnostic::error(codes::parse_error(), "syntax error");
+
+        assert_eq!(
+            printer.format_colored(&diagnostic),
+            "\x1b[31merror\x1b[0m[PARSE001]: syntax error"
+        );
+    }
+
+    #[test]
+    fn output_writer_persists_temp_file_contents() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let output_path = temp.path().join("diagram.svg");
+
+        let mut writer =
+            OutputWriter::new(Some(&output_path), ColorWhen::Never).expect("create writer");
+        writer.write("<svg>diagram</svg>").expect("write output");
+        writer.finish().expect("persist output");
+
+        let content = std::fs::read_to_string(&output_path).expect("read output");
+        assert_eq!(content, "<svg>diagram</svg>");
+    }
+
+    #[test]
+    fn diagnostic_helpers_detect_severity() {
+        let diagnostics = vec![
+            Diagnostic::info(codes::parse_skipped(), "ignored"),
+            Diagnostic::warning(codes::lint_orphan_table(), "warn"),
+            Diagnostic::error(codes::parse_error(), "err"),
+        ];
+
+        assert!(DiagnosticPrinter::has_warnings(&diagnostics));
+        assert!(DiagnosticPrinter::has_errors(&diagnostics));
+        assert_eq!(diagnostics[0].severity, Severity::Info);
+    }
+}

@@ -1,5 +1,6 @@
 //! Shared CLI input resolution helpers.
 
+use std::fs;
 use std::path::Path;
 
 use relune_app::InputSource;
@@ -198,17 +199,26 @@ impl<'a> DiffInputSelection<'a> {
 }
 
 fn read_sniffed_file(path: &Path, subject: &str, dialect: SqlDialect) -> CliResult<InputSource> {
-    let is_json = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
-    if is_json {
+    let content = fs::read_to_string(path).map_err(|error| {
+        CliError::usage(anyhow::anyhow!(
+            "Failed to read {subject} input file: {}: {error}",
+            path.display()
+        ))
+    })?;
+
+    if looks_like_schema_json(&content) {
         return ensure_input_file_metadata(path, "Failed to read schema JSON file")
             .map(|()| InputSource::schema_json_file(path));
     }
 
     ensure_input_file_metadata(path, &format!("Failed to read {subject} input file"))
         .map(|()| InputSource::sql_file_with_dialect(path, dialect))
+}
+
+fn looks_like_schema_json(content: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .is_some_and(|value| value.get("tables").is_some())
 }
 
 fn ensure_input_file_metadata(path: &Path, prefix: &str) -> CliResult<()> {
