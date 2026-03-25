@@ -143,7 +143,7 @@ Run `relune --help` or `relune <command> --help` for the full option list.
 
 | Document | Contents |
 |----------|----------|
-| [Getting started](docs/getting-started.md) | Prerequisites, installation, first commands |
+| [Getting started](docs/getting-started.md) | Installation, first commands, live database introspection |
 | [CLI reference](docs/cli-reference.md) | Commands and flags |
 | [Configuration](docs/configuration.md) | `relune.toml` and merge rules |
 

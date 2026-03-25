@@ -21,6 +21,8 @@ Every command requires **at least one input** (except `doctor`). Typical inputs:
 
 Output path: **`-o` / `--out`** writes a file; omit to print to **stdout**.
 
+For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**.
+
 ---
 
 ## `render`
@@ -43,6 +45,13 @@ Generate SVG, HTML, or JSON representations of the ERD. SVG/HTML outputs include
 | `--edge-style straight\|orthogonal\|curved` | Edge routing style |
 
 **Other:** `--stats` (stderr statistics), `--fail-on-warning` (non-zero on warnings).
+
+`render` validates focus/filter combinations before running:
+
+- `--depth` requires `--focus`
+- the focused table cannot also be excluded
+- if `--include` is set, it must contain the focused table
+- the same table cannot appear in both `--include` and `--exclude`
 
 ```bash
 relune render --sql schema.sql -o erd.svg
@@ -89,7 +98,7 @@ Emit normalized JSON or diagram text. **`--format` is required.**
 | `d2` | [D2](https://d2lang.com/) diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--focus`, `--depth`, `--group-by`, `--layout`, and `--edge-style` like `render` for positioned exports.
+Supports `--focus`, `--depth`, `--group-by`, `--layout`, and `--edge-style` like `render` for positioned exports. `export` applies the same `focus`/`depth` validation rule as `render`, so `--depth` requires `--focus`.
 
 ```bash
 relune export --sql schema.sql --format schema-json -o schema.json
@@ -131,6 +140,8 @@ Compare two schemas. Provide **before** and **after** inputs independently (each
 **Before:** `--before <FILE>`, `--before-sql-text '<DDL>'`, or `--before-schema-json <FILE>`.
 
 **After:** `--after <FILE>`, `--after-sql-text '<DDL>'`, or `--after-schema-json <FILE>`.
+
+When `--before <FILE>` or `--after <FILE>` is used, Relune inspects the file contents and treats schema JSON as schema JSON even if the extension is not `.json`.
 
 | Option | Description |
 |--------|-------------|

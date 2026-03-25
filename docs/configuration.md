@@ -67,6 +67,15 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 
 `layout` and `edge_style` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
 
+Semantic validation is also applied after merge:
+
+- `depth` must be at least `1`
+- `depth` can only be set when `focus` is present
+- table names in `focus`, `include`, and `exclude` must be non-empty and must not have surrounding whitespace
+- the same table cannot appear in both `include` and `exclude`
+- if `include` is non-empty, it must contain the focused table
+- the focused table cannot also appear in `exclude`
+
 ---
 
 ## `[inspect]`
@@ -87,7 +96,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `focus`, `depth` | Same as CLI |
 
-`export.format` can be set in the config file and overridden with `--format`. If neither config nor CLI provides a format, the command fails fast.
+`export.format` can be set in the config file and overridden with `--format`. If neither config nor CLI provides a format, the command fails fast. As with `render`, `export.depth` requires `export.focus`, and focused table names must be non-empty after trimming.
 
 ---
 
@@ -107,7 +116,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `format` | `text`, `json` |
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 
-`diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format` and `--dialect` only, and CLI flags override them when provided.
+`diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format` and `--dialect` only, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
 
 ---
 

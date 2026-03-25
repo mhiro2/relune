@@ -56,8 +56,9 @@ Relune is a **reusable schema graph engine** with multiple delivery surfaces (CL
 ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
 │ Domain / logic   │ │ Input            │ │ Output           │
 │ relune-core      │ │ relune-parser-   │ │ relune-render-   │
-│ relune-layout    │ │   sql            │ │   svg / html     │
-│                  │ │ relune-introspect│ │                  │
+│ relune-layout    │ │   sql            │ │   theme          │
+│                  │ │ relune-introspect│ │ relune-render-   │
+│                  │ │                  │ │   svg / html     │
 └──────────────────┘ └──────────────────┘ └──────────────────┘
 ```
 
@@ -67,6 +68,7 @@ Relune is a **reusable schema graph engine** with multiple delivery surfaces (CL
 | `relune-layout` | Hierarchical and force-directed layout, edge routing, text diagram export (Mermaid, D2, DOT) |
 | `relune-parser-sql` | DDL → `Schema` (PostgreSQL, MySQL, SQLite; auto-detection) |
 | `relune-introspect` | Live DB metadata → `Schema` (PostgreSQL, MySQL/MariaDB, SQLite; native builds only) |
+| `relune-render-theme` | Shared theme palette and render-facing theme DTOs used by SVG and HTML renderers |
 | `relune-render-svg` | Layout → SVG string |
 | `relune-render-html` | Layout → self-contained HTML + embedded SVG + viewer scripts |
 | `relune-app` | Use-cases: parse/introspect, render, export, lint, diff wiring |
@@ -79,8 +81,8 @@ Repository layout (abbreviated):
 ```text
 crates/
   relune-core/ relune-layout/ relune-parser-sql/ relune-introspect/
-  relune-render-svg/ relune-render-html/ relune-app/ relune-cli/ relune-wasm/
-  relune-testkit/
+  relune-render-theme/ relune-render-svg/ relune-render-html/
+  relune-app/ relune-cli/ relune-wasm/ relune-testkit/
 fixtures/          # golden inputs and snapshots
 docs/              # user-facing guides
 ```
@@ -143,6 +145,7 @@ relune-cli  ──► relune-app ──► relune-core
                   │    ├── relune-layout
                   │    ├── relune-parser-sql
                   │    ├── relune-introspect   (native)
+                  │    ├── relune-render-theme
                   │    ├── relune-render-svg
                   │    └── relune-render-html
 relune-wasm ───► relune-app
@@ -150,7 +153,8 @@ relune-wasm ───► relune-app
 
 - **`relune-core`** must not depend on CLI, WASM, renderers, or parsers.
 - **`relune-layout`** depends on `relune-core` (not the reverse).
-- **`relune-render-*`** may depend on `relune-core` and layout outputs.
+- **`relune-render-theme`** is the shared palette layer for renderers.
+- **`relune-render-*`** may depend on `relune-core`, layout outputs, and `relune-render-theme`.
 - **`relune-app`** composes adapters; avoid duplicating domain rules that belong in core or layout.
 - **`relune-testkit`** is for tests; it must not become a default production dependency of shipped crates.
 
@@ -166,7 +170,7 @@ Supported paths into a `Schema`:
 | Normalized schema JSON | Deserialized directly into `relune-core` types |
 | Live database | `relune-introspect` (PostgreSQL, MySQL/MariaDB, SQLite) |
 
-`relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries.
+`relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries. Native file-backed SQL and schema JSON inputs are size-limited before reading.
 
 ---
 
@@ -174,6 +178,7 @@ Supported paths into a `Schema`:
 
 | Output | Producer |
 |--------|----------|
+| Shared palettes / theme DTOs | `relune-render-theme` |
 | SVG | `relune-render-svg` |
 | Self-contained HTML | `relune-render-html` |
 | `schema-json` / `graph-json` / `layout-json` | Core + layout serialization |
@@ -183,7 +188,7 @@ Supported paths into a `Schema`:
 
 ## 8. Configuration
 
-CLI merges **defaults → TOML file → flags** for command settings (`render`, `inspect`, `export`, `lint`, `diff`). Implementation: `crates/relune-cli/src/config.rs`. Required inputs still come from the CLI.
+CLI merges **defaults → TOML file → flags** for command settings (`render`, `inspect`, `export`, `lint`, `diff`). Implementation: `crates/relune-cli/src/config.rs`. Required inputs still come from the CLI. After merge, render/export apply semantic validation for focus depth and filter combinations, and diff file inputs are classified by content instead of extension alone.
 
 ---
 
@@ -203,8 +208,9 @@ Phases: build layout graph → grouping/focus → layout algorithm → coordinat
 
 ## 11. Rendering
 
+- **Theme** (`relune-render-theme`) — Shared palettes and theme-facing DTOs consumed by both renderers.
 - **SVG** (`relune-render-svg`) — Geometry, edge paths, labels, themes, optional embedded CSS. Tables, views, and enums share one positioned graph and are styled by node/edge kind.
-- **HTML** (`relune-render-html`) — Wraps SVG with interactive behavior (pan/zoom, search, filters, grouping toggles, highlights) and embeds node/edge kind metadata for client-side features. Viewer logic is TypeScript under `crates/relune-render-html/ts/`; `build.rs` runs pnpm to emit bundled JS consumed via `include_str!`. Node + pnpm are required on `PATH`.
+- **HTML** (`relune-render-html`) — Wraps SVG with interactive behavior (pan/zoom, search, filters, grouping toggles, highlights) and embeds node/edge kind metadata for client-side features. Viewer logic is TypeScript under `crates/relune-render-html/ts/`; `build.rs` runs pnpm to emit bundled JS consumed via `include_str!`. Node + pnpm are required on `PATH` for renderer development and local builds of that crate.
 
 The two crates are separate to keep low-level vector output apart from document bundling and JS tooling.
 
