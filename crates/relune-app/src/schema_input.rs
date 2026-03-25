@@ -7,6 +7,8 @@ use tracing::info;
 use crate::error::AppError;
 use crate::request::InputSource;
 
+const MAX_INPUT_FILE_SIZE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Load a schema from the given input source.
 pub(crate) fn schema_from_input(
     input: &InputSource,
@@ -27,6 +29,7 @@ pub(crate) fn schema_from_input(
             }
         }
         InputSource::SqlFile { path, dialect } => {
+            ensure_file_size_within_limit(path)?;
             let sql = std::fs::read_to_string(path)?;
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, *dialect);
             info!(
@@ -47,6 +50,7 @@ pub(crate) fn schema_from_input(
             Ok((relune_core::export::import_schema(&export), vec![]))
         }
         InputSource::SchemaJsonFile { path } => {
+            ensure_file_size_within_limit(path)?;
             let json = std::fs::read_to_string(path)?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(&json)?;
             Ok((relune_core::export::import_schema(&export), vec![]))
@@ -57,6 +61,20 @@ pub(crate) fn schema_from_input(
             Ok((schema, vec![]))
         }
     }
+}
+
+fn ensure_file_size_within_limit(path: &std::path::Path) -> Result<(), AppError> {
+    let size = std::fs::metadata(path)?.len();
+    if size > MAX_INPUT_FILE_SIZE_BYTES {
+        return Err(AppError::input(format!(
+            "Input file '{}' is too large: {} bytes exceeds the {} byte limit",
+            path.display(),
+            size,
+            MAX_INPUT_FILE_SIZE_BYTES
+        )));
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "introspect")]
@@ -102,6 +120,27 @@ mod tests {
         let input = InputSource::sql_text("CREATE TABLE t (id INT PRIMARY KEY);");
         let (schema, _diagnostics) = schema_from_input(&input).expect("schema");
         assert_eq!(schema.tables.len(), 1);
+    }
+
+    #[test]
+    fn rejects_oversized_input_files() {
+        let path = std::env::temp_dir().join(format!(
+            "relune-schema-input-{}-{}.sql",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        let file = std::fs::File::create(&path).expect("create temp file");
+        file.set_len(MAX_INPUT_FILE_SIZE_BYTES + 1)
+            .expect("sparse temp file");
+        drop(file);
+
+        let err = ensure_file_size_within_limit(&path).expect_err("file size should be rejected");
+        assert!(matches!(err, AppError::Input(_)));
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[cfg(feature = "introspect")]
