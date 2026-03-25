@@ -118,13 +118,6 @@ impl FocusExtractor {
         graph: &LayoutGraph,
         included_indices: &BTreeSet<usize>,
     ) -> LayoutGraph {
-        // Build new nodes with updated indices
-        let _old_to_new: BTreeMap<usize, usize> = included_indices
-            .iter()
-            .enumerate()
-            .map(|(new_idx, &old_idx)| (old_idx, new_idx))
-            .collect();
-
         let nodes: Vec<LayoutNode> = included_indices
             .iter()
             .map(|&idx| {

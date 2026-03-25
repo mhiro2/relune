@@ -96,19 +96,16 @@ fn apply_strategy(
                     &nodes_by_rank[rank_idx],
                     &nodes_by_rank[rank_idx - 1],
                     &adjacency,
-                    true,
                 ),
                 CrossingReductionStrategy::Median => order_by_median(
                     &nodes_by_rank[rank_idx],
                     &nodes_by_rank[rank_idx - 1],
                     &adjacency,
-                    true,
                 ),
                 CrossingReductionStrategy::Sifting => order_by_sifting(
                     &nodes_by_rank[rank_idx],
                     &nodes_by_rank[rank_idx - 1],
                     &adjacency,
-                    true,
                 ),
                 CrossingReductionStrategy::Combined => unreachable!(),
             };
@@ -121,19 +118,16 @@ fn apply_strategy(
                     &nodes_by_rank[rank_idx],
                     &nodes_by_rank[rank_idx + 1],
                     &adjacency,
-                    false,
                 ),
                 CrossingReductionStrategy::Median => order_by_median(
                     &nodes_by_rank[rank_idx],
                     &nodes_by_rank[rank_idx + 1],
                     &adjacency,
-                    false,
                 ),
                 CrossingReductionStrategy::Sifting => order_by_sifting(
                     &nodes_by_rank[rank_idx],
                     &nodes_by_rank[rank_idx + 1],
                     &adjacency,
-                    false,
                 ),
                 CrossingReductionStrategy::Combined => unreachable!(),
             };
@@ -298,7 +292,6 @@ fn order_by_barycenter(
     layer_nodes: &[usize],
     adjacent_layer: &[usize],
     adjacency: &BTreeMap<usize, Vec<usize>>,
-    _is_forward: bool,
 ) -> Vec<usize> {
     // Create position map for adjacent layer
     let position: BTreeMap<usize, usize> = adjacent_layer
@@ -351,7 +344,6 @@ fn order_by_median(
     layer_nodes: &[usize],
     adjacent_layer: &[usize],
     adjacency: &BTreeMap<usize, Vec<usize>>,
-    _is_forward: bool,
 ) -> Vec<usize> {
     // Create position map for adjacent layer
     let position: BTreeMap<usize, usize> = adjacent_layer
@@ -414,7 +406,6 @@ fn order_by_sifting(
     layer_nodes: &[usize],
     adjacent_layer: &[usize],
     adjacency: &BTreeMap<usize, Vec<usize>>,
-    _is_forward: bool,
 ) -> Vec<usize> {
     if layer_nodes.len() <= 1 || layer_nodes.len() > SIFTING_NODE_LIMIT {
         return layer_nodes.to_vec();
