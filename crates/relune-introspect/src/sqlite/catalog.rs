@@ -29,6 +29,9 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
 
         let col_rows = pragma_table_info(pool, &q).await?;
         for row in col_rows {
+            let ordinal_position =
+                ordinal_position_from_row(row.cid.saturating_add(1), table_name)?;
+
             columns.push(RawColumn {
                 table_name: table_name.clone(),
                 schema_name: MAIN_SCHEMA.to_string(),
@@ -37,7 +40,7 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
                 is_nullable: row.notnull == 0,
                 is_primary_key: row.pk > 0,
                 column_comment: None,
-                ordinal_position: i16::try_from(row.cid.saturating_add(1)).unwrap_or(i16::MAX),
+                ordinal_position,
             });
         }
 
@@ -105,6 +108,17 @@ async fn list_views(pool: &SqlitePool) -> Result<Vec<RawView>, IntrospectError> 
 fn quote_ident(name: &str) -> String {
     let escaped = name.replace('"', "\"\"");
     format!(r#""{escaped}""#)
+}
+
+fn ordinal_position_from_row(
+    ordinal_position: i64,
+    table_name: &str,
+) -> Result<i16, IntrospectError> {
+    i16::try_from(ordinal_position).map_err(|_| {
+        IntrospectError::metadata_mapping(format!(
+            "ordinal_position {ordinal_position} out of range for {MAIN_SCHEMA}.{table_name}"
+        ))
+    })
 }
 
 async fn pragma_table_info(
@@ -267,4 +281,16 @@ async fn collect_table_indexes(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_oversized_ordinal_positions() {
+        let err = ordinal_position_from_row(i64::from(i16::MAX) + 1, "users")
+            .expect_err("ordinal_position should overflow");
+        assert!(matches!(err, IntrospectError::MetadataMapping(_)));
+    }
 }

@@ -98,19 +98,26 @@ impl MySqlCatalog {
         .await
         .map_err(|e| IntrospectError::query(format!("Failed to fetch columns: {e}")))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| RawColumn {
-                table_name: row.table_name,
-                schema_name: row.schema_name,
-                column_name: row.column_name,
-                data_type: row.data_type,
-                is_nullable: row.is_nullable,
-                is_primary_key: row.is_primary_key,
-                column_comment: row.column_comment,
-                ordinal_position: row.ordinal_position.try_into().unwrap_or(i16::MAX),
+        rows.into_iter()
+            .map(|row| {
+                let ordinal_position = ordinal_position_from_row(
+                    row.ordinal_position,
+                    &row.schema_name,
+                    &row.table_name,
+                )?;
+
+                Ok::<RawColumn, IntrospectError>(RawColumn {
+                    table_name: row.table_name,
+                    schema_name: row.schema_name,
+                    column_name: row.column_name,
+                    data_type: row.data_type,
+                    is_nullable: row.is_nullable,
+                    is_primary_key: row.is_primary_key,
+                    column_comment: row.column_comment,
+                    ordinal_position,
+                })
             })
-            .collect())
+            .collect::<Result<Vec<RawColumn>, IntrospectError>>()
     }
 
     async fn fetch_foreign_key_rows(&self) -> Result<Vec<FkColumnRow>, IntrospectError> {
@@ -323,6 +330,18 @@ fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
     out
 }
 
+fn ordinal_position_from_row(
+    ordinal_position: u64,
+    schema_name: &str,
+    table_name: &str,
+) -> Result<i16, IntrospectError> {
+    i16::try_from(ordinal_position).map_err(|_| {
+        IntrospectError::metadata_mapping(format!(
+            "ordinal_position {ordinal_position} out of range for {schema_name}.{table_name}"
+        ))
+    })
+}
+
 fn group_indexes(rows: Vec<IndexColumnRow>) -> Vec<RawIndex> {
     #[derive(Eq, PartialEq, Ord, PartialOrd, Clone)]
     struct Key {
@@ -368,5 +387,12 @@ mod tests {
     #[test]
     fn test_pool_max_connections_matches_parallel_queries() {
         assert_eq!(pool_max_connections(), PARALLEL_CATALOG_QUERIES);
+    }
+
+    #[test]
+    fn rejects_oversized_ordinal_positions() {
+        let err = ordinal_position_from_row(i16::MAX as u64 + 1, "public", "users")
+            .expect_err("ordinal_position should overflow");
+        assert!(matches!(err, IntrospectError::MetadataMapping(_)));
     }
 }

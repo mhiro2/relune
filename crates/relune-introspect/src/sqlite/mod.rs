@@ -65,6 +65,7 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
         "Introspection completed successfully"
     );
 
+    // Pool::close() is infallible in sqlx 0.8; await it so connections drain cleanly.
     pool.close().await;
 
     Ok(schema)

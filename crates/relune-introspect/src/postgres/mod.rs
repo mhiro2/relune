@@ -143,7 +143,7 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
         "Introspection completed successfully"
     );
 
-    // Close the pool
+    // Pool::close() is infallible in sqlx 0.8; await it so connections drain cleanly.
     pool.close().await;
 
     Ok(schema)

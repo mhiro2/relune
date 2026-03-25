@@ -67,6 +67,7 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
         "Introspection completed successfully"
     );
 
+    // Pool::close() is infallible in sqlx 0.8; await it so connections drain cleanly.
     pool.close().await;
 
     Ok(schema)
