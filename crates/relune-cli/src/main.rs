@@ -9,14 +9,12 @@ use clap::Parser;
 mod cli;
 mod commands;
 mod config;
-mod doctor;
 mod error;
 mod output;
 
 use cli::{Cli, Command};
 use commands::{run_diff, run_export, run_inspect, run_lint, run_render};
 use config::ReluneConfig;
-use doctor::run_doctor;
 use error::{CliError, CliResult};
 
 fn main() -> ExitCode {
@@ -71,9 +69,6 @@ fn run_command(cli: Cli) -> CliResult<()> {
         }
         Command::Diff(args) => {
             run_diff(&args, cli.color, cli.quiet, &config)?;
-        }
-        Command::Doctor => {
-            run_doctor();
         }
     }
     Ok(())

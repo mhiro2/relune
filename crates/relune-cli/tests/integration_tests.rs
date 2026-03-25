@@ -731,34 +731,6 @@ mod config_validation_tests {
 }
 
 // ============================================================================
-// Doctor Command Tests
-// ============================================================================
-
-mod doctor_tests {
-    use super::*;
-
-    #[test]
-    fn doctor_succeeds() {
-        let mut cmd = relune();
-        let output = cmd.arg("doctor").assert().success();
-
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        assert!(
-            stdout.contains("relune doctor:"),
-            "doctor should print overall status"
-        );
-        assert!(
-            stdout.contains("introspect:"),
-            "doctor should report feature status"
-        );
-        assert!(
-            stdout.contains("inputs:"),
-            "doctor should report supported input capabilities"
-        );
-    }
-}
-
-// ============================================================================
 // Global Flag Tests
 // ============================================================================
 

@@ -9,7 +9,7 @@ Global options (before the subcommand):
 | `-v`, `--verbose` | More log output (repeatable: `-v` info, `-vv` debug, `-vvv` trace with span events) |
 | `-q`, `--quiet` | Less non-error output |
 
-Every command requires **at least one input** (except `doctor`). Typical inputs:
+Every command requires **at least one input**. Typical inputs:
 
 | Input | Flag | Notes |
 |-------|------|--------|
@@ -153,14 +153,4 @@ When `--before <FILE>` or `--after <FILE>` is used, Relune inspects the file con
 relune diff --before old_schema.sql --after new_schema.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
 relune --config relune.toml diff --before old.sql --after new.sql
-```
-
----
-
-## `doctor`
-
-Reports runtime-visible capabilities of the current binary, such as supported input modes and whether live DB introspection is compiled in.
-
-```bash
-relune doctor
 ```
