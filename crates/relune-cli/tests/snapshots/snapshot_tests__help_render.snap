@@ -4,7 +4,7 @@ expression: stdout
 ---
 Render an ERD from SQL, schema JSON, or database metadata
 
-Usage: relune render [OPTIONS]
+Usage: relune render [OPTIONS] <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
 
 Options:
   -c, --config <CONFIG>

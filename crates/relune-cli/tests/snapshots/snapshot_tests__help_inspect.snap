@@ -4,7 +4,7 @@ expression: stdout
 ---
 Inspect schema metadata or details for a specific table
 
-Usage: relune inspect [OPTIONS]
+Usage: relune inspect [OPTIONS] <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
 
 Options:
   -c, --config <CONFIG>

@@ -2,13 +2,14 @@
 
 use anyhow::Context;
 
+use super::input::InputSelection;
 use crate::cli::{ColorWhen, ExportArgs, ExportFormat, GroupByMode};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter, print_success};
 use relune_app::{
     ExportFormat as AppExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
-    GroupingStrategy, InputSource, LayoutSpec, export,
+    GroupingStrategy, LayoutSpec, export,
 };
 
 /// Run the export command.
@@ -19,7 +20,7 @@ pub fn run_export(
     config: &ReluneConfig,
 ) -> CliResult<()> {
     // Resolve input source
-    let input = resolve_input(args)?;
+    let input = InputSelection::from_export(args).resolve(args.dialect.into(), "input")?;
 
     // Merge config file with CLI args
     let merged = config.merge_export_args(args)?;
@@ -95,58 +96,4 @@ pub fn run_export(
     }
 
     Ok(())
-}
-
-/// Resolve input source from CLI arguments.
-fn resolve_input(args: &ExportArgs) -> CliResult<InputSource> {
-    let count = args.sql.iter().count()
-        + args.sql_text.iter().count()
-        + args.schema_json.iter().count()
-        + args.db_url.iter().count();
-
-    if count == 0 {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "At least one input option is required: --sql, --sql-text, --schema-json, or --db-url"
-        )));
-    }
-
-    if count > 1 {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "Only one input option can be specified: --sql, --sql-text, --schema-json, or --db-url"
-        )));
-    }
-
-    let dialect = args.dialect.into();
-
-    if let Some(ref path) = args.sql {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            CliError::usage(anyhow::anyhow!(
-                "Failed to read SQL file: {}: {}",
-                path.display(),
-                e
-            ))
-        })?;
-        return Ok(InputSource::sql_text_with_dialect(content, dialect));
-    }
-
-    if let Some(ref text) = args.sql_text {
-        return Ok(InputSource::sql_text_with_dialect(text.clone(), dialect));
-    }
-
-    if let Some(ref path) = args.schema_json {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            CliError::usage(anyhow::anyhow!(
-                "Failed to read schema JSON file: {}: {}",
-                path.display(),
-                e
-            ))
-        })?;
-        return Ok(InputSource::schema_json(content));
-    }
-
-    if let Some(ref url) = args.db_url {
-        return Ok(InputSource::db_url(url.clone()));
-    }
-
-    unreachable!()
 }

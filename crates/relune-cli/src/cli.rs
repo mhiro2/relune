@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use relune_core::{RouteStyle, SqlDialect};
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,14 @@ pub enum Command {
 
 /// Render an ERD from SQL, schema JSON, or database metadata.
 #[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("input")
+            .args(["sql", "sql_text", "schema_json", "db_url"])
+            .required(true)
+            .multiple(false)
+    )
+)]
 pub struct RenderArgs {
     // -------------------------------------------------------------------------
     // Input options (at least one required)
@@ -268,6 +276,14 @@ impl From<EdgeStyleArg> for RouteStyle {
 
 /// Inspect schema metadata or details for a specific table.
 #[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("input")
+            .args(["sql", "sql_text", "schema_json", "db_url"])
+            .required(true)
+            .multiple(false)
+    )
+)]
 pub struct InspectArgs {
     // -------------------------------------------------------------------------
     // Input options (at least one required)
@@ -325,6 +341,14 @@ pub enum InspectFormat {
 
 /// Export normalized schema, graph data, or review-oriented diagram text.
 #[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("input")
+            .args(["sql", "sql_text", "schema_json", "db_url"])
+            .required(true)
+            .multiple(false)
+    )
+)]
 pub struct ExportArgs {
     // -------------------------------------------------------------------------
     // Input options (at least one required)
@@ -406,6 +430,14 @@ pub enum ExportFormat {
 
 /// Lint schema for issues and anti-patterns.
 #[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("input")
+            .args(["sql", "db_url", "schema_json"])
+            .required(true)
+            .multiple(false)
+    )
+)]
 pub struct LintArgs {
     // -------------------------------------------------------------------------
     // Input options (at least one required)
@@ -473,6 +505,20 @@ pub enum LintSeverity {
 
 /// Compare two schemas and show differences.
 #[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("before_input")
+            .args(["before", "before_sql_text", "before_schema_json"])
+            .required(true)
+            .multiple(false)
+    ),
+    group(
+        ArgGroup::new("after_input")
+            .args(["after", "after_sql_text", "after_schema_json"])
+            .required(true)
+            .multiple(false)
+    )
+)]
 pub struct DiffArgs {
     // -------------------------------------------------------------------------
     // Before input options (at least one required)

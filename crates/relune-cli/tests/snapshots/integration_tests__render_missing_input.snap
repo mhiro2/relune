@@ -5,4 +5,9 @@ expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 2
 stderr:
-Error: At least one input option is required: --sql, --sql-text, --schema-json, or --db-url
+error: the following required arguments were not provided:
+  <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
+
+Usage: relune render <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
+
+For more information, try '--help'.

@@ -2,11 +2,12 @@
 
 use anyhow::Context;
 
+use super::input::DiffInputSelection;
 use crate::cli::{ColorWhen, DiffArgs, DiffFormat};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter, print_success};
-use relune_app::{DiffRequest, InputSource, diff, format_diff_text};
+use relune_app::{DiffRequest, diff, format_diff_text};
 
 /// Run the diff command.
 pub fn run_diff(
@@ -19,22 +20,10 @@ pub fn run_diff(
     let dialect = merged.dialect.into();
 
     // Resolve before input source
-    let before = resolve_input(
-        args.before.as_ref(),
-        args.before_sql_text.as_ref(),
-        args.before_schema_json.as_ref(),
-        "before",
-        dialect,
-    )?;
+    let before = DiffInputSelection::from_before(args).resolve(dialect, "before")?;
 
     // Resolve after input source
-    let after = resolve_input(
-        args.after.as_ref(),
-        args.after_sql_text.as_ref(),
-        args.after_schema_json.as_ref(),
-        "after",
-        dialect,
-    )?;
+    let after = DiffInputSelection::from_after(args).resolve(dialect, "after")?;
 
     // Build request
     let request = DiffRequest {
@@ -96,65 +85,4 @@ pub fn run_diff(
     }
 
     Ok(())
-}
-
-/// Resolve input source from CLI arguments.
-fn resolve_input(
-    file_path: Option<&std::path::PathBuf>,
-    sql_text: Option<&String>,
-    schema_json: Option<&std::path::PathBuf>,
-    context: &str,
-    dialect: relune_core::SqlDialect,
-) -> CliResult<InputSource> {
-    let count = file_path.iter().count() + sql_text.iter().count() + schema_json.iter().count();
-
-    if count == 0 {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "At least one {context} input option is required: --{context}, --{context}-sql-text, or --{context}-schema-json"
-        )));
-    }
-
-    if count > 1 {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "Only one {context} input option can be specified"
-        )));
-    }
-
-    if let Some(path) = file_path {
-        // Determine if it's SQL or JSON based on extension, or try to parse
-        let file_content = std::fs::read_to_string(path).map_err(|e| {
-            CliError::usage(anyhow::anyhow!(
-                "Failed to read {} file: {}: {}",
-                context,
-                path.display(),
-                e
-            ))
-        })?;
-
-        // Check file extension to determine type
-        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if extension == "json" {
-            return Ok(InputSource::schema_json(file_content));
-        }
-        // Default to SQL for .sql files and unknown extensions
-        return Ok(InputSource::sql_text_with_dialect(file_content, dialect));
-    }
-
-    if let Some(text) = sql_text {
-        return Ok(InputSource::sql_text_with_dialect(text.clone(), dialect));
-    }
-
-    if let Some(path) = schema_json {
-        let schema_content = std::fs::read_to_string(path).map_err(|e| {
-            CliError::usage(anyhow::anyhow!(
-                "Failed to read {} schema JSON file: {}: {}",
-                context,
-                path.display(),
-                e
-            ))
-        })?;
-        return Ok(InputSource::schema_json(schema_content));
-    }
-
-    unreachable!()
 }

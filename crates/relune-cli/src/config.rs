@@ -298,7 +298,7 @@ impl ReluneConfig {
             } else {
                 args.exclude.clone()
             },
-            show_legend: args.stats || self.render.show_legend.unwrap_or(false),
+            show_legend: self.render.show_legend.unwrap_or(false),
             show_stats: args.stats || self.render.show_stats.unwrap_or(false),
         }
     }
@@ -570,6 +570,8 @@ mod tests {
         assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
         assert_eq!(merged.include, vec!["a"]);
         assert_eq!(merged.exclude, vec!["b"]);
+        assert!(!merged.show_legend);
+        assert!(merged.show_stats);
     }
 
     #[test]

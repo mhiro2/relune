@@ -4,7 +4,7 @@ expression: stdout
 ---
 Compare two schemas and show differences
 
-Usage: relune diff [OPTIONS]
+Usage: relune diff [OPTIONS] <--before <FILE>|--before-sql-text <TEXT>|--before-schema-json <FILE>> <--after <FILE>|--after-sql-text <TEXT>|--after-schema-json <FILE>>
 
 Options:
       --before <FILE>

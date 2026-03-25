@@ -270,6 +270,19 @@ mod render_tests {
     }
 
     #[test]
+    fn render_multiple_inputs_fails() {
+        relune()
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .assert()
+            .failure()
+            .code(2);
+    }
+
+    #[test]
     fn render_nonexistent_file_fails() {
         let output = relune()
             .arg("render")
@@ -916,6 +929,42 @@ mod diff_tests {
         assert!(
             stdout.contains("posts"),
             "Output should mention the removed table"
+        );
+    }
+
+    #[test]
+    fn diff_schema_json_inputs() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = simple_blog_fixture();
+        let before_json = temp.path().join("before.json");
+        let after_json = temp.path().join("after.json");
+
+        relune()
+            .arg("export")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--format")
+            .arg("schema-json")
+            .arg("--out")
+            .arg(&before_json)
+            .assert()
+            .success();
+
+        fs::copy(&before_json, &after_json).expect("Failed to duplicate schema JSON file");
+
+        let output = relune()
+            .arg("diff")
+            .arg("--before")
+            .arg(&before_json)
+            .arg("--after")
+            .arg(&after_json)
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        assert!(
+            stdout.contains("No changes"),
+            "JSON inputs should be treated as schema JSON"
         );
     }
 

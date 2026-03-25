@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod export;
+mod input;
 pub mod inspect;
 pub mod lint;
 pub mod render;

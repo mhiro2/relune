@@ -63,7 +63,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `focus` | Table name |
 | `depth` | Unsigned integer |
 | `include` / `exclude` | String arrays |
-| `show_legend`, `show_stats` | Booleans; `--stats` on the CLI also forces stats-style behavior when merging |
+| `show_legend`, `show_stats` | Booleans; `--stats` on the CLI forces `show_stats` only |
 
 `layout` and `edge_style` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
 

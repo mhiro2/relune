@@ -4,7 +4,7 @@ expression: stdout
 ---
 Export schema JSON, graph JSON, layout JSON, or diagram text (Mermaid / D2 / DOT)
 
-Usage: relune export [OPTIONS]
+Usage: relune export [OPTIONS] <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
 
 Options:
   -c, --config <CONFIG>

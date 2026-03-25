@@ -2,11 +2,12 @@
 
 use anyhow::Context;
 
+use super::input::InputSelection;
 use crate::cli::{ColorWhen, LintArgs, LintFormat, LintSeverity};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter};
-use relune_app::{InputSource, LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
+use relune_app::{LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
 use relune_core::Severity;
 
 /// Run the lint command.
@@ -15,7 +16,7 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Cli
     let merged = config.merge_lint_args(args);
 
     // Resolve input source
-    let input = resolve_input(args)?;
+    let input = InputSelection::from_lint(args).resolve(args.dialect.into(), "input")?;
 
     // Convert severity from CLI to core type
     let fail_on = merged.deny.map(|s| match s {
@@ -70,52 +71,4 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Cli
     }
 
     Ok(())
-}
-
-/// Resolve input source from CLI arguments.
-fn resolve_input(args: &LintArgs) -> CliResult<InputSource> {
-    let count =
-        args.sql.iter().count() + args.db_url.iter().count() + args.schema_json.iter().count();
-
-    if count == 0 {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "At least one input option is required: --sql, --db-url, or --schema-json"
-        )));
-    }
-
-    if count > 1 {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "Only one input option can be specified: --sql, --db-url, or --schema-json"
-        )));
-    }
-
-    let dialect = args.dialect.into();
-
-    if let Some(ref path) = args.sql {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            CliError::usage(anyhow::anyhow!(
-                "Failed to read SQL file: {}: {}",
-                path.display(),
-                e
-            ))
-        })?;
-        return Ok(InputSource::sql_text_with_dialect(content, dialect));
-    }
-
-    if let Some(ref url) = args.db_url {
-        return Ok(InputSource::db_url(url.clone()));
-    }
-
-    if let Some(ref path) = args.schema_json {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            CliError::usage(anyhow::anyhow!(
-                "Failed to read schema JSON file: {}: {}",
-                path.display(),
-                e
-            ))
-        })?;
-        return Ok(InputSource::schema_json(content));
-    }
-
-    unreachable!()
 }
