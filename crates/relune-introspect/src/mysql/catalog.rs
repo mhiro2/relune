@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use sqlx::MySqlPool;
 
-use crate::common::{RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView};
+use crate::common::{
+    RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView, parse_referential_action,
+};
 use crate::error::IntrospectError;
 
 /// Fetches all catalog metadata from a `MySQL` database.
@@ -120,13 +122,18 @@ impl MySqlCatalog {
                 CONVERT(kcu.REFERENCED_TABLE_SCHEMA USING utf8mb4) AS referenced_schema,
                 CONVERT(kcu.REFERENCED_TABLE_NAME USING utf8mb4) AS referenced_table,
                 CONVERT(kcu.REFERENCED_COLUMN_NAME USING utf8mb4) AS referenced_column,
-                kcu.ORDINAL_POSITION AS ordinal_position
+                kcu.ORDINAL_POSITION AS ordinal_position,
+                CONVERT(rc.DELETE_RULE USING utf8mb4) AS delete_rule,
+                CONVERT(rc.UPDATE_RULE USING utf8mb4) AS update_rule
             FROM information_schema.KEY_COLUMN_USAGE kcu
             INNER JOIN information_schema.TABLE_CONSTRAINTS tc
                 ON kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
                 AND kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
                 AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA
                 AND kcu.TABLE_NAME = tc.TABLE_NAME
+            INNER JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+                ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+                AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
             WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
               AND kcu.TABLE_SCHEMA NOT IN (
                   'information_schema', 'mysql', 'performance_schema', 'sys',
@@ -234,6 +241,8 @@ struct FkColumnRow {
     referenced_table: String,
     referenced_column: String,
     ordinal_position: u64,
+    delete_rule: String,
+    update_rule: String,
 }
 
 #[derive(Debug, sqlx::FromRow, Clone)]
@@ -283,6 +292,14 @@ fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
             .first()
             .map(|r| r.referenced_table.clone())
             .unwrap_or_default();
+        let on_delete = cols
+            .first()
+            .map(|r| parse_referential_action(&r.delete_rule))
+            .unwrap_or_default();
+        let on_update = cols
+            .first()
+            .map(|r| parse_referential_action(&r.update_rule))
+            .unwrap_or_default();
         out.push(RawForeignKey {
             constraint_name: key.constraint,
             schema_name: key.schema,
@@ -291,6 +308,8 @@ fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
             to_schema,
             to_table,
             to_columns,
+            on_delete,
+            on_update,
         });
     }
     out

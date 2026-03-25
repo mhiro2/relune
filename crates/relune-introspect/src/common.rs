@@ -68,6 +68,37 @@ pub struct RawForeignKey {
     pub to_table: String,
     /// Names of the columns in the referenced table.
     pub to_columns: Vec<String>,
+    /// ON DELETE referential action.
+    pub on_delete: ReferentialAction,
+    /// ON UPDATE referential action.
+    pub on_update: ReferentialAction,
+}
+
+/// Parse a referential action string (as returned by `information_schema` / PRAGMA /
+/// `pg_constraint`) into a [`ReferentialAction`]. Unrecognised values fall back to `NoAction`.
+///
+/// Accepts:
+/// - Full names: `CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION` (case-insensitive)
+/// - `PostgreSQL` `pg_constraint` single-char codes: `a`/`r`/`c`/`n`/`d`
+#[must_use]
+pub fn parse_referential_action(s: &str) -> ReferentialAction {
+    let trimmed = s.trim();
+    // PostgreSQL pg_constraint single-char codes (confdeltype / confupdtype)
+    match trimmed {
+        "a" => return ReferentialAction::NoAction,
+        "r" => return ReferentialAction::Restrict,
+        "c" => return ReferentialAction::Cascade,
+        "n" => return ReferentialAction::SetNull,
+        "d" => return ReferentialAction::SetDefault,
+        _ => {}
+    }
+    match trimmed.to_uppercase().as_str() {
+        "CASCADE" => ReferentialAction::Cascade,
+        "SET NULL" => ReferentialAction::SetNull,
+        "SET DEFAULT" => ReferentialAction::SetDefault,
+        "RESTRICT" => ReferentialAction::Restrict,
+        _ => ReferentialAction::NoAction,
+    }
 }
 
 /// Raw index metadata from a database catalog.
@@ -299,8 +330,8 @@ fn map_foreign_key(raw_fk: &RawForeignKey) -> ForeignKey {
         to_schema: raw_fk.to_schema.clone(),
         to_table: raw_fk.to_table.clone(),
         to_columns: raw_fk.to_columns.clone(),
-        on_delete: ReferentialAction::NoAction,
-        on_update: ReferentialAction::NoAction,
+        on_delete: raw_fk.on_delete,
+        on_update: raw_fk.on_update,
     }
 }
 

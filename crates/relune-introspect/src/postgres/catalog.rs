@@ -6,7 +6,10 @@
 
 use sqlx::PgPool;
 
-use crate::common::{RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView};
+use crate::common::{
+    RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
+    parse_referential_action,
+};
 use crate::error::IntrospectError;
 
 /// `PostgreSQL` catalog reader.
@@ -160,7 +163,9 @@ impl PostgresCatalog {
                 array_agg(src_attr.attname ORDER BY u.ord) AS from_columns,
                 dst_ns.nspname AS to_schema,
                 dst_cls.relname AS to_table,
-                array_agg(dst_attr.attname ORDER BY u.ord) AS to_columns
+                array_agg(dst_attr.attname ORDER BY u.ord) AS to_columns,
+                tc.confdeltype::text AS on_delete_code,
+                tc.confupdtype::text AS on_update_code
             FROM pg_catalog.pg_constraint tc
             INNER JOIN pg_catalog.pg_class src_cls ON src_cls.oid = tc.conrelid
             INNER JOIN pg_catalog.pg_namespace src_ns ON src_ns.oid = src_cls.relnamespace
@@ -174,7 +179,7 @@ impl PostgresCatalog {
                 AND src_ns.nspname NOT LIKE 'pg_%'
                 AND dst_ns.nspname NOT IN ('pg_catalog', 'information_schema')
                 AND dst_ns.nspname NOT LIKE 'pg_%'
-            GROUP BY tc.conname, src_ns.nspname, src_cls.relname, dst_ns.nspname, dst_cls.relname
+            GROUP BY tc.conname, src_ns.nspname, src_cls.relname, dst_ns.nspname, dst_cls.relname, tc.confdeltype, tc.confupdtype
             ORDER BY src_ns.nspname, src_cls.relname, tc.conname
             ",
         )
@@ -192,6 +197,8 @@ impl PostgresCatalog {
                 to_schema: Some(row.to_schema),
                 to_table: row.to_table,
                 to_columns: row.to_columns.unwrap_or_default(),
+                on_delete: parse_referential_action(&row.on_delete_code),
+                on_update: parse_referential_action(&row.on_update_code),
             })
             .collect())
     }
@@ -361,6 +368,8 @@ struct RawForeignKeyRow {
     to_schema: String,
     to_table: String,
     to_columns: Option<Vec<String>>,
+    on_delete_code: String,
+    on_update_code: String,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -390,6 +399,8 @@ struct RawEnumRow {
 
 #[cfg(test)]
 mod tests {
+    use relune_core::ReferentialAction;
+
     use super::*;
 
     #[test]
@@ -430,6 +441,8 @@ mod tests {
             to_schema: Some("public".to_string()),
             to_table: "users".to_string(),
             to_columns: vec!["id".to_string()],
+            on_delete: ReferentialAction::Cascade,
+            on_update: ReferentialAction::NoAction,
         };
         assert_eq!(fk.constraint_name, "fk_posts_user_id");
         assert_eq!(fk.from_table, "posts");

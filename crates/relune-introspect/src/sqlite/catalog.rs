@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use sqlx::sqlite::SqlitePool;
 
-use crate::common::{RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView};
+use crate::common::{
+    RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView, parse_referential_action,
+};
 use crate::error::IntrospectError;
 
 const MAIN_SCHEMA: &str = "main";
@@ -169,6 +171,8 @@ struct SqliteFkRow {
     #[sqlx(rename = "from")]
     from_col: String,
     to: String,
+    on_update: String,
+    on_delete: String,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -209,6 +213,14 @@ fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignK
         let from_columns: Vec<String> = cols.iter().map(|r| r.from_col.clone()).collect();
         let to_columns: Vec<String> = cols.iter().map(|r| r.to.clone()).collect();
         let constraint_name = format!("fk_{from_table}_{}", gk.id);
+        let on_delete = cols
+            .first()
+            .map(|r| parse_referential_action(&r.on_delete))
+            .unwrap_or_default();
+        let on_update = cols
+            .first()
+            .map(|r| parse_referential_action(&r.on_update))
+            .unwrap_or_default();
         out.push(RawForeignKey {
             constraint_name,
             schema_name: MAIN_SCHEMA.to_string(),
@@ -217,6 +229,8 @@ fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignK
             to_schema: None,
             to_table,
             to_columns,
+            on_delete,
+            on_update,
         });
     }
     out
