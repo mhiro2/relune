@@ -1,7 +1,7 @@
 //! Core data model for database schema representation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// SQL dialect for parsing.
@@ -107,102 +107,152 @@ impl Schema {
     /// Validates the schema for structural consistency.
     ///
     /// Checks for:
-    /// - Duplicate table names
+    /// - Duplicate table names (schema-qualified)
     /// - Empty table or column names
     /// - Empty column data types
-    /// - FK `from_columns` / `to_columns` referencing nonexistent columns
+    /// - FK `from_columns` referencing nonexistent columns in the source table
+    /// - FK `to_columns` referencing nonexistent columns in the target table
     /// - FK `from_columns` / `to_columns` count mismatch
     /// - FK `to_table` referencing a nonexistent table
     #[must_use]
     pub fn validate(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 
-        // Check for duplicate table names (case-insensitive)
-        let mut seen_names: HashSet<String> = HashSet::new();
+        // Check for duplicate table names using (schema, name) tuple
+        let mut seen_names: HashSet<(String, String)> = HashSet::new();
         for table in &self.tables {
-            let lower = table.name.to_lowercase();
-            if !seen_names.insert(lower) {
+            let schema = table.schema_name.as_deref().unwrap_or("").to_lowercase();
+            let name = table.name.to_lowercase();
+            if !seen_names.insert((schema, name)) {
                 errors.push(ValidationError {
-                    table: Some(table.name.clone()),
+                    table: Some(table.qualified_name()),
                     message: "duplicate table name".to_string(),
                 });
             }
         }
 
-        // Build set of known table names for FK target validation
-        let known_tables: HashSet<String> = self
-            .tables
-            .iter()
-            .flat_map(|t| {
-                let mut names = vec![t.name.to_lowercase()];
-                names.push(t.stable_id.to_lowercase());
-                names
-            })
-            .collect();
+        // Build lookup from (schema_lower, name_lower) and (schema_lower, stable_id_lower)
+        // to the table's column names, for FK target validation.
+        let mut table_columns: HashMap<(String, String), HashSet<String>> = HashMap::new();
+        for t in &self.tables {
+            let schema = t.schema_name.as_deref().unwrap_or("").to_lowercase();
+            let cols: HashSet<String> = t.columns.iter().map(|c| c.name.clone()).collect();
+            table_columns.insert((schema.clone(), t.name.to_lowercase()), cols.clone());
+            table_columns.insert((schema, t.stable_id.to_lowercase()), cols);
+        }
 
         for table in &self.tables {
-            // Empty table name
-            if table.name.trim().is_empty() {
-                errors.push(ValidationError {
-                    table: None,
-                    message: "table has empty name".to_string(),
-                });
-            }
-
-            let col_names: HashSet<String> = table.columns.iter().map(|c| c.name.clone()).collect();
-
-            for col in &table.columns {
-                if col.name.trim().is_empty() {
-                    errors.push(ValidationError {
-                        table: Some(table.name.clone()),
-                        message: "column has empty name".to_string(),
-                    });
-                }
-                if col.data_type.trim().is_empty() {
-                    errors.push(ValidationError {
-                        table: Some(table.name.clone()),
-                        message: format!("column '{}' has empty data_type", col.name),
-                    });
-                }
-            }
-
-            for fk in &table.foreign_keys {
-                // Column count mismatch
-                if !fk.from_columns.is_empty()
-                    && !fk.to_columns.is_empty()
-                    && fk.from_columns.len() != fk.to_columns.len()
-                {
-                    errors.push(ValidationError {
-                        table: Some(table.name.clone()),
-                        message: format!(
-                            "FK column count mismatch: {} from_columns vs {} to_columns",
-                            fk.from_columns.len(),
-                            fk.to_columns.len()
-                        ),
-                    });
-                }
-
-                // from_columns reference existing columns
-                for col in &fk.from_columns {
-                    if !col_names.contains(col) {
-                        errors.push(ValidationError {
-                            table: Some(table.name.clone()),
-                            message: format!("FK from_column '{col}' does not exist in table"),
-                        });
-                    }
-                }
-
-                // to_table references a known table
-                if !known_tables.contains(&fk.to_table.to_lowercase()) {
-                    errors.push(ValidationError {
-                        table: Some(table.name.clone()),
-                        message: format!("FK references unknown table '{}'", fk.to_table),
-                    });
-                }
-            }
+            Self::validate_table(table, &table_columns, &mut errors);
         }
 
         errors
+    }
+
+    fn validate_table(
+        table: &Table,
+        table_columns: &HashMap<(String, String), HashSet<String>>,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        if table.name.trim().is_empty() {
+            errors.push(ValidationError {
+                table: None,
+                message: "table has empty name".to_string(),
+            });
+        }
+
+        let col_names: HashSet<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+
+        for col in &table.columns {
+            if col.name.trim().is_empty() {
+                errors.push(ValidationError {
+                    table: Some(table.name.clone()),
+                    message: "column has empty name".to_string(),
+                });
+            }
+            if col.data_type.trim().is_empty() {
+                errors.push(ValidationError {
+                    table: Some(table.name.clone()),
+                    message: format!("column '{}' has empty data_type", col.name),
+                });
+            }
+        }
+
+        for fk in &table.foreign_keys {
+            Self::validate_fk(table, fk, &col_names, table_columns, errors);
+        }
+    }
+
+    fn validate_fk(
+        table: &Table,
+        fk: &ForeignKey,
+        col_names: &HashSet<String>,
+        table_columns: &HashMap<(String, String), HashSet<String>>,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        // Column count mismatch
+        if !fk.from_columns.is_empty()
+            && !fk.to_columns.is_empty()
+            && fk.from_columns.len() != fk.to_columns.len()
+        {
+            errors.push(ValidationError {
+                table: Some(table.name.clone()),
+                message: format!(
+                    "FK column count mismatch: {} from_columns vs {} to_columns",
+                    fk.from_columns.len(),
+                    fk.to_columns.len()
+                ),
+            });
+        }
+
+        // from_columns reference existing columns in source table
+        for col in &fk.from_columns {
+            if !col_names.contains(col) {
+                errors.push(ValidationError {
+                    table: Some(table.name.clone()),
+                    message: format!("FK from_column '{col}' does not exist in table"),
+                });
+            }
+        }
+
+        // Resolve the target table using (to_schema, to_table).
+        let to_key = fk.to_table.to_lowercase();
+        let target_cols = if fk.to_schema.is_some() {
+            let target_schema = fk.to_schema.as_deref().unwrap_or("").to_lowercase();
+            table_columns.get(&(target_schema, to_key))
+        } else {
+            // No explicit schema — try empty schema first, then any match
+            table_columns
+                .get(&(String::new(), to_key.clone()))
+                .or_else(|| {
+                    table_columns
+                        .iter()
+                        .find(|((_, n), _)| *n == to_key)
+                        .map(|(_, v)| v)
+                })
+        };
+
+        match target_cols {
+            None => {
+                errors.push(ValidationError {
+                    table: Some(table.name.clone()),
+                    message: format!("FK references unknown table '{}'", fk.to_table),
+                });
+            }
+            Some(ref_cols) => {
+                // to_columns reference existing columns in the target table
+                for col in &fk.to_columns {
+                    if !ref_cols.contains(col) {
+                        errors.push(ValidationError {
+                            table: Some(table.name.clone()),
+                            message: format!(
+                                "FK to_column '{col}' does not exist in table '{}'",
+                                fk.to_table
+                            ),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// Returns statistics about the schema.
@@ -397,5 +447,169 @@ impl Enum {
             Some(schema_name) => format!("{}.{}", schema_name, self.name),
             None => self.name.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_table(name: &str, schema: Option<&str>, cols: &[&str], fks: Vec<ForeignKey>) -> Table {
+        Table {
+            id: TableId(0),
+            stable_id: name.to_string(),
+            schema_name: schema.map(ToString::to_string),
+            name: name.to_string(),
+            columns: cols
+                .iter()
+                .enumerate()
+                .map(|(i, c)| Column {
+                    id: ColumnId(i as u64),
+                    name: (*c).to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: i == 0,
+                    comment: None,
+                })
+                .collect(),
+            foreign_keys: fks,
+            indexes: vec![],
+            comment: None,
+        }
+    }
+
+    fn make_fk(to_table: &str, from_cols: &[&str], to_cols: &[&str]) -> ForeignKey {
+        ForeignKey {
+            name: None,
+            from_columns: from_cols.iter().map(|c| (*c).to_string()).collect(),
+            to_schema: None,
+            to_table: to_table.to_string(),
+            to_columns: to_cols.iter().map(|c| (*c).to_string()).collect(),
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+        }
+    }
+
+    #[test]
+    fn validate_clean_schema_returns_no_errors() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id", "name"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk("users", &["user_id"], &["id"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_same_name_different_schemas_is_ok() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                make_table("users", Some("auth"), &["id"], vec![]),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_duplicate_within_same_schema() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                make_table("users", Some("public"), &["id"], vec![]),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("duplicate"));
+    }
+
+    #[test]
+    fn validate_to_columns_referencing_nonexistent_column() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk("users", &["user_id"], &["nonexistent"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("to_column 'nonexistent'"));
+    }
+
+    #[test]
+    fn validate_fk_unknown_table() {
+        let schema = Schema {
+            tables: vec![make_table(
+                "posts",
+                None,
+                &["id", "user_id"],
+                vec![make_fk("missing", &["user_id"], &["id"])],
+            )],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("unknown table"));
+    }
+
+    #[test]
+    fn validate_fk_from_column_nonexistent() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id"],
+                    vec![make_fk("users", &["ghost"], &["id"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("from_column 'ghost'"));
+    }
+
+    #[test]
+    fn validate_fk_column_count_mismatch() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id", "name"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk("users", &["user_id"], &["id", "name"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("count mismatch"));
     }
 }
