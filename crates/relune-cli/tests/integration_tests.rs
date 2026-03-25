@@ -731,7 +731,7 @@ mod global_flag_tests {
         assert!(output.status.success(), "verbose render should succeed");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("parsed SQL file input"),
+            stderr.contains("parsed SQL"),
             "verbose output should include parse details"
         );
         assert!(

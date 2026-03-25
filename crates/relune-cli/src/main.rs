@@ -10,12 +10,14 @@ mod cli;
 mod commands;
 mod config;
 mod doctor;
+mod error;
 mod output;
 
 use cli::{Cli, Command};
 use commands::{run_diff, run_export, run_inspect, run_lint, run_render};
 use config::ReluneConfig;
 use doctor::run_doctor;
+use error::{CliError, CliResult};
 
 fn main() -> ExitCode {
     // Parse command line arguments
@@ -30,22 +32,27 @@ fn main() -> ExitCode {
         Err(e) => {
             // Print error to stderr
             eprintln!("Error: {e}");
-            ExitCode::from(get_exit_code(&e))
+            ExitCode::from(e.exit_code())
         }
     }
 }
 
 /// Load configuration file if specified, otherwise return default config.
-fn load_config(config_path: Option<&std::path::Path>) -> anyhow::Result<ReluneConfig> {
+fn load_config(config_path: Option<&std::path::Path>) -> CliResult<ReluneConfig> {
     match config_path {
-        Some(path) => ReluneConfig::from_file(path)
-            .map_err(|e| anyhow::anyhow!("Failed to load config file '{}': {}", path.display(), e)),
+        Some(path) => ReluneConfig::from_file(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to load config file '{}': {}",
+                path.display(),
+                e
+            ))
+        }),
         None => Ok(ReluneConfig::default()),
     }
 }
 
 /// Run the specified command.
-fn run_command(cli: Cli) -> anyhow::Result<()> {
+fn run_command(cli: Cli) -> CliResult<()> {
     // Load config file if specified
     let config = load_config(cli.config.as_deref())?;
 
@@ -98,33 +105,7 @@ fn setup_logging(verbose: u8, quiet: bool) {
         .with_env_filter(filter)
         .with_span_events(span_events)
         .with_target(verbose >= 2)
+        .with_writer(std::io::stderr)
         .without_time()
         .try_init();
-}
-
-/// Determine the exit code based on the error.
-fn get_exit_code(error: &anyhow::Error) -> u8 {
-    // Check for specific error types
-    let error_string = error.to_string();
-
-    // Check for invalid input/arguments or config errors
-    if error_string.contains("At least one input option is required")
-        || error_string.contains("Only one input option can be specified")
-        || error_string.contains("Failed to read")
-        || error_string.contains("not found")
-        || error_string.contains("Failed to load config")
-        || error_string.contains("Failed to parse config")
-        || error_string.contains("Invalid config value")
-        || error_string.contains("Export format must be provided")
-    {
-        return 2;
-    }
-
-    // Check for warnings with --fail-on-warning
-    if error_string.contains("Warnings were emitted and --fail-on-warning is set") {
-        return 3;
-    }
-
-    // Default to general error
-    1
 }

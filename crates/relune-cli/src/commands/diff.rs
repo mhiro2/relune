@@ -1,9 +1,10 @@
 //! Diff command implementation.
 
-use anyhow::{Context, Result, bail};
+use anyhow::Context;
 
 use crate::cli::{ColorWhen, DiffArgs, DiffFormat};
 use crate::config::ReluneConfig;
+use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter, print_success};
 use relune_app::{DiffRequest, InputSource, diff, format_diff_text};
 
@@ -13,7 +14,7 @@ pub fn run_diff(
     color: ColorWhen,
     quiet: bool,
     config: &ReluneConfig,
-) -> Result<()> {
+) -> CliResult<()> {
     let merged = config.merge_diff_args(args);
     let dialect = merged.dialect.into();
 
@@ -55,7 +56,9 @@ pub fn run_diff(
 
     // Check for errors
     if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        bail!("Errors were encountered during diff computation");
+        return Err(CliError::general(anyhow::anyhow!(
+            "Errors were encountered during diff computation"
+        )));
     }
 
     // Format output
@@ -102,23 +105,31 @@ fn resolve_input(
     schema_json: Option<&std::path::PathBuf>,
     context: &str,
     dialect: relune_core::SqlDialect,
-) -> Result<InputSource> {
+) -> CliResult<InputSource> {
     let count = file_path.iter().count() + sql_text.iter().count() + schema_json.iter().count();
 
     if count == 0 {
-        bail!(
+        return Err(CliError::usage(anyhow::anyhow!(
             "At least one {context} input option is required: --{context}, --{context}-sql-text, or --{context}-schema-json"
-        );
+        )));
     }
 
     if count > 1 {
-        bail!("Only one {context} input option can be specified");
+        return Err(CliError::usage(anyhow::anyhow!(
+            "Only one {context} input option can be specified"
+        )));
     }
 
     if let Some(path) = file_path {
         // Determine if it's SQL or JSON based on extension, or try to parse
-        let file_content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {} file: {}", context, path.display()))?;
+        let file_content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to read {} file: {}: {}",
+                context,
+                path.display(),
+                e
+            ))
+        })?;
 
         // Check file extension to determine type
         let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -134,12 +145,13 @@ fn resolve_input(
     }
 
     if let Some(path) = schema_json {
-        let schema_content = std::fs::read_to_string(path).with_context(|| {
-            format!(
-                "Failed to read {} schema JSON file: {}",
+        let schema_content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to read {} schema JSON file: {}: {}",
                 context,
-                path.display()
-            )
+                path.display(),
+                e
+            ))
         })?;
         return Ok(InputSource::schema_json(schema_content));
     }

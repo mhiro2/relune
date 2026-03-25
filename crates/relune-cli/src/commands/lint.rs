@@ -1,15 +1,16 @@
 //! Lint command implementation.
 
-use anyhow::{Context, Result, bail};
+use anyhow::Context;
 
 use crate::cli::{ColorWhen, LintArgs, LintFormat, LintSeverity};
 use crate::config::ReluneConfig;
+use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter};
 use relune_app::{InputSource, LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
 use relune_core::Severity;
 
 /// Run the lint command.
-pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Result<()> {
+pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> CliResult<()> {
     // Merge config file with CLI args
     let merged = config.merge_lint_args(args);
 
@@ -44,7 +45,9 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Res
 
     // Check for errors
     if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        bail!("Errors were encountered during linting");
+        return Err(CliError::general(anyhow::anyhow!(
+            "Errors were encountered during linting"
+        )));
     }
 
     // Format output
@@ -61,30 +64,41 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Res
 
     // Check if we should exit with non-zero code based on --deny
     if result.has_failures(fail_on) {
-        bail!("Lint issues found at or above the configured severity threshold");
+        return Err(CliError::general(anyhow::anyhow!(
+            "Lint issues found at or above the configured severity threshold"
+        )));
     }
 
     Ok(())
 }
 
 /// Resolve input source from CLI arguments.
-fn resolve_input(args: &LintArgs) -> Result<InputSource> {
+fn resolve_input(args: &LintArgs) -> CliResult<InputSource> {
     let count =
         args.sql.iter().count() + args.db_url.iter().count() + args.schema_json.iter().count();
 
     if count == 0 {
-        bail!("At least one input option is required: --sql, --db-url, or --schema-json");
+        return Err(CliError::usage(anyhow::anyhow!(
+            "At least one input option is required: --sql, --db-url, or --schema-json"
+        )));
     }
 
     if count > 1 {
-        bail!("Only one input option can be specified: --sql, --db-url, or --schema-json");
+        return Err(CliError::usage(anyhow::anyhow!(
+            "Only one input option can be specified: --sql, --db-url, or --schema-json"
+        )));
     }
 
     let dialect = args.dialect.into();
 
     if let Some(ref path) = args.sql {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read SQL file: {}", path.display()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to read SQL file: {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
         return Ok(InputSource::sql_text_with_dialect(content, dialect));
     }
 
@@ -93,8 +107,13 @@ fn resolve_input(args: &LintArgs) -> Result<InputSource> {
     }
 
     if let Some(ref path) = args.schema_json {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read schema JSON file: {}", path.display()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to read schema JSON file: {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
         return Ok(InputSource::schema_json(content));
     }
 

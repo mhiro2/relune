@@ -1,7 +1,8 @@
 ---
 source: crates/relune-cli/tests/integration_tests.rs
-expression: format!("exit_code: {exit_code}\nstderr:\n{stderr}")
+assertion_line: 45
+expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 2
 stderr:
-Error: Failed to read SQL file: /nonexistent/path/file.sql
+Error: Failed to read SQL file: /nonexistent/path/file.sql: No such file or directory (os error 2)

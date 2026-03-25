@@ -1,9 +1,10 @@
 //! Render command implementation.
 
-use anyhow::{Context, Result, bail};
+use anyhow::Context;
 
 use crate::cli::{ColorWhen, GroupByMode, RenderArgs, RenderFormat, Theme};
 use crate::config::ReluneConfig;
+use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter, print_stats, print_success};
 use relune_app::{
     FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, InputSource, LayoutSpec, OutputFormat,
@@ -16,7 +17,7 @@ pub fn run_render(
     color: ColorWhen,
     quiet: bool,
     config: &ReluneConfig,
-) -> Result<()> {
+) -> CliResult<()> {
     // Resolve input source
     let input = resolve_input(args)?;
 
@@ -86,12 +87,16 @@ pub fn run_render(
 
     // Check for fail-on-warning
     if args.fail_on_warning && DiagnosticPrinter::has_warnings(&result.diagnostics) {
-        bail!("Warnings were emitted and --fail-on-warning is set");
+        return Err(CliError::warning(anyhow::anyhow!(
+            "Warnings were emitted and --fail-on-warning is set"
+        )));
     }
 
     // Check for errors
     if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        bail!("Errors were encountered during rendering");
+        return Err(CliError::general(anyhow::anyhow!(
+            "Errors were encountered during rendering"
+        )));
     }
 
     // Write output
@@ -124,29 +129,34 @@ pub fn run_render(
 }
 
 /// Resolve input source from CLI arguments.
-fn resolve_input(args: &RenderArgs) -> Result<InputSource> {
+fn resolve_input(args: &RenderArgs) -> CliResult<InputSource> {
     let count = args.sql.iter().count()
         + args.sql_text.iter().count()
         + args.schema_json.iter().count()
         + args.db_url.iter().count();
 
     if count == 0 {
-        bail!(
+        return Err(CliError::usage(anyhow::anyhow!(
             "At least one input option is required: --sql, --sql-text, --schema-json, or --db-url"
-        );
+        )));
     }
 
     if count > 1 {
-        bail!(
+        return Err(CliError::usage(anyhow::anyhow!(
             "Only one input option can be specified: --sql, --sql-text, --schema-json, or --db-url"
-        );
+        )));
     }
 
     let dialect = args.dialect.into();
 
     if let Some(ref path) = args.sql {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read SQL file: {}", path.display()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to read SQL file: {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
         return Ok(InputSource::sql_text_with_dialect(content, dialect));
     }
 
@@ -155,8 +165,13 @@ fn resolve_input(args: &RenderArgs) -> Result<InputSource> {
     }
 
     if let Some(ref path) = args.schema_json {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read schema JSON file: {}", path.display()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::usage(anyhow::anyhow!(
+                "Failed to read schema JSON file: {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
         return Ok(InputSource::schema_json(content));
     }
 

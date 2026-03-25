@@ -1,6 +1,7 @@
 ---
 source: crates/relune-cli/tests/integration_tests.rs
-expression: format!("exit_code: {exit_code}\nstderr:\n{stderr}")
+assertion_line: 45
+expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 1
 stderr:
