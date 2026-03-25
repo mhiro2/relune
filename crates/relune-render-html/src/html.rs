@@ -772,6 +772,27 @@ mod tests {
     }
 
     #[test]
+    fn test_build_html_escapes_xss_payload_in_embedded_svg_and_title() {
+        let payload = "<script>alert('xss')</script>";
+        let escaped = "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;";
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><g data-table-id="{escaped}"><title>{escaped}</title><text>{escaped}</text></g></svg>"#
+        );
+        let metadata = "{}";
+        let options = HtmlRenderOptions {
+            title: Some(payload.to_string()),
+            ..Default::default()
+        };
+
+        let html = build_html_document(&svg, metadata, &options);
+
+        assert!(html.contains(escaped));
+        assert!(html.contains(&format!("<title>{escaped}</title>")));
+        assert!(html.contains(&format!("<h1>{escaped}</h1>")));
+        assert!(!html.contains(payload));
+    }
+
+    #[test]
     fn test_build_html_without_pan_zoom() {
         let svg = "<svg></svg>";
         let metadata = "{}";

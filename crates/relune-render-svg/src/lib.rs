@@ -808,6 +808,49 @@ mod tests {
     }
 
     #[test]
+    fn test_render_svg_escapes_xss_payload_in_table_name() {
+        let payload = "<script>alert('xss')</script>";
+        let escaped = "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;";
+        let graph = relune_layout::PositionedGraph {
+            nodes: vec![PositionedNode {
+                id: payload.to_string(),
+                label: payload.to_string(),
+                kind: NodeKind::Table,
+                columns: vec![PositionedColumn {
+                    name: payload.to_string(),
+                    data_type: "text".to_string(),
+                    nullable: false,
+                    is_primary_key: false,
+                }],
+                x: 56.0,
+                y: 56.0,
+                width: 280.0,
+                height: 94.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            }],
+            edges: vec![],
+            groups: vec![],
+            width: 400.0,
+            height: 180.0,
+        };
+
+        let svg = render_svg(
+            &graph,
+            SvgRenderOptions {
+                show_tooltips: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(svg.contains(escaped));
+        assert!(svg.contains(&format!(r#"data-table-id="{escaped}""#)));
+        assert!(svg.contains(&format!(r"<title>{escaped} table")));
+        assert!(!svg.contains(payload));
+    }
+
+    #[test]
     fn test_render_svg_with_dark_theme() {
         let graph = single_node_graph();
         let options = SvgRenderOptions {
