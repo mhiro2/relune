@@ -10,6 +10,7 @@ use relune_core::{
     View,
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// Check whether `needle` appears in `haystack` as a whole SQL identifier,
 /// i.e. not as a substring of a longer identifier.  Both strings must already
@@ -36,6 +37,63 @@ fn contains_identifier(haystack: &str, needle: &str) -> bool {
         }
     }
     false
+}
+
+#[derive(Debug, Default)]
+struct EnumIndex {
+    exact: BTreeMap<String, String>,
+    by_name: BTreeMap<String, Vec<(Option<String>, String)>>,
+}
+
+impl EnumIndex {
+    fn insert(&mut self, enum_type: &Enum) {
+        let name = enum_type.name.to_lowercase();
+        let schema_name = enum_type
+            .schema_name
+            .as_ref()
+            .map(|schema| schema.to_lowercase());
+
+        self.by_name
+            .entry(name.clone())
+            .or_default()
+            .push((schema_name.clone(), enum_type.id.clone()));
+
+        if let Some(schema_name) = schema_name {
+            self.exact
+                .insert(format!("{schema_name}.{name}"), enum_type.id.clone());
+        }
+    }
+
+    fn resolve(&self, table: &Table, data_type: &str) -> Option<String> {
+        let data_type = data_type.to_lowercase();
+        if data_type.contains('.')
+            && let Some(enum_id) = self.exact.get(&data_type)
+        {
+            return Some(enum_id.clone());
+        }
+
+        let candidates = self.by_name.get(&data_type)?;
+        if candidates.len() == 1 {
+            return Some(candidates[0].1.clone());
+        }
+
+        if let Some(table_schema) = table.schema_name.as_deref().map(str::to_lowercase) {
+            let matching: Vec<&(Option<String>, String)> = candidates
+                .iter()
+                .filter(|(schema_name, _)| schema_name.as_deref() == Some(table_schema.as_str()))
+                .collect();
+            if let [(_, enum_id)] = matching.as_slice() {
+                return Some((*enum_id).clone());
+            }
+        }
+
+        warn!(
+            table = %table.qualified_name(),
+            data_type = %data_type,
+            "Ambiguous enum reference skipped"
+        );
+        None
+    }
 }
 
 /// Request to build a layout graph from a schema.
@@ -321,19 +379,10 @@ impl LayoutGraphBuilder {
                 ]
             })
             .collect();
-        let enum_index: BTreeMap<String, String> = enums
-            .iter()
-            .flat_map(|enum_type| {
-                [
-                    (enum_type.name.to_lowercase(), enum_type.id.clone()),
-                    (
-                        enum_type.qualified_name().to_lowercase(),
-                        enum_type.id.clone(),
-                    ),
-                    (enum_type.id.to_lowercase(), enum_type.id.clone()),
-                ]
-            })
-            .collect();
+        let mut enum_index = EnumIndex::default();
+        for enum_type in enums {
+            enum_index.insert(enum_type);
+        }
 
         let mut nodes = Vec::with_capacity(tables.len() + views.len() + enums.len());
         let mut edges = Vec::new();
@@ -398,10 +447,10 @@ impl LayoutGraphBuilder {
             }
 
             for column in &table.columns {
-                if let Some(enum_id) = enum_index.get(&column.data_type.to_lowercase()) {
+                if let Some(enum_id) = enum_index.resolve(table, &column.data_type) {
                     edges.push(LayoutEdge {
                         from: table.stable_id.clone(),
-                        to: enum_id.clone(),
+                        to: enum_id,
                         name: Some(format!("{} ({})", column.name, column.data_type)),
                         from_columns: vec![column.name.clone()],
                         to_columns: vec![],
@@ -564,6 +613,20 @@ impl LayoutGraphBuilder {
         }
     }
 
+    fn is_join_table_metadata_column(column: &LayoutColumn) -> bool {
+        column.is_primary_key
+            || matches!(
+                column.name.as_str(),
+                "id" | "created_at"
+                    | "updated_at"
+                    | "created_on"
+                    | "updated_on"
+                    | "deleted_at"
+                    | "sort_order"
+                    | "position"
+            )
+    }
+
     /// Mark nodes that are likely join tables.
     #[allow(clippy::unused_self)]
     fn mark_join_table_candidates(&self, nodes: &mut [LayoutNode], edges: &[LayoutEdge]) {
@@ -575,33 +638,40 @@ impl LayoutGraphBuilder {
                 continue;
             }
 
-            // A join table typically has:
-            // - Exactly 2 outbound FKs
-            // - No or few inbound FKs
-            // - Columns are mostly FK columns + maybe a PK
-
             let outbound_fks: Vec<_> = edges
                 .iter()
                 .filter(|e| e.from == node.id && !e.is_self_loop && e.kind == EdgeKind::ForeignKey)
                 .collect();
 
-            if outbound_fks.len() == 2 && node.inbound_count == 0 {
-                // Check if most columns are part of FKs
-                let fk_columns: BTreeSet<&str> = outbound_fks
-                    .iter()
-                    .flat_map(|e| e.from_columns.iter().map(String::as_str))
-                    .collect();
+            if outbound_fks.len() != 2 {
+                continue;
+            }
 
-                let fk_column_count = node
-                    .columns
-                    .iter()
-                    .filter(|c| fk_columns.contains(c.name.as_str()))
-                    .count();
+            let target_tables: BTreeSet<&str> =
+                outbound_fks.iter().map(|e| e.to.as_str()).collect();
+            if target_tables.len() != 2 {
+                continue;
+            }
 
-                // If at least 2 columns are FK columns, mark as join table candidate
-                if fk_column_count >= 2 {
-                    candidates.push(idx);
-                }
+            let fk_columns: BTreeSet<&str> = outbound_fks
+                .iter()
+                .flat_map(|e| e.from_columns.iter().map(String::as_str))
+                .collect();
+
+            let fk_column_count = node
+                .columns
+                .iter()
+                .filter(|c| fk_columns.contains(c.name.as_str()))
+                .count();
+            if fk_column_count < 2 {
+                continue;
+            }
+
+            if node.columns.iter().all(|column| {
+                fk_columns.contains(column.name.as_str())
+                    || Self::is_join_table_metadata_column(column)
+            }) {
+                candidates.push(idx);
             }
         }
 
@@ -916,6 +986,64 @@ mod tests {
     }
 
     #[test]
+    fn test_ambiguous_enum_reference_is_skipped() {
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "accounts".to_string(),
+                schema_name: None,
+                name: "accounts".to_string(),
+                columns: vec![
+                    Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    },
+                    Column {
+                        id: ColumnId(2),
+                        name: "status".to_string(),
+                        data_type: "status".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    },
+                ],
+                foreign_keys: vec![],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![],
+            enums: vec![
+                Enum {
+                    id: "public.status".to_string(),
+                    schema_name: Some("public".to_string()),
+                    name: "status".to_string(),
+                    values: vec!["active".to_string()],
+                },
+                Enum {
+                    id: "auth.status".to_string(),
+                    schema_name: Some("auth".to_string()),
+                    name: "status".to_string(),
+                    values: vec!["pending".to_string()],
+                },
+            ],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+
+        assert_eq!(graph.nodes.len(), 3);
+        assert!(
+            graph
+                .edges
+                .iter()
+                .all(|edge| edge.kind != EdgeKind::EnumReference)
+        );
+    }
+
+    #[test]
     fn test_collapse_join_tables_option() {
         // Test that collapse_join_tables defaults to false
         let request = LayoutRequest::default();
@@ -1077,6 +1205,142 @@ mod collapse_tests {
         let roles = graph.nodes.iter().find(|n| n.id == "roles").unwrap();
         assert!(!users.is_join_table_candidate);
         assert!(!roles.is_join_table_candidate);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn test_join_table_detection_allows_metadata_and_inbound_edges() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "roles".to_string(),
+                    schema_name: None,
+                    name: "roles".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(3),
+                    stable_id: "user_roles".to_string(),
+                    schema_name: None,
+                    name: "user_roles".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(3),
+                            name: "id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: true,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(4),
+                            name: "user_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(5),
+                            name: "role_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(6),
+                            name: "created_at".to_string(),
+                            data_type: "timestamp".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![
+                        ForeignKey {
+                            name: Some("fk_user_roles_user".to_string()),
+                            from_columns: vec!["user_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_user_roles_role".to_string()),
+                            from_columns: vec!["role_id".to_string()],
+                            to_schema: None,
+                            to_table: "roles".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                    ],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(4),
+                    stable_id: "audit_logs".to_string(),
+                    schema_name: None,
+                    name: "audit_logs".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(7),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: Some("fk_audit_logs_user_roles".to_string()),
+                        from_columns: vec!["id".to_string()],
+                        to_schema: None,
+                        to_table: "user_roles".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let user_roles = graph.nodes.iter().find(|n| n.id == "user_roles").unwrap();
+        assert!(user_roles.is_join_table_candidate);
     }
 
     #[test]

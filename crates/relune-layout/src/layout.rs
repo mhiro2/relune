@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{Level, debug, info, span};
+use tracing::{Level, debug, info, span, warn};
 
 use relune_core::{EdgeKind, LayoutAlgorithm, LayoutDirection, LayoutSpec, NodeKind, Schema};
 
@@ -745,11 +745,25 @@ fn position_groups(
     groups
         .iter()
         .map(|group| {
+            let mut invalid_indices = Vec::new();
             let group_nodes: Vec<&PositionedNode> = group
                 .node_indices
                 .iter()
-                .filter_map(|&idx| positioned_nodes.get(idx))
+                .filter_map(|&idx| {
+                    positioned_nodes.get(idx).or_else(|| {
+                        invalid_indices.push(idx);
+                        None
+                    })
+                })
                 .collect();
+
+            if !invalid_indices.is_empty() {
+                warn!(
+                    group = %group.id,
+                    invalid_indices = ?invalid_indices,
+                    "Skipping invalid group node indices"
+                );
+            }
 
             if group_nodes.is_empty() {
                 return PositionedGroup {

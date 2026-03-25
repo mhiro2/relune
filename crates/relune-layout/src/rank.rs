@@ -6,6 +6,7 @@
 use std::collections::VecDeque;
 
 use crate::graph::LayoutGraph;
+use tracing::warn;
 
 /// Strategy for rank assignment.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -36,6 +37,8 @@ pub struct RankAssignment {
 /// ensuring that edges generally point downward (or in the layout direction).
 #[must_use]
 pub fn assign_ranks(graph: &LayoutGraph, strategy: RankAssignmentStrategy) -> RankAssignment {
+    warn_if_cycles(graph);
+
     match strategy {
         RankAssignmentStrategy::Topological => assign_ranks_topological(graph),
         RankAssignmentStrategy::LongestPath => assign_ranks_longest_path(graph),
@@ -44,6 +47,65 @@ pub fn assign_ranks(graph: &LayoutGraph, strategy: RankAssignmentStrategy) -> Ra
             assign_ranks_longest_path(graph)
         }
     }
+}
+
+fn warn_if_cycles(graph: &LayoutGraph) {
+    let cycle_nodes = detect_cycle_nodes(graph);
+    if cycle_nodes.is_empty() {
+        return;
+    }
+
+    warn!(
+        count = cycle_nodes.len(),
+        nodes = ?cycle_nodes,
+        "Cycle detected; rank assignment will keep remaining nodes in a fallback order"
+    );
+}
+
+fn detect_cycle_nodes(graph: &LayoutGraph) -> Vec<String> {
+    let n = graph.nodes.len();
+    let mut in_degree = vec![0usize; n];
+    let mut adjacency = vec![Vec::new(); n];
+
+    for edge in &graph.edges {
+        if edge.is_self_loop {
+            continue;
+        }
+        if let (Some(&from_idx), Some(&to_idx)) = (
+            graph.node_index.get(&edge.from),
+            graph.node_index.get(&edge.to),
+        ) {
+            adjacency[from_idx].push(to_idx);
+            in_degree[to_idx] += 1;
+        }
+    }
+
+    let mut queue = VecDeque::new();
+    for (idx, &degree) in in_degree.iter().enumerate() {
+        if degree == 0 {
+            queue.push_back(idx);
+        }
+    }
+
+    let mut processed = 0usize;
+    while let Some(idx) = queue.pop_front() {
+        processed += 1;
+        for &neighbor in &adjacency[idx] {
+            in_degree[neighbor] -= 1;
+            if in_degree[neighbor] == 0 {
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    if processed == n {
+        return Vec::new();
+    }
+
+    (0..n)
+        .filter(|&idx| in_degree[idx] > 0)
+        .map(|idx| graph.nodes[idx].id.clone())
+        .collect()
 }
 
 fn assign_ranks_topological(graph: &LayoutGraph) -> RankAssignment {
@@ -100,8 +162,6 @@ fn assign_ranks_topological(graph: &LayoutGraph) -> RankAssignment {
     if processed < n {
         for idx in 0..n {
             if node_rank[idx] == 0 && in_degree[idx] > 0 {
-                // This node is part of a cycle
-                // Assign it to rank 0 and let it be handled by ordering
                 node_rank[idx] = 0;
             }
         }
@@ -317,5 +377,71 @@ mod tests {
         let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
 
         assert_eq!(ranks.num_ranks, 3);
+    }
+
+    #[test]
+    fn test_detect_cycle_nodes() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "a".to_string(),
+                    schema_name: None,
+                    name: "a".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["b_id".to_string()],
+                        to_schema: None,
+                        to_table: "b".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "b".to_string(),
+                    schema_name: None,
+                    name: "b".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["a_id".to_string()],
+                        to_schema: None,
+                        to_table: "a".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        assert_eq!(
+            detect_cycle_nodes(&graph),
+            vec!["a".to_string(), "b".to_string()]
+        );
     }
 }

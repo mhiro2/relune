@@ -3,7 +3,7 @@
 //! This module implements algorithms for ordering nodes within each layer
 //! to minimize edge crossings and improve readability.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::graph::LayoutGraph;
 use crate::rank::RankAssignment;
@@ -416,53 +416,41 @@ fn order_by_sifting(
     adjacency: &BTreeMap<usize, Vec<usize>>,
     _is_forward: bool,
 ) -> Vec<usize> {
-    if layer_nodes.len() <= 1 {
+    if layer_nodes.len() <= 1 || layer_nodes.len() > SIFTING_NODE_LIMIT {
         return layer_nodes.to_vec();
     }
 
-    // Skip expensive sifting for very large layers
-    if layer_nodes.len() > SIFTING_NODE_LIMIT {
-        return layer_nodes.to_vec();
-    }
-
-    // Create position map for adjacent layer
-    let adj_position: BTreeMap<usize, usize> = adjacent_layer
+    let adj_position: HashMap<usize, usize> = adjacent_layer
         .iter()
         .enumerate()
         .map(|(pos, &idx)| (idx, pos))
         .collect();
 
     let mut ordering = layer_nodes.to_vec();
-    let initial_crossings = count_layer_crossings(&ordering, &adj_position, adjacency);
-
-    // If already zero crossings, no improvement possible
-    if initial_crossings == 0 {
+    if count_layer_crossings(&ordering, &adj_position, adjacency) == 0 {
         return ordering;
     }
 
-    // Sifting: for each node, find its best position
     for i in 0..ordering.len() {
         let node = ordering[i];
+        let mut reduced_ordering = ordering.clone();
+        reduced_ordering.remove(i);
+
+        let node_targets = collect_target_positions(node, adjacency, &adj_position);
+        let other_edges = collect_layer_edges(&reduced_ordering, adjacency, &adj_position);
+
         let mut best_pos = i;
         let mut best_crossings = usize::MAX;
 
-        // Try placing node at each position
-        for try_pos in 0..ordering.len() {
-            // Create temporary ordering
-            let mut temp_ordering = ordering.clone();
-            temp_ordering.remove(i);
-            temp_ordering.insert(try_pos, node);
+        for try_pos in 0..=reduced_ordering.len() {
+            let crossings = count_inserted_node_crossings(&node_targets, &other_edges, try_pos);
 
-            // Count local crossings for this layer
-            let crossings = count_layer_crossings(&temp_ordering, &adj_position, adjacency);
-
-            if crossings < best_crossings {
+            if crossings < best_crossings || (crossings == best_crossings && try_pos < best_pos) {
                 best_crossings = crossings;
                 best_pos = try_pos;
             }
         }
 
-        // Move node to best position
         if best_pos != i {
             ordering.remove(i);
             ordering.insert(best_pos, node);
@@ -476,7 +464,7 @@ fn order_by_sifting(
 #[allow(clippy::map_unwrap_or)]
 fn count_layer_crossings(
     layer_nodes: &[usize],
-    adj_position: &BTreeMap<usize, usize>,
+    adj_position: &HashMap<usize, usize>,
     adjacency: &BTreeMap<usize, Vec<usize>>,
 ) -> usize {
     // Build edge list with positions
@@ -509,53 +497,50 @@ fn count_layer_crossings(
 }
 
 /// Apply global sifting across all layers.
-#[allow(clippy::items_after_statements)]
 #[allow(clippy::assigning_clones)]
 fn apply_global_sifting(nodes_by_rank: &mut [Vec<usize>], adjacency: &BTreeMap<usize, Vec<usize>>) {
     if nodes_by_rank.is_empty() {
         return;
     }
 
-    // Build position map
-    fn build_position(nodes_by_rank: &[Vec<usize>]) -> BTreeMap<usize, (usize, usize)> {
-        let mut pos = BTreeMap::new();
-        for (rank, nodes) in nodes_by_rank.iter().enumerate() {
-            for (col, &node) in nodes.iter().enumerate() {
-                pos.insert(node, (rank, col));
-            }
-        }
-        pos
-    }
-
-    // Multiple sifting passes
     for _ in 0..2 {
         for rank_idx in 0..nodes_by_rank.len() {
-            let layer_nodes = nodes_by_rank[rank_idx].clone();
+            let mut ordering = nodes_by_rank[rank_idx].clone();
+            let prev_positions = rank_idx
+                .checked_sub(1)
+                .map(|prev| build_position_index(&nodes_by_rank[prev]));
+            let next_positions = (rank_idx + 1 < nodes_by_rank.len())
+                .then(|| build_position_index(&nodes_by_rank[rank_idx + 1]));
 
-            for i in 0..layer_nodes.len() {
-                let node = layer_nodes[i];
+            for i in 0..ordering.len() {
+                let node = ordering[i];
+                let mut reduced_ordering = ordering.clone();
+                reduced_ordering.remove(i);
+
+                let node_prev_targets = prev_positions.as_ref().map_or_else(Vec::new, |pos| {
+                    collect_target_positions(node, adjacency, pos)
+                });
+                let node_next_targets = next_positions.as_ref().map_or_else(Vec::new, |pos| {
+                    collect_target_positions(node, adjacency, pos)
+                });
+                let prev_edges = prev_positions.as_ref().map_or_else(Vec::new, |pos| {
+                    collect_layer_edges(&reduced_ordering, adjacency, pos)
+                });
+                let next_edges = next_positions.as_ref().map_or_else(Vec::new, |pos| {
+                    collect_layer_edges(&reduced_ordering, adjacency, pos)
+                });
+
                 let mut best_pos = i;
                 let mut best_crossings = usize::MAX;
 
-                for try_pos in 0..layer_nodes.len() {
-                    // Create temporary ordering
-                    let mut temp_ordering = nodes_by_rank[rank_idx].clone();
-                    temp_ordering.remove(i);
-                    temp_ordering.insert(try_pos, node);
-
-                    // Build position map with temporary ordering
-                    let mut temp_nodes_by_rank = nodes_by_rank.to_vec();
-                    temp_nodes_by_rank[rank_idx] = temp_ordering.clone();
-                    let position = build_position(&temp_nodes_by_rank);
-
-                    // Count crossings for this layer and adjacent layers
-                    let crossings = count_global_crossings_for_rank(
-                        &temp_ordering,
-                        rank_idx,
-                        &temp_nodes_by_rank,
-                        adjacency,
-                        &position,
-                    );
+                for try_pos in 0..=reduced_ordering.len() {
+                    let crossings =
+                        count_inserted_node_crossings(&node_prev_targets, &prev_edges, try_pos)
+                            + count_inserted_node_crossings(
+                                &node_next_targets,
+                                &next_edges,
+                                try_pos,
+                            );
 
                     if crossings < best_crossings
                         || (crossings == best_crossings && try_pos < best_pos)
@@ -566,78 +551,79 @@ fn apply_global_sifting(nodes_by_rank: &mut [Vec<usize>], adjacency: &BTreeMap<u
                 }
 
                 if best_pos != i {
-                    nodes_by_rank[rank_idx].remove(i);
-                    nodes_by_rank[rank_idx].insert(best_pos, node);
+                    ordering.remove(i);
+                    ordering.insert(best_pos, node);
                 }
             }
+
+            nodes_by_rank[rank_idx] = ordering;
         }
     }
 }
 
-/// Count crossings involving a specific rank.
-#[allow(clippy::map_unwrap_or)]
-fn count_global_crossings_for_rank(
-    layer_nodes: &[usize],
-    rank_idx: usize,
-    nodes_by_rank: &[Vec<usize>],
+fn build_position_index(nodes: &[usize]) -> HashMap<usize, usize> {
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(pos, &idx)| (idx, pos))
+        .collect()
+}
+
+fn collect_target_positions(
+    node_idx: usize,
     adjacency: &BTreeMap<usize, Vec<usize>>,
-    position: &BTreeMap<usize, (usize, usize)>,
+    target_positions: &HashMap<usize, usize>,
+) -> Vec<usize> {
+    adjacency
+        .get(&node_idx)
+        .map_or_else(|| &[] as &[usize], Vec::as_slice)
+        .iter()
+        .filter_map(|&neighbor| target_positions.get(&neighbor).copied())
+        .collect()
+}
+
+fn collect_layer_edges(
+    ordering: &[usize],
+    adjacency: &BTreeMap<usize, Vec<usize>>,
+    adjacent_positions: &HashMap<usize, usize>,
+) -> Vec<(usize, usize)> {
+    ordering
+        .iter()
+        .enumerate()
+        .flat_map(|(src_pos, &node_idx)| {
+            adjacency
+                .get(&node_idx)
+                .map_or_else(|| &[] as &[usize], Vec::as_slice)
+                .iter()
+                .filter_map(move |&neighbor| {
+                    adjacent_positions
+                        .get(&neighbor)
+                        .copied()
+                        .map(|dst_pos| (src_pos, dst_pos))
+                })
+        })
+        .collect()
+}
+
+fn count_inserted_node_crossings(
+    node_targets: &[usize],
+    other_edges: &[(usize, usize)],
+    insert_pos: usize,
 ) -> usize {
     let mut crossings = 0;
 
-    // Build position maps for adjacent layers
-    let get_col = |node: usize| -> usize { position.get(&node).map(|&(_, col)| col).unwrap_or(0) };
+    for &(base_src, other_target) in other_edges {
+        let other_src = if base_src >= insert_pos {
+            base_src + 1
+        } else {
+            base_src
+        };
 
-    // Count crossings with previous layer
-    if rank_idx > 0 {
-        let prev_layer = &nodes_by_rank[rank_idx - 1];
-        let edges: Vec<(usize, usize)> = layer_nodes
-            .iter()
-            .enumerate()
-            .flat_map(|(col, &node_idx)| {
-                let neighbors = adjacency.get(&node_idx).map(Vec::as_slice).unwrap_or(&[]);
-                neighbors
-                    .iter()
-                    .filter(|&&n| prev_layer.contains(&n))
-                    .map(|&n| (col, get_col(n)))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-
-        for i in 0..edges.len() {
-            for j in (i + 1)..edges.len() {
-                if (edges[i].0 < edges[j].0 && edges[i].1 > edges[j].1)
-                    || (edges[i].0 > edges[j].0 && edges[i].1 < edges[j].1)
-                {
-                    crossings += 1;
-                }
-            }
-        }
-    }
-
-    // Count crossings with next layer
-    if rank_idx + 1 < nodes_by_rank.len() {
-        let next_layer = &nodes_by_rank[rank_idx + 1];
-        let edges: Vec<(usize, usize)> = layer_nodes
-            .iter()
-            .enumerate()
-            .flat_map(|(col, &node_idx)| {
-                let neighbors = adjacency.get(&node_idx).map(Vec::as_slice).unwrap_or(&[]);
-                neighbors
-                    .iter()
-                    .filter(|&&n| next_layer.contains(&n))
-                    .map(|&n| (col, get_col(n)))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-
-        for i in 0..edges.len() {
-            for j in (i + 1)..edges.len() {
-                if (edges[i].0 < edges[j].0 && edges[i].1 > edges[j].1)
-                    || (edges[i].0 > edges[j].0 && edges[i].1 < edges[j].1)
-                {
-                    crossings += 1;
-                }
+        for &node_target in node_targets {
+            if (insert_pos < other_src && node_target > other_target)
+                || (insert_pos > other_src && node_target < other_target)
+            {
+                crossings += 1;
             }
         }
     }
