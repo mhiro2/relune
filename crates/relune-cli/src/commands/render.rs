@@ -100,6 +100,7 @@ pub fn run_render(
     writer
         .write(&result.content)
         .context("Failed to write output")?;
+    writer.finish().context("Failed to finalize output")?;
 
     // Print stats if requested (from merged config)
     if merged.show_stats {

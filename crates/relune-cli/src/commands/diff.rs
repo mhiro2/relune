@@ -69,6 +69,7 @@ pub fn run_diff(
     let mut writer =
         OutputWriter::new(args.out.as_deref(), color).context("Failed to create output writer")?;
     writer.write(&content).context("Failed to write output")?;
+    writer.finish().context("Failed to finalize output")?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {

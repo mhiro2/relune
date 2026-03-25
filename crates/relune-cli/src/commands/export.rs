@@ -84,6 +84,7 @@ pub fn run_export(
     writer
         .write(&result.content)
         .context("Failed to write output")?;
+    writer.finish().context("Failed to finalize output")?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {

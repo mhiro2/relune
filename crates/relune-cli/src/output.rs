@@ -4,12 +4,16 @@
 //! colored output, and diagnostic formatting.
 
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::cli::ColorWhen;
 use relune_core::{Diagnostic, Severity};
 
 /// Output writer that handles both file and stdout output.
+///
+/// File output uses a temporary file in the same directory as the target,
+/// then atomically renames on completion. This prevents partial writes from
+/// corrupting existing output files on failure or interruption.
 pub struct OutputWriter {
     /// The output destination.
     destination: OutputDestination,
@@ -17,19 +21,27 @@ pub struct OutputWriter {
 
 enum OutputDestination {
     Stdout,
-    File(std::fs::File),
+    TempFile {
+        file: tempfile::NamedTempFile,
+        final_path: PathBuf,
+    },
 }
 
 impl OutputWriter {
     /// Create a new output writer.
     ///
     /// If `path` is `None`, writes to stdout.
-    /// If `path` is `Some`, writes to the specified file.
+    /// If `path` is `Some`, writes to a temporary file that will be atomically
+    /// renamed to the target path when [`finish`] is called.
     pub fn new(path: Option<&Path>, _color: ColorWhen) -> io::Result<Self> {
         let destination = match path {
             Some(p) => {
-                let file = std::fs::File::create(p)?;
-                OutputDestination::File(file)
+                let dir = p.parent().unwrap_or_else(|| Path::new("."));
+                let file = tempfile::NamedTempFile::new_in(dir)?;
+                OutputDestination::TempFile {
+                    file,
+                    final_path: p.to_path_buf(),
+                }
             }
             None => OutputDestination::Stdout,
         };
@@ -44,9 +56,23 @@ impl OutputWriter {
                 print!("{content}");
                 io::stdout().flush()
             }
-            OutputDestination::File(file) => {
+            OutputDestination::TempFile { file, .. } => {
                 write!(file, "{content}")?;
                 file.flush()
+            }
+        }
+    }
+
+    /// Finalize file output by atomically renaming the temp file to the target path.
+    ///
+    /// For stdout output, this is a no-op.
+    /// Must be called after all writes are complete to persist the output file.
+    pub fn finish(self) -> io::Result<()> {
+        match self.destination {
+            OutputDestination::Stdout => Ok(()),
+            OutputDestination::TempFile { file, final_path } => {
+                file.persist(&final_path).map_err(|e| e.error)?;
+                Ok(())
             }
         }
     }
