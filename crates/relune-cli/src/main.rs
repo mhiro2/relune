@@ -9,11 +9,13 @@ use clap::Parser;
 mod cli;
 mod commands;
 mod config;
+mod doctor;
 mod output;
 
 use cli::{Cli, Command};
 use commands::{run_diff, run_export, run_inspect, run_lint, run_render};
 use config::ReluneConfig;
+use doctor::run_doctor;
 
 fn main() -> ExitCode {
     // Parse command line arguments
@@ -70,20 +72,9 @@ fn run_command(cli: Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run the doctor command.
-fn run_doctor() {
-    println!("relune doctor: ok");
-    println!("- cli: loaded");
-    println!("- parser: wired");
-    println!("- renderer: wired");
-    println!("- app: wired");
-    println!(
-        "- wasm target: expected via cargo build -p relune-wasm --target wasm32-unknown-unknown"
-    );
-}
-
 /// Setup logging based on verbosity and quiet flags.
 fn setup_logging(verbose: u8, quiet: bool) {
+    use tracing_subscriber::fmt::format::FmtSpan;
     use tracing_subscriber::{EnvFilter, fmt};
 
     let filter = if quiet {
@@ -97,9 +88,16 @@ fn setup_logging(verbose: u8, quiet: bool) {
         }
     };
 
+    let span_events = if verbose >= 3 {
+        FmtSpan::NEW | FmtSpan::CLOSE
+    } else {
+        FmtSpan::NONE
+    };
+
     let _ = fmt()
         .with_env_filter(filter)
-        .with_target(false)
+        .with_span_events(span_events)
+        .with_target(verbose >= 2)
         .without_time()
         .try_init();
 }

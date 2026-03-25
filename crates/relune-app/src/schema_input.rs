@@ -2,6 +2,7 @@
 
 use relune_core::{Diagnostic, Schema};
 use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
+use tracing::info;
 
 use crate::error::AppError;
 use crate::request::InputSource;
@@ -13,6 +14,13 @@ pub(crate) fn schema_from_input(
     match input {
         InputSource::SqlText { sql, dialect } => {
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, *dialect);
+            info!(
+                requested_dialect = %dialect,
+                resolved_dialect = %output.dialect,
+                diagnostics = output.diagnostics.len(),
+                tables = output.schema.as_ref().map_or(0, |schema| schema.tables.len()),
+                "parsed SQL text input"
+            );
             match output.schema {
                 Some(schema) => Ok((schema, output.diagnostics)),
                 None => Err(AppError::input("Failed to parse SQL: no schema produced")),
@@ -21,6 +29,14 @@ pub(crate) fn schema_from_input(
         InputSource::SqlFile { path, dialect } => {
             let sql = std::fs::read_to_string(path)?;
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, *dialect);
+            info!(
+                path = %path.display(),
+                requested_dialect = %dialect,
+                resolved_dialect = %output.dialect,
+                diagnostics = output.diagnostics.len(),
+                tables = output.schema.as_ref().map_or(0, |schema| schema.tables.len()),
+                "parsed SQL file input"
+            );
             match output.schema {
                 Some(schema) => Ok((schema, output.diagnostics)),
                 None => Err(AppError::input("Failed to parse SQL: no schema produced")),

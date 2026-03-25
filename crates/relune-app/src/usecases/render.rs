@@ -8,7 +8,7 @@ use relune_layout::{
 };
 use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
 use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg};
-use tracing::{debug, info_span};
+use tracing::{debug, info, info_span};
 
 use crate::error::AppError;
 use crate::request::{OutputFormat, RenderOptions, RenderRequest, RenderTheme};
@@ -20,6 +20,15 @@ use crate::schema_input::schema_from_input;
 pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     let _total_span = info_span!("render_pipeline").entered();
     let _total_start = Instant::now();
+    debug!(
+        output_format = ?request.output_format,
+        focus = ?request.focus,
+        filter = ?request.filter,
+        grouping = ?request.grouping,
+        layout = ?request.layout,
+        options = ?request.options,
+        "accepted render request"
+    );
 
     // Step 1: Parse input
     let parse_start = Instant::now();
@@ -86,6 +95,17 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
 
     let render_stats =
         RenderStats::from_schema_stats(&stats, parse_time, graph_time, layout_time, render_time);
+    info!(
+        output_format = ?request.output_format,
+        tables = render_stats.table_count,
+        columns = render_stats.column_count,
+        diagnostics = diagnostics.len(),
+        parse_ms = parse_time.as_millis(),
+        graph_ms = graph_time.as_millis(),
+        layout_ms = layout_time.as_millis(),
+        render_ms = render_time.as_millis(),
+        "render complete"
+    );
 
     Ok(RenderResult {
         content,

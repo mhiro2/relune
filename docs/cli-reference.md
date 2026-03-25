@@ -6,7 +6,7 @@ Global options (before the subcommand):
 |--------|-------------|
 | `-c`, `--config <FILE>` | Optional TOML config; merges with flags (see [Configuration](configuration.md)) |
 | `--color auto\|always\|never` | Terminal styling |
-| `-v`, `--verbose` | More log output (repeatable) |
+| `-v`, `--verbose` | More log output (repeatable: `-v` info, `-vv` debug, `-vvv` trace with span events) |
 | `-q`, `--quiet` | Less non-error output |
 
 Every command requires **at least one input** (except `doctor`). Typical inputs:
@@ -148,7 +148,7 @@ relune --config relune.toml diff --before old.sql --after new.sql
 
 ## `doctor`
 
-Prints basic diagnostics (version / wiring check).
+Reports runtime-visible capabilities of the current binary, such as supported input modes and whether live DB introspection is compiled in.
 
 ```bash
 relune doctor

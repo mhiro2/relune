@@ -65,6 +65,22 @@ pub use relune_core::{
     LayoutSpec, RouteStyle,
 };
 
+/// Returns whether live database introspection support is compiled in.
+#[must_use]
+pub const fn introspection_enabled() -> bool {
+    cfg!(feature = "introspect")
+}
+
+/// Returns the live database backends supported by the current build.
+#[must_use]
+pub const fn supported_introspection_backends() -> &'static [&'static str] {
+    if cfg!(feature = "introspect") {
+        &["postgres", "mysql", "mariadb", "sqlite"]
+    } else {
+        &[]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

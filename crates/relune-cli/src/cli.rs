@@ -62,7 +62,7 @@ pub enum Command {
     /// Compare two schemas and show differences.
     Diff(DiffArgs),
 
-    /// Print version and workspace wiring diagnostics.
+    /// Check local toolchain prerequisites and compiled feature support.
     Doctor,
 }
 

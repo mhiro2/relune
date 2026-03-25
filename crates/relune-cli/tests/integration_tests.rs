@@ -5,22 +5,21 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Output;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use relune_testkit::{config_fixture_path, normalize_workspace_paths, sql_fixture_path};
 
 fn relune() -> Command {
     Command::cargo_bin("relune").expect("Failed to find relune binary")
 }
 
 fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    sql_fixture_path("simple_blog.sql")
         .parent()
         .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures")
-        .join("sql")
+        .to_path_buf()
 }
 
 fn simple_blog_fixture() -> PathBuf {
@@ -32,13 +31,18 @@ fn ecommerce_fixture() -> PathBuf {
 }
 
 fn config_fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    config_fixture_path("valid_full.toml")
         .parent()
         .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures")
-        .join("config")
+        .to_path_buf()
+}
+
+fn failure_snapshot(name: &str, output: &Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+    let stderr = normalize_workspace_paths(stderr.trim_end());
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    insta::assert_snapshot!(name, format!("exit_code: {exit_code}\nstderr:\n{stderr}"));
 }
 
 // ============================================================================
@@ -260,20 +264,24 @@ mod render_tests {
 
     #[test]
     fn render_missing_input_fails() {
-        let mut cmd = relune();
-        // The command should fail when no input is provided
-        // Exit code 2 indicates invalid arguments
-        cmd.arg("render").assert().failure().code(2);
+        let output = relune().arg("render").output().expect("command should run");
+        assert!(!output.status.success(), "render without input should fail");
+        failure_snapshot("render_missing_input", &output);
     }
 
     #[test]
     fn render_nonexistent_file_fails() {
-        let mut cmd = relune();
-        cmd.arg("render")
+        let output = relune()
+            .arg("render")
             .arg("--sql")
             .arg("/nonexistent/path/file.sql")
-            .assert()
-            .failure();
+            .output()
+            .expect("command should run");
+        assert!(
+            !output.status.success(),
+            "render with missing file should fail"
+        );
+        failure_snapshot("render_nonexistent_file", &output);
     }
 
     #[test]
@@ -631,40 +639,35 @@ mod config_validation_tests {
 
     #[test]
     fn config_typo_fails_fast() {
-        let temp = tempfile::tempdir().expect("Failed to create temp dir");
-        let config_path = temp.path().join("relune.toml");
-
-        fs::write(&config_path, "[render]\ntehme = \"dark\"\n").unwrap();
-
-        let mut cmd = relune();
-        cmd.arg("--config")
-            .arg(&config_path)
+        let output = relune()
+            .arg("--config")
+            .arg(config_fixture_path("unknown_nested_key.toml"))
             .arg("render")
             .arg("--sql")
             .arg(simple_blog_fixture())
-            .assert()
-            .failure()
-            .code(2)
-            .stderr(predicate::str::contains("unknown field `tehme`"));
+            .output()
+            .expect("command should run");
+
+        assert!(
+            !output.status.success(),
+            "invalid nested config should fail"
+        );
+        failure_snapshot("config_unknown_nested_key", &output);
     }
 
     #[test]
     fn config_unknown_root_key_fails_fast() {
-        let temp = tempfile::tempdir().expect("Failed to create temp dir");
-        let config_path = temp.path().join("relune.toml");
-
-        fs::write(&config_path, "unknown_field = true\n").unwrap();
-
-        let mut cmd = relune();
-        cmd.arg("--config")
-            .arg(&config_path)
+        let output = relune()
+            .arg("--config")
+            .arg(config_fixture_path("unknown_root_key.toml"))
             .arg("render")
             .arg("--sql")
             .arg(simple_blog_fixture())
-            .assert()
-            .failure()
-            .code(2)
-            .stderr(predicate::str::contains("unknown field `unknown_field`"));
+            .output()
+            .expect("command should run");
+
+        assert!(!output.status.success(), "invalid root config should fail");
+        failure_snapshot("config_unknown_root_key", &output);
     }
 }
 
@@ -682,8 +685,16 @@ mod doctor_tests {
 
         let stdout = String::from_utf8_lossy(&output.get_output().stdout);
         assert!(
-            stdout.contains("ok") || stdout.contains("wired"),
-            "Doctor should report status"
+            stdout.contains("relune doctor:"),
+            "doctor should print overall status"
+        );
+        assert!(
+            stdout.contains("introspect:"),
+            "doctor should report feature status"
+        );
+        assert!(
+            stdout.contains("inputs:"),
+            "doctor should report supported input capabilities"
         );
     }
 }
@@ -709,14 +720,24 @@ mod global_flag_tests {
 
     #[test]
     fn verbose_flag_increases_output() {
-        let mut cmd = relune();
-        cmd.arg("-v")
+        let output = relune()
+            .arg("-v")
             .arg("render")
             .arg("--sql")
             .arg(simple_blog_fixture())
-            .assert()
-            .success();
-        // Verbose should produce more log output
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "verbose render should succeed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("parsed SQL file input"),
+            "verbose output should include parse details"
+        );
+        assert!(
+            stderr.contains("render complete"),
+            "verbose output should include render completion details"
+        );
     }
 
     #[test]
@@ -744,13 +765,15 @@ mod error_tests {
     fn broken_sql_fails_gracefully() {
         let broken_fixture = fixtures_dir().join("broken_input.sql");
 
-        let mut cmd = relune();
-        // broken_input.sql contains severe syntax errors that should cause failure
-        cmd.arg("render")
+        let output = relune()
+            .arg("render")
             .arg("--sql")
             .arg(&broken_fixture)
-            .assert()
-            .failure();
+            .output()
+            .expect("command should run");
+
+        assert!(!output.status.success(), "broken SQL should fail");
+        failure_snapshot("render_broken_sql", &output);
     }
 
     #[test]

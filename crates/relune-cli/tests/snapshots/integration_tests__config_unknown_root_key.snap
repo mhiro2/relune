@@ -1,0 +1,11 @@
+---
+source: crates/relune-cli/tests/integration_tests.rs
+expression: format!("exit_code: {exit_code}\nstderr:\n{stderr}")
+---
+exit_code: 2
+stderr:
+Error: Failed to load config file '$WORKSPACE/fixtures/config/unknown_root_key.toml': Failed to parse config file: TOML parse error at line 1, column 1
+  |
+1 | unknown_field = true
+  | ^^^^^^^^^^^^^
+unknown field `unknown_field`, expected one of `render`, `inspect`, `export`, `lint`, `diff`

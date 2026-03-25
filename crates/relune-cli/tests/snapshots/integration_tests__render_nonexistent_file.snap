@@ -1,0 +1,7 @@
+---
+source: crates/relune-cli/tests/integration_tests.rs
+expression: format!("exit_code: {exit_code}\nstderr:\n{stderr}")
+---
+exit_code: 2
+stderr:
+Error: Failed to read SQL file: /nonexistent/path/file.sql
