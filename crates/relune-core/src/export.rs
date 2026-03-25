@@ -243,6 +243,64 @@ fn import_index(export: &IndexExport) -> Index {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{ColumnId, ReferentialAction, TableId};
+
+    fn roundtrip_schema(schema: &Schema) -> SchemaExport {
+        let exported = export_schema(schema);
+        let imported = import_schema(&exported);
+        export_schema(&imported)
+    }
+
+    fn make_column(id: u64, name: &str, data_type: &str, primary_key: bool) -> Column {
+        Column {
+            id: ColumnId(id),
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            nullable: false,
+            is_primary_key: primary_key,
+            comment: None,
+        }
+    }
+
+    fn make_table(
+        id: u64,
+        stable_id: &str,
+        schema_name: Option<&str>,
+        name: &str,
+        columns: Vec<Column>,
+        foreign_keys: Vec<ForeignKey>,
+    ) -> Table {
+        Table {
+            id: TableId(id),
+            stable_id: stable_id.to_string(),
+            schema_name: schema_name.map(ToString::to_string),
+            name: name.to_string(),
+            columns,
+            foreign_keys,
+            indexes: vec![],
+            comment: None,
+        }
+    }
+
+    fn make_fk(
+        name: &str,
+        from_columns: &[&str],
+        to_schema: Option<&str>,
+        to_table: &str,
+        to_columns: &[&str],
+        on_delete: ReferentialAction,
+        on_update: ReferentialAction,
+    ) -> ForeignKey {
+        ForeignKey {
+            name: Some(name.to_string()),
+            from_columns: from_columns.iter().map(ToString::to_string).collect(),
+            to_schema: to_schema.map(ToString::to_string),
+            to_table: to_table.to_string(),
+            to_columns: to_columns.iter().map(ToString::to_string).collect(),
+            on_delete,
+            on_update,
+        }
+    }
 
     #[test]
     fn test_schema_export_roundtrip() {
@@ -281,5 +339,123 @@ mod tests {
     fn test_export_version() {
         let export = SchemaExport::new(vec![]);
         assert_eq!(export.version, "1.0.0");
+    }
+
+    #[test]
+    fn test_export_import_roundtrip_empty_schema() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![],
+        };
+
+        assert_eq!(roundtrip_schema(&schema), export_schema(&schema));
+    }
+
+    #[test]
+    fn test_export_import_roundtrip_schema_qualified_tables() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "public.users",
+                    Some("public"),
+                    "users",
+                    vec![make_column(1, "id", "bigint", true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "audit.users",
+                    Some("audit"),
+                    "users",
+                    vec![make_column(1, "id", "bigint", true)],
+                    vec![],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let export = roundtrip_schema(&schema);
+        assert_eq!(export.tables.len(), 2);
+        assert_eq!(export.tables[0].schema.as_deref(), Some("public"));
+        assert_eq!(export.tables[1].schema.as_deref(), Some("audit"));
+        assert_eq!(export.tables[0].id, "public.users");
+        assert_eq!(export.tables[1].id, "audit.users");
+    }
+
+    #[test]
+    fn test_export_import_roundtrip_referential_actions() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "public.accounts",
+                    Some("public"),
+                    "accounts",
+                    vec![make_column(1, "id", "uuid", true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "public.sessions",
+                    Some("public"),
+                    "sessions",
+                    vec![
+                        make_column(1, "id", "uuid", true),
+                        make_column(2, "account_id", "uuid", false),
+                    ],
+                    vec![make_fk(
+                        "fk_sessions_account",
+                        &["account_id"],
+                        Some("public"),
+                        "accounts",
+                        &["id"],
+                        ReferentialAction::Cascade,
+                        ReferentialAction::SetNull,
+                    )],
+                ),
+                make_table(
+                    3,
+                    "public.audit_logs",
+                    Some("public"),
+                    "audit_logs",
+                    vec![
+                        make_column(1, "id", "uuid", true),
+                        make_column(2, "session_id", "uuid", false),
+                    ],
+                    vec![make_fk(
+                        "fk_audit_logs_session",
+                        &["session_id"],
+                        Some("public"),
+                        "sessions",
+                        &["id"],
+                        ReferentialAction::Restrict,
+                        ReferentialAction::SetDefault,
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let export = roundtrip_schema(&schema);
+        assert_eq!(
+            export.tables[1].foreign_keys[0].on_delete.as_deref(),
+            Some("CASCADE")
+        );
+        assert_eq!(
+            export.tables[1].foreign_keys[0].on_update.as_deref(),
+            Some("SET NULL")
+        );
+        assert_eq!(
+            export.tables[2].foreign_keys[0].on_delete.as_deref(),
+            Some("RESTRICT")
+        );
+        assert_eq!(
+            export.tables[2].foreign_keys[0].on_update.as_deref(),
+            Some("SET DEFAULT")
+        );
     }
 }

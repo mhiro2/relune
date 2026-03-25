@@ -15,11 +15,12 @@ use relune_core::{
     SourceSpan, SqlDialect, Table, TableId, View, normalize_identifier,
 };
 use sqlparser::ast::{
-    AlterTableOperation, ColumnOption, CreateIndex, ObjectName, ObjectNamePart, Statement,
+    AlterTableOperation, ColumnOption, CreateIndex, ObjectName, ObjectNamePart, Spanned, Statement,
     TableConstraint, UserDefinedTypeRepresentation,
 };
-use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
+use sqlparser::tokenizer::{Location, Span as SqlSpan, Token, Tokenizer};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -147,10 +148,99 @@ impl WithSpanOpt for Diagnostic {
 
 /// Detect the SQL dialect from the content of the SQL string.
 ///
-/// Uses heuristics to identify `MySQL` and `SQLite`-specific constructs.
-/// Falls back to `PostgreSQL` if no dialect-specific markers are found.
+/// Uses token-based heuristics so comments and string literals do not skew the
+/// result. Falls back to `PostgreSQL` if no dialect-specific markers are found.
 #[must_use]
 pub fn detect_dialect(input: &str) -> SqlDialect {
+    match Tokenizer::new(&GenericDialect {}, input).tokenize() {
+        Ok(tokens) => detect_dialect_from_tokens(&tokens),
+        Err(_) => detect_dialect_from_source(input),
+    }
+}
+
+fn detect_dialect_from_tokens(tokens: &[Token]) -> SqlDialect {
+    let significant_tokens = significant_tokens(tokens);
+
+    let mysql_score = score_dialect_signals(&[
+        (
+            significant_tokens
+                .iter()
+                .any(|token| is_backtick_identifier(token)),
+            2,
+        ),
+        (contains_word(&significant_tokens, "AUTO_INCREMENT"), 4),
+        (contains_word(&significant_tokens, "UNSIGNED"), 3),
+        (
+            contains_word_sequence(&significant_tokens, &["DEFAULT", "CHARSET"])
+                || contains_word_sequence(&significant_tokens, &["CHARACTER", "SET"]),
+            3,
+        ),
+        (contains_word(&significant_tokens, "COLLATE"), 2),
+        (contains_word(&significant_tokens, "FULLTEXT"), 2),
+        (
+            contains_word_sequence(&significant_tokens, &["ON", "UPDATE", "CURRENT_TIMESTAMP"]),
+            3,
+        ),
+    ]);
+
+    let sqlite_score = score_dialect_signals(&[
+        (contains_word(&significant_tokens, "AUTOINCREMENT"), 4),
+        (
+            contains_word_sequence(&significant_tokens, &["WITHOUT", "ROWID"]),
+            4,
+        ),
+        (contains_word(&significant_tokens, "PRAGMA"), 4),
+        (
+            contains_word_sequence(&significant_tokens, &["INTEGER", "PRIMARY", "KEY"])
+                && !contains_word(&significant_tokens, "AUTO_INCREMENT"),
+            3,
+        ),
+        (contains_word(&significant_tokens, "STRICT"), 2),
+    ]);
+
+    let pg_score = score_dialect_signals(&[
+        (
+            contains_word_sequence(&significant_tokens, &["CREATE", "TYPE"])
+                && contains_word_sequence(&significant_tokens, &["AS", "ENUM"]),
+            4,
+        ),
+        (
+            contains_word(&significant_tokens, "SERIAL")
+                || contains_word(&significant_tokens, "BIGSERIAL"),
+            3,
+        ),
+        (
+            contains_word_sequence(&significant_tokens, &["COMMENT", "ON"]),
+            4,
+        ),
+        (
+            contains_word_sequence(&significant_tokens, &["CREATE", "EXTENSION"]),
+            4,
+        ),
+        (
+            contains_word_sequence(&significant_tokens, &["CREATE", "SEQUENCE"]),
+            4,
+        ),
+        (
+            significant_tokens
+                .iter()
+                .any(|token| matches!(token, Token::DoubleColon)),
+            3,
+        ),
+        (contains_word(&significant_tokens, "RETURNING"), 2),
+        (contains_word(&significant_tokens, "ILIKE"), 2),
+    ]);
+
+    if mysql_score > sqlite_score && mysql_score > pg_score {
+        SqlDialect::Mysql
+    } else if sqlite_score > mysql_score && sqlite_score > pg_score {
+        SqlDialect::Sqlite
+    } else {
+        SqlDialect::Postgres
+    }
+}
+
+fn detect_dialect_from_source(input: &str) -> SqlDialect {
     let upper = input.to_uppercase();
 
     let mysql_score = score_dialect_signals(&[
@@ -201,6 +291,38 @@ pub fn detect_dialect(input: &str) -> SqlDialect {
     }
 }
 
+fn significant_tokens(tokens: &[Token]) -> Vec<&Token> {
+    tokens
+        .iter()
+        .filter(|token| !matches!(token, Token::Whitespace(_)))
+        .collect()
+}
+
+fn contains_word(tokens: &[&Token], expected: &str) -> bool {
+    tokens.iter().copied().any(|token| is_word(token, expected))
+}
+
+fn contains_word_sequence(tokens: &[&Token], sequence: &[&str]) -> bool {
+    if sequence.is_empty() || tokens.len() < sequence.len() {
+        return false;
+    }
+
+    tokens.windows(sequence.len()).any(|window| {
+        window
+            .iter()
+            .zip(sequence)
+            .all(|(token, expected)| is_word(token, expected))
+    })
+}
+
+fn is_word(token: &Token, expected: &str) -> bool {
+    matches!(token, Token::Word(word) if word.value.eq_ignore_ascii_case(expected))
+}
+
+fn is_backtick_identifier(token: &Token) -> bool {
+    matches!(token, Token::Word(word) if word.quote_style == Some('`'))
+}
+
 fn score_dialect_signals(signals: &[(bool, u8)]) -> u32 {
     signals
         .iter()
@@ -223,6 +345,72 @@ fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
         SqlDialect::Mysql => Box::new(MySqlDialect {}),
         SqlDialect::Sqlite => Box::new(SQLiteDialect {}),
     }
+}
+
+fn source_span_from_sql_span(input: &str, span: SqlSpan) -> Option<SourceSpan> {
+    let start = location_to_offset(input, span.start)?;
+    let end = location_to_offset(input, span.end)?;
+    let length = end.saturating_sub(start).max(1);
+    Some(SourceSpan::new(start, length))
+}
+
+fn location_to_offset(input: &str, location: Location) -> Option<usize> {
+    if location.line == 0 || location.column == 0 {
+        return None;
+    }
+
+    let target_line = usize::try_from(location.line).ok()?;
+    let target_column = usize::try_from(location.column).ok()?;
+    let mut line = 1usize;
+    let mut column = 1usize;
+
+    for (byte_offset, ch) in input.char_indices() {
+        if line == target_line && column == target_column {
+            return Some(byte_offset);
+        }
+
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+
+    if line == target_line && column == target_column {
+        Some(input.len())
+    } else {
+        None
+    }
+}
+
+fn span_from_spanned<T: Spanned>(input: &str, value: &T) -> Option<SourceSpan> {
+    let span = value.span();
+    if span == SqlSpan::empty() {
+        None
+    } else {
+        source_span_from_sql_span(input, span)
+    }
+}
+
+fn span_from_ident(input: &str, ident: &sqlparser::ast::Ident) -> Option<SourceSpan> {
+    source_span_from_sql_span(input, ident.span)
+}
+
+fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
+    match schema_name {
+        Some(schema_name) => format!(
+            "{}.{}",
+            normalize_identifier(schema_name),
+            normalize_identifier(name)
+        ),
+        None => normalize_identifier(name),
+    }
+}
+
+fn normalized_stable_id_for_object_name(name: &ObjectName) -> String {
+    let (schema_name, object_name) = split_object_name(name);
+    normalized_stable_id(schema_name.as_deref(), &object_name)
 }
 
 /// Parse SQL into a Schema, returning an error on fatal parse failures.
@@ -296,10 +484,13 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     for statement in &statements {
         match statement {
             Statement::CreateTable(create) => {
-                if let Some(table) = parse_create_table(&mut ctx, create) {
+                if let Some(table) = parse_create_table(&mut ctx, input, create) {
                     let stable_id = table.stable_id.clone();
                     if ctx.seen_tables.contains(&stable_id) {
-                        ctx.warn_duplicate_table(&stable_id, None);
+                        ctx.warn_duplicate_table(
+                            &stable_id,
+                            source_span_from_sql_span(input, create.span()),
+                        );
                     } else {
                         ctx.seen_tables.insert(stable_id.clone());
                         let idx = tables.len();
@@ -316,11 +507,14 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                     let enum_def = parse_create_type_enum(name, labels);
                     enums.push(enum_def);
                 } else {
-                    ctx.warn_unsupported("CREATE TYPE (non-enum)", None);
+                    ctx.warn_unsupported(
+                        "CREATE TYPE (non-enum)",
+                        source_span_from_sql_span(input, statement.span()),
+                    );
                 }
             }
             Statement::CreateIndex(create_index) => {
-                parse_create_index(&mut ctx, create_index, &mut tables, &table_map);
+                parse_create_index(&mut ctx, input, create_index, &mut tables, &table_map);
             }
             Statement::Comment {
                 object_type,
@@ -330,6 +524,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             } => {
                 parse_comment(
                     &mut ctx,
+                    input,
                     *object_type,
                     object_name,
                     comment.as_ref(),
@@ -347,6 +542,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             Statement::AlterTable(alter_table) => {
                 apply_alter_table_operations(
                     &mut ctx,
+                    input,
                     &mut tables,
                     &mut table_map,
                     &alter_table.name,
@@ -375,23 +571,38 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 ctx.info_skipped("SELECT");
             }
             Statement::CreateFunction { .. } => {
-                ctx.warn_unsupported("CREATE FUNCTION", None);
+                ctx.warn_unsupported(
+                    "CREATE FUNCTION",
+                    source_span_from_sql_span(input, statement.span()),
+                );
             }
             Statement::CreateTrigger { .. } => {
-                ctx.warn_unsupported("CREATE TRIGGER", None);
+                ctx.warn_unsupported(
+                    "CREATE TRIGGER",
+                    source_span_from_sql_span(input, statement.span()),
+                );
             }
             Statement::CreateSequence { .. } => {
-                ctx.warn_unsupported("CREATE SEQUENCE", None);
+                ctx.warn_unsupported(
+                    "CREATE SEQUENCE",
+                    source_span_from_sql_span(input, statement.span()),
+                );
             }
             Statement::CreateExtension { .. } => {
-                ctx.warn_unsupported("CREATE EXTENSION", None);
+                ctx.warn_unsupported(
+                    "CREATE EXTENSION",
+                    source_span_from_sql_span(input, statement.span()),
+                );
             }
             Statement::Drop { .. } => {
-                ctx.warn_unsupported("DROP", None);
+                ctx.warn_unsupported("DROP", source_span_from_sql_span(input, statement.span()));
             }
             _ => {
                 // Generic unsupported statement
-                ctx.warn_unsupported(&format!("{statement:?}"), None);
+                ctx.warn_unsupported(
+                    &format!("{statement:?}"),
+                    source_span_from_sql_span(input, statement.span()),
+                );
             }
         }
     }
@@ -427,13 +638,11 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
 #[allow(clippy::unnecessary_wraps)]
 fn parse_create_table(
     ctx: &mut ParseContext,
+    input: &str,
     create: &sqlparser::ast::CreateTable,
 ) -> Option<Table> {
     let (schema_name, name) = split_object_name(&create.name);
-    let stable_id = match &schema_name {
-        Some(s) => format!("{s}.{name}"),
-        None => name.clone(),
-    };
+    let stable_id = normalized_stable_id(schema_name.as_deref(), &name);
 
     let table_id = ctx.next_table_id();
 
@@ -570,7 +779,10 @@ fn parse_create_table(
                 // Check constraints and Index constraints are informational only
             }
             TableConstraint::FulltextOrSpatial(_) => {
-                ctx.warn_unsupported("FULLTEXT/SPATIAL constraint", None);
+                ctx.warn_unsupported(
+                    "FULLTEXT/SPATIAL constraint",
+                    span_from_spanned(input, constraint),
+                );
             }
         }
     }
@@ -610,27 +822,23 @@ fn extract_column_name(index_col: &sqlparser::ast::IndexColumn) -> String {
 /// Parse a CREATE INDEX statement and attach it to the appropriate table.
 fn parse_create_index(
     ctx: &mut ParseContext,
+    input: &str,
     create_index: &CreateIndex,
     tables: &mut [Table],
     table_map: &std::collections::HashMap<String, usize>,
 ) {
     // Get the table name
-    let (schema_name, table_name) = split_object_name(&create_index.table_name);
-    let stable_id = match &schema_name {
-        Some(s) => format!(
-            "{}.{}",
-            normalize_identifier(s),
-            normalize_identifier(&table_name)
-        ),
-        None => normalize_identifier(&table_name),
-    };
+    let stable_id = normalized_stable_id_for_object_name(&create_index.table_name);
 
     // Find the table
     let Some(&table_idx) = table_map.get(&stable_id) else {
-        ctx.diagnostics.push(Diagnostic::warning(
-            codes::schema_unknown_table(),
-            format!("CREATE INDEX references unknown table: {stable_id}"),
-        ));
+        ctx.diagnostics.push(
+            Diagnostic::warning(
+                codes::schema_unknown_table(),
+                format!("CREATE INDEX references unknown table: {stable_id}"),
+            )
+            .with_span_opt(span_from_spanned(input, create_index)),
+        );
         return;
     };
 
@@ -662,6 +870,7 @@ fn parse_create_index(
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn parse_comment(
     ctx: &mut ParseContext,
+    input: &str,
     object_type: sqlparser::ast::CommentObject,
     object_name: &ObjectName,
     comment: Option<&String>,
@@ -675,23 +884,18 @@ fn parse_comment(
 
     match object_type {
         sqlparser::ast::CommentObject::Table => {
-            let (schema_name, table_name) = split_object_name(object_name);
-            let stable_id = match &schema_name {
-                Some(s) => format!(
-                    "{}.{}",
-                    normalize_identifier(s),
-                    normalize_identifier(&table_name)
-                ),
-                None => normalize_identifier(&table_name),
-            };
+            let stable_id = normalized_stable_id_for_object_name(object_name);
 
             if let Some(&table_idx) = table_map.get(&stable_id) {
                 tables[table_idx].comment = Some(comment_text);
             } else {
-                ctx.diagnostics.push(Diagnostic::warning(
-                    codes::schema_unknown_table(),
-                    format!("COMMENT ON TABLE references unknown table: {stable_id}"),
-                ));
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::schema_unknown_table(),
+                        format!("COMMENT ON TABLE references unknown table: {stable_id}"),
+                    )
+                    .with_span_opt(span_from_spanned(input, object_name)),
+                );
             }
         }
         sqlparser::ast::CommentObject::Column => {
@@ -704,10 +908,13 @@ fn parse_comment(
 
             // Extract column name (last part) and table name (remaining parts)
             if parts.len() < 2 {
-                ctx.diagnostics.push(Diagnostic::warning(
-                    codes::parse_unsupported(),
-                    "Invalid COMMENT ON COLUMN syntax: expected table.column".to_string(),
-                ));
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::parse_unsupported(),
+                        "Invalid COMMENT ON COLUMN syntax: expected table.column".to_string(),
+                    )
+                    .with_span_opt(span_from_spanned(input, object_name)),
+                );
                 return;
             }
 
@@ -716,16 +923,15 @@ fn parse_comment(
 
             let stable_id = match table_parts {
                 [table] => normalize_identifier(table),
-                [schema, table] => format!(
-                    "{}.{}",
-                    normalize_identifier(schema),
-                    normalize_identifier(table)
-                ),
+                [schema, table] => normalized_stable_id(Some(schema), table),
                 _ => {
-                    ctx.diagnostics.push(Diagnostic::warning(
-                        codes::parse_unsupported(),
-                        format!("Invalid COMMENT ON COLUMN syntax: {}", parts.join(".")),
-                    ));
+                    ctx.diagnostics.push(
+                        Diagnostic::warning(
+                            codes::parse_unsupported(),
+                            format!("Invalid COMMENT ON COLUMN syntax: {}", parts.join(".")),
+                        )
+                        .with_span_opt(span_from_spanned(input, object_name)),
+                    );
                     return;
                 }
             };
@@ -743,34 +949,38 @@ fn parse_comment(
                         format!(
                             "COMMENT ON COLUMN references unknown column: {stable_id}.{column_name}"
                         ),
-                    ));
+                    )
+                    .with_span_opt(span_from_spanned(input, object_name)));
                 }
             } else {
-                ctx.diagnostics.push(Diagnostic::warning(
-                    codes::schema_unknown_table(),
-                    format!("COMMENT ON COLUMN references unknown table: {stable_id}"),
-                ));
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::schema_unknown_table(),
+                        format!("COMMENT ON COLUMN references unknown table: {stable_id}"),
+                    )
+                    .with_span_opt(span_from_spanned(input, object_name)),
+                );
             }
         }
         _ => {
             // Other comment types (view, function, etc.) are not supported
-            ctx.warn_unsupported(&format!("COMMENT ON {object_type:?}"), None);
+            ctx.warn_unsupported(
+                &format!("COMMENT ON {object_type:?}"),
+                span_from_spanned(input, object_name),
+            );
         }
     }
 }
 
 /// Build `stable_id` the same way as [`parse_create_table`] so `ALTER TABLE` resolves targets.
 fn stable_id_for_alter_target(table_name: &ObjectName) -> String {
-    let (schema_name, name) = split_object_name(table_name);
-    match schema_name {
-        Some(s) => format!("{s}.{name}"),
-        None => name,
-    }
+    normalized_stable_id_for_object_name(table_name)
 }
 
 #[allow(clippy::too_many_lines)]
 fn apply_alter_table_operations(
     ctx: &mut ParseContext,
+    input: &str,
     tables: &mut [Table],
     table_map: &mut HashMap<String, usize>,
     table_name: &ObjectName,
@@ -778,21 +988,25 @@ fn apply_alter_table_operations(
 ) {
     let stable_id = stable_id_for_alter_target(table_name);
     let Some(&idx) = table_map.get(&stable_id) else {
-        ctx.diagnostics.push(Diagnostic::warning(
-            codes::schema_unknown_table(),
-            format!("ALTER TABLE references unknown table: {stable_id}"),
-        ));
+        ctx.diagnostics.push(
+            Diagnostic::warning(
+                codes::schema_unknown_table(),
+                format!("ALTER TABLE references unknown table: {stable_id}"),
+            )
+            .with_span_opt(span_from_spanned(input, table_name)),
+        );
         return;
     };
 
     for op in operations {
-        apply_single_alter_operation(ctx, tables, table_map, idx, op);
+        apply_single_alter_operation(ctx, input, tables, table_map, idx, op);
     }
 }
 
 #[allow(clippy::too_many_lines)]
 fn apply_single_alter_operation(
     ctx: &mut ParseContext,
+    input: &str,
     tables: &mut [Table],
     table_map: &mut HashMap<String, usize>,
     idx: usize,
@@ -804,7 +1018,7 @@ fn apply_single_alter_operation(
             if_not_exists,
             ..
         } => {
-            add_column_from_alter(ctx, &mut tables[idx], column_def, *if_not_exists);
+            add_column_from_alter(ctx, input, &mut tables[idx], column_def, *if_not_exists);
         }
         AlterTableOperation::DropColumn {
             column_names,
@@ -825,17 +1039,20 @@ fn apply_single_alter_operation(
                         ix.columns.retain(|c| *c != col_name);
                     }
                 } else if !if_exists {
-                    ctx.diagnostics.push(Diagnostic::warning(
-                        codes::schema_unknown_column(),
-                        format!(
-                            "ALTER TABLE DROP COLUMN: unknown column `{col_name}` on `{stable}`"
-                        ),
-                    ));
+                    ctx.diagnostics.push(
+                        Diagnostic::warning(
+                            codes::schema_unknown_column(),
+                            format!(
+                                "ALTER TABLE DROP COLUMN: unknown column `{col_name}` on `{stable}`"
+                            ),
+                        )
+                        .with_span_opt(span_from_ident(input, ident)),
+                    );
                 }
             }
         }
         AlterTableOperation::AddConstraint { constraint, .. } => {
-            apply_add_table_constraint(ctx, &mut tables[idx], constraint);
+            apply_add_table_constraint(ctx, input, &mut tables[idx], constraint);
         }
         AlterTableOperation::DropConstraint {
             if_exists, name, ..
@@ -861,7 +1078,8 @@ fn apply_single_alter_operation(
                     format!(
                         "ALTER TABLE DROP CONSTRAINT: no constraint named `{cname}` on `{stable}`"
                     ),
-                ));
+                )
+                .with_span_opt(span_from_ident(input, name)));
             }
         }
         AlterTableOperation::RenameColumn {
@@ -889,10 +1107,13 @@ fn apply_single_alter_operation(
                     }
                 }
             } else {
-                ctx.diagnostics.push(Diagnostic::warning(
-                    codes::schema_unknown_column(),
-                    format!("ALTER TABLE RENAME COLUMN: unknown `{old}` on `{stable}`"),
-                ));
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::schema_unknown_column(),
+                        format!("ALTER TABLE RENAME COLUMN: unknown `{old}` on `{stable}`"),
+                    )
+                    .with_span_opt(span_from_ident(input, old_column_name)),
+                );
             }
         }
         AlterTableOperation::RenameTable {
@@ -904,10 +1125,7 @@ fn apply_single_alter_operation(
                 | sqlparser::ast::RenameTableNameKind::To(name) => name,
             };
             let (new_schema_raw, new_name_raw) = split_object_name(renamed_target);
-            let renamed_stable_id = match &new_schema_raw {
-                Some(s) => format!("{s}.{new_name_raw}"),
-                None => new_name_raw.clone(),
-            };
+            let renamed_stable_id = normalized_stable_id(new_schema_raw.as_deref(), &new_name_raw);
             let table = &mut tables[idx];
             table.schema_name = new_schema_raw.map(|s| normalize_identifier(&s));
             table.name = normalize_identifier(&new_name_raw);
@@ -929,10 +1147,13 @@ fn apply_single_alter_operation(
                 fk.name.as_ref().map(|n| normalize_identifier(n)) != Some(sym.clone())
             });
             if table.foreign_keys.len() == before {
-                ctx.diagnostics.push(Diagnostic::warning(
-                    codes::parse_unsupported(),
-                    format!("ALTER TABLE DROP FOREIGN KEY: no FK named `{sym}` on `{stable}`"),
-                ));
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::parse_unsupported(),
+                        format!("ALTER TABLE DROP FOREIGN KEY: no FK named `{sym}` on `{stable}`"),
+                    )
+                    .with_span_opt(span_from_ident(input, name)),
+                );
             }
         }
         AlterTableOperation::DropIndex { name } => {
@@ -944,16 +1165,19 @@ fn apply_single_alter_operation(
                 ix.name.as_ref().map(|nm| normalize_identifier(nm)) != Some(n.clone())
             });
             if table.indexes.len() == before {
-                ctx.diagnostics.push(Diagnostic::warning(
-                    codes::parse_unsupported(),
-                    format!("ALTER TABLE DROP INDEX: no index named `{n}` on `{stable}`"),
-                ));
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::parse_unsupported(),
+                        format!("ALTER TABLE DROP INDEX: no index named `{n}` on `{stable}`"),
+                    )
+                    .with_span_opt(span_from_ident(input, name)),
+                );
             }
         }
         other => {
             ctx.warn_unsupported(
                 &format!("ALTER TABLE operation (unsupported): {other:?}"),
-                None,
+                span_from_spanned(input, op),
             );
         }
     }
@@ -1007,6 +1231,7 @@ fn column_from_column_def_body(column: &sqlparser::ast::ColumnDef) -> Column {
 
 fn add_column_from_alter(
     ctx: &mut ParseContext,
+    input: &str,
     table: &mut Table,
     column_def: &sqlparser::ast::ColumnDef,
     if_not_exists: bool,
@@ -1014,13 +1239,16 @@ fn add_column_from_alter(
     let col_name = normalize_identifier(&column_def.name.value);
     if table.columns.iter().any(|c| c.name == col_name) {
         if !if_not_exists {
-            ctx.diagnostics.push(Diagnostic::warning(
-                codes::parse_unsupported(),
-                format!(
-                    "ALTER TABLE ADD COLUMN: duplicate column `{col_name}` on `{}`",
-                    table.stable_id
-                ),
-            ));
+            ctx.diagnostics.push(
+                Diagnostic::warning(
+                    codes::parse_unsupported(),
+                    format!(
+                        "ALTER TABLE ADD COLUMN: duplicate column `{col_name}` on `{}`",
+                        table.stable_id
+                    ),
+                )
+                .with_span_opt(span_from_spanned(input, column_def)),
+            );
         }
         return;
     }
@@ -1058,6 +1286,7 @@ fn add_column_from_alter(
 
 fn apply_add_table_constraint(
     ctx: &mut ParseContext,
+    input: &str,
     table: &mut Table,
     constraint: &TableConstraint,
 ) {
@@ -1111,7 +1340,10 @@ fn apply_add_table_constraint(
         }
         TableConstraint::Check(_) | TableConstraint::Index(_) => {}
         TableConstraint::FulltextOrSpatial(_) => {
-            ctx.warn_unsupported("FULLTEXT/SPATIAL constraint", None);
+            ctx.warn_unsupported(
+                "FULLTEXT/SPATIAL constraint",
+                span_from_spanned(input, constraint),
+            );
         }
     }
 }
@@ -1121,10 +1353,7 @@ fn parse_create_type_enum(name: &ObjectName, labels: &[sqlparser::ast::Ident]) -
     let (schema_name, type_name) = split_object_name(name);
 
     // Generate a stable ID for the enum
-    let id = match &schema_name {
-        Some(s) => format!("{s}.{type_name}"),
-        None => type_name.clone(),
-    };
+    let id = normalized_stable_id(schema_name.as_deref(), &type_name);
 
     // Extract enum values
     let values: Vec<String> = labels.iter().map(|l| l.value.clone()).collect();
@@ -1151,10 +1380,7 @@ fn parse_create_view(
     let (schema_name, view_name) = split_object_name(name);
 
     // Generate a stable ID for the view
-    let id = match &schema_name {
-        Some(s) => format!("{s}.{view_name}"),
-        None => view_name.clone(),
-    };
+    let id = normalized_stable_id(schema_name.as_deref(), &view_name);
 
     // Get the query definition as a string
     let definition = query.to_string();
@@ -1437,6 +1663,26 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_stable_ids_for_lookups() {
+        let sql = r"
+        CREATE TABLE Public.Users (
+          id BIGINT PRIMARY KEY
+        );
+
+        CREATE INDEX idx_users_id ON public.users (id);
+        COMMENT ON TABLE PUBLIC.USERS IS 'User accounts';
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let table = &schema.tables[0];
+
+        assert_eq!(table.stable_id, "public.users");
+        assert_eq!(table.comment, Some("User accounts".to_string()));
+        assert_eq!(table.indexes.len(), 1);
+        assert_eq!(table.indexes[0].name, Some("idx_users_id".to_string()));
+    }
+
+    #[test]
     fn handles_table_level_primary_key() {
         let sql = r"
         CREATE TABLE order_items (
@@ -1537,6 +1783,14 @@ mod tests {
                 .filter(|d| d.code == codes::schema_duplicate_table())
                 .count(),
             1
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .find(|d| d.code == codes::schema_duplicate_table())
+                .and_then(|d| d.span)
+                .is_some()
         );
     }
 
@@ -1689,6 +1943,22 @@ mod tests {
 
         // Should have warning about unknown table
         assert!(output.has_warnings());
+    }
+
+    #[test]
+    fn unknown_table_warnings_include_spans() {
+        let sql = r"
+        CREATE INDEX idx_missing ON nonexistent_table (id);
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let warning = output
+            .diagnostics
+            .iter()
+            .find(|d| d.code == codes::schema_unknown_table())
+            .expect("warning should exist");
+
+        assert!(warning.span.is_some());
     }
 
     #[test]
@@ -2059,6 +2329,19 @@ mod tests {
             );
         ";
         // Generic SQL should default to Postgres
+        assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
+    }
+
+    #[test]
+    fn test_detect_dialect_ignores_comment_markers() {
+        let sql = r"
+            -- ENGINE=InnoDB AUTO_INCREMENT
+            /* PRAGMA foreign_keys = ON */
+            CREATE TABLE users (
+                id INT PRIMARY KEY
+            );
+        ";
+
         assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
     }
 
