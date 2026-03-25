@@ -45,16 +45,34 @@ pub(crate) fn schema_from_input(
 
 #[cfg(feature = "introspect")]
 fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::input("Database URL is empty"));
+    // If we're already inside a Tokio runtime, use it directly via
+    // spawn_blocking → block_in_place fallback instead of creating a
+    // second runtime (which would panic).
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        return tokio::task::block_in_place(|| handle.block_on(schema_from_db_url_async(url)));
     }
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|e| AppError::Other(format!("Failed to start async runtime: {e}")))?
-        .block_on(relune_introspect::introspect_database(trimmed))
+        .block_on(schema_from_db_url_async(url))
+}
+
+/// Async version of database introspection.
+///
+/// Use this when you already have a Tokio runtime (e.g. in a server or
+/// worker context). The synchronous [`schema_from_input`] calls this
+/// internally and creates a runtime only when one is not already active.
+#[cfg(feature = "introspect")]
+pub async fn schema_from_db_url_async(url: &str) -> Result<Schema, AppError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::input("Database URL is empty"));
+    }
+
+    relune_introspect::introspect_database(trimmed)
+        .await
         .map_err(AppError::from)
 }
 
