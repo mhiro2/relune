@@ -3,6 +3,7 @@
 //! Provides builder patterns for constructing test fixtures and
 //! utility functions for test assertions.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use relune_core::{
@@ -111,10 +112,35 @@ impl SchemaBuilder {
     /// Builds the schema.
     #[must_use]
     pub fn build(self) -> Schema {
+        validate_foreign_key_targets(&self.tables);
         Schema {
             tables: self.tables,
             views: self.views,
             enums: self.enums,
+        }
+    }
+}
+
+fn validate_foreign_key_targets(tables: &[Table]) {
+    let qualified_names: HashSet<&str> = tables
+        .iter()
+        .map(|table| table.stable_id.as_str())
+        .collect();
+    let unqualified_names: HashSet<&str> = tables.iter().map(|table| table.name.as_str()).collect();
+
+    for table in tables {
+        for foreign_key in &table.foreign_keys {
+            let target_exists = if foreign_key.to_table.contains('.') {
+                qualified_names.contains(foreign_key.to_table.as_str())
+            } else {
+                unqualified_names.contains(foreign_key.to_table.as_str())
+            };
+
+            assert!(
+                target_exists,
+                "foreign key from '{}' references unknown table '{}'",
+                table.name, foreign_key.to_table
+            );
         }
     }
 }
@@ -298,5 +324,17 @@ mod tests {
         assert_eq!(schema.tables.len(), 1);
         assert_eq!(schema.enums.len(), 1);
         assert_eq!(schema.enums[0].values, vec!["active", "inactive"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "references unknown table 'accounts'")]
+    fn test_schema_builder_rejects_unknown_foreign_key_target() {
+        let _ = SchemaBuilder::new()
+            .table("posts", |t| {
+                t.pk("id", "int")
+                    .column("author_id", "int")
+                    .fk("accounts", &["author_id"], &["id"])
+            })
+            .build();
     }
 }
