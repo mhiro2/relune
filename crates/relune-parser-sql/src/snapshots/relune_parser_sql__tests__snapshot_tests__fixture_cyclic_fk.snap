@@ -1,9 +1,11 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-expression: snapshot_data
+assertion_line: 1859
+expression: snapshot_data(&output)
 ---
 {
   "diagnostics": [],
+  "dialect": "postgres",
   "schema": {
     "enums": [],
     "tables": [

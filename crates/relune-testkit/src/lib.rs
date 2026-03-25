@@ -3,6 +3,8 @@
 //! Provides builder patterns for constructing test fixtures and
 //! utility functions for test assertions.
 
+use std::path::PathBuf;
+
 use relune_core::{
     Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, Table, TableId, View,
 };
@@ -14,6 +16,42 @@ pub fn normalize_svg(svg: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Returns the workspace root for repository fixtures.
+#[must_use]
+pub fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root should be resolvable from relune-testkit")
+        .to_path_buf()
+}
+
+/// Returns the path to a SQL fixture in `fixtures/sql`.
+#[must_use]
+pub fn sql_fixture_path(name: &str) -> PathBuf {
+    workspace_root().join("fixtures").join("sql").join(name)
+}
+
+/// Loads a SQL fixture from `fixtures/sql`.
+#[must_use]
+pub fn read_sql_fixture(name: &str) -> String {
+    std::fs::read_to_string(sql_fixture_path(name))
+        .unwrap_or_else(|err| panic!("failed to read SQL fixture {name}: {err}"))
+}
+
+/// Returns the path to a config fixture in `fixtures/config`.
+#[must_use]
+pub fn config_fixture_path(name: &str) -> PathBuf {
+    workspace_root().join("fixtures").join("config").join(name)
+}
+
+/// Normalizes absolute workspace paths for stable snapshots.
+#[must_use]
+pub fn normalize_workspace_paths(text: &str) -> String {
+    let root = workspace_root().display().to_string();
+    text.replace(&root, "$WORKSPACE")
 }
 
 /// Builder for constructing [`Schema`] test fixtures.

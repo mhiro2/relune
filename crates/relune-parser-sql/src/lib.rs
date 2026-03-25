@@ -41,6 +41,8 @@ pub enum ParseError {
 /// Output from parsing SQL with diagnostics support.
 #[derive(Debug, Clone)]
 pub struct ParseOutput {
+    /// The resolved SQL dialect used for parsing.
+    pub dialect: SqlDialect,
     /// The parsed schema, if parsing succeeded (may be partial).
     pub schema: Option<Schema>,
     /// Diagnostics collected during parsing.
@@ -151,55 +153,59 @@ impl WithSpanOpt for Diagnostic {
 pub fn detect_dialect(input: &str) -> SqlDialect {
     let upper = input.to_uppercase();
 
-    // MySQL indicators
-    let mysql_score = [
-        upper.contains("ENGINE=") || upper.contains("ENGINE ="),
-        upper.contains("AUTO_INCREMENT"),
-        upper.contains("UNSIGNED"),
-        upper.contains("ENUM(") || upper.contains("ENUM ("),
-        upper.contains("FULLTEXT"),
-        input.contains('`'),
-        upper.contains("DEFAULT CHARSET") || upper.contains("CHARACTER SET"),
-        upper.contains("IF NOT EXISTS") && upper.contains("ENGINE"),
-    ]
-    .iter()
-    .filter(|&&b| b)
-    .count();
+    let mysql_score = score_dialect_signals(&[
+        (upper.contains("ENGINE=") || upper.contains("ENGINE ="), 4),
+        (upper.contains("AUTO_INCREMENT"), 4),
+        (upper.contains("UNSIGNED"), 3),
+        (
+            upper.contains("DEFAULT CHARSET") || upper.contains("CHARACTER SET"),
+            3,
+        ),
+        (upper.contains("COLLATE=") || upper.contains("COLLATE "), 2),
+        (upper.contains("FULLTEXT"), 2),
+        (upper.contains("ON UPDATE CURRENT_TIMESTAMP"), 3),
+        (input.contains('`'), 2),
+    ]);
 
-    // SQLite indicators
-    let sqlite_score = [
-        upper.contains("AUTOINCREMENT"),
-        upper.contains("WITHOUT ROWID"),
-        upper.contains("INTEGER PRIMARY KEY") && !upper.contains("AUTO_INCREMENT"),
-        upper.contains("PRAGMA"),
-        upper.contains("IF NOT EXISTS") && !upper.contains("ENGINE"),
-        // SQLite doesn't support schema-qualified names with dots in CREATE TABLE
-    ]
-    .iter()
-    .filter(|&&b| b)
-    .count();
+    let sqlite_score = score_dialect_signals(&[
+        (upper.contains("AUTOINCREMENT"), 4),
+        (upper.contains("WITHOUT ROWID"), 4),
+        (upper.contains("PRAGMA"), 4),
+        (
+            upper.contains("INTEGER PRIMARY KEY") && !upper.contains("AUTO_INCREMENT"),
+            3,
+        ),
+        (upper.contains("STRICT"), 2),
+    ]);
 
-    // PostgreSQL indicators
-    let pg_score = [
-        upper.contains("CREATE TYPE") && upper.contains("AS ENUM"),
-        upper.contains("SERIAL") || upper.contains("BIGSERIAL"),
-        upper.contains("COMMENT ON"),
-        upper.contains("CREATE EXTENSION"),
-        upper.contains("CREATE SEQUENCE"),
-        upper.contains("::"),
-        upper.contains("RETURNING"),
-    ]
-    .iter()
-    .filter(|&&b| b)
-    .count();
+    let pg_score = score_dialect_signals(&[
+        (
+            upper.contains("CREATE TYPE") && upper.contains("AS ENUM"),
+            4,
+        ),
+        (upper.contains("SERIAL") || upper.contains("BIGSERIAL"), 3),
+        (upper.contains("COMMENT ON"), 4),
+        (upper.contains("CREATE EXTENSION"), 4),
+        (upper.contains("CREATE SEQUENCE"), 4),
+        (upper.contains("::"), 3),
+        (upper.contains("RETURNING"), 2),
+        (upper.contains("ILIKE"), 2),
+    ]);
 
-    if mysql_score > sqlite_score && mysql_score > pg_score && mysql_score >= 2 {
+    if mysql_score > sqlite_score && mysql_score > pg_score {
         SqlDialect::Mysql
-    } else if sqlite_score > mysql_score && sqlite_score > pg_score && sqlite_score >= 2 {
+    } else if sqlite_score > mysql_score && sqlite_score > pg_score {
         SqlDialect::Sqlite
     } else {
         SqlDialect::Postgres
     }
+}
+
+fn score_dialect_signals(signals: &[(bool, u8)]) -> u32 {
+    signals
+        .iter()
+        .filter_map(|(matched, weight)| matched.then_some(u32::from(*weight)))
+        .sum()
 }
 
 /// Resolve `SqlDialect::Auto` to a concrete dialect by detecting from SQL content.
@@ -276,6 +282,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                     .with_span(SourceSpan::new(0, input.len().min(100))),
             );
             return ParseOutput {
+                dialect: resolved_dialect,
                 schema: None,
                 diagnostics: ctx.diagnostics,
             };
@@ -411,6 +418,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     };
 
     ParseOutput {
+        dialect: resolved_dialect,
         schema,
         diagnostics: ctx.diagnostics,
     }
@@ -1276,6 +1284,20 @@ pub fn parse_schema(sql: &str) -> Result<Schema, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use relune_testkit::read_sql_fixture;
+
+    fn snapshot_data(output: &ParseOutput) -> serde_json::Value {
+        serde_json::json!({
+            "dialect": output.dialect,
+            "schema": output.schema,
+            "diagnostics": output.diagnostics.iter().map(|d| serde_json::json!({
+                "severity": format!("{}", d.severity),
+                "code": d.code.full_code(),
+                "message": d.message,
+            })).collect::<Vec<_>>(),
+        })
+    }
 
     #[test]
     fn parses_primary_keys_and_foreign_keys() {
@@ -1491,6 +1513,7 @@ mod tests {
     #[test]
     fn parse_output_helpers() {
         let output = ParseOutput {
+            dialect: SqlDialect::Postgres,
             schema: Some(Schema {
                 tables: vec![],
                 views: vec![],
@@ -1503,6 +1526,7 @@ mod tests {
         assert!(output.has_warnings());
 
         let output_with_errors = ParseOutput {
+            dialect: SqlDialect::Postgres,
             schema: None,
             diagnostics: vec![Diagnostic::error(codes::parse_error(), "test")],
         };
@@ -1828,95 +1852,70 @@ mod tests {
     // Snapshot tests for all fixtures
     mod snapshot_tests {
         use super::*;
-        use std::fs;
-
-        fn read_fixture(name: &str) -> String {
-            fs::read_to_string(format!("../../fixtures/sql/{name}"))
-                .unwrap_or_else(|_| panic!("Failed to read fixture: {name}"))
-        }
 
         fn snapshot_fixture(name: &str, sql: &str) {
             let output = parse_sql_to_schema_with_diagnostics(sql);
 
-            // Create a snapshot-friendly representation
-            let snapshot_data = serde_json::json!({
-                "schema": output.schema,
-                "diagnostics": output.diagnostics.iter().map(|d| serde_json::json!({
-                    "severity": format!("{}", d.severity),
-                    "code": d.code.full_code(),
-                    "message": d.message,
-                })).collect::<Vec<_>>(),
-            });
-
             insta::assert_json_snapshot!(
                 format!("fixture_{}", name.replace('.', "_")),
-                snapshot_data
+                snapshot_data(&output)
             );
         }
 
         #[test]
         fn snapshot_simple_blog() {
-            let sql = read_fixture("simple_blog.sql");
+            let sql = read_sql_fixture("simple_blog.sql");
             snapshot_fixture("simple_blog", &sql);
         }
 
         #[test]
         fn snapshot_ecommerce() {
-            let sql = read_fixture("ecommerce.sql");
+            let sql = read_sql_fixture("ecommerce.sql");
             snapshot_fixture("ecommerce", &sql);
         }
 
         #[test]
         fn snapshot_multi_schema() {
-            let sql = read_fixture("multi_schema.sql");
+            let sql = read_sql_fixture("multi_schema.sql");
             snapshot_fixture("multi_schema", &sql);
         }
 
         #[test]
         fn snapshot_broken_input() {
-            let sql = read_fixture("broken_input.sql");
+            let sql = read_sql_fixture("broken_input.sql");
             snapshot_fixture("broken_input", &sql);
         }
 
         #[test]
         fn snapshot_cyclic_fk() {
-            let sql = read_fixture("cyclic_fk.sql");
+            let sql = read_sql_fixture("cyclic_fk.sql");
             snapshot_fixture("cyclic_fk", &sql);
         }
 
         #[test]
         fn snapshot_join_heavy() {
-            let sql = read_fixture("join_heavy.sql");
+            let sql = read_sql_fixture("join_heavy.sql");
             snapshot_fixture("join_heavy", &sql);
         }
 
         fn snapshot_fixture_with_dialect(name: &str, sql: &str, dialect: SqlDialect) {
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, dialect);
 
-            let snapshot_data = serde_json::json!({
-                "schema": output.schema,
-                "diagnostics": output.diagnostics.iter().map(|d| serde_json::json!({
-                    "severity": format!("{}", d.severity),
-                    "code": d.code.full_code(),
-                    "message": d.message,
-                })).collect::<Vec<_>>(),
-            });
-
             insta::assert_json_snapshot!(
                 format!("fixture_{}", name.replace('.', "_")),
-                snapshot_data
+                snapshot_data(&output)
             );
         }
 
         #[test]
         fn snapshot_mysql_ecommerce() {
-            let sql = read_fixture("mysql_ecommerce.sql");
+            let sql = read_sql_fixture("mysql_ecommerce.sql");
             snapshot_fixture_with_dialect("mysql_ecommerce", &sql, SqlDialect::Mysql);
         }
 
         #[test]
         fn snapshot_sqlite_blog() {
-            let sql = read_fixture("sqlite_blog.sql");
+            let sql = read_sql_fixture("sqlite_blog.sql");
             snapshot_fixture_with_dialect("sqlite_blog", &sql, SqlDialect::Sqlite);
         }
     }
@@ -1938,6 +1937,23 @@ mod tests {
         let sql = r"
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            );
+        ";
+        assert_eq!(detect_dialect(sql), SqlDialect::Sqlite);
+    }
+
+    #[test]
+    fn test_detect_dialect_mysql_with_single_signal() {
+        let sql = "CREATE TABLE `users` (`id` INT PRIMARY KEY);";
+        assert_eq!(detect_dialect(sql), SqlDialect::Mysql);
+    }
+
+    #[test]
+    fn test_detect_dialect_sqlite_with_single_signal() {
+        let sql = r"
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL
             );
         ";
@@ -1967,6 +1983,51 @@ mod tests {
         ";
         // Generic SQL should default to Postgres
         assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
+    }
+
+    proptest! {
+        #[test]
+        fn prop_detect_dialect_mysql_from_backticks(table in "[a-z][a-z0-9_]{0,15}") {
+            let sql = format!("CREATE TABLE `{table}` (`id` INT PRIMARY KEY);");
+            prop_assert_eq!(detect_dialect(&sql), SqlDialect::Mysql);
+        }
+
+        #[test]
+        fn prop_detect_dialect_sqlite_from_integer_primary_key(table in "[a-z][a-z0-9_]{0,15}") {
+            let sql = format!(
+                "CREATE TABLE {table} (id INTEGER PRIMARY KEY, name TEXT NOT NULL);"
+            );
+            prop_assert_eq!(detect_dialect(&sql), SqlDialect::Sqlite);
+        }
+    }
+
+    #[test]
+    fn auto_detection_matches_explicit_dialect_for_fixture_corpus() {
+        let cases = [
+            ("simple_blog.sql", SqlDialect::Postgres),
+            ("ecommerce.sql", SqlDialect::Postgres),
+            ("multi_schema.sql", SqlDialect::Postgres),
+            ("cyclic_fk.sql", SqlDialect::Postgres),
+            ("join_heavy.sql", SqlDialect::Postgres),
+            ("mysql_ecommerce.sql", SqlDialect::Mysql),
+            ("sqlite_blog.sql", SqlDialect::Sqlite),
+        ];
+
+        for (fixture, dialect) in cases {
+            let sql = read_sql_fixture(fixture);
+            let auto = parse_sql_to_schema_with_diagnostics(&sql);
+            let explicit = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, dialect);
+
+            assert_eq!(
+                auto.dialect, dialect,
+                "auto-detected wrong dialect for {fixture}"
+            );
+            assert_eq!(
+                snapshot_data(&auto),
+                snapshot_data(&explicit),
+                "auto-detected parse output diverged for {fixture}"
+            );
+        }
     }
 
     #[test]

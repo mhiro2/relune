@@ -1,6 +1,7 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-expression: snapshot_data
+assertion_line: 1859
+expression: snapshot_data(&output)
 ---
 {
   "diagnostics": [
@@ -20,6 +21,7 @@ expression: snapshot_data
       "severity": "warning"
     }
   ],
+  "dialect": "postgres",
   "schema": {
     "enums": [],
     "tables": [

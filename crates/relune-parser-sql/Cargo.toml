@@ -12,6 +12,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+proptest = "1.6"
+relune-testkit = { path = "../relune-testkit" }
 serde_json.workspace = true
 
 [lints]
