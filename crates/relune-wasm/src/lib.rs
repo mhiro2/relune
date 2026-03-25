@@ -71,13 +71,13 @@ pub fn init() {
 #[wasm_bindgen]
 pub fn render_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
     let req: WasmRenderRequest = serde_wasm_bindgen::from_value(input)
-        .map_err(|e| WasmError::new(format!("Invalid request: {e}")))?;
+        .map_err(|e| WasmError::input(format!("Invalid request: {e}")))?;
 
-    let render_req = req.to_render_request().map_err(WasmError::new)?;
+    let render_req = req.to_render_request().map_err(WasmError::input)?;
 
     let result = render(render_req).map_err(WasmError::from)?;
 
-    serde_wasm_bindgen::to_value(&result).map_err(|e| WasmError::from(e).into())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(WasmError::from)?)
 }
 
 /// Render an ERD from schema JSON.
@@ -104,13 +104,13 @@ pub fn render_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn inspect_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
     let req: WasmInspectRequest = serde_wasm_bindgen::from_value(input)
-        .map_err(|e| WasmError::new(format!("Invalid request: {e}")))?;
+        .map_err(|e| WasmError::input(format!("Invalid request: {e}")))?;
 
-    let inspect_req = req.to_inspect_request().map_err(WasmError::new)?;
+    let inspect_req = req.to_inspect_request().map_err(WasmError::input)?;
 
     let result = inspect(inspect_req).map_err(WasmError::from)?;
 
-    serde_wasm_bindgen::to_value(&result).map_err(|e| WasmError::from(e).into())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(WasmError::from)?)
 }
 
 /// Inspect schema metadata from schema JSON.
@@ -143,13 +143,13 @@ pub fn inspect_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn export_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
     let req: WasmExportRequest = serde_wasm_bindgen::from_value(input)
-        .map_err(|e| WasmError::new(format!("Invalid request: {e}")))?;
+        .map_err(|e| WasmError::input(format!("Invalid request: {e}")))?;
 
-    let export_req = req.to_export_request().map_err(WasmError::new)?;
+    let export_req = req.to_export_request().map_err(WasmError::input)?;
 
     let result = export(export_req).map_err(WasmError::from)?;
 
-    serde_wasm_bindgen::to_value(&result).map_err(|e| WasmError::from(e).into())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(WasmError::from)?)
 }
 
 /// Export schema or graph data from schema JSON.
@@ -187,9 +187,9 @@ pub fn render_svg_from_sql(sql: &str) -> Result<String, JsValue> {
         vertical_spacing: None,
     };
 
-    let render_req = req.to_render_request().map_err(|e| JsValue::from_str(&e))?;
+    let render_req = req.to_render_request().map_err(WasmError::input)?;
 
-    let result = render(render_req).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let result = render(render_req).map_err(WasmError::from)?;
 
     Ok(result.content)
 }
@@ -216,9 +216,9 @@ pub fn render_html_from_sql(sql: &str) -> Result<String, JsValue> {
         vertical_spacing: None,
     };
 
-    let render_req = req.to_render_request().map_err(|e| JsValue::from_str(&e))?;
+    let render_req = req.to_render_request().map_err(WasmError::input)?;
 
-    let result = render(render_req).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let result = render(render_req).map_err(WasmError::from)?;
 
     Ok(result.content)
 }

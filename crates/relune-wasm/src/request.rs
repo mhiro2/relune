@@ -97,6 +97,10 @@ impl WasmRenderRequest {
             strategy: grouping_strategy,
         };
 
+        let horizontal_spacing =
+            validated_spacing(self.horizontal_spacing, 320.0, "horizontalSpacing")?;
+        let vertical_spacing = validated_spacing(self.vertical_spacing, 80.0, "verticalSpacing")?;
+
         // Parse layout direction
         let layout_direction = match self.layout_direction.as_deref() {
             None | Some("top-to-bottom") => LayoutDirection::TopToBottom,
@@ -120,8 +124,8 @@ impl WasmRenderRequest {
             algorithm: layout_algorithm,
             direction: layout_direction,
             edge_style,
-            horizontal_spacing: self.horizontal_spacing.unwrap_or(320.0),
-            vertical_spacing: self.vertical_spacing.unwrap_or(80.0),
+            horizontal_spacing,
+            vertical_spacing,
             force_iterations: 150,
         };
 
@@ -289,6 +293,15 @@ impl WasmExportRequest {
     }
 }
 
+fn validated_spacing(value: Option<f32>, default: f32, field: &str) -> Result<f32, String> {
+    let spacing = value.unwrap_or(default);
+    if spacing.is_finite() && spacing > 0.0 {
+        Ok(spacing)
+    } else {
+        Err(format!("{field} must be a positive finite number"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,5 +430,29 @@ mod tests {
         assert_eq!(export_req.format, ExportFormat::GraphJson);
         assert_eq!(export_req.layout.algorithm, LayoutAlgorithm::ForceDirected);
         assert_eq!(export_req.layout.edge_style, RouteStyle::Curved);
+    }
+
+    #[test]
+    fn test_wasm_render_request_rejects_non_positive_spacing() {
+        let req = WasmRenderRequest {
+            sql: Some("CREATE TABLE test (id INT);".to_string()),
+            schema_json: None,
+            format: None,
+            focus_table: None,
+            depth: None,
+            include_tables: vec![],
+            exclude_tables: vec![],
+            group_by: None,
+            layout_direction: None,
+            layout_algorithm: None,
+            edge_style: None,
+            horizontal_spacing: Some(0.0),
+            vertical_spacing: Some(80.0),
+        };
+
+        let err = req
+            .to_render_request()
+            .expect_err("spacing should be rejected");
+        assert!(err.contains("horizontalSpacing"));
     }
 }

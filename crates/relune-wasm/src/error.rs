@@ -24,6 +24,11 @@ impl WasmError {
         }
     }
 
+    /// Create a new input error with a stable error code.
+    pub fn input(message: impl Into<String>) -> Self {
+        Self::with_code(message, "INPUT_ERROR")
+    }
+
     /// Create a new error with a message and code.
     pub fn with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         Self {
@@ -58,5 +63,16 @@ impl From<WasmError> for JsValue {
 impl std::fmt::Display for WasmError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_errors_use_stable_code() {
+        let err = WasmError::input("bad request");
+        assert_eq!(err.code.as_deref(), Some("INPUT_ERROR"));
     }
 }
