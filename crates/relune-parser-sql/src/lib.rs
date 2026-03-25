@@ -1200,7 +1200,11 @@ fn extract_view_columns_from_defs(defs: &[sqlparser::ast::ViewColumnDef]) -> Vec
         .collect()
 }
 
-/// Extract column names from the SELECT items in a view query.
+/// Extract column names from the top-level `SELECT` items in a view query.
+///
+/// Complex queries such as nested subqueries, set operations, or wildcard-only
+/// projections may not yield derived column names here unless the view declares
+/// them explicitly in `CREATE VIEW ... (col1, col2)`.
 fn extract_view_columns_from_query(query: &sqlparser::ast::Query) -> Vec<Column> {
     use sqlparser::ast::{SelectItem, SetExpr};
 

@@ -25,7 +25,7 @@ Output path: **`-o` / `--out`** writes a file; omit to print to **stdout**.
 
 ## `render`
 
-Generate SVG, HTML, or JSON representations of the ERD. SVG/HTML outputs include tables, views, and PostgreSQL enum types.
+Generate SVG, HTML, or JSON representations of the ERD. SVG/HTML outputs include tables, views, and PostgreSQL enum types. For SQL-defined views, Relune preserves the full view definition and extracts columns from either an explicit `CREATE VIEW ... (cols...)` list or simple top-level `SELECT` items; more complex queries may render the view without inferred columns.
 
 **Formats** (`-f` / `--format`): `svg` (default), `html`, `graph-json`, `schema-json`.
 
