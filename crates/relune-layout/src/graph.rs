@@ -11,6 +11,33 @@ use relune_core::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Check whether `needle` appears in `haystack` as a whole SQL identifier,
+/// i.e. not as a substring of a longer identifier.  Both strings must already
+/// be lowercased.  The check treats any character that is **not** alphanumeric,
+/// `_`, or `.` (for schema-qualified names) as an identifier boundary, which
+/// also covers quoted identifiers (`"user"` → boundary is `"`).
+fn contains_identifier(haystack: &str, needle: &str) -> bool {
+    fn is_ident_char(c: char) -> bool {
+        c.is_alphanumeric() || c == '_' || c == '.'
+    }
+
+    let h = haystack.as_bytes();
+    let n = needle.len();
+    if n == 0 || n > h.len() {
+        return false;
+    }
+
+    for (start, _) in haystack.match_indices(needle) {
+        let end = start + n;
+        let left_ok = start == 0 || !is_ident_char(haystack[..start].chars().next_back().unwrap());
+        let right_ok = end == h.len() || !is_ident_char(haystack[end..].chars().next().unwrap());
+        if left_ok && right_ok {
+            return true;
+        }
+    }
+    false
+}
+
 /// Request to build a layout graph from a schema.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LayoutRequest {
@@ -419,8 +446,10 @@ impl LayoutGraphBuilder {
                 for table in tables {
                     let stable_id = table.stable_id.to_lowercase();
                     let table_name = table.name.to_lowercase();
-                    if (table_names.contains(&stable_id) && definition.contains(&stable_id))
-                        || (table_names.contains(&table_name) && definition.contains(&table_name))
+                    if (table_names.contains(&stable_id)
+                        && contains_identifier(&definition, &stable_id))
+                        || (table_names.contains(&table_name)
+                            && contains_identifier(&definition, &table_name))
                     {
                         seen_targets.insert(table.stable_id.clone());
                     }
@@ -435,9 +464,11 @@ impl LayoutGraphBuilder {
                     let view_name = dependency_view.name.to_lowercase();
                     let view_label = dependency_view.qualified_name().to_lowercase();
                     if (view_ids.contains(dependency_view.id.as_str())
-                        && definition.contains(&view_id))
-                        || (view_names.contains(&view_name) && definition.contains(&view_name))
-                        || (view_names.contains(&view_label) && definition.contains(&view_label))
+                        && contains_identifier(&definition, &view_id))
+                        || (view_names.contains(&view_name)
+                            && contains_identifier(&definition, &view_name))
+                        || (view_names.contains(&view_label)
+                            && contains_identifier(&definition, &view_label))
                     {
                         seen_targets.insert(dependency_view.id.clone());
                     }
