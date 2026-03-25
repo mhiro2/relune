@@ -703,10 +703,15 @@ fn html_escape(s: &str) -> String {
 
 /// Indent SVG content for proper nesting in HTML.
 fn indent_svg(svg: &str) -> String {
-    svg.lines()
-        .map(|line| "        ".to_string() + line.trim_start())
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut indented = String::with_capacity(svg.len().saturating_add(svg.lines().count() * 8));
+    for (index, line) in svg.lines().enumerate() {
+        if index > 0 {
+            indented.push('\n');
+        }
+        indented.push_str("        ");
+        indented.push_str(line.trim_start());
+    }
+    indented
 }
 
 #[cfg(test)]
