@@ -19,6 +19,8 @@ pub struct PostgresCatalog {
     pool: PgPool,
 }
 
+const PARALLEL_CATALOG_QUERIES: u32 = 6;
+
 impl PostgresCatalog {
     /// Create a new `PostgreSQL` catalog reader.
     #[must_use]
@@ -329,6 +331,12 @@ impl PostgresCatalog {
     }
 }
 
+/// Returns the number of concurrent catalog queries executed for `PostgreSQL`.
+#[must_use]
+pub(crate) const fn pool_max_connections() -> u32 {
+    PARALLEL_CATALOG_QUERIES
+}
+
 /// Fetches all catalog metadata from a `PostgreSQL` database.
 ///
 /// This is a convenience function that creates a `PostgresCatalog` and
@@ -495,5 +503,10 @@ mod tests {
         assert!(schema.indexes.is_empty());
         assert!(schema.views.is_empty());
         assert!(schema.enums.is_empty());
+    }
+
+    #[test]
+    fn test_pool_max_connections_matches_parallel_queries() {
+        assert_eq!(pool_max_connections(), PARALLEL_CATALOG_QUERIES);
     }
 }

@@ -9,6 +9,8 @@ use crate::common::{
 };
 use crate::error::IntrospectError;
 
+const PARALLEL_CATALOG_QUERIES: u32 = 5;
+
 /// Fetches all catalog metadata from a `MySQL` database.
 pub async fn fetch_catalog_metadata(pool: &MySqlPool) -> Result<RawSchema, IntrospectError> {
     let catalog = MySqlCatalog { pool: pool.clone() };
@@ -212,6 +214,12 @@ impl MySqlCatalog {
     }
 }
 
+/// Returns the number of concurrent catalog queries executed for `MySQL`.
+#[must_use]
+pub(crate) const fn pool_max_connections() -> u32 {
+    PARALLEL_CATALOG_QUERIES
+}
+
 #[derive(Debug, sqlx::FromRow)]
 struct RawTableRow {
     schema_name: String,
@@ -351,4 +359,14 @@ fn group_indexes(rows: Vec<IndexColumnRow>) -> Vec<RawIndex> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pool_max_connections_matches_parallel_queries() {
+        assert_eq!(pool_max_connections(), PARALLEL_CATALOG_QUERIES);
+    }
 }

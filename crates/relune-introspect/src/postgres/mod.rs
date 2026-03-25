@@ -107,7 +107,7 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
 
     // Create a connection pool
     let pool = PgPoolOptions::new()
-        .max_connections(1)
+        .max_connections(catalog::pool_max_connections())
         .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&database_url)
         .await

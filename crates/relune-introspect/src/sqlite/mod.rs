@@ -8,6 +8,8 @@ use tracing::{debug, error, info, instrument};
 
 use crate::error::IntrospectError;
 
+const POOL_MAX_CONNECTIONS: u32 = 1;
+
 /// Introspects a `SQLite` database and extracts its schema metadata.
 ///
 /// Accepts URLs understood by `sqlx`, for example `sqlite://path/to.db`,
@@ -32,7 +34,7 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
     debug!("Connecting to SQLite database");
 
     let pool = SqlitePoolOptions::new()
-        .max_connections(1)
+        .max_connections(pool_max_connections())
         .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(trimmed)
         .await
@@ -68,6 +70,11 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
     Ok(schema)
 }
 
+#[must_use]
+pub(crate) const fn pool_max_connections() -> u32 {
+    POOL_MAX_CONNECTIONS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +97,10 @@ mod tests {
             result.unwrap_err(),
             IntrospectError::InvalidDatabaseUrl(_)
         ));
+    }
+
+    #[test]
+    fn test_pool_max_connections_matches_execution_model() {
+        assert_eq!(pool_max_connections(), POOL_MAX_CONNECTIONS);
     }
 }

@@ -40,7 +40,7 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
     debug!("Connecting to MySQL database");
 
     let pool = MySqlPoolOptions::new()
-        .max_connections(1)
+        .max_connections(catalog::pool_max_connections())
         .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&connect_url)
         .await
