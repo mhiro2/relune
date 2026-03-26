@@ -413,6 +413,69 @@ fn normalized_stable_id_for_object_name(name: &ObjectName) -> String {
     normalized_stable_id(schema_name.as_deref(), &object_name)
 }
 
+/// Parse SQL statements with error recovery.
+///
+/// Instead of using `Parser::parse_sql` which aborts on the first error,
+/// this function parses statement-by-statement and skips to the next
+/// semicolon on error, allowing subsequent statements to be parsed.
+fn parse_statements_with_recovery(
+    dialect: &dyn Dialect,
+    input: &str,
+    ctx: &mut ParseContext,
+) -> Vec<Statement> {
+    // First, try the fast path: parse all at once
+    let mut parser = match Parser::new(dialect).try_with_sql(input) {
+        Ok(p) => p,
+        Err(e) => {
+            // Tokenizer error — nothing can be parsed
+            ctx.diagnostics.push(
+                Diagnostic::error(codes::parse_error(), format!("SQL parse error: {e}"))
+                    .with_span(SourceSpan::new(0, input.len().min(100))),
+            );
+            return Vec::new();
+        }
+    };
+
+    let mut statements = Vec::new();
+
+    loop {
+        // Skip empty statements (consecutive semicolons)
+        while parser.consume_token(&Token::SemiColon) {}
+
+        if parser.peek_token().token == Token::EOF {
+            break;
+        }
+
+        match parser.parse_statement() {
+            Ok(stmt) => {
+                statements.push(stmt);
+            }
+            Err(e) => {
+                let error_msg = format!("SQL parse error: {e}");
+                // Try to extract location from the error token's current position
+                let span = {
+                    let tok = parser.peek_token();
+                    let sql_span = tok.span;
+                    source_span_from_sql_span(input, sql_span)
+                        .unwrap_or_else(|| SourceSpan::new(0, input.len().min(100)))
+                };
+                ctx.diagnostics
+                    .push(Diagnostic::error(codes::parse_error(), error_msg).with_span(span));
+
+                // Skip tokens until the next semicolon or EOF for recovery
+                loop {
+                    let tok = parser.next_token();
+                    if matches!(tok.token, Token::SemiColon | Token::EOF) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    statements
+}
+
 /// Parse SQL into a Schema, returning an error on fatal parse failures.
 ///
 /// This is a convenience function that rejects error-level diagnostics.
@@ -459,21 +522,10 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     let mut ctx = ParseContext::new();
     ctx.dialect = resolved_dialect;
 
-    // Parse SQL statements
-    let statements = match Parser::parse_sql(dialect_impl(resolved_dialect).as_ref(), input) {
-        Ok(stmts) => stmts,
-        Err(e) => {
-            ctx.diagnostics.push(
-                Diagnostic::error(codes::parse_error(), format!("SQL parse error: {e}"))
-                    .with_span(SourceSpan::new(0, input.len().min(100))),
-            );
-            return ParseOutput {
-                dialect: resolved_dialect,
-                schema: None,
-                diagnostics: ctx.diagnostics,
-            };
-        }
-    };
+    // Parse SQL statements with error recovery: parse statement-by-statement so that
+    // a syntax error in one statement does not prevent parsing of subsequent statements.
+    let statements =
+        parse_statements_with_recovery(dialect_impl(resolved_dialect).as_ref(), input, &mut ctx);
 
     // Build schema in source order so ALTER TABLE is visible to later CREATE INDEX / COMMENT.
     let mut tables = Vec::new();
@@ -857,10 +909,11 @@ fn parse_create_index(
 
     let index = Index {
         name: create_index.name.as_ref().map(|ident| {
-            // ObjectName is a wrapper around Vec<ObjectNamePart>
+            // ObjectName is a wrapper around Vec<ObjectNamePart>.
+            // Use the last part as the actual index name (earlier parts are schema qualifiers).
             ident
                 .0
-                .first()
+                .last()
                 .map(|part| normalize_identifier(&object_name_part_to_string(part)))
                 .unwrap_or_default()
         }),
