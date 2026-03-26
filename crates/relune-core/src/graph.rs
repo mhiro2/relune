@@ -214,7 +214,7 @@ impl SchemaGraph {
                 .and_then(|table_id| ids.get(table_id).copied())
                 .ok_or_else(|| GraphBuildError::UnknownTable(fk.to_table.clone()))?;
 
-            let fk_nullable = fk.from_columns.iter().all(|col_name| {
+            let fk_nullable = fk.from_columns.iter().any(|col_name| {
                 table
                     .columns
                     .iter()
@@ -553,6 +553,47 @@ mod tests {
                 && edge.kind == EdgeKind::ViewDependency
                 && edge.label == "view dep"
         }));
+    }
+
+    #[test]
+    fn foreign_key_edges_are_nullable_when_any_source_column_is_nullable() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "users",
+                    None,
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "sessions",
+                    None,
+                    vec![
+                        make_column("id", "integer", false, true),
+                        make_column("tenant_id", "integer", true, false),
+                        make_column("user_id", "integer", false, false),
+                    ],
+                    vec![make_foreign_key(
+                        "users",
+                        &["tenant_id", "user_id"],
+                        &["id", "id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let edge = graph
+            .graph
+            .edge_references()
+            .find(|edge| edge.weight().kind == EdgeKind::ForeignKey)
+            .expect("foreign key edge");
+
+        assert!(edge.weight().nullable);
     }
 
     #[test]
