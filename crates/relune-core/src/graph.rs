@@ -87,6 +87,39 @@ pub enum GraphBuildError {
     },
 }
 
+const fn is_sql_identifier_continue(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '$'
+}
+
+/// Returns `true` if `definition_lower` contains `name_lower` as a standalone SQL-style
+/// identifier token, not as a substring of a longer identifier (e.g. `user` inside `users`).
+fn definition_references_table_identifier(definition_lower: &str, name_lower: &str) -> bool {
+    if name_lower.is_empty() {
+        return false;
+    }
+    let mut start = 0usize;
+    while let Some(rel) = definition_lower
+        .get(start..)
+        .and_then(|slice| slice.find(name_lower))
+    {
+        let i = start + rel;
+        let before_ok = definition_lower[..i]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !is_sql_identifier_continue(c));
+        let after_start = i + name_lower.len();
+        let after_ok = definition_lower
+            .get(after_start..)
+            .and_then(|slice| slice.chars().next())
+            .is_none_or(|c| !is_sql_identifier_continue(c));
+        if before_ok && after_ok {
+            return true;
+        }
+        start = i + 1;
+    }
+    false
+}
+
 impl SchemaGraph {
     /// Builds a schema graph from a Schema.
     pub fn from_schema(schema: &Schema) -> Result<Self, GraphBuildError> {
@@ -269,7 +302,7 @@ impl SchemaGraph {
                 for table in &schema.tables {
                     let tname = table.name.to_lowercase();
                     if table_names.contains(&tname)
-                        && def_lower.contains(&tname)
+                        && definition_references_table_identifier(&def_lower, &tname)
                         && let Some(&table_idx) = ids.get(&table.id)
                     {
                         graph.add_edge(
@@ -625,5 +658,84 @@ mod tests {
             err,
             GraphBuildError::AmbiguousEnumReference { ref data_type, .. } if data_type == "status"
         ));
+    }
+
+    #[test]
+    fn definition_references_table_identifier_respects_token_boundaries() {
+        assert!(super::definition_references_table_identifier(
+            "select * from users",
+            "users"
+        ));
+        assert!(!super::definition_references_table_identifier(
+            "select * from users",
+            "user"
+        ));
+        assert!(!super::definition_references_table_identifier(
+            "select * from user_settings",
+            "user"
+        ));
+        assert!(super::definition_references_table_identifier(
+            "select * from user",
+            "user"
+        ));
+        assert!(!super::definition_references_table_identifier(
+            "select * from user_settings",
+            "users"
+        ));
+        assert!(super::definition_references_table_identifier(
+            "select * from public.users u",
+            "users"
+        ));
+    }
+
+    #[test]
+    fn view_dependency_does_not_link_prefix_table_name_in_longer_identifier() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "user",
+                    None,
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "users",
+                    None,
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+            ],
+            views: vec![make_view("active_users", None, "select * from users")],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let user = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "user")
+            .expect("user node");
+        let users = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "users")
+            .expect("users node");
+        let view = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "active_users")
+            .expect("view node");
+
+        let deps: Vec<_> = graph
+            .graph
+            .edge_references()
+            .filter(|edge| edge.target() == view && edge.weight().kind == EdgeKind::ViewDependency)
+            .map(|edge| edge.source())
+            .collect();
+
+        assert_eq!(deps, vec![users]);
+        assert!(!deps.contains(&user));
     }
 }
