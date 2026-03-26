@@ -196,9 +196,18 @@ fn count_crossings(
     let mut crossings = 0;
 
     // Build position map for all nodes
+    // Note: Bit-packing assumes max 65536 nodes per rank and 65536 ranks
     let mut position: BTreeMap<usize, usize> = BTreeMap::new();
     for (rank_idx, rank_nodes) in nodes_by_rank.iter().enumerate() {
+        debug_assert!(
+            rank_idx < 65536,
+            "rank index exceeds 16-bit limit (max 65536 ranks)"
+        );
         for (pos, &node_idx) in rank_nodes.iter().enumerate() {
+            debug_assert!(
+                pos < 65536,
+                "position within rank exceeds 16-bit limit (max 65536 nodes per rank)"
+            );
             position.insert(node_idx, (rank_idx << 16) | pos);
         }
     }
