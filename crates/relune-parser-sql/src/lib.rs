@@ -598,9 +598,15 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 ctx.warn_unsupported("DROP", source_span_from_sql_span(input, statement.span()));
             }
             _ => {
-                // Generic unsupported statement
+                // Generic unsupported statement - truncate to avoid huge debug output
+                let debug_str = format!("{statement:?}");
+                let truncated = if debug_str.len() > 80 {
+                    format!("{}...", &debug_str[..77])
+                } else {
+                    debug_str
+                };
                 ctx.warn_unsupported(
-                    &format!("{statement:?}"),
+                    &truncated,
                     source_span_from_sql_span(input, statement.span()),
                 );
             }

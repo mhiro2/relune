@@ -7,17 +7,17 @@ expression: snapshot_data(&output)
   "diagnostics": [
     {
       "code": "PARSE002",
-      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"public\", quote_style: None, span: Span(Location(5,29)..Location(5,35)) })])), if_not_exists: true, with: None, options: None, default_collate_spec: None, clone: None }. This statement will be skipped.",
+      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"pub.... This statement will be skipped.",
       "severity": "warning"
     },
     {
       "code": "PARSE002",
-      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"inventory\", quote_style: None, span: Span(Location(8,29)..Location(8,38)) })])), if_not_exists: true, with: None, options: None, default_collate_spec: None, clone: None }. This statement will be skipped.",
+      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"inv.... This statement will be skipped.",
       "severity": "warning"
     },
     {
       "code": "PARSE002",
-      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"sales\", quote_style: None, span: Span(Location(11,29)..Location(11,34)) })])), if_not_exists: true, with: None, options: None, default_collate_spec: None, clone: None }. This statement will be skipped.",
+      "message": "Unsupported SQL construct: CreateSchema { schema_name: Simple(ObjectName([Identifier(Ident { value: \"sal.... This statement will be skipped.",
       "severity": "warning"
     }
   ],
