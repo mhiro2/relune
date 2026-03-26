@@ -45,6 +45,20 @@ struct EnumIndex {
     by_name: BTreeMap<String, Vec<(Option<String>, String)>>,
 }
 
+fn column_flag_sets(table: &Table) -> (BTreeSet<String>, BTreeSet<String>) {
+    let foreign_key_columns = table
+        .foreign_keys
+        .iter()
+        .flat_map(|fk| fk.from_columns.iter().cloned())
+        .collect();
+    let indexed_columns = table
+        .indexes
+        .iter()
+        .flat_map(|index| index.columns.iter().cloned())
+        .collect();
+    (foreign_key_columns, indexed_columns)
+}
+
 impl EnumIndex {
     fn insert(&mut self, enum_type: &Enum) {
         let name = enum_type.name.to_lowercase();
@@ -158,6 +172,7 @@ pub struct LayoutNode {
 
 /// Column information for layout nodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct LayoutColumn {
     /// Column name.
     pub name: String,
@@ -167,6 +182,12 @@ pub struct LayoutColumn {
     pub nullable: bool,
     /// Whether this column is part of the primary key.
     pub is_primary_key: bool,
+    /// Whether this column participates in a foreign key.
+    #[serde(default)]
+    pub is_foreign_key: bool,
+    /// Whether this column appears in an index.
+    #[serde(default)]
+    pub is_indexed: bool,
 }
 
 /// An edge in the layout graph.
@@ -388,6 +409,7 @@ impl LayoutGraphBuilder {
         let mut edges = Vec::new();
 
         for table in tables {
+            let (foreign_key_columns, indexed_columns) = column_flag_sets(table);
             let node = LayoutNode {
                 id: table.stable_id.clone(),
                 label: table.qualified_name(),
@@ -402,6 +424,8 @@ impl LayoutGraphBuilder {
                         data_type: c.data_type.clone(),
                         nullable: c.nullable,
                         is_primary_key: c.is_primary_key,
+                        is_foreign_key: foreign_key_columns.contains(&c.name),
+                        is_indexed: indexed_columns.contains(&c.name),
                     })
                     .collect(),
                 inbound_count: 0,
@@ -479,6 +503,8 @@ impl LayoutGraphBuilder {
                         data_type: column.data_type.clone(),
                         nullable: column.nullable,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     })
                     .collect(),
                 inbound_count: 0,
@@ -555,6 +581,8 @@ impl LayoutGraphBuilder {
                         data_type: String::new(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     })
                     .collect(),
                 inbound_count: 0,
@@ -882,7 +910,7 @@ fn extract_prefix(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relune_core::{Column, ColumnId, TableId};
+    use relune_core::{Column, ColumnId, ForeignKey, Index, ReferentialAction, TableId};
 
     #[test]
     fn test_matches_pattern() {
@@ -928,7 +956,11 @@ mod tests {
                     },
                 ],
                 foreign_keys: vec![],
-                indexes: vec![],
+                indexes: vec![Index {
+                    name: Some("idx_users_status".to_string()),
+                    columns: vec!["status".to_string()],
+                    is_unique: false,
+                }],
                 comment: None,
             }],
             views: vec![View {
@@ -1064,6 +1096,68 @@ mod tests {
 
         let builder = LayoutGraphBuilder::new().collapse_join_tables(false);
         assert!(!builder.request.collapse_join_tables);
+    }
+
+    #[test]
+    fn test_build_marks_foreign_key_and_index_columns() {
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "posts".to_string(),
+                schema_name: None,
+                name: "posts".to_string(),
+                columns: vec![
+                    Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    },
+                    Column {
+                        id: ColumnId(2),
+                        name: "user_id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    },
+                ],
+                foreign_keys: vec![ForeignKey {
+                    name: Some("fk_posts_user".to_string()),
+                    from_columns: vec!["user_id".to_string()],
+                    to_schema: None,
+                    to_table: "users".to_string(),
+                    to_columns: vec!["id".to_string()],
+                    on_delete: ReferentialAction::NoAction,
+                    on_update: ReferentialAction::NoAction,
+                }],
+                indexes: vec![Index {
+                    name: Some("idx_posts_user_id".to_string()),
+                    columns: vec!["user_id".to_string()],
+                    is_unique: false,
+                }],
+                comment: None,
+            }],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let posts = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "posts")
+            .expect("posts node");
+        let user_id = posts
+            .columns
+            .iter()
+            .find(|column| column.name == "user_id")
+            .expect("user_id column");
+
+        assert!(user_id.is_foreign_key);
+        assert!(user_id.is_indexed);
     }
 }
 

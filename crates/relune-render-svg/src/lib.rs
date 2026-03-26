@@ -76,25 +76,42 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
 }
 
 fn out_push_defs(out: &mut String, colors: &ThemeColors) {
-    let (grid_base, grid_dot, shadow_color, hatch_color) = if is_light_theme(colors) {
-        ("#f7f8fc", "#e8eaf0", "rgba(15, 23, 42, 0.12)", "#cbd5e1")
+    let (shadow_dy, shadow_blur, hatch_color) = if is_light_theme(colors) {
+        ("2", "5", "#cbd5e1")
     } else {
-        ("#0c0f1a", "#151928", "rgba(0, 0, 0, 0.52)", "#334155")
+        ("4", "8", "#334155")
     };
 
     let _ = write!(
         out,
         r##"<defs>
+<style>
+.edge-glow-path,
+.edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
+.edge-particle {{ fill: #fbbf24; }}
+.edge:hover .edge-glow-path,
+.edge:hover .edge-particles {{ opacity: 0.92; }}
+.edge:hover .edge-path {{ stroke: #f59e0b; }}
+.node:hover .table-body {{ stroke-width: 2.1px; }}
+.group-box,
+.group-band,
+.group-divider,
+.group-label {{ pointer-events: none; }}
+</style>
 <pattern id="canvas-grid" width="32" height="32" patternUnits="userSpaceOnUse">
-<rect width="32" height="32" fill="{grid_base}"/>
-<circle cx="2" cy="2" r="1.2" fill="{grid_dot}" fill-opacity="0.9"/>
+<rect width="32" height="32" fill="{}"/>
+<circle cx="2" cy="2" r="1.2" fill="{}" fill-opacity="0.9"/>
+<circle cx="18" cy="18" r="0.8" fill="{}" fill-opacity="0.54"/>
 </pattern>
 <pattern id="type-filter-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
 <rect width="8" height="8" fill="transparent"/>
 <rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
 </pattern>
 <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="150%">
-<feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="{shadow_color}"/>
+<feDropShadow dx="0" dy="{shadow_dy}" stdDeviation="{shadow_blur}" flood-color="{}"/>
+</filter>
+<filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
+<feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
 <filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
 <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b"/>
@@ -113,6 +130,11 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <path d="M6 1 L14 6 M6 6 L14 6 M6 11 L14 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
 </defs>"##,
+        colors.canvas_base,
+        colors.canvas_dot,
+        colors.canvas_dot,
+        colors.node_shadow,
+        colors.node_shadow,
         colors.arrow_fill,
         colors.text_secondary,
         colors.text_secondary,
@@ -302,9 +324,10 @@ fn render_edge_internal(
         Some(stroke_dasharray) => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}"/>"##,
+                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"##,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
+                index,
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
@@ -315,15 +338,27 @@ fn render_edge_internal(
         None => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} />"##,
+                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"##,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
+                index,
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
                 edge_marker_attributes(uses_crow_markers, edge.nullable)
             );
         }
+    }
+
+    if edge.kind == EdgeKind::ForeignKey {
+        out.push_str(r#"<g class="edge-particles" opacity="0">"#);
+        let _ = write!(
+            out,
+            r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{}"/></animateMotion></circle>"##,
+            index,
+            index
+        );
+        out.push_str("</g>");
     }
 
     // Render the label if enabled
@@ -405,7 +440,7 @@ struct EdgeStyle {
 }
 
 fn is_light_theme(colors: &ThemeColors) -> bool {
-    colors.background == "#ffffff"
+    colors.background == "#f7f8fc"
 }
 
 const fn node_kind_name(kind: NodeKind) -> &'static str {
@@ -562,12 +597,16 @@ mod tests {
                         data_type: "uuid PK".to_string(),
                         nullable: false,
                         is_primary_key: true,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     },
                     PositionedColumn {
                         name: "name".to_string(),
                         data_type: "text".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     },
                 ],
                 x: 56.0,
@@ -599,12 +638,16 @@ mod tests {
                             data_type: "uuid PK".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "name".to_string(),
                             data_type: "text".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 56.0,
@@ -625,18 +668,24 @@ mod tests {
                             data_type: "uuid PK".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "user_id".to_string(),
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
                         },
                         PositionedColumn {
                             name: "title".to_string(),
                             data_type: "text".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 56.0,
@@ -736,6 +785,8 @@ mod tests {
                         data_type: "status".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     }],
                     x: 56.0,
                     y: 56.0,
@@ -754,6 +805,8 @@ mod tests {
                         data_type: "int".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     }],
                     x: 396.0,
                     y: 56.0,
@@ -773,12 +826,16 @@ mod tests {
                             data_type: String::new(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "inactive".to_string(),
                             data_type: String::new(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 396.0,
@@ -906,6 +963,8 @@ mod tests {
                     data_type: "text".to_string(),
                     nullable: false,
                     is_primary_key: false,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
@@ -971,6 +1030,8 @@ mod tests {
                     data_type: "text".to_string(),
                     nullable: false,
                     is_primary_key: false,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
@@ -1195,12 +1256,16 @@ mod tests {
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "name".to_string(),
                             data_type: "text".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 56.0,
@@ -1221,12 +1286,16 @@ mod tests {
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "user_id".to_string(),
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
                         },
                     ],
                     x: 56.0,
@@ -1286,6 +1355,8 @@ mod tests {
                     data_type: "uuid".to_string(),
                     nullable: false,
                     is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
@@ -1428,6 +1499,8 @@ mod tests {
                     data_type: "text".to_string(),
                     nullable: false,
                     is_primary_key: false,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
