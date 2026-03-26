@@ -3,7 +3,7 @@
 //! Embedded viewer scripts are generated from TypeScript in `ts/` into `src/js/` by `build.rs` (`pnpm run build`; outputs are gitignored).
 
 use crate::options::{HtmlRenderOptions, Theme};
-use relune_render_theme::get_colors;
+use relune_render_theme::{escape_xml_text, get_colors};
 
 /// Escape JSON content for safe embedding in a script tag.
 pub fn escape_json_for_script(json: &str) -> String {
@@ -61,7 +61,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     let heading = if options.title.is_some() {
         Some(format!(
             "<h1>{}</h1>",
-            html_escape(options.title.as_deref().unwrap())
+            escape_xml_text(options.title.as_deref().unwrap())
         ))
     } else {
         None
@@ -128,7 +128,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 {js}
 </body>
 </html>"#,
-        title = html_escape(title),
+        title = escape_xml_text(title),
         heading = heading.unwrap_or_default(),
         search_panel = search_panel.unwrap_or_default(),
         filter_reset_bar = filter_reset_bar.unwrap_or_default(),
@@ -1271,15 +1271,6 @@ fn build_search_panel_html(enable_column_type_filter: bool) -> String {
     )
 }
 
-/// Escape HTML special characters.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 /// Indent SVG content for proper nesting in HTML.
 fn indent_svg(svg: &str) -> String {
     let mut indented = String::with_capacity(svg.len().saturating_add(svg.lines().count() * 8));
@@ -1313,11 +1304,11 @@ mod tests {
     }
 
     #[test]
-    fn test_html_escape() {
-        assert_eq!(html_escape("<script>"), "&lt;script&gt;");
-        assert_eq!(html_escape("a & b"), "a &amp; b");
-        assert_eq!(html_escape(r#""quoted""#), "&quot;quoted&quot;");
-        assert_eq!(html_escape("'quoted'"), "&#39;quoted&#39;");
+    fn test_escape_xml_text_for_html() {
+        assert_eq!(escape_xml_text("<script>"), "&lt;script&gt;");
+        assert_eq!(escape_xml_text("a & b"), "a &amp; b");
+        assert_eq!(escape_xml_text(r#""quoted""#), "&quot;quoted&quot;");
+        assert_eq!(escape_xml_text("'quoted'"), "&#39;quoted&#39;");
     }
 
     #[test]

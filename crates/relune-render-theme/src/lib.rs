@@ -1,6 +1,10 @@
 //! Shared theme definitions for Relune renderers.
 
+mod xml_escape;
+
 use serde::{Deserialize, Serialize};
+
+pub use xml_escape::{escape_xml_attribute, escape_xml_text};
 
 /// Theme selection for render output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
