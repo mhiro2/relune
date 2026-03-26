@@ -174,11 +174,29 @@ mod render_tests {
             .arg("render")
             .arg("--sql")
             .arg(simple_blog_fixture())
+            .arg("--stdout")
             .assert()
             .success();
 
         let stdout = String::from_utf8_lossy(&output.get_output().stdout);
         assert!(stdout.contains("<svg"), "Stdout should contain SVG");
+    }
+
+    #[test]
+    fn render_html_to_explicit_stdout() {
+        let mut cmd = relune();
+        let output = cmd
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("html")
+            .arg("--stdout")
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        assert!(stdout.contains("<!DOCTYPE html>") || stdout.contains("<html"));
     }
 
     #[test]
@@ -306,6 +324,7 @@ mod render_tests {
             .arg("render")
             .arg("--sql")
             .arg(simple_blog_fixture())
+            .arg("--stdout")
             .assert()
             .success();
 

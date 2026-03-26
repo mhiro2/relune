@@ -19,7 +19,7 @@ Every command requires **at least one input**. Typical inputs:
 | Live DB | `--db-url <URL>` | Read-only introspection |
 | SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | For SQL parsing |
 
-Output path: **`-o` / `--out`** writes a file; omit to print to **stdout**.
+Output path: **`-o` / `--out`** writes a file. `render` still prints to stdout when piped, but for interactive terminals it now requires **`--stdout`** to emit raw SVG/HTML directly.
 
 For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**.
 
@@ -30,6 +30,8 @@ For SQL files and schema JSON files, Relune currently rejects inputs larger than
 Generate SVG, HTML, or JSON representations of the ERD. SVG/HTML outputs include tables, views, and PostgreSQL enum types. For SQL-defined views, Relune preserves the full view definition and extracts columns from either an explicit `CREATE VIEW ... (cols...)` list or simple top-level `SELECT` items; more complex queries may render the view without inferred columns.
 
 **Formats** (`-f` / `--format`): `svg` (default), `html`, `graph-json`, `schema-json`.
+
+When rendering `svg` or `html` without `-o`, interactive terminals require `--stdout`; otherwise Relune asks you to choose a file output path or explicitly opt in to raw stdout.
 
 **View options:**
 
@@ -56,6 +58,7 @@ Generate SVG, HTML, or JSON representations of the ERD. SVG/HTML outputs include
 ```bash
 relune render --sql schema.sql -o erd.svg
 relune render --sql schema.sql --format html -o erd.html
+relune render --sql schema.sql --format html --stdout > erd.html
 relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 relune render --sql schema.sql --group-by schema -o grouped.svg
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o force.svg

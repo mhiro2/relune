@@ -1,5 +1,7 @@
 //! Render command implementation.
 
+use std::io::IsTerminal;
+
 use anyhow::Context;
 
 use super::input::InputSelection;
@@ -33,6 +35,12 @@ pub fn run_render(
         RenderFormat::GraphJson => OutputFormat::GraphJson,
         RenderFormat::SchemaJson => OutputFormat::SchemaJson,
     };
+    validate_stdout_usage(
+        output_format,
+        args.out.is_some(),
+        args.stdout,
+        std::io::stdout().is_terminal(),
+    )?;
 
     // Build filter spec from merged config
     let filter = FilterSpec {
@@ -128,4 +136,55 @@ pub fn run_render(
     }
 
     Ok(())
+}
+
+fn validate_stdout_usage(
+    output_format: OutputFormat,
+    has_output_path: bool,
+    explicit_stdout: bool,
+    stdout_is_terminal: bool,
+) -> CliResult<()> {
+    let renders_markup = matches!(output_format, OutputFormat::Svg | OutputFormat::Html);
+
+    if renders_markup && !has_output_path && !explicit_stdout && stdout_is_terminal {
+        return Err(CliError::usage(anyhow::anyhow!(
+            "Refusing to write raw SVG/HTML to an interactive terminal. Use --out <FILE> or --stdout."
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_markup_stdout_on_terminal_without_opt_in() {
+        let result = validate_stdout_usage(OutputFormat::Svg, false, false, true);
+
+        let error = result.expect_err("interactive stdout should require opt-in");
+        assert!(
+            error.to_string().contains("Use --out <FILE> or --stdout"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn allows_markup_stdout_when_explicitly_requested() {
+        validate_stdout_usage(OutputFormat::Html, false, true, true)
+            .expect("explicit stdout should be allowed");
+    }
+
+    #[test]
+    fn allows_json_stdout_on_terminal() {
+        validate_stdout_usage(OutputFormat::GraphJson, false, false, true)
+            .expect("json stdout should stay allowed");
+    }
+
+    #[test]
+    fn allows_markup_stdout_when_piped() {
+        validate_stdout_usage(OutputFormat::Svg, false, false, false)
+            .expect("piped stdout should stay allowed");
+    }
 }

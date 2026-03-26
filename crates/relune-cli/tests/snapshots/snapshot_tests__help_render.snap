@@ -1,5 +1,6 @@
 ---
 source: crates/relune-cli/tests/snapshot_tests.rs
+assertion_line: 27
 expression: stdout
 ---
 Render an ERD from SQL, schema JSON, or database metadata
@@ -61,6 +62,9 @@ Options:
 
   -o, --out <FILE>
           Output file path; stdout if omitted
+
+      --stdout
+          Allow raw SVG/HTML output on stdout even when stdout is a terminal
 
       --focus <TABLE>
           Center the graph on a table

@@ -632,6 +632,7 @@ mod tests {
             db_url: None,
             format: Some(RenderFormat::Svg), // CLI specifies svg
             out: None,
+            stdout: false,
             focus: Some("posts".to_string()), // CLI specifies different focus
             depth: Some(3),                   // CLI specifies different depth
             group_by: Some(GroupByMode::Prefix), // CLI specifies different group_by
@@ -680,6 +681,7 @@ mod tests {
             db_url: None,
             format: None,
             out: None,
+            stdout: false,
             focus: None, // Not specified - should use config
             depth: None,
             group_by: None,  // Not specified - should use config
@@ -722,6 +724,7 @@ mod tests {
             db_url: None,
             format: Some(RenderFormat::Html), // CLI explicitly specifies html
             out: None,
+            stdout: false,
             focus: Some("cli_table".to_string()), // CLI explicitly specifies focus
             depth: Some(10),                      // CLI explicitly specifies depth
             group_by: Some(GroupByMode::Prefix),  // CLI explicitly specifies group_by
