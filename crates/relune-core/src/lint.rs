@@ -9,7 +9,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::diagnostic::{DiagnosticCode, Severity};
-use crate::model::{ForeignKey, Schema, Table, TableId};
+use crate::model::{
+    ForeignKey, ForeignKeyTargetResolution, Schema, Table, TableId, resolve_table_reference,
+};
 
 /// Unique identifier for a lint rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -290,7 +292,7 @@ fn build_fk_maps(schema: &Schema) -> (FkMap, FkMap) {
             outgoing.entry(table.id).or_default().push(Arc::clone(&fk));
 
             // Record incoming FK to the target table
-            if let Some(target_table) = resolve_referenced_table(schema, fk.as_ref()) {
+            if let Some(target_table) = resolve_referenced_table(schema, table, fk.as_ref()) {
                 incoming.entry(target_table.id).or_default().push(fk);
             }
         }
@@ -557,30 +559,15 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
         .any(|idx| column_list_has_prefix(&idx.columns, fk_cols))
 }
 
-fn resolve_referenced_table<'a>(schema: &'a Schema, fk: &ForeignKey) -> Option<&'a Table> {
-    let target_table = fk.to_table.to_lowercase();
-    let target_schema = fk.to_schema.as_deref().map(str::to_lowercase);
-    let matches: Vec<&Table> = schema
-        .tables
-        .iter()
-        .filter(|table| {
-            let schema_matches = match &target_schema {
-                Some(target_schema) => table
-                    .schema_name
-                    .as_deref()
-                    .is_some_and(|schema_name| schema_name.to_lowercase() == *target_schema),
-                None => true,
-            };
-            schema_matches
-                && (table.name.to_lowercase() == target_table
-                    || table.stable_id.to_lowercase() == target_table)
-        })
-        .collect();
-    matches
-        .as_slice()
-        .first()
-        .copied()
-        .filter(|_| matches.len() == 1)
+fn resolve_referenced_table<'a>(
+    schema: &'a Schema,
+    table: &Table,
+    fk: &ForeignKey,
+) -> Option<&'a Table> {
+    match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
+        ForeignKeyTargetResolution::Found(ref_table) => Some(ref_table),
+        ForeignKeyTargetResolution::Missing | ForeignKeyTargetResolution::Ambiguous => None,
+    }
 }
 
 /// `true` when `to_columns` exactly matches the referenced table PK column list or some unique index column list.
@@ -695,7 +682,7 @@ fn check_foreign_key_target_uniqueness(
         return;
     }
 
-    let Some(ref_table) = resolve_referenced_table(schema, fk) else {
+    let Some(ref_table) = resolve_referenced_table(schema, table, fk) else {
         return;
     };
     if referenced_columns_are_unique(ref_table, &fk.to_columns) {
@@ -1316,6 +1303,68 @@ mod tests {
                 name: None,
                 from_columns: vec!["user_email".to_string()],
                 to_schema: Some("auth".to_string()),
+                to_table: "users".to_string(),
+                to_columns: vec!["email".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![Index {
+                name: Some("posts_user_email_idx".to_string()),
+                columns: vec!["user_email".to_string()],
+                is_unique: false,
+            }],
+        );
+        let schema = Schema {
+            tables: vec![public_users, auth_users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+
+        assert!(
+            !result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_non_unique_target_prefers_same_schema_when_unqualified() {
+        let public_users = create_test_table_with_schema(
+            Some("public"),
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let auth_users = create_test_table_with_schema(
+            Some("auth"),
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![Index {
+                name: Some("auth_users_email_unique".to_string()),
+                columns: vec!["email".to_string()],
+                is_unique: true,
+            }],
+        );
+        let posts = create_test_table_with_schema(
+            Some("auth"),
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_email", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["user_email".to_string()],
+                to_schema: None,
                 to_table: "users".to_string(),
                 to_columns: vec!["email".to_string()],
                 on_delete: ReferentialAction::NoAction,

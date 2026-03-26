@@ -200,7 +200,7 @@ impl Schema {
             }
         }
 
-        match Self::resolve_fk_target(schema, fk) {
+        match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
             ForeignKeyTargetResolution::Missing => {
                 errors.push(ValidationError {
                     table: Some(table.name.clone()),
@@ -237,30 +237,6 @@ impl Schema {
         }
     }
 
-    fn resolve_fk_target<'a>(schema: &'a Self, fk: &ForeignKey) -> ForeignKeyTargetResolution<'a> {
-        let target_table = fk.to_table.to_lowercase();
-        let target_schema = fk.to_schema.as_deref().map(str::to_lowercase);
-
-        let mut matches = schema.tables.iter().filter(|table| {
-            let schema_matches = match &target_schema {
-                Some(target_schema) => table
-                    .schema_name
-                    .as_deref()
-                    .is_some_and(|schema_name| schema_name.to_lowercase() == *target_schema),
-                None => true,
-            };
-            schema_matches
-                && (table.name.to_lowercase() == target_table
-                    || table.stable_id.to_lowercase() == target_table)
-        });
-
-        match (matches.next(), matches.next()) {
-            (None, _) => ForeignKeyTargetResolution::Missing,
-            (Some(table), None) => ForeignKeyTargetResolution::Found(table),
-            _ => ForeignKeyTargetResolution::Ambiguous,
-        }
-    }
-
     /// Returns statistics about the schema.
     #[must_use]
     pub fn stats(&self) -> SchemaStats {
@@ -277,10 +253,83 @@ impl Schema {
     }
 }
 
-enum ForeignKeyTargetResolution<'a> {
+pub(crate) enum ForeignKeyTargetResolution<'a> {
     Found(&'a Table),
     Missing,
     Ambiguous,
+}
+
+pub(crate) fn resolve_table_reference<'a>(
+    schema: &'a Schema,
+    from_table: Option<&Table>,
+    to_schema: Option<&str>,
+    to_table: &str,
+) -> ForeignKeyTargetResolution<'a> {
+    let target_table = to_table.to_lowercase();
+
+    if let Some(target_schema) = to_schema {
+        return resolve_matching_tables(schema, &target_table, Some(target_schema));
+    }
+
+    if let Some(source_schema) = from_table.and_then(|table| table.schema_name.as_deref()) {
+        match resolve_matching_tables(schema, &target_table, Some(source_schema)) {
+            ForeignKeyTargetResolution::Found(table) => {
+                return ForeignKeyTargetResolution::Found(table);
+            }
+            ForeignKeyTargetResolution::Ambiguous => {
+                return ForeignKeyTargetResolution::Ambiguous;
+            }
+            ForeignKeyTargetResolution::Missing => {}
+        }
+    }
+
+    match resolve_matching_tables(schema, &target_table, None) {
+        ForeignKeyTargetResolution::Missing => {
+            resolve_matching_tables_any_schema(schema, &target_table)
+        }
+        resolution => resolution,
+    }
+}
+
+fn resolve_matching_tables<'a>(
+    schema: &'a Schema,
+    target_table: &str,
+    target_schema: Option<&str>,
+) -> ForeignKeyTargetResolution<'a> {
+    let target_schema = target_schema.map(str::to_lowercase);
+    let mut matches = schema.tables.iter().filter(|table| {
+        let schema_matches = match &target_schema {
+            Some(target_schema) => table
+                .schema_name
+                .as_deref()
+                .is_some_and(|schema_name| schema_name.to_lowercase() == *target_schema),
+            None => table.schema_name.is_none(),
+        };
+        schema_matches
+            && (table.name.to_lowercase() == target_table
+                || table.stable_id.to_lowercase() == target_table)
+    });
+
+    match (matches.next(), matches.next()) {
+        (None, _) => ForeignKeyTargetResolution::Missing,
+        (Some(table), None) => ForeignKeyTargetResolution::Found(table),
+        _ => ForeignKeyTargetResolution::Ambiguous,
+    }
+}
+
+fn resolve_matching_tables_any_schema<'a>(
+    schema: &'a Schema,
+    target_table: &str,
+) -> ForeignKeyTargetResolution<'a> {
+    let mut matches = schema.tables.iter().filter(|table| {
+        table.name.to_lowercase() == target_table || table.stable_id.to_lowercase() == target_table
+    });
+
+    match (matches.next(), matches.next()) {
+        (None, _) => ForeignKeyTargetResolution::Missing,
+        (Some(table), None) => ForeignKeyTargetResolution::Found(table),
+        _ => ForeignKeyTargetResolution::Ambiguous,
+    }
 }
 
 /// Statistics about a schema.
@@ -616,6 +665,34 @@ mod tests {
                     }],
                     ..make_table("posts", None, &["id", "user_id"], vec![])
                 },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn validate_fk_without_schema_prefers_same_schema_target() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                make_table("users", Some("auth"), &["id"], vec![]),
+                make_table(
+                    "posts",
+                    Some("auth"),
+                    &["id", "user_id"],
+                    vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["user_id".to_string()],
+                        to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                ),
             ],
             views: vec![],
             enums: vec![],

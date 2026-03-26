@@ -402,8 +402,7 @@ impl TableDiff {
             let mut key = String::new();
             Self::push_key_option(&mut key, fk.to_schema.as_deref());
             Self::push_key_part(&mut key, &fk.to_table);
-            Self::push_key_list(&mut key, &fk.from_columns);
-            Self::push_key_list(&mut key, &fk.to_columns);
+            Self::push_key_pairs(&mut key, &Self::fk_column_pairs(fk));
             key
         }
     }
@@ -419,11 +418,12 @@ impl TableDiff {
         }
     }
 
-    fn push_key_list(key: &mut String, values: &[String]) {
-        key.push_str(&values.len().to_string());
+    fn push_key_pairs(key: &mut String, pairs: &[(String, String)]) {
+        key.push_str(&pairs.len().to_string());
         key.push('[');
-        for value in values {
-            Self::push_key_part(key, value);
+        for (from_column, to_column) in pairs {
+            Self::push_key_part(key, from_column);
+            Self::push_key_part(key, to_column);
         }
         key.push(']');
     }
@@ -436,10 +436,22 @@ impl TableDiff {
     }
 
     fn fks_differ(a: &ForeignKey, b: &ForeignKey) -> bool {
-        a.from_columns != b.from_columns
+        a.from_columns.len() != b.from_columns.len()
+            || a.to_columns.len() != b.to_columns.len()
+            || Self::fk_column_pairs(a) != Self::fk_column_pairs(b)
             || a.to_schema != b.to_schema
             || a.to_table != b.to_table
-            || a.to_columns != b.to_columns
+    }
+
+    fn fk_column_pairs(fk: &ForeignKey) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = fk
+            .from_columns
+            .iter()
+            .cloned()
+            .zip(fk.to_columns.iter().cloned())
+            .collect();
+        pairs.sort_unstable();
+        pairs
     }
 
     fn diff_indexes(
@@ -932,6 +944,70 @@ mod tests {
         assert!(diff.added_tables.is_empty());
         assert!(diff.removed_tables.is_empty());
         assert!(diff.modified_tables.is_empty());
+    }
+
+    #[test]
+    fn test_unnamed_foreign_keys_ignore_column_order_when_pairs_match() {
+        let before = Schema {
+            tables: vec![
+                create_test_table(
+                    "users",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("tenant_id", "bigint", false, true),
+                    ],
+                    vec![],
+                ),
+                create_test_table(
+                    "posts",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("user_id", "bigint", false, false),
+                        ("tenant_id", "bigint", false, false),
+                    ],
+                    vec![(
+                        "",
+                        vec!["user_id", "tenant_id"],
+                        "users",
+                        vec!["id", "tenant_id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![
+                create_test_table(
+                    "users",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("tenant_id", "bigint", false, true),
+                    ],
+                    vec![],
+                ),
+                create_test_table(
+                    "posts",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("user_id", "bigint", false, false),
+                        ("tenant_id", "bigint", false, false),
+                    ],
+                    vec![(
+                        "",
+                        vec!["tenant_id", "user_id"],
+                        "users",
+                        vec!["tenant_id", "id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert!(diff.is_empty());
     }
 
     #[test]
