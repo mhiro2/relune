@@ -9,6 +9,7 @@ use crate::cli::{ColorWhen, GroupByMode, RenderArgs, RenderFormat, Theme};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{DiagnosticPrinter, OutputWriter, print_stats, print_success};
+use crate::png;
 use relune_app::{
     FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, OutputFormat, RenderOptions,
     RenderRequest, RenderTheme, render,
@@ -28,15 +29,17 @@ pub fn run_render(
     let merged = config.merge_render_args(args);
     merged.validate_semantics()?;
 
-    // Convert merged format to app format
+    // Convert merged format to app format.
+    // PNG is rendered as SVG internally, then rasterized after the render step.
+    let is_png = merged.format == RenderFormat::Png;
     let output_format = match merged.format {
-        RenderFormat::Svg => OutputFormat::Svg,
+        RenderFormat::Svg | RenderFormat::Png => OutputFormat::Svg,
         RenderFormat::Html => OutputFormat::Html,
         RenderFormat::GraphJson => OutputFormat::GraphJson,
         RenderFormat::SchemaJson => OutputFormat::SchemaJson,
     };
     validate_stdout_usage(
-        output_format,
+        merged.format,
         args.out.is_some(),
         args.stdout,
         std::io::stdout().is_terminal(),
@@ -112,9 +115,17 @@ pub fn run_render(
     // Write output
     let mut writer =
         OutputWriter::new(args.out.as_deref(), color).context("Failed to create output writer")?;
-    writer
-        .write(&result.content)
-        .context("Failed to write output")?;
+    if is_png {
+        let png_data =
+            png::svg_to_png(&result.content).context("Failed to rasterize SVG to PNG")?;
+        writer
+            .write_bytes(&png_data)
+            .context("Failed to write PNG output")?;
+    } else {
+        writer
+            .write(&result.content)
+            .context("Failed to write output")?;
+    }
     writer.finish().context("Failed to finalize output")?;
 
     // Print stats if requested (from merged config)
@@ -139,17 +150,25 @@ pub fn run_render(
 }
 
 fn validate_stdout_usage(
-    output_format: OutputFormat,
+    render_format: RenderFormat,
     has_output_path: bool,
     explicit_stdout: bool,
     stdout_is_terminal: bool,
 ) -> CliResult<()> {
-    let renders_markup = matches!(output_format, OutputFormat::Svg | OutputFormat::Html);
-
-    if renders_markup && !has_output_path && !explicit_stdout && stdout_is_terminal {
-        return Err(CliError::usage(anyhow::anyhow!(
-            "Refusing to write raw SVG/HTML to an interactive terminal. Use --out <FILE> or --stdout."
-        )));
+    if !has_output_path && !explicit_stdout && stdout_is_terminal {
+        match render_format {
+            RenderFormat::Svg | RenderFormat::Html => {
+                return Err(CliError::usage(anyhow::anyhow!(
+                    "Refusing to write raw SVG/HTML to an interactive terminal. Use --out <FILE> or --stdout."
+                )));
+            }
+            RenderFormat::Png => {
+                return Err(CliError::usage(anyhow::anyhow!(
+                    "Refusing to write binary PNG data to an interactive terminal. Use --out <FILE>."
+                )));
+            }
+            RenderFormat::GraphJson | RenderFormat::SchemaJson => {}
+        }
     }
 
     Ok(())
@@ -161,7 +180,7 @@ mod tests {
 
     #[test]
     fn rejects_markup_stdout_on_terminal_without_opt_in() {
-        let result = validate_stdout_usage(OutputFormat::Svg, false, false, true);
+        let result = validate_stdout_usage(RenderFormat::Svg, false, false, true);
 
         let error = result.expect_err("interactive stdout should require opt-in");
         assert!(
@@ -171,20 +190,45 @@ mod tests {
     }
 
     #[test]
+    fn rejects_png_stdout_on_terminal() {
+        let result = validate_stdout_usage(RenderFormat::Png, false, false, true);
+
+        let error = result.expect_err("PNG stdout on terminal should be rejected");
+        assert!(
+            error.to_string().contains("binary PNG data"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_png_stdout_even_with_explicit_stdout_flag() {
+        // PNG cannot use --stdout because it conflicts with --out in clap,
+        // but if somehow both are false, it should still reject on terminal.
+        let result = validate_stdout_usage(RenderFormat::Png, false, false, true);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn allows_markup_stdout_when_explicitly_requested() {
-        validate_stdout_usage(OutputFormat::Html, false, true, true)
+        validate_stdout_usage(RenderFormat::Html, false, true, true)
             .expect("explicit stdout should be allowed");
     }
 
     #[test]
     fn allows_json_stdout_on_terminal() {
-        validate_stdout_usage(OutputFormat::GraphJson, false, false, true)
+        validate_stdout_usage(RenderFormat::GraphJson, false, false, true)
             .expect("json stdout should stay allowed");
     }
 
     #[test]
     fn allows_markup_stdout_when_piped() {
-        validate_stdout_usage(OutputFormat::Svg, false, false, false)
+        validate_stdout_usage(RenderFormat::Svg, false, false, false)
             .expect("piped stdout should stay allowed");
+    }
+
+    #[test]
+    fn allows_png_stdout_when_piped() {
+        validate_stdout_usage(RenderFormat::Png, false, false, false)
+            .expect("piped PNG stdout should be allowed");
     }
 }

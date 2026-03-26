@@ -25,7 +25,7 @@ await Promise.all(
       bundle: true,
       format: "iife",
       platform: "browser",
-      target: "es2020",
+      target: ["chrome120", "firefox120", "safari17"],
       outfile: join(outDir, `${name}.js`),
     }),
   ),

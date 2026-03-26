@@ -9,12 +9,12 @@ rust-version.workspace = true
 relune-core = { path = "../relune-core" }
 relune-layout = { path = "../relune-layout" }
 relune-render-theme = { path = "../relune-render-theme" }
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
 relune-parser-sql = { path = "../relune-parser-sql" }
-serde_json = "1"
+serde_json.workspace = true
 
 [lints]
 workspace = true

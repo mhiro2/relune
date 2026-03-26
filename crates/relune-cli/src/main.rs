@@ -11,6 +11,7 @@ mod commands;
 mod config;
 mod error;
 mod output;
+mod png;
 
 use cli::{Cli, Command};
 use commands::{run_diff, run_export, run_inspect, run_lint, run_render};

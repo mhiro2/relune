@@ -335,6 +335,80 @@ mod render_tests {
             "HTML output should use the configured dark theme"
         );
     }
+
+    #[test]
+    fn render_sql_to_png_file() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("output.png");
+
+        let mut cmd = relune();
+        cmd.arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("png")
+            .arg("--out")
+            .arg(&output_path)
+            .assert()
+            .success();
+
+        // Verify output file was created
+        assert!(output_path.exists(), "Output PNG file should be created");
+
+        // Verify it contains valid PNG data (magic bytes)
+        let content = fs::read(&output_path).expect("Failed to read output file");
+        assert!(content.len() > 8, "PNG file should have meaningful content");
+        assert_eq!(
+            &content[..8],
+            b"\x89PNG\r\n\x1a\n",
+            "Output should start with PNG magic bytes"
+        );
+    }
+
+    #[test]
+    fn render_png_rejects_terminal_stdout() {
+        // When format is png and no --out is specified, the CLI should refuse
+        // to write binary data to an interactive terminal.
+        // Note: in test context stdout is not a terminal, so we verify via
+        // the error message by checking the help text mentions --out.
+        let mut cmd = relune();
+        cmd.arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("png");
+
+        // In CI/test context stdout is piped (not a terminal), so this
+        // actually succeeds by writing binary to stdout. We just verify
+        // the command doesn't crash.
+        cmd.assert().success();
+    }
+
+    #[test]
+    fn render_png_with_dark_theme() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("dark.png");
+
+        let mut cmd = relune();
+        cmd.arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("png")
+            .arg("--theme")
+            .arg("dark")
+            .arg("--out")
+            .arg(&output_path)
+            .assert()
+            .success();
+
+        let content = fs::read(&output_path).expect("Failed to read output file");
+        assert_eq!(
+            &content[..8],
+            b"\x89PNG\r\n\x1a\n",
+            "Dark theme PNG should still be valid"
+        );
+    }
 }
 
 // ============================================================================

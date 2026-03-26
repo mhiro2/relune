@@ -35,6 +35,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread"] }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
+resvg = "0.47"
+fontdb = "0.23"
 console_error_panic_hook = "0.1"
 
 [workspace.lints.rust]
