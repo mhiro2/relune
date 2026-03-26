@@ -33,6 +33,8 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     let mut js_parts: Vec<&str> = Vec::new();
     if options.enable_pan_zoom {
         js_parts.push(build_pan_zoom_js());
+        js_parts.push(build_minimap_js());
+        js_parts.push(build_shortcuts_js());
     }
     if options.enable_group_toggles {
         js_parts.push(build_group_toggle_js());
@@ -49,6 +51,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     if options.enable_highlight {
         js_parts.push(build_highlight_js());
     }
+    js_parts.push(build_load_motion_js());
     let js = if js_parts.is_empty() {
         None
     } else {
@@ -76,6 +79,24 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         None
     };
 
+    let filter_reset_bar = if options.enable_search && options.enable_column_type_filter {
+        Some(build_filter_reset_bar_html())
+    } else {
+        None
+    };
+
+    let viewer_controls = if options.enable_pan_zoom {
+        Some(build_viewer_controls_html())
+    } else {
+        None
+    };
+
+    let detail_drawer = if options.enable_highlight {
+        Some(build_detail_drawer_html())
+    } else {
+        None
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -90,7 +111,10 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 <body>
 {heading}
 {search_panel}
+{filter_reset_bar}
 {group_panel}
+{detail_drawer}
+{viewer_controls}
   <div class="container">
     <div class="viewport" id="viewport">
       <div class="canvas" id="canvas">
@@ -107,7 +131,10 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         title = html_escape(title),
         heading = heading.unwrap_or_default(),
         search_panel = search_panel.unwrap_or_default(),
+        filter_reset_bar = filter_reset_bar.unwrap_or_default(),
         group_panel = group_panel.unwrap_or_default(),
+        detail_drawer = detail_drawer.unwrap_or_default(),
+        viewer_controls = viewer_controls.unwrap_or_default(),
         css = css,
         svg = indent_svg(svg),
         metadata_json = metadata_json,
@@ -129,6 +156,37 @@ fn build_css(
     enable_highlight: bool,
 ) -> String {
     let colors = get_colors(theme);
+    let (
+        viewer_bg,
+        panel_bg,
+        panel_border,
+        panel_shadow,
+        accent_color,
+        accent_soft,
+        grid_dot,
+        grid_line,
+    ) = match theme {
+        Theme::Dark => (
+            "radial-gradient(circle at top, rgba(245, 158, 11, 0.16), transparent 34%), linear-gradient(180deg, #0b1020 0%, #111827 52%, #0a0f1c 100%)",
+            "rgba(10, 15, 28, 0.9)",
+            "rgba(148, 163, 184, 0.18)",
+            "0 18px 48px rgba(2, 6, 23, 0.52)",
+            "#f59e0b",
+            "rgba(245, 158, 11, 0.16)",
+            "rgba(148, 163, 184, 0.12)",
+            "rgba(148, 163, 184, 0.05)",
+        ),
+        Theme::Light => (
+            "radial-gradient(circle at top, rgba(217, 119, 6, 0.12), transparent 32%), linear-gradient(180deg, #f8fafc 0%, #eef2ff 42%, #f8fafc 100%)",
+            "rgba(255, 255, 255, 0.86)",
+            "rgba(71, 85, 105, 0.16)",
+            "0 16px 36px rgba(15, 23, 42, 0.12)",
+            "#c2410c",
+            "rgba(194, 65, 12, 0.12)",
+            "rgba(71, 85, 105, 0.12)",
+            "rgba(71, 85, 105, 0.04)",
+        ),
+    };
 
     let search_css = if enable_search {
         r"
@@ -137,13 +195,14 @@ fn build_css(
       position: fixed;
       top: 12px;
       left: 12px;
-      width: 300px;
-      background-color: var(--bg-color);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      z-index: 200;
+      width: min(360px, calc(100vw - 24px));
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      z-index: 240;
       overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
     }
 
     body:has(h1) .search-panel {
@@ -153,8 +212,8 @@ fn build_css(
     .search-container {
       display: flex;
       align-items: center;
-      padding: 10px 12px;
-      gap: 8px;
+      padding: 12px 14px;
+      gap: 10px;
     }
 
     .search-icon {
@@ -168,6 +227,7 @@ fn build_css(
       flex: 1;
       border: none;
       background: transparent;
+      font-family: var(--ui-font);
       font-size: 14px;
       color: var(--text-color);
       outline: none;
@@ -201,14 +261,14 @@ fn build_css(
 
     .search-clear:hover {
       opacity: 1;
-      background-color: var(--border-color);
+      background-color: var(--accent-soft);
     }
 
     .search-results {
-      padding: 6px 12px;
+      padding: 6px 14px 10px;
       font-size: 12px;
       opacity: 0.7;
-      border-top: 1px solid var(--border-color);
+      border-top: 1px solid var(--panel-border);
       display: none;
     }
 
@@ -228,16 +288,16 @@ fn build_css(
     }
 
     .node.dimmed-by-type-filter {
-      opacity: 0.25;
+      opacity: 0.2;
       transition: opacity 0.2s;
     }
 
     .node.dimmed-by-search.dimmed-by-type-filter {
-      opacity: 0.12;
+      opacity: 0.08;
     }
 
     .edge.dimmed-by-edge-filter {
-      opacity: 0.15;
+      opacity: 0.12;
       transition: opacity 0.2s;
     }"
     } else {
@@ -247,76 +307,97 @@ fn build_css(
     let type_filter_css = if enable_search && enable_column_type_filter {
         r"
     .type-filter-section {
-      border-top: 1px solid var(--border-color);
+      border-top: 1px solid var(--panel-border);
     }
 
     .type-filter-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 12px 4px;
+      padding: 10px 14px 6px;
       font-size: 12px;
       font-weight: 600;
       opacity: 0.9;
     }
 
-    .type-filter-clear {
-      background: none;
-      border: none;
+    .type-filter-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .type-filter-action {
+      background: transparent;
+      border: 1px solid var(--panel-border);
       color: var(--text-color);
       font-size: 11px;
       cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 4px;
-      opacity: 0.7;
+      padding: 4px 8px;
+      border-radius: 999px;
+      opacity: 0.84;
+      transition: background-color 0.16s, border-color 0.16s, opacity 0.16s;
     }
 
-    .type-filter-clear:hover {
+    .type-filter-action:hover {
       opacity: 1;
-      background-color: var(--border-color);
+      border-color: var(--accent-color);
+      background-color: var(--accent-soft);
     }
 
     .type-filter-query {
       display: block;
-      width: calc(100% - 24px);
-      margin: 0 12px 8px;
-      padding: 6px 8px;
+      width: calc(100% - 28px);
+      margin: 0 14px 10px;
+      padding: 8px 10px;
       font-size: 12px;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      background: var(--bg-color);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.02);
       color: var(--text-color);
     }
 
     .type-filter-list {
-      max-height: 200px;
+      max-height: min(300px, 50vh);
       overflow-y: auto;
-      padding: 4px 0 8px;
+      padding: 4px 0 10px;
     }
 
     .type-filter-item {
       display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 4px 12px;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 14px;
       font-size: 12px;
       cursor: pointer;
+      transition: background-color 0.16s;
     }
 
     .type-filter-item:hover {
-      background-color: var(--border-color);
+      background-color: var(--accent-soft);
     }
 
     .type-filter-item span {
       word-break: break-word;
+      font-family: var(--mono-font);
+    }
+
+    .type-filter-item-count {
+      margin-left: auto;
+      min-width: 28px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--ui-font);
     }
 
     .type-filter-summary {
       display: none;
-      padding: 6px 12px;
+      padding: 8px 14px 12px;
       font-size: 11px;
       opacity: 0.7;
-      border-top: 1px solid var(--border-color);
+      border-top: 1px solid var(--panel-border);
     }
 
     .type-filter-summary.visible {
@@ -333,14 +414,15 @@ fn build_css(
       position: fixed;
       top: 12px;
       right: 12px;
-      width: 220px;
+      width: min(280px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
-      background-color: var(--bg-color);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      z-index: 200;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      z-index: 220;
       overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
     }
 
     body:has(h1) .group-panel {
@@ -356,10 +438,10 @@ fn build_css(
     }
 
     .group-panel-header {
-      padding: 10px 12px;
+      padding: 12px 14px;
       font-size: 13px;
       font-weight: 600;
-      border-bottom: 1px solid var(--border-color);
+      border-bottom: 1px solid var(--panel-border);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -391,7 +473,7 @@ fn build_css(
 
     .group-panel-collapse-btn:hover {
       opacity: 1;
-      background-color: var(--border-color);
+      background-color: var(--accent-soft);
     }
 
     .group-panel.group-panel-collapsed .group-panel-body {
@@ -405,19 +487,20 @@ fn build_css(
 
     .group-panel-actions button {
       background: none;
-      border: none;
+      border: 1px solid transparent;
       color: var(--text-color);
       font-size: 11px;
       cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 4px;
+      padding: 4px 8px;
+      border-radius: 999px;
       opacity: 0.7;
-      transition: opacity 0.2s, background-color 0.2s;
+      transition: opacity 0.2s, background-color 0.2s, border-color 0.2s;
     }
 
     .group-panel-actions button:hover {
       opacity: 1;
-      background-color: var(--border-color);
+      border-color: var(--accent-color);
+      background-color: var(--accent-soft);
     }
 
     .group-list {
@@ -435,7 +518,7 @@ fn build_css(
     }
 
     .group-item:hover {
-      background-color: var(--border-color);
+      background-color: var(--accent-soft);
     }
 
     .group-item input[type="checkbox"] {
@@ -477,40 +560,433 @@ fn build_css(
     /* Neighbor highlight styles */
     .node.highlighted-neighbor {
       opacity: 1 !important;
-      filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.5));
+      filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.35));
       transition: opacity 0.2s, filter 0.2s;
     }
 
+    .node .table-body {
+      transition: stroke 0.3s, stroke-width 0.3s, filter 0.3s, opacity 0.3s;
+    }
+
+    .node.highlighted-neighbor .table-body {
+      stroke: rgba(245, 158, 11, 0.78);
+      stroke-width: 2.2px;
+    }
+
     .node.highlighted-neighbor.inbound {
-      filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.5));
+      filter: drop-shadow(0 0 10px rgba(45, 212, 191, 0.35));
+    }
+
+    .node.highlighted-neighbor.inbound .table-body {
+      stroke: rgba(45, 212, 191, 0.78);
     }
 
     .node.highlighted-neighbor.outbound {
-      filter: drop-shadow(0 0 6px rgba(249, 115, 22, 0.5));
+      filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.4));
+    }
+
+    .node.highlighted-neighbor.outbound .table-body {
+      stroke: rgba(251, 191, 36, 0.84);
     }
 
     .node.dimmed-by-highlight {
-      opacity: 0.2 !important;
+      opacity: 0.12 !important;
       transition: opacity 0.2s;
     }
 
     .edge.highlighted-neighbor {
       opacity: 1 !important;
-      stroke-width: 2.5px;
+      stroke-width: 2.6px;
       transition: opacity 0.2s, stroke-width 0.2s;
     }
 
     .edge.dimmed-by-highlight {
-      opacity: 0.1 !important;
+      opacity: 0.08 !important;
       transition: opacity 0.2s;
     }
 
     .node.selected-node {
-      filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.8));
+      filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.48));
     }"
     } else {
         ""
     };
+
+    let viewer_shell_css = r"
+    .filter-reset-bar {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: min(520px, calc(100vw - 24px));
+      max-width: calc(100vw - 24px);
+      padding: 10px 14px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: var(--panel-bg);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      z-index: 260;
+    }
+
+    .filter-reset-bar[hidden] {
+      display: none;
+    }
+
+    body:has(h1) .filter-reset-bar {
+      top: 61px;
+    }
+
+    .filter-reset-copy {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .filter-reset-button {
+      border: 1px solid var(--accent-color);
+      background: var(--accent-soft);
+      color: var(--text-color);
+      border-radius: 999px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font: inherit;
+      transition: filter 0.16s, transform 0.16s;
+    }
+
+    .filter-reset-button:hover {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+    }
+
+    .viewer-controls {
+      position: fixed;
+      right: 16px;
+      bottom: 196px;
+      display: flex;
+      gap: 10px;
+      z-index: 220;
+    }
+
+    .viewer-control-button {
+      min-width: 48px;
+      height: 44px;
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      color: var(--text-color);
+      border-radius: 14px;
+      font: 600 13px var(--ui-font);
+      cursor: pointer;
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      transition: transform 0.16s, border-color 0.16s, background-color 0.16s;
+    }
+
+    .viewer-control-fit {
+      min-width: 68px;
+    }
+
+    .viewer-control-button:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent-color);
+      background: color-mix(in srgb, var(--panel-bg) 82%, var(--accent-soft));
+    }
+
+    .minimap-shell {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      width: min(240px, calc(100vw - 32px));
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      background: var(--panel-bg);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      overflow: hidden;
+      z-index: 210;
+    }
+
+    .minimap-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--panel-border);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.8;
+    }
+
+    .minimap-hint {
+      opacity: 0.65;
+      text-transform: none;
+      letter-spacing: normal;
+    }
+
+    .minimap {
+      display: block;
+      width: 100%;
+      height: 150px;
+      cursor: pointer;
+    }
+
+    .minimap-node {
+      fill: rgba(148, 163, 184, 0.46);
+      stroke: rgba(148, 163, 184, 0.7);
+      stroke-width: 0.4;
+      rx: 2;
+    }
+
+    .minimap-node.selected {
+      fill: rgba(245, 158, 11, 0.72);
+      stroke: rgba(245, 158, 11, 1);
+    }
+
+    .minimap-frame {
+      fill: rgba(245, 158, 11, 0.14);
+      stroke: rgba(245, 158, 11, 0.88);
+      stroke-width: 1.4;
+    }
+
+    .detail-drawer {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      width: min(340px, calc(100vw - 24px));
+      max-height: min(48vh, 540px);
+      overflow: auto;
+      padding: 16px;
+      border: 1px solid var(--panel-border);
+      border-radius: 22px;
+      background: var(--panel-bg);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(18px);
+      z-index: 250;
+    }
+
+    .detail-drawer[hidden] {
+      display: none;
+    }
+
+    body:has(h1) .detail-drawer {
+      top: 61px;
+    }
+
+    body:has(.detail-drawer:not([hidden])) .group-panel {
+      top: 236px;
+    }
+
+    body:has(.detail-drawer:not([hidden])):has(h1) .group-panel {
+      top: 285px;
+    }
+
+    .detail-drawer-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .detail-kicker {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent-color);
+      margin-bottom: 6px;
+    }
+
+    .detail-title {
+      font-size: 20px;
+      line-height: 1.15;
+      margin: 0;
+    }
+
+    .detail-subtitle {
+      margin-top: 10px;
+      font-size: 13px;
+      opacity: 0.72;
+    }
+
+    .detail-close {
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--panel-border);
+      background: transparent;
+      color: var(--text-color);
+      border-radius: 50%;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .detail-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 16px 0;
+    }
+
+    .detail-metric {
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(148, 163, 184, 0.08);
+    }
+
+    .detail-metric-label {
+      display: block;
+      font-size: 11px;
+      opacity: 0.65;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .detail-metric-value {
+      font-family: var(--mono-font);
+      font-size: 14px;
+    }
+
+    .detail-section + .detail-section {
+      margin-top: 16px;
+    }
+
+    .detail-section h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.74;
+      margin-bottom: 10px;
+    }
+
+    .detail-columns,
+    .detail-relations {
+      display: grid;
+      gap: 8px;
+    }
+
+    .detail-column,
+    .detail-relation {
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: rgba(148, 163, 184, 0.05);
+    }
+
+    .detail-relation:hover {
+      border-color: var(--accent-color);
+      background: color-mix(in srgb, rgba(148, 163, 184, 0.05) 72%, var(--accent-soft));
+    }
+
+    .detail-column-name,
+    .detail-relation-label {
+      display: block;
+      font-family: var(--mono-font);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .detail-column-meta,
+    .detail-relation-meta {
+      font-size: 12px;
+      opacity: 0.72;
+    }
+
+    .detail-relation-meta {
+      border: none;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .detail-empty {
+      font-size: 12px;
+      opacity: 0.62;
+    }
+
+    .canvas svg .node,
+    .canvas svg .edge {
+      opacity: 0;
+      animation-duration: 440ms;
+      animation-timing-function: cubic-bezier(0.2, 0.9, 0.2, 1);
+      animation-fill-mode: forwards;
+      animation-delay: var(--enter-delay, calc(var(--enter-index, 0) * 20ms));
+    }
+
+    .canvas svg .node {
+      animation-name: relune-node-enter;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .canvas svg .edge {
+      animation-name: relune-edge-enter;
+    }
+
+    .node.dimmed-by-type-filter .type-filter-overlay {
+      opacity: 0.34;
+    }
+
+    .edge.highlighted-neighbor .edge-glow-path {
+      opacity: 0.92;
+    }
+
+    @keyframes relune-node-enter {
+      from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes relune-edge-enter {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+
+    @media (max-width: 960px) {
+      .detail-drawer,
+      .group-panel,
+      .search-panel,
+      .minimap-shell {
+        width: calc(100vw - 24px);
+      }
+
+      .detail-drawer {
+        top: auto;
+        bottom: 16px;
+        max-height: 42vh;
+      }
+
+      .viewer-controls {
+        right: 12px;
+        bottom: 188px;
+      }
+
+      .group-panel,
+      body:has(.detail-drawer:not([hidden])) .group-panel,
+      body:has(.detail-drawer:not([hidden])):has(h1) .group-panel {
+        top: auto;
+        bottom: 16px;
+        max-height: 38vh;
+      }
+    }";
 
     format!(
         r"    :root {{
@@ -520,6 +996,16 @@ fn build_css(
       --node-bg: {node_bg};
       --node-header-bg: {node_header_bg};
       --edge-color: {edge_color};
+      --panel-bg: {panel_bg};
+      --panel-border: {panel_border};
+      --panel-shadow: {panel_shadow};
+      --accent-color: {accent_color};
+      --accent-soft: {accent_soft};
+      --viewer-bg: {viewer_bg};
+      --grid-dot: {grid_dot};
+      --grid-line: {grid_line};
+      --ui-font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --mono-font: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
     }}
 
     * {{
@@ -529,8 +1015,8 @@ fn build_css(
     }}
 
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background-color: var(--bg-color);
+      font-family: var(--ui-font);
+      background: var(--viewer-bg);
       color: var(--text-color);
       min-height: 100vh;
       overflow: hidden;
@@ -544,9 +1030,10 @@ fn build_css(
       padding: 12px 20px;
       font-size: 18px;
       font-weight: 600;
-      background-color: var(--bg-color);
-      border-bottom: 1px solid var(--border-color);
-      z-index: 100;
+      background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+      border-bottom: 1px solid var(--panel-border);
+      backdrop-filter: blur(16px);
+      z-index: 180;
       margin: 0;
     }}
 
@@ -568,6 +1055,13 @@ fn build_css(
       height: 100%;
       overflow: hidden;
       cursor: grab;
+      position: relative;
+      background-image:
+        radial-gradient(circle at 1px 1px, var(--grid-dot) 1.2px, transparent 0),
+        linear-gradient(var(--grid-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+      background-size: 24px 24px, 96px 96px, 96px 96px;
+      background-position: 0 0, -1px -1px, -1px -1px;
     }}
 
     .viewport:active {{
@@ -576,35 +1070,47 @@ fn build_css(
 
     .canvas {{
       transform-origin: 0 0;
+      will-change: transform;
     }}
 
     .viewport svg {{
       display: block;
+      overflow: visible;
     }}
 
     /* Controls hint */
     .viewport::after {{
-      content: 'Drag to pan, scroll to zoom';
+      content: 'Drag to pan, scroll to zoom, F to fit';
       position: absolute;
       bottom: 16px;
-      right: 16px;
+      left: 16px;
       font-size: 12px;
       color: var(--text-color);
       opacity: 0.5;
       pointer-events: none;
       transition: opacity 0.3s;
+      z-index: 20;
     }}
 
     .viewport:hover::after {{
       opacity: 0.8;
     }}
-{search_css}{type_filter_css}{group_panel_css}{highlight_css}",
+{search_css}{type_filter_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
         bg_color = colors.background,
         text_color = colors.text_primary,
         border_color = colors.node_stroke,
         node_bg = colors.node_fill,
         node_header_bg = colors.header_fill,
         edge_color = colors.edge_stroke,
+        panel_bg = panel_bg,
+        panel_border = panel_border,
+        panel_shadow = panel_shadow,
+        accent_color = accent_color,
+        accent_soft = accent_soft,
+        viewer_bg = viewer_bg,
+        grid_dot = grid_dot,
+        grid_line = grid_line,
+        viewer_shell_css = viewer_shell_css,
     )
 }
 
@@ -658,14 +1164,87 @@ const fn build_highlight_js() -> &'static str {
     include_str!("js/highlight.js")
 }
 
+/// Build the minimap JavaScript.
+const fn build_minimap_js() -> &'static str {
+    include_str!("js/minimap.js")
+}
+
+/// Build the keyboard shortcuts JavaScript.
+const fn build_shortcuts_js() -> &'static str {
+    include_str!("js/shortcuts.js")
+}
+
+/// Build the load animation JavaScript.
+const fn build_load_motion_js() -> &'static str {
+    include_str!("js/load_motion.js")
+}
+
+#[allow(clippy::needless_raw_string_hashes)]
+fn build_filter_reset_bar_html() -> String {
+    r#"  <div class="filter-reset-bar" id="filter-reset-bar" hidden>
+    <span class="filter-reset-copy" id="filter-reset-copy"></span>
+    <button type="button" class="filter-reset-button" id="filter-reset-button">Reset filters</button>
+  </div>
+"#
+    .to_string()
+}
+
+#[allow(clippy::needless_raw_string_hashes)]
+fn build_viewer_controls_html() -> String {
+    r#"  <div class="viewer-controls" id="viewer-controls" aria-label="Diagram controls">
+    <button type="button" class="viewer-control-button" id="zoom-in" title="Zoom in">+</button>
+    <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out">-</button>
+    <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen">Fit</button>
+  </div>
+  <div class="minimap-shell" id="minimap-shell" aria-label="Diagram minimap">
+    <div class="minimap-header">
+      <span>Minimap</span>
+      <span class="minimap-hint">Viewport</span>
+    </div>
+    <svg class="minimap" id="minimap" viewBox="0 0 100 100" aria-hidden="true"></svg>
+  </div>
+"#
+    .to_string()
+}
+
+#[allow(clippy::needless_raw_string_hashes)]
+fn build_detail_drawer_html() -> String {
+    r#"  <aside class="detail-drawer" id="detail-drawer" hidden>
+    <div class="detail-drawer-header">
+      <div>
+        <p class="detail-kicker" id="detail-kind"></p>
+        <h2 class="detail-title" id="detail-title">Object details</h2>
+      </div>
+      <button type="button" class="detail-close" id="detail-close" aria-label="Close details">&times;</button>
+    </div>
+    <p class="detail-subtitle" id="detail-subtitle"></p>
+    <div class="detail-metrics" id="detail-metrics"></div>
+    <section class="detail-section">
+      <h3>Columns</h3>
+      <div class="detail-empty" id="detail-columns-empty">No column details available.</div>
+      <div class="detail-columns" id="detail-columns"></div>
+    </section>
+    <section class="detail-section">
+      <h3>Relationships</h3>
+      <div class="detail-empty" id="detail-relationships-empty">No relationships for this object.</div>
+      <div class="detail-relations" id="detail-relations"></div>
+    </section>
+  </aside>
+"#
+    .to_string()
+}
+
 /// Build the search panel HTML structure.
 #[allow(clippy::needless_raw_string_hashes)]
 fn build_search_panel_html(enable_column_type_filter: bool) -> String {
     let type_block = if enable_column_type_filter {
         r#"    <section class="type-filter-section" id="type-filter-section" hidden aria-label="Column type filter">
       <div class="type-filter-header">
-        <span>Column types</span>
-        <button type="button" class="type-filter-clear" id="type-filter-clear">Clear</button>
+        <span>Filter by type</span>
+        <div class="type-filter-actions">
+          <button type="button" class="type-filter-action" id="type-filter-select-visible">All</button>
+          <button type="button" class="type-filter-action" id="type-filter-clear">None</button>
+        </div>
       </div>
       <input type="search" id="type-filter-query" class="type-filter-query" placeholder="Narrow type list..." autocomplete="off">
       <div class="type-filter-list" id="type-filter-list"></div>
@@ -873,8 +1452,8 @@ mod tests {
     fn test_group_panel_css_not_included_when_disabled() {
         let css = build_css(Theme::Light, false, false, false, false, false);
 
-        assert!(!css.contains(".group-panel"));
-        assert!(!css.contains(".group-item"));
+        assert!(!css.contains(".group-item input[type=\"checkbox\"]"));
+        assert!(!css.contains(".hidden-by-group"));
     }
 
     #[test]
@@ -922,6 +1501,9 @@ mod tests {
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains(r#"id="table-search""#));
         assert!(html.contains("type-filter-section"));
+        assert!(html.contains("filter-reset-bar"));
+        assert!(html.contains("viewer-controls"));
+        assert!(html.contains("detail-drawer"));
     }
 
     #[test]
@@ -965,8 +1547,8 @@ mod tests {
     fn test_search_css_not_included_when_disabled() {
         let css = build_css(Theme::Light, false, false, false, false, false);
 
-        assert!(!css.contains(".search-panel"));
-        assert!(!css.contains(".search-input"));
+        assert!(!css.contains("/* Search panel styles */"));
+        assert!(!css.contains(".search-container"));
         assert!(!css.contains(".dimmed-by-search"));
     }
 
@@ -983,6 +1565,11 @@ mod tests {
         assert!(html.contains(r#"class="search-results""#));
         assert!(html.contains(r#"id="search-results""#));
         assert!(html.contains("type-filter-section"));
+        assert!(html.contains("Filter by type"));
+        assert!(html.contains("type-filter-select-visible"));
+        assert!(html.contains("type-filter-clear"));
+        assert!(html.contains(">All<"));
+        assert!(html.contains(">None<"));
     }
 
     #[test]
@@ -1010,6 +1597,37 @@ mod tests {
         assert!(html.contains("search-clear"));
         assert!(html.contains("search-results"));
         assert!(html.contains("tableMatchesAnySelectedType"));
+        assert!(html.contains("detail-drawer"));
+        assert!(html.contains("minimap"));
+        assert!(html.contains("zoom-fit"));
+    }
+
+    #[test]
+    fn test_build_viewer_controls_html() {
+        let html = build_viewer_controls_html();
+
+        assert!(html.contains(r#"id="zoom-in""#));
+        assert!(html.contains(r#"id="zoom-out""#));
+        assert!(html.contains(r#"id="zoom-fit""#));
+        assert!(html.contains(r#"id="minimap""#));
+    }
+
+    #[test]
+    fn test_build_detail_drawer_html() {
+        let html = build_detail_drawer_html();
+
+        assert!(html.contains(r#"id="detail-drawer""#));
+        assert!(html.contains(r#"id="detail-title""#));
+        assert!(html.contains(r#"id="detail-columns""#));
+        assert!(html.contains(r#"id="detail-relations""#));
+    }
+
+    #[test]
+    fn test_build_filter_reset_bar_html() {
+        let html = build_filter_reset_bar_html();
+
+        assert!(html.contains(r#"id="filter-reset-bar""#));
+        assert!(html.contains(r#"id="filter-reset-button""#));
     }
 
     #[test]
@@ -1050,13 +1668,15 @@ mod tests {
         assert!(css.contains(".highlighted-neighbor"));
         assert!(css.contains(".dimmed-by-highlight"));
         assert!(css.contains(".selected-node"));
+        assert!(css.contains(".node.selected-node {"));
+        assert!(css.contains("transition: stroke 0.3s"));
     }
 
     #[test]
     fn test_highlight_css_not_included_when_disabled() {
         let css = build_css(Theme::Light, false, false, false, false, false);
 
-        assert!(!css.contains(".highlighted-neighbor"));
+        assert!(!css.contains("/* Neighbor highlight styles */"));
         assert!(!css.contains(".dimmed-by-highlight"));
         assert!(!css.contains(".selected-node"));
     }
