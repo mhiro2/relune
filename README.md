@@ -36,6 +36,8 @@ Generate schema diagrams as:
 - **HTML** for interactive exploration with pan, zoom, search, and filters
 - render **tables, views, and PostgreSQL enums** with distinct node/edge styles
 
+SVG/HTML renders now require either `-o/--out` or an explicit `--stdout` opt-in, so interactive terminals do not get flooded with raw markup by accident.
+
 ### Layout and edge control
 
 Tune readability depending on the shape of your schema:
@@ -117,6 +119,9 @@ relune render --sql schema.sql -o erd.svg
 
 # Interactive HTML viewer
 relune render --sql schema.sql --format html -o erd.html
+
+# Pipe raw SVG explicitly
+relune render --sql schema.sql --stdout > erd.svg
 
 # Focus on the “orders” table with depth 2
 relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
