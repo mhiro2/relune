@@ -28,6 +28,21 @@ const fn default_force_iterations() -> usize {
     150
 }
 
+/// Node header font size used for width estimation.
+const HEADER_FONT_SIZE: f32 = 14.0;
+/// Node column font size used for width estimation.
+const COLUMN_FONT_SIZE: f32 = 12.0;
+/// Lower bound factor applied to configured node width.
+const MIN_NODE_WIDTH_FACTOR: f32 = 0.72;
+/// Space reserved for badges and padding in width estimation.
+const NODE_WIDTH_SLACK: f32 = 34.0;
+
+#[derive(Debug, Clone, Copy)]
+struct NodeSize {
+    width: f32,
+    height: f32,
+}
+
 /// Configuration for layout.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayoutConfig {
@@ -361,17 +376,18 @@ pub fn build_layout_with_config(
     }
 
     // Step 3: Assign coordinates based on layout mode
+    let node_sizes = measure_node_sizes(&graph, &effective_config);
     let (positioned_nodes, width, height) = match effective_config.mode {
         LayoutAlgorithm::Hierarchical => {
             // Hierarchical layout: assign ranks and order
             let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
             debug!("Assigned {} ranks", ranks.num_ranks);
             let ordered_nodes = order_nodes_within_layers(&graph, &ranks);
-            assign_coordinates(&graph, &ordered_nodes, &effective_config)
+            assign_coordinates(&graph, &ordered_nodes, &effective_config, &node_sizes)
         }
         LayoutAlgorithm::ForceDirected => {
             // Force-directed layout
-            apply_force_layout(&graph, &effective_config)
+            apply_force_layout(&graph, &effective_config, &node_sizes)
         }
     };
 
@@ -399,16 +415,15 @@ fn assign_coordinates(
     graph: &LayoutGraph,
     ordered_nodes: &[Vec<usize>],
     config: &LayoutConfig,
+    node_sizes: &[NodeSize],
 ) -> (Vec<PositionedNode>, f32, f32) {
     let mut positioned_nodes = Vec::new();
-
-    let mut max_x = config.origin_x;
-    let mut max_y = config.origin_y;
 
     let is_horizontal = matches!(
         config.direction,
         LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
     );
+    let rank_primary_offsets = compute_rank_primary_offsets(ordered_nodes, node_sizes, config);
 
     for (rank_idx, rank_nodes) in ordered_nodes.iter().enumerate() {
         let mut secondary_offset = if is_horizontal {
@@ -419,72 +434,49 @@ fn assign_coordinates(
 
         for &node_idx in rank_nodes {
             let node = &graph.nodes[node_idx];
-            let node_height = config.header_height
-                + node.columns.len() as f32 * config.column_height
-                + config.node_padding * 2.0;
+            let node_size = node_sizes[node_idx];
+            let primary = rank_primary_offsets[rank_idx];
+            let secondary = secondary_offset;
 
             let (node_x, node_y) = if is_horizontal {
                 // Horizontal: ranks flow along X, nodes stack along Y
-                let primary = config.origin_x + rank_idx as f32 * config.horizontal_spacing;
-                let secondary = secondary_offset;
-                secondary_offset += node_height + config.vertical_spacing;
+                secondary_offset += node_size.height + config.vertical_spacing;
                 (primary, secondary)
             } else {
                 // Vertical: ranks flow along Y, nodes stack along X
-                let primary = config.origin_y + rank_idx as f32 * config.vertical_spacing;
-                let secondary = secondary_offset;
-                secondary_offset += config.node_width + config.horizontal_spacing;
+                secondary_offset += node_size.width + config.horizontal_spacing;
                 (secondary, primary)
             };
 
-            let positioned = PositionedNode {
-                id: node.id.clone(),
-                label: node.label.clone(),
-                kind: node.kind,
-                columns: node
-                    .columns
-                    .iter()
-                    .map(|c| PositionedColumn {
-                        name: c.name.clone(),
-                        data_type: c.data_type.clone(),
-                        nullable: c.nullable,
-                        is_primary_key: c.is_primary_key,
-                    })
-                    .collect(),
-                x: node_x,
-                y: node_y,
-                width: config.node_width,
-                height: node_height,
-                is_join_table_candidate: node.is_join_table_candidate,
-                has_self_loop: node.has_self_loop,
-                group_index: node.group_index,
-            };
-
-            max_x = max_x.max(positioned.x + positioned.width);
-            max_y = max_y.max(positioned.y + positioned.height);
-
-            positioned_nodes.push(positioned);
+            positioned_nodes.push(build_positioned_node(
+                node,
+                node_x,
+                node_y,
+                node_size.width,
+                node_size.height,
+            ));
         }
     }
 
-    let width = max_x + config.origin_x;
-    let height = max_y + config.origin_y;
+    resolve_rank_collisions(&mut positioned_nodes, ordered_nodes, config, is_horizontal);
+    let graph_bounds = compute_graph_bounds(&positioned_nodes, config);
 
     // Flip coordinates for reversed directions
     match config.direction {
         LayoutDirection::BottomToTop => {
             for node in &mut positioned_nodes {
-                node.y = height - node.y - node.height;
+                node.y = graph_bounds.1 - node.y - node.height;
             }
         }
         LayoutDirection::RightToLeft => {
             for node in &mut positioned_nodes {
-                node.x = width - node.x - node.width;
+                node.x = graph_bounds.0 - node.x - node.width;
             }
         }
         LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => {}
     }
 
+    let (width, height) = compute_graph_bounds(&positioned_nodes, config);
     (positioned_nodes, width, height)
 }
 
@@ -502,6 +494,7 @@ fn assign_coordinates(
 fn apply_force_layout(
     graph: &LayoutGraph,
     config: &LayoutConfig,
+    node_sizes: &[NodeSize],
 ) -> (Vec<PositionedNode>, f32, f32) {
     let n = graph.nodes.len();
     if n == 0 {
@@ -516,7 +509,11 @@ fn apply_force_layout(
     let min_distance = 1.0;
 
     // Calculate ideal spacing based on config
-    let ideal_spacing = config.horizontal_spacing.max(config.vertical_spacing);
+    let max_node_span = node_sizes
+        .iter()
+        .map(|size| size.width.max(size.height))
+        .fold(0.0, f32::max);
+    let ideal_spacing = config.horizontal_spacing.max(config.vertical_spacing) + max_node_span;
     let initial_radius = ideal_spacing * (n as f32).sqrt() * 0.5;
 
     // Initialize positions in a circle layout (deterministic)
@@ -563,7 +560,8 @@ fn apply_force_layout(
             for j in (i + 1)..n {
                 let dx = positions[i].0 - positions[j].0;
                 let dy = positions[i].1 - positions[j].1;
-                let dist_sq = dx * dx + dy * dy + min_distance;
+                let min_gap = node_pair_spacing(node_sizes[i], node_sizes[j], config);
+                let dist_sq = dx * dx + dy * dy + min_distance + min_gap * min_gap * 0.25;
                 let dist = dist_sq.sqrt();
 
                 // Repulsive force: F = k / d^2
@@ -583,9 +581,11 @@ fn apply_force_layout(
             let dx = positions[to_idx].0 - positions[from_idx].0;
             let dy = positions[to_idx].1 - positions[from_idx].1;
             let dist = (dx * dx + dy * dy).sqrt().max(min_distance);
+            let target_distance =
+                node_pair_spacing(node_sizes[from_idx], node_sizes[to_idx], config);
 
             // Attractive force: F = k * d
-            let force = attraction_strength * dist;
+            let force = attraction_strength * (dist - target_distance);
             let fx = force * dx / dist;
             let fy = force * dy / dist;
 
@@ -624,7 +624,6 @@ fn apply_force_layout(
         pos.0 = pos.0 - min_x + config.origin_x;
         pos.1 = pos.1 - min_y + config.origin_y;
     }
-
     // Build positioned nodes
     let mut max_x = config.origin_x;
     let mut max_y = config.origin_y;
@@ -632,37 +631,12 @@ fn apply_force_layout(
     let positioned_nodes: Vec<PositionedNode> = graph
         .nodes
         .iter()
-        .zip(positions.iter())
-        .map(|(node, &(x, y))| {
-            let height = config.header_height
-                + node.columns.len() as f32 * config.column_height
-                + config.node_padding * 2.0;
+        .zip(positions.iter().zip(node_sizes.iter()))
+        .map(|(node, (&(x, y), size))| {
+            max_x = max_x.max(x + size.width);
+            max_y = max_y.max(y + size.height);
 
-            max_x = max_x.max(x + config.node_width);
-            max_y = max_y.max(y + height);
-
-            PositionedNode {
-                id: node.id.clone(),
-                label: node.label.clone(),
-                kind: node.kind,
-                columns: node
-                    .columns
-                    .iter()
-                    .map(|c| PositionedColumn {
-                        name: c.name.clone(),
-                        data_type: c.data_type.clone(),
-                        nullable: c.nullable,
-                        is_primary_key: c.is_primary_key,
-                    })
-                    .collect(),
-                x,
-                y,
-                width: config.node_width,
-                height,
-                is_join_table_candidate: node.is_join_table_candidate,
-                has_self_loop: node.has_self_loop,
-                group_index: node.group_index,
-            }
+            build_positioned_node(node, x, y, size.width, size.height)
         })
         .collect();
 
@@ -670,6 +644,206 @@ fn apply_force_layout(
     let height = max_y + config.origin_y;
 
     (positioned_nodes, width, height)
+}
+
+fn build_positioned_node(
+    node: &crate::graph::LayoutNode,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> PositionedNode {
+    PositionedNode {
+        id: node.id.clone(),
+        label: node.label.clone(),
+        kind: node.kind,
+        columns: node
+            .columns
+            .iter()
+            .map(|c| PositionedColumn {
+                name: c.name.clone(),
+                data_type: c.data_type.clone(),
+                nullable: c.nullable,
+                is_primary_key: c.is_primary_key,
+            })
+            .collect(),
+        x,
+        y,
+        width,
+        height,
+        is_join_table_candidate: node.is_join_table_candidate,
+        has_self_loop: node.has_self_loop,
+        group_index: node.group_index,
+    }
+}
+
+fn measure_node_sizes(graph: &LayoutGraph, config: &LayoutConfig) -> Vec<NodeSize> {
+    graph
+        .nodes
+        .iter()
+        .map(|node| NodeSize {
+            width: estimate_node_width(node, config),
+            height: estimate_node_height(node, config),
+        })
+        .collect()
+}
+
+fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
+    let minimum_width = (config.node_width * MIN_NODE_WIDTH_FACTOR).max(160.0);
+    let header_width = config
+        .node_padding
+        .mul_add(2.0, estimate_text_width(&node.label, HEADER_FONT_SIZE))
+        + 24.0;
+
+    let column_width = node
+        .columns
+        .iter()
+        .map(|column| {
+            let text = display_column_text(node.kind, &column.name, &column.data_type);
+            estimate_text_width(&text, COLUMN_FONT_SIZE)
+        })
+        .fold(0.0, f32::max);
+
+    header_width
+        .max(config.node_padding.mul_add(2.0, column_width) + NODE_WIDTH_SLACK)
+        .max(minimum_width)
+        .ceil()
+}
+
+#[allow(clippy::cast_precision_loss)] // Layout sizing is approximate and bounded for diagram rendering.
+#[allow(clippy::suboptimal_flops)]
+#[allow(clippy::missing_const_for_fn)] // This helper stays non-const to avoid over-constraining floating-point layout code.
+fn estimate_node_height(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
+    config
+        .node_padding
+        .mul_add(
+            2.0,
+            (node.columns.len() as f32).mul_add(config.column_height, config.header_height),
+        )
+        .ceil()
+}
+
+fn compute_rank_primary_offsets(
+    ordered_nodes: &[Vec<usize>],
+    node_sizes: &[NodeSize],
+    config: &LayoutConfig,
+) -> Vec<f32> {
+    let is_horizontal = matches!(
+        config.direction,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+    );
+    let mut offsets = Vec::with_capacity(ordered_nodes.len());
+    let mut primary = if is_horizontal {
+        config.origin_x
+    } else {
+        config.origin_y
+    };
+    let gap = if is_horizontal {
+        config.horizontal_spacing
+    } else {
+        config.vertical_spacing
+    };
+
+    for rank_nodes in ordered_nodes {
+        offsets.push(primary);
+        let extent = rank_nodes
+            .iter()
+            .map(|&node_idx| {
+                if is_horizontal {
+                    node_sizes[node_idx].width
+                } else {
+                    node_sizes[node_idx].height
+                }
+            })
+            .fold(0.0, f32::max);
+        primary += extent + gap;
+    }
+
+    offsets
+}
+
+fn resolve_rank_collisions(
+    positioned_nodes: &mut [PositionedNode],
+    ordered_nodes: &[Vec<usize>],
+    config: &LayoutConfig,
+    is_horizontal: bool,
+) {
+    let spacing = if is_horizontal {
+        config.vertical_spacing
+    } else {
+        config.horizontal_spacing
+    };
+
+    for rank_nodes in ordered_nodes {
+        let mut previous_end = None;
+        for &node_idx in rank_nodes {
+            let node = &mut positioned_nodes[node_idx];
+            let coordinate = if is_horizontal {
+                &mut node.y
+            } else {
+                &mut node.x
+            };
+            let extent = if is_horizontal {
+                node.height
+            } else {
+                node.width
+            };
+
+            if let Some(end) = previous_end {
+                let required = end + spacing;
+                if *coordinate < required {
+                    *coordinate = required;
+                }
+            }
+
+            previous_end = Some(*coordinate + extent);
+        }
+    }
+}
+
+fn compute_graph_bounds(positioned_nodes: &[PositionedNode], config: &LayoutConfig) -> (f32, f32) {
+    let max_x = positioned_nodes
+        .iter()
+        .map(|node| node.x + node.width)
+        .fold(config.origin_x, f32::max);
+    let max_y = positioned_nodes
+        .iter()
+        .map(|node| node.y + node.height)
+        .fold(config.origin_y, f32::max);
+
+    (max_x + config.origin_x, max_y + config.origin_y)
+}
+
+fn node_pair_spacing(left: NodeSize, right: NodeSize, config: &LayoutConfig) -> f32 {
+    let left_radius = left.width.max(left.height) * 0.5;
+    let right_radius = right.width.max(right.height) * 0.5;
+    config.node_padding.mul_add(2.0, left_radius + right_radius)
+}
+
+fn display_column_text(kind: NodeKind, name: &str, data_type: &str) -> String {
+    if kind == NodeKind::Enum {
+        format!("• {name}")
+    } else if data_type.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}: {data_type}")
+    }
+}
+
+fn estimate_text_width(text: &str, font_size: f32) -> f32 {
+    text.chars()
+        .map(|ch| {
+            let width_factor = match ch {
+                'A'..='Z' => 0.72,
+                'a'..='z' | '0'..='9' => 0.62,
+                '_' | '-' | '.' | ':' | ',' | '(' | ')' | '[' | ']' | ' ' => 0.38,
+                _ if ch.is_ascii_punctuation() => 0.52,
+                _ if ch.is_ascii() => 0.62,
+                _ => 1.0,
+            };
+            font_size * width_factor
+        })
+        .sum()
 }
 
 /// Route all edges in the graph.
@@ -875,6 +1049,148 @@ mod tests {
         }
     }
 
+    fn make_variable_width_schema() -> Schema {
+        Schema {
+            tables: vec![
+                Table {
+                    id: TableId(10),
+                    stable_id: "tiny".to_string(),
+                    schema_name: None,
+                    name: "tiny".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(10),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(11),
+                    stable_id: "extraordinarily_verbose_audit_log_entries".to_string(),
+                    schema_name: None,
+                    name: "extraordinarily_verbose_audit_log_entries".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(11),
+                            name: "id".to_string(),
+                            data_type: "uuid".to_string(),
+                            nullable: false,
+                            is_primary_key: true,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(12),
+                            name: "very_long_business_context_identifier".to_string(),
+                            data_type: "timestamp with time zone".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(12),
+                    stable_id: "medium".to_string(),
+                    schema_name: None,
+                    name: "medium".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(13),
+                        name: "display_name".to_string(),
+                        data_type: "varchar(255)".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    fn make_tall_rank_schema() -> Schema {
+        let columns = (0_u64..18)
+            .map(|index| Column {
+                id: ColumnId(100 + index),
+                name: format!("extremely_long_column_name_{index:02}"),
+                data_type: "character varying(255)".to_string(),
+                nullable: index % 2 == 0,
+                is_primary_key: index == 0,
+                comment: None,
+            })
+            .collect();
+
+        Schema {
+            tables: vec![
+                Table {
+                    id: TableId(20),
+                    stable_id: "audit_event_log_entries".to_string(),
+                    schema_name: Some("analytics".to_string()),
+                    name: "audit_event_log_entries".to_string(),
+                    columns,
+                    foreign_keys: vec![ForeignKey {
+                        name: Some("fk_audit_event_log_entries_user_accounts".to_string()),
+                        from_columns: vec!["extremely_long_column_name_01".to_string()],
+                        to_schema: None,
+                        to_table: "user_accounts".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(21),
+                    stable_id: "user_accounts".to_string(),
+                    schema_name: Some("analytics".to_string()),
+                    name: "user_accounts".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(200),
+                            name: "id".to_string(),
+                            data_type: "uuid".to_string(),
+                            nullable: false,
+                            is_primary_key: true,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(201),
+                            name: "display_name".to_string(),
+                            data_type: "varchar(255)".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    fn nodes_overlap(left: &PositionedNode, right: &PositionedNode) -> bool {
+        left.x < right.x + right.width
+            && left.x + left.width > right.x
+            && left.y < right.y + right.height
+            && left.y + left.height > right.y
+    }
+
     #[test]
     fn test_build_layout() {
         let schema = make_test_schema();
@@ -1015,5 +1331,58 @@ mod tests {
             positions_differ,
             "Force layout should produce different positions than hierarchical layout"
         );
+    }
+
+    #[test]
+    fn test_hierarchical_layout_avoids_overlap_with_variable_width_nodes() {
+        let schema = make_variable_width_schema();
+        let graph = build_layout(&schema).unwrap();
+
+        let mut nodes = graph.nodes;
+        nodes.sort_by(|left, right| left.x.total_cmp(&right.x));
+
+        for pair in nodes.windows(2) {
+            let current = &pair[0];
+            let next = &pair[1];
+            assert!(
+                current.x + current.width <= next.x,
+                "nodes {} and {} overlap on the same rank",
+                current.id,
+                next.id
+            );
+        }
+    }
+
+    #[test]
+    fn test_layout_expands_node_width_for_long_content() {
+        let schema = make_variable_width_schema();
+        let graph = build_layout(&schema).unwrap();
+
+        let tiny = graph.nodes.iter().find(|node| node.id == "tiny").unwrap();
+        let verbose = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "extraordinarily_verbose_audit_log_entries")
+            .unwrap();
+
+        assert!(verbose.width > tiny.width);
+        assert!(verbose.width > LayoutConfig::default().node_width);
+    }
+
+    #[test]
+    fn test_hierarchical_layout_avoids_overlap_between_tall_ranks() {
+        let schema = make_tall_rank_schema();
+        let graph = build_layout(&schema).unwrap();
+
+        for (index, node) in graph.nodes.iter().enumerate() {
+            for other in graph.nodes.iter().skip(index + 1) {
+                assert!(
+                    !nodes_overlap(node, other),
+                    "nodes {} and {} overlap",
+                    node.id,
+                    other.id
+                );
+            }
+        }
     }
 }
