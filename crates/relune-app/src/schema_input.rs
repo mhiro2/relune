@@ -8,6 +8,8 @@ use crate::error::AppError;
 use crate::request::InputSource;
 
 const MAX_INPUT_FILE_SIZE_BYTES: u64 = 8 * 1024 * 1024;
+/// Maximum size for direct text/JSON input (same limit as file input for consistency).
+const MAX_TEXT_INPUT_SIZE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Load a schema from the given input source.
 pub(crate) fn schema_from_input(
@@ -15,6 +17,7 @@ pub(crate) fn schema_from_input(
 ) -> Result<(Schema, Vec<Diagnostic>), AppError> {
     match input {
         InputSource::SqlText { sql, dialect } => {
+            ensure_text_size_within_limit(sql.len(), "SQL text")?;
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, *dialect);
             info!(
                 requested_dialect = %dialect,
@@ -46,6 +49,7 @@ pub(crate) fn schema_from_input(
             }
         }
         InputSource::SchemaJson { json } => {
+            ensure_text_size_within_limit(json.len(), "Schema JSON")?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(json)?;
             Ok((relune_core::export::import_schema(&export), vec![]))
         }
@@ -61,6 +65,15 @@ pub(crate) fn schema_from_input(
             Ok((schema, vec![]))
         }
     }
+}
+
+fn ensure_text_size_within_limit(size: usize, input_type: &str) -> Result<(), AppError> {
+    if size > MAX_TEXT_INPUT_SIZE_BYTES {
+        return Err(AppError::input(format!(
+            "{input_type} is too large: {size} bytes exceeds the {MAX_TEXT_INPUT_SIZE_BYTES} byte limit"
+        )));
+    }
+    Ok(())
 }
 
 fn ensure_file_size_within_limit(path: &std::path::Path) -> Result<(), AppError> {
