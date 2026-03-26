@@ -43,6 +43,7 @@ pub struct TableMetadata {
 
 /// Metadata about a column.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ColumnMetadata {
     /// Column name.
     pub name: String,
@@ -52,6 +53,12 @@ pub struct ColumnMetadata {
     pub nullable: bool,
     /// Whether the column is a primary key.
     pub is_primary_key: bool,
+    /// Whether the column participates in a foreign key.
+    #[serde(default)]
+    pub is_foreign_key: bool,
+    /// Whether the column appears in an index.
+    #[serde(default)]
+    pub is_indexed: bool,
 }
 
 /// Metadata about a single edge/relation.
@@ -101,6 +108,8 @@ pub fn build_metadata(graph: &LayoutGraph) -> GraphMetadata {
                     data_type: c.data_type.clone(),
                     nullable: c.nullable,
                     is_primary_key: c.is_primary_key,
+                    is_foreign_key: c.is_foreign_key,
+                    is_indexed: c.is_indexed,
                 })
                 .collect(),
             inbound_count: node.inbound_count,
@@ -163,6 +172,8 @@ mod tests {
                     data_type: "integer".to_string(),
                     nullable: false,
                     is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 inbound_count: 1,
                 outbound_count: 0,
@@ -229,6 +240,44 @@ mod tests {
         assert_eq!(column.data_type, "integer");
         assert!(!column.nullable);
         assert!(column.is_primary_key);
+        assert!(!column.is_foreign_key);
+        assert!(!column.is_indexed);
+    }
+
+    #[test]
+    fn test_column_metadata_preserves_layout_flags() {
+        let graph = LayoutGraph {
+            nodes: vec![LayoutNode {
+                id: "posts".to_string(),
+                label: "posts".to_string(),
+                schema_name: None,
+                table_name: "posts".to_string(),
+                kind: NodeKind::Table,
+                columns: vec![LayoutColumn {
+                    name: "user_id".to_string(),
+                    data_type: "integer".to_string(),
+                    nullable: false,
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: true,
+                }],
+                inbound_count: 0,
+                outbound_count: 1,
+                has_self_loop: false,
+                is_join_table_candidate: false,
+                group_index: None,
+            }],
+            edges: vec![],
+            groups: vec![],
+            node_index: std::collections::BTreeMap::new(),
+            reverse_index: std::collections::BTreeMap::new(),
+        };
+
+        let metadata = build_metadata(&graph);
+        let column = &metadata.tables[0].columns[0];
+
+        assert!(column.is_foreign_key);
+        assert!(column.is_indexed);
     }
 
     #[test]

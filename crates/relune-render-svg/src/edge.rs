@@ -274,7 +274,9 @@ mod tests {
 
     fn create_test_theme() -> ThemeColors {
         ThemeColors {
-            background: "#0f172a",
+            background: "#0c0f1a",
+            canvas_base: "#0c0f1a",
+            canvas_dot: "#151928",
             foreground: "#e2e8f0",
             node_fill: "#111827",
             node_stroke: "#334155",
@@ -284,6 +286,10 @@ mod tests {
             text_muted: "#94a3b8",
             edge_stroke: "#64748b",
             arrow_fill: "#64748b",
+            node_shadow: "rgba(0, 0, 0, 0.5)",
+            group_fill: "#0f172acc",
+            group_band_fill: "#172036",
+            group_stroke: "#334155",
         }
     }
 

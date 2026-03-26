@@ -90,32 +90,52 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: Set<st
       );
     }
 
-    function syncFilterChrome(): void {
+    function activeTypes(): string[] {
+      if (selectedTypes.size > 0) {
+        return selectedTypeList();
+      }
+
+      const query = queryInput instanceof HTMLInputElement ? queryInput.value : '';
+      return query.trim() === '' ? [] : visibleTypesForQuery(query);
+    }
+
+    function syncFilterChrome(activeTypeList: string[]): void {
       const selected = selectedTypeList();
+      const query = queryInput instanceof HTMLInputElement ? queryInput.value.trim() : '';
+      const hasExplicitSelection = selected.length > 0;
+      const hasActiveFilter = activeTypeList.length > 0;
+
       if (summaryEl) {
-        if (selected.length === 0) {
+        if (!hasActiveFilter) {
           summaryEl.textContent = '';
           summaryEl.classList.remove('visible');
         } else {
-          summaryEl.textContent = `${selected.length} type(s) selected across the schema`;
+          summaryEl.textContent = hasExplicitSelection
+            ? `${selected.length} type(s) selected across the schema`
+            : `${activeTypeList.length} matching type(s) for "${query}"`;
           summaryEl.classList.add('visible');
         }
       }
 
       if (resetBar && resetCopy) {
-        resetBar.toggleAttribute('hidden', selected.length === 0);
-        if (selected.length > 0) {
+        resetBar.toggleAttribute('hidden', !hasActiveFilter);
+        if (hasExplicitSelection) {
           const preview = selected.slice(0, 3).join(', ');
           const suffix = selected.length > 3 ? ` +${selected.length - 3} more` : '';
           resetCopy.textContent = `${selected.length} type filter(s): ${preview}${suffix}`;
+        } else if (hasActiveFilter) {
+          const preview = activeTypeList.slice(0, 3).join(', ');
+          const suffix = activeTypeList.length > 3 ? ` +${activeTypeList.length - 3} more` : '';
+          resetCopy.textContent = `Type query "${query}": ${preview}${suffix}`;
         } else {
           resetCopy.textContent = '';
         }
       }
 
       emitViewerEvent('relune:filters-changed', {
-        active: selected.length > 0,
-        selectedTypes: selected,
+        active: hasActiveFilter,
+        selectedTypes: hasExplicitSelection ? selected : activeTypeList,
+        query: hasExplicitSelection ? '' : query,
       });
     }
 
@@ -157,7 +177,8 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: Set<st
 
     function applyTypeFilter(): void {
       const nodes = svgRoot.querySelectorAll('.node');
-      if (selectedTypes.size === 0) {
+      const effectiveTypes = new Set(activeTypes());
+      if (effectiveTypes.size === 0) {
         nodes.forEach((node) => {
           node.classList.remove('dimmed-by-type-filter', 'excluded-by-type-filter');
         });
@@ -165,18 +186,21 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: Set<st
         nodes.forEach((node) => {
           const tableId = node.getAttribute('data-id') ?? node.getAttribute('data-table-id') ?? '';
           const table = tables.find((candidate) => candidate.id === tableId);
-          const matches = table !== undefined && tableMatchesAnySelectedType(table, selectedTypes);
+          const matches = table !== undefined && tableMatchesAnySelectedType(table, effectiveTypes);
           node.classList.toggle('dimmed-by-type-filter', !matches);
           node.classList.toggle('excluded-by-type-filter', !matches);
         });
       }
 
-      syncFilterChrome();
+      syncFilterChrome(Array.from(effectiveTypes));
       syncEdgeDimming(svgRoot);
     }
 
     function clearSelection(): void {
       selectedTypes.clear();
+      if (queryInput instanceof HTMLInputElement) {
+        queryInput.value = '';
+      }
       rebuildList();
       applyTypeFilter();
     }
@@ -186,7 +210,7 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: Set<st
         clearSelection();
       },
       hasActiveFilters(): boolean {
-        return selectedTypes.size > 0;
+        return activeTypes().length > 0;
       },
     };
 

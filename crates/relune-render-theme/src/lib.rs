@@ -22,6 +22,10 @@ pub enum Theme {
 pub struct ThemeColors {
     /// Background color for the canvas.
     pub background: &'static str,
+    /// Base canvas color used by SVG patterns.
+    pub canvas_base: &'static str,
+    /// Dot color used by SVG patterns.
+    pub canvas_dot: &'static str,
     /// Primary foreground/text color.
     pub foreground: &'static str,
     /// Node background fill color.
@@ -40,6 +44,14 @@ pub struct ThemeColors {
     pub edge_stroke: &'static str,
     /// Arrow marker color.
     pub arrow_fill: &'static str,
+    /// Soft shadow color used under node cards.
+    pub node_shadow: &'static str,
+    /// Group background fill.
+    pub group_fill: &'static str,
+    /// Group accent band fill.
+    pub group_band_fill: &'static str,
+    /// Group border stroke.
+    pub group_stroke: &'static str,
 }
 
 /// Returns the color palette for the given theme.
@@ -47,7 +59,9 @@ pub struct ThemeColors {
 pub const fn get_colors(theme: Theme) -> ThemeColors {
     match theme {
         Theme::Dark => ThemeColors {
-            background: "#0f172a",
+            background: "#0c0f1a",
+            canvas_base: "#0c0f1a",
+            canvas_dot: "#151928",
             foreground: "#e2e8f0",
             node_fill: "#111827",
             node_stroke: "#334155",
@@ -57,9 +71,15 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_muted: "#94a3b8",
             edge_stroke: "#64748b",
             arrow_fill: "#64748b",
+            node_shadow: "rgba(0, 0, 0, 0.5)",
+            group_fill: "#0f172acc",
+            group_band_fill: "#172036",
+            group_stroke: "#334155",
         },
         Theme::Light => ThemeColors {
-            background: "#ffffff",
+            background: "#f7f8fc",
+            canvas_base: "#f7f8fc",
+            canvas_dot: "#e8eaf0",
             foreground: "#1e293b",
             node_fill: "#f8fafc",
             node_stroke: "#cbd5e1",
@@ -69,6 +89,10 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_muted: "#64748b",
             edge_stroke: "#94a3b8",
             arrow_fill: "#94a3b8",
+            node_shadow: "rgba(15, 23, 42, 0.08)",
+            group_fill: "#ffffffd9",
+            group_band_fill: "#eef2ff",
+            group_stroke: "#cbd5e1",
         },
     }
 }
@@ -85,7 +109,9 @@ mod tests {
     #[test]
     fn dark_theme_colors_match_expected_palette() {
         let colors = get_colors(Theme::Dark);
-        assert_eq!(colors.background, "#0f172a");
+        assert_eq!(colors.background, "#0c0f1a");
+        assert_eq!(colors.canvas_base, "#0c0f1a");
+        assert_eq!(colors.canvas_dot, "#151928");
         assert_eq!(colors.node_fill, "#111827");
         assert_eq!(colors.header_fill, "#1e293b");
         assert_eq!(colors.text_primary, "#e2e8f0");
@@ -94,7 +120,9 @@ mod tests {
     #[test]
     fn light_theme_colors_match_expected_palette() {
         let colors = get_colors(Theme::Light);
-        assert_eq!(colors.background, "#ffffff");
+        assert_eq!(colors.background, "#f7f8fc");
+        assert_eq!(colors.canvas_base, "#f7f8fc");
+        assert_eq!(colors.canvas_dot, "#e8eaf0");
         assert_eq!(colors.node_fill, "#f8fafc");
         assert_eq!(colors.header_fill, "#f1f5f9");
         assert_eq!(colors.text_primary, "#1e293b");

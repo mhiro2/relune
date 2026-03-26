@@ -6,9 +6,8 @@ use relune_core::model::SchemaStats;
 
 use crate::theme::ThemeColors;
 
-// Legend indicator colors (matching node.rs)
-const PK_BG: &str = "#22c55e";
-const PK_TEXT: &str = "#ffffff";
+// Legend indicator colors (matching node cards)
+const PK_STROKE: &str = "#fbbf24";
 const FK_COLOR: &str = "#3b82f6";
 const IDX_COLOR: &str = "#f59e0b";
 const NULLABLE_TEXT: &str = "#64748b";
@@ -30,150 +29,59 @@ pub fn render_legend(
     svg_width: f32,
     svg_height: f32,
 ) {
-    // Calculate legend dimensions
-    let legend_width = 180.0;
-    let legend_height = if stats.is_some() { 160.0 } else { 100.0 };
-    let padding = 16.0;
-    let line_height = 20.0;
+    let bar_height = 42.0;
+    let side_padding = 18.0;
+    let legend_width = (svg_width - side_padding * 2.0).clamp(320.0, 640.0);
+    let legend_x = (svg_width - legend_width) * 0.5;
+    let legend_y = svg_height - bar_height - 18.0;
+    let mut cursor_x = legend_x + 16.0;
+    let baseline_y = legend_y + 25.0;
 
-    // Position in bottom-right corner with some margin
-    let legend_x = svg_width - legend_width - padding;
-    let legend_y = svg_height - legend_height - padding;
-
-    // Legend container
     out.push_str(r#"<g class="legend">"#);
 
-    // Legend background
     let _ = write!(
         out,
-        r#"<rect class="legend-background" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="8" fill="{}" stroke="{}" stroke-width="1"/>"#,
-        legend_x, legend_y, legend_width, legend_height, theme.node_fill, theme.node_stroke
-    );
-
-    // Legend title
-    let _ = write!(
-        out,
-        r#"<text class="legend-title" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="12" font-weight="600" fill="{}">Legend</text>"#,
-        legend_x + 12.0,
-        legend_y + 20.0,
-        theme.text_primary
-    );
-
-    // Separator line
-    let _ = write!(
-        out,
-        r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="1"/>"#,
-        legend_x + 12.0,
-        legend_y + 28.0,
-        legend_x + legend_width - 12.0,
-        legend_y + 28.0,
-        theme.node_stroke
-    );
-
-    let mut current_y = legend_y + 44.0;
-
-    // PK indicator
-    render_legend_pk_indicator(out, legend_x + 12.0, current_y - 4.0, theme);
-    let _ = write!(
-        out,
-        r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="11" fill="{}">Primary Key</text>"#,
-        legend_x + 44.0,
-        current_y,
-        theme.text_secondary
-    );
-    current_y += line_height;
-
-    // FK indicator
-    render_legend_fk_indicator(out, legend_x + 12.0, current_y - 4.0);
-    let _ = write!(
-        out,
-        r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="11" fill="{}">Foreign Key</text>"#,
-        legend_x + 44.0,
-        current_y,
-        theme.text_secondary
-    );
-    current_y += line_height;
-
-    // IDX indicator
-    let _ = write!(
-        out,
-        r#"<text class="legend-idx" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="600" fill="{}">IDX</text>"#,
-        legend_x + 16.0,
-        current_y,
-        IDX_COLOR
+        r#"<rect class="legend-background" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="18" fill="{}" fill-opacity="0.94" stroke="{}" stroke-opacity="0.82" stroke-width="1.1"/>"#,
+        legend_x, legend_y, legend_width, bar_height, theme.group_fill, theme.group_stroke
     );
     let _ = write!(
         out,
-        r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="11" fill="{}">Indexed</text>"#,
-        legend_x + 44.0,
-        current_y,
-        theme.text_secondary
+        r#"<text class="legend-title" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em" fill="{}">LEGEND</text>"#,
+        cursor_x, baseline_y, theme.text_primary
     );
-    current_y += line_height;
-
-    // Nullable indicator
+    cursor_x += 84.0;
+    render_legend_pk_indicator(out, cursor_x, baseline_y - 8.0);
+    cursor_x += 16.0;
+    render_legend_item_label(out, cursor_x, baseline_y, "Primary key", theme);
+    cursor_x += 82.0;
+    render_legend_fk_indicator(out, cursor_x, baseline_y - 7.0);
+    cursor_x += 22.0;
+    render_legend_item_label(out, cursor_x, baseline_y, "Foreign key", theme);
+    cursor_x += 84.0;
+    render_legend_idx_indicator(out, cursor_x, baseline_y - 8.0);
+    cursor_x += 16.0;
+    render_legend_item_label(out, cursor_x, baseline_y, "Indexed", theme);
+    cursor_x += 62.0;
     let _ = write!(
         out,
-        r#"<text class="legend-nullable" x="{:.1}" y="{:.1}" font-family="ui-monospace, monospace" font-size="11" font-style="italic" fill="{}">nullable</text>"#,
-        legend_x + 12.0,
-        current_y,
-        NULLABLE_TEXT
+        r#"<text class="legend-nullable" x="{cursor_x:.1}" y="{baseline_y:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11" font-style="italic" fill="{NULLABLE_TEXT}">nullable</text>"#
     );
 
-    // Statistics section (if provided)
     if let Some(stats) = stats {
-        current_y += line_height + 4.0;
-
-        // Separator line
+        let stats_x = legend_x + legend_width - 144.0;
         let _ = write!(
             out,
-            r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="1"/>"#,
-            legend_x + 12.0,
-            current_y - 8.0,
-            legend_x + legend_width - 12.0,
-            current_y - 8.0,
-            theme.node_stroke
-        );
-
-        // Stats title
-        let _ = write!(
-            out,
-            r#"<text class="legend-stats-title" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="11" font-weight="600" fill="{}">Statistics</text>"#,
-            legend_x + 12.0,
-            current_y,
-            theme.text_primary
-        );
-        current_y += line_height;
-
-        // Table count
-        let _ = write!(
-            out,
-            r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="10" fill="{}">Tables: {}</text>"#,
-            legend_x + 12.0,
-            current_y,
-            theme.text_muted,
-            stats.table_count
-        );
-        current_y += 14.0;
-
-        // Column count
-        let _ = write!(
-            out,
-            r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="10" fill="{}">Columns: {}</text>"#,
-            legend_x + 12.0,
-            current_y,
-            theme.text_muted,
-            stats.column_count
-        );
-        current_y += 14.0;
-
-        // Foreign key count
-        let _ = write!(
-            out,
-            r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="10" fill="{}">Foreign Keys: {}</text>"#,
-            legend_x + 12.0,
-            current_y,
-            theme.text_muted,
+            r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/><text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
+            stats_x - 16.0,
+            legend_y + 10.0,
+            stats_x - 16.0,
+            legend_y + bar_height - 10.0,
+            theme.group_stroke,
+            stats_x,
+            baseline_y,
+            theme.text_secondary,
+            stats.table_count,
+            stats.column_count,
             stats.foreign_key_count
         );
     }
@@ -181,35 +89,41 @@ pub fn render_legend(
     out.push_str("</g>");
 }
 
-/// Renders a small PK badge for the legend.
-fn render_legend_pk_indicator(out: &mut String, x: f32, y: f32, _theme: &ThemeColors) {
+/// Renders a small key icon for the legend.
+fn render_legend_pk_indicator(out: &mut String, x: f32, y: f32) {
     let _ = write!(
         out,
-        r#"<rect class="legend-pk-badge" x="{x:.1}" y="{y:.1}" width="24" height="14" rx="4" fill="{PK_BG}"/>"#
-    );
-    let _ = write!(
-        out,
-        r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="700" fill="{PK_TEXT}">PK</text>"#,
-        x + 4.0,
-        y + 10.0
+        r#"<path class="legend-pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="{PK_STROKE}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"#,
+        x,
+        y + 3.2,
+        x + 3.2,
+        y + 3.2
     );
 }
 
-/// Renders a small FK indicator for the legend.
+/// Renders a small link indicator for the legend.
 fn render_legend_fk_indicator(out: &mut String, x: f32, y: f32) {
     let _ = write!(
         out,
-        r#"<path class="legend-fk-indicator" d="M{:.1} {:.1} L{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{FK_COLOR}" stroke-width="1.5" fill="none"/>"#,
+        r#"<path class="legend-fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" stroke="{FK_COLOR}" stroke-width="1.5" fill="none" stroke-linecap="round"/>"#,
         x,
-        y + 7.0,
-        x + 18.0,
-        y + 7.0,
-        x + 14.0,
-        y + 3.0,
-        x + 18.0,
-        y + 7.0,
-        x + 14.0,
-        y + 11.0,
+        y + 3.4
+    );
+}
+
+/// Renders a small bolt indicator for the legend.
+fn render_legend_idx_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r#"<path class="legend-idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="{IDX_COLOR}"/>"#
+    );
+}
+
+fn render_legend_item_label(out: &mut String, x: f32, y: f32, label: &str, theme: &ThemeColors) {
+    let _ = write!(
+        out,
+        r#"<text x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{}</text>"#,
+        x, y, theme.text_secondary, label
     );
 }
 
@@ -219,7 +133,9 @@ mod tests {
 
     fn test_theme_colors() -> ThemeColors {
         ThemeColors {
-            background: "#0f172a",
+            background: "#0c0f1a",
+            canvas_base: "#0c0f1a",
+            canvas_dot: "#151928",
             foreground: "#e2e8f0",
             node_fill: "#111827",
             node_stroke: "#334155",
@@ -229,6 +145,10 @@ mod tests {
             text_muted: "#94a3b8",
             edge_stroke: "#64748b",
             arrow_fill: "#64748b",
+            node_shadow: "rgba(0, 0, 0, 0.5)",
+            group_fill: "#0f172acc",
+            group_band_fill: "#172036",
+            group_stroke: "#334155",
         }
     }
 
@@ -241,12 +161,12 @@ mod tests {
 
         assert!(out.contains("class=\"legend\""));
         assert!(out.contains("class=\"legend-background\""));
-        assert!(out.contains("Legend"));
-        assert!(out.contains("Primary Key"));
-        assert!(out.contains("Foreign Key"));
+        assert!(out.contains("LEGEND"));
+        assert!(out.contains("Primary key"));
+        assert!(out.contains("Foreign key"));
         assert!(out.contains("Indexed"));
         assert!(out.contains("nullable"));
-        assert!(!out.contains("Statistics"));
+        assert!(!out.contains("tables ·"));
     }
 
     #[test]
@@ -263,10 +183,7 @@ mod tests {
         render_legend(&mut out, &colors, Some(&stats), 800.0, 600.0);
 
         assert!(out.contains("class=\"legend\""));
-        assert!(out.contains("Statistics"));
-        assert!(out.contains("Tables: 5"));
-        assert!(out.contains("Columns: 42"));
-        assert!(out.contains("Foreign Keys: 8"));
+        assert!(out.contains("5 tables · 42 columns · 8 FKs"));
     }
 
     #[test]
@@ -276,10 +193,8 @@ mod tests {
 
         render_legend(&mut out, &colors, None, 800.0, 600.0);
 
-        // Should be positioned in bottom-right corner
-        // legend_x = svg_width - legend_width - padding = 800 - 180 - 16 = 604
-        // legend_y = svg_height - legend_height - padding = 600 - 100 - 16 = 484
-        assert!(out.contains("x=\"604.0\""));
-        assert!(out.contains("y=\"484.0\""));
+        // Bottom bar layout centers the legend horizontally near the canvas edge.
+        assert!(out.contains("x=\"80.0\""));
+        assert!(out.contains("y=\"540.0\""));
     }
 }

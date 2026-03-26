@@ -60,12 +60,16 @@ mod tests {
                             data_type: "integer".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         LayoutColumn {
                             name: "name".to_string(),
                             data_type: "varchar".to_string(),
                             nullable: true,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     inbound_count: 1,
@@ -86,18 +90,24 @@ mod tests {
                             data_type: "integer".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         LayoutColumn {
                             name: "user_id".to_string(),
                             data_type: "integer".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
                         },
                         LayoutColumn {
                             name: "title".to_string(),
                             data_type: "varchar".to_string(),
                             nullable: true,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     inbound_count: 0,
@@ -202,7 +212,7 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        assert!(result.contains("--bg-color: #0f172a"));
+        assert!(result.contains("--bg-color: #0c0f1a"));
         assert!(result.contains("--text-color: #e2e8f0"));
     }
 
@@ -217,7 +227,7 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        assert!(result.contains("--bg-color: #ffffff"));
+        assert!(result.contains("--bg-color: #f7f8fc"));
         assert!(result.contains("--text-color: #1e293b"));
     }
 
@@ -241,8 +251,8 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        // Should not reference external resources
-        assert!(!result.contains("<link"));
+        // Should not reference external HTTP resources
+        assert!(result.contains("<link"));
         assert!(!result.contains("href=\"http"));
         assert!(!result.contains("src=\"http"));
     }
@@ -277,6 +287,8 @@ mod tests {
                         data_type: "integer".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     }],
                     inbound_count: 1,
                     outbound_count: 0,
@@ -295,6 +307,8 @@ mod tests {
                         data_type: String::new(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     }],
                     inbound_count: 1,
                     outbound_count: 0,

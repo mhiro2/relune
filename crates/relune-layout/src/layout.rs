@@ -236,6 +236,7 @@ pub struct PositionedNode {
 
 /// Column information for positioned nodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct PositionedColumn {
     /// Column name.
     pub name: String,
@@ -245,6 +246,12 @@ pub struct PositionedColumn {
     pub nullable: bool,
     /// Whether this column is part of the primary key.
     pub is_primary_key: bool,
+    /// Whether this column participates in a foreign key.
+    #[serde(default)]
+    pub is_foreign_key: bool,
+    /// Whether this column appears in an index.
+    #[serde(default)]
+    pub is_indexed: bool,
 }
 
 /// A positioned edge ready for rendering.
@@ -791,6 +798,8 @@ fn build_positioned_node(
                 data_type: c.data_type.clone(),
                 nullable: c.nullable,
                 is_primary_key: c.is_primary_key,
+                is_foreign_key: c.is_foreign_key,
+                is_indexed: c.is_indexed,
             })
             .collect(),
         x,
@@ -1510,6 +1519,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_build_positioned_node_preserves_column_flags() {
+        let node = crate::graph::LayoutNode {
+            id: "posts".to_string(),
+            label: "posts".to_string(),
+            schema_name: None,
+            table_name: "posts".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![
+                crate::graph::LayoutColumn {
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
+                },
+                crate::graph::LayoutColumn {
+                    name: "user_id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: true,
+                },
+            ],
+            inbound_count: 0,
+            outbound_count: 1,
+            has_self_loop: false,
+            is_join_table_candidate: false,
+            group_index: None,
+        };
+
+        let positioned = build_positioned_node(&node, 10.0, 20.0, 200.0, 100.0);
+
+        assert!(positioned.columns[0].is_primary_key);
+        assert!(!positioned.columns[0].is_foreign_key);
+        assert!(!positioned.columns[0].is_indexed);
+        assert!(positioned.columns[1].is_foreign_key);
+        assert!(positioned.columns[1].is_indexed);
     }
 
     fn make_empty_schema() -> Schema {

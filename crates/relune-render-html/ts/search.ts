@@ -1,6 +1,6 @@
 import { syncEdgeDimming } from './edge_filters';
 import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
-import { getViewerRuntime } from './viewer_api';
+import { emitViewerEvent, getViewerRuntime } from './viewer_api';
 
 {
   const searchInput = document.getElementById('table-search');
@@ -30,6 +30,12 @@ import { getViewerRuntime } from './viewer_api';
         syncEdgeDimming(svgRoot);
         searchClear?.classList.remove('visible');
         searchResults?.classList.remove('visible');
+        emitViewerEvent('relune:search-changed', {
+          active: false,
+          query: '',
+          matches: totalCount,
+          total: totalCount,
+        });
         return;
       }
 
@@ -61,6 +67,13 @@ import { getViewerRuntime } from './viewer_api';
         searchResults.textContent = `${matchCount} of ${totalCount} objects`;
         searchResults.classList.add('visible');
       }
+
+      emitViewerEvent('relune:search-changed', {
+        active: true,
+        query,
+        matches: matchCount,
+        total: totalCount,
+      });
     };
 
     runtime.search = {

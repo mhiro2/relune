@@ -18,26 +18,35 @@ pub fn render_group(out: &mut String, group: &PositionedGroup, colors: &ThemeCol
         return;
     }
 
-    // Render the group box with dashed stroke and semi-transparent fill
+    // Render the group box with a distinct background plane and accent band.
     let _ = write!(
         out,
-        r#"<rect class="group-box" data-group-id="{}" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" fill-opacity="0.48" stroke="{}" stroke-width="1.5" stroke-dasharray="10,5"/>"#,
+        r#"<g class="group" data-group-id="{}"><rect class="group-box" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="20" ry="20" fill="{}" stroke="{}" stroke-width="1.5" stroke-dasharray="10,5" filter="url(#group-shadow)"/><rect class="group-band" x="{:.1}" y="{:.1}" width="{:.1}" height="34" rx="20" ry="20" fill="{}" fill-opacity="0.92"/><line class="group-divider" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/></g>"#,
         escape_attribute(&group.id),
         group.x,
         group.y,
         group.width,
         group.height,
-        colors.node_fill,
-        colors.node_stroke
+        colors.group_fill,
+        colors.group_stroke,
+        group.x,
+        group.y,
+        group.width,
+        colors.group_band_fill,
+        group.x + 12.0,
+        group.y + 34.0,
+        group.x + group.width - 12.0,
+        group.y + 34.0,
+        colors.group_stroke
     );
 
     // Render the group label at top-left inside the group
     if !group.label.is_empty() {
         let _ = write!(
             out,
-            r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="0.04em" fill="{}">{}</text>"#,
+            r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em" fill="{}">{}</text>"#,
             group.x + 12.0,
-            group.y + 20.0,
+            group.y + 22.0,
             colors.text_secondary,
             escape_text(&group.label)
         );
@@ -52,7 +61,9 @@ mod tests {
 
     fn test_colors() -> ThemeColors {
         ThemeColors {
-            background: "#0f172a",
+            background: "#0c0f1a",
+            canvas_base: "#0c0f1a",
+            canvas_dot: "#151928",
             foreground: "#e2e8f0",
             node_fill: "#111827",
             node_stroke: "#334155",
@@ -62,6 +73,10 @@ mod tests {
             text_muted: "#94a3b8",
             edge_stroke: "#64748b",
             arrow_fill: "#64748b",
+            node_shadow: "rgba(0, 0, 0, 0.5)",
+            group_fill: "#0f172acc",
+            group_band_fill: "#172036",
+            group_stroke: "#334155",
         }
     }
 
@@ -82,8 +97,8 @@ mod tests {
 
         assert!(out.contains("class=\"group-box\""));
         assert!(out.contains("data-group-id=\"group1\""));
+        assert!(out.contains("class=\"group-band\""));
         assert!(out.contains("stroke-dasharray=\"10,5\""));
-        assert!(out.contains("fill-opacity=\"0.48\""));
         assert!(out.contains("class=\"group-label\""));
         assert!(out.contains(">User Tables<"));
     }
@@ -165,7 +180,7 @@ mod tests {
         let mut out = String::new();
         render_group(&mut out, &group, &colors);
 
-        assert!(out.contains("rx=\"16\""));
-        assert!(out.contains("ry=\"16\""));
+        assert!(out.contains("rx=\"20\""));
+        assert!(out.contains("ry=\"20\""));
     }
 }

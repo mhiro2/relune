@@ -67,14 +67,17 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         None
     };
 
-    let group_panel = if options.enable_group_toggles {
+    let group_panel = if options.enable_group_toggles && !options.enable_search {
         Some(build_group_panel_html())
     } else {
         None
     };
 
     let search_panel = if options.enable_search {
-        Some(build_search_panel_html(options.enable_column_type_filter))
+        Some(build_search_panel_html(
+            options.enable_column_type_filter,
+            options.enable_group_toggles,
+        ))
     } else {
         None
     };
@@ -104,6 +107,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230c0f1a'/%3E%3Cpath d='M16 18h18M16 32h32M16 46h22' stroke='%23f59e0b' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='18' r='6' fill='%232dd4bf'/%3E%3C/svg%3E">
   <style>
 {css}
   </style>
@@ -190,15 +194,19 @@ fn build_css(
 
     let search_css = if enable_search {
         r"
-    /* Search panel styles */
+    /* Explorer sidebar styles */
     .search-panel {
       position: fixed;
       top: 12px;
       left: 12px;
-      width: min(360px, calc(100vw - 24px));
+      bottom: 12px;
+      width: min(340px, calc(100vw - 24px));
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
-      border-radius: 18px;
+      border-radius: 22px;
       z-index: 240;
       overflow: hidden;
       box-shadow: var(--panel-shadow);
@@ -207,6 +215,28 @@ fn build_css(
 
     body:has(h1) .search-panel {
       top: 61px;
+    }
+
+    .search-panel-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 16px 10px;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .search-panel-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .search-panel-meta,
+    .object-browser-count {
+      font-size: 11px;
+      opacity: 0.65;
+      white-space: nowrap;
     }
 
     .search-container {
@@ -265,10 +295,9 @@ fn build_css(
     }
 
     .search-results {
-      padding: 6px 14px 10px;
+      padding: 0 16px 12px;
       font-size: 12px;
       opacity: 0.7;
-      border-top: 1px solid var(--panel-border);
       display: none;
     }
 
@@ -276,7 +305,109 @@ fn build_css(
       display: block;
     }
 
-    /* Search highlight/dim styles */
+    .object-browser-section {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-height: 180px;
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .object-browser-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 16px 8px;
+      font-size: 12px;
+      font-weight: 600;
+      opacity: 0.9;
+    }
+
+    .object-browser-list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 4px 0 12px;
+    }
+
+    .object-browser-empty {
+      padding: 0 16px 16px;
+      font-size: 12px;
+      opacity: 0.62;
+    }
+
+    .object-browser-empty[hidden] {
+      display: none;
+    }
+
+    .object-browser-item {
+      width: 100%;
+      border: none;
+      border-left: 2px solid transparent;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      padding: 12px 16px 11px;
+      cursor: pointer;
+      transition: background-color 0.16s, border-color 0.16s, opacity 0.16s;
+    }
+
+    .object-browser-item:hover {
+      background: var(--accent-soft);
+    }
+
+    .object-browser-item.selected {
+      background: color-mix(in srgb, var(--accent-soft) 76%, transparent);
+      border-left-color: var(--accent-color);
+    }
+
+    .object-browser-item.filtered-out {
+      opacity: 0.46;
+    }
+
+    .object-browser-item.hidden-item {
+      opacity: 0.24;
+    }
+
+    .object-browser-item-header,
+    .object-browser-item-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .object-browser-item-header {
+      margin-bottom: 6px;
+    }
+
+    .object-browser-item-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .object-browser-kind {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.14);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .object-browser-item-meta {
+      font-size: 11px;
+      opacity: 0.7;
+      font-family: var(--mono-font);
+    }
+
     .node.dimmed-by-search {
       opacity: 0.25;
       transition: opacity 0.2s;
@@ -356,7 +487,7 @@ fn build_css(
     }
 
     .type-filter-list {
-      max-height: min(300px, 50vh);
+      max-height: min(220px, 28vh);
       overflow-y: auto;
       padding: 4px 0 10px;
     }
@@ -411,30 +542,33 @@ fn build_css(
         r#"
     /* Group panel styles */
     .group-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    body > .group-panel {
       position: fixed;
       top: 12px;
-      right: 12px;
-      width: min(280px, calc(100vw - 24px));
+      left: 12px;
+      width: min(340px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
-      border-radius: 18px;
+      border-radius: 22px;
       z-index: 220;
       overflow: hidden;
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
     }
 
-    body:has(h1) .group-panel {
+    body:has(h1) > .group-panel {
       top: 61px;
     }
 
-    body:has(.search-panel):not(:has(h1)) .group-panel {
-      top: 61px;
-    }
-
-    body:has(.search-panel):has(h1) .group-panel {
-      top: 110px;
+    .search-panel .group-panel {
+      border-top: 1px solid var(--panel-border);
+      background: transparent;
     }
 
     .group-panel-header {
@@ -504,8 +638,8 @@ fn build_css(
     }
 
     .group-list {
-      padding: 8px 0;
-      max-height: calc(100vh - 120px);
+      padding: 8px 0 12px;
+      max-height: min(220px, 28vh);
       overflow-y: auto;
     }
 
@@ -667,29 +801,42 @@ fn build_css(
 
     .viewer-controls {
       position: fixed;
-      right: 16px;
-      bottom: 196px;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
       display: flex;
-      gap: 10px;
-      z-index: 220;
+      align-items: center;
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      z-index: 230;
     }
 
     .viewer-control-button {
-      min-width: 48px;
-      height: 44px;
+      min-width: 42px;
+      height: 34px;
       border: 1px solid var(--panel-border);
-      background: var(--panel-bg);
+      background: transparent;
       color: var(--text-color);
-      border-radius: 14px;
-      font: 600 13px var(--ui-font);
+      border-radius: 999px;
+      font: 600 12px var(--ui-font);
       cursor: pointer;
-      box-shadow: var(--panel-shadow);
-      backdrop-filter: blur(16px);
       transition: transform 0.16s, border-color 0.16s, background-color 0.16s;
     }
 
     .viewer-control-fit {
-      min-width: 68px;
+      min-width: 56px;
+    }
+
+    .viewer-control-status {
+      min-width: 52px;
+      text-align: center;
+      font: 600 11px var(--mono-font);
+      opacity: 0.7;
     }
 
     .viewer-control-button:hover {
@@ -701,7 +848,7 @@ fn build_css(
     .minimap-shell {
       position: fixed;
       right: 16px;
-      bottom: 16px;
+      bottom: 88px;
       width: min(240px, calc(100vw - 32px));
       border: 1px solid var(--panel-border);
       border-radius: 18px;
@@ -760,7 +907,7 @@ fn build_css(
       top: 12px;
       right: 12px;
       width: min(340px, calc(100vw - 24px));
-      max-height: min(48vh, 540px);
+      bottom: 12px;
       overflow: auto;
       padding: 16px;
       border: 1px solid var(--panel-border);
@@ -777,14 +924,6 @@ fn build_css(
 
     body:has(h1) .detail-drawer {
       top: 61px;
-    }
-
-    body:has(.detail-drawer:not([hidden])) .group-panel {
-      top: 236px;
-    }
-
-    body:has(.detail-drawer:not([hidden])):has(h1) .group-panel {
-      top: 285px;
     }
 
     .detail-drawer-header {
@@ -940,6 +1079,10 @@ fn build_css(
       opacity: 0.92;
     }
 
+    .edge.highlighted-neighbor .edge-particles {
+      opacity: 0.92;
+    }
+
     @keyframes relune-node-enter {
       from {
         opacity: 0;
@@ -962,9 +1105,12 @@ fn build_css(
 
     @media (max-width: 960px) {
       .detail-drawer,
-      .group-panel,
       .search-panel,
       .minimap-shell {
+        width: calc(100vw - 24px);
+      }
+
+      body > .group-panel {
         width: calc(100vw - 24px);
       }
 
@@ -975,21 +1121,34 @@ fn build_css(
       }
 
       .viewer-controls {
-        right: 12px;
-        bottom: 188px;
+        bottom: 12px;
       }
 
-      .group-panel,
-      body:has(.detail-drawer:not([hidden])) .group-panel,
-      body:has(.detail-drawer:not([hidden])):has(h1) .group-panel {
+      .search-panel {
+        top: 12px;
+        bottom: auto;
+        max-height: min(58vh, 720px);
+      }
+
+      body:has(h1) .search-panel {
+        top: 61px;
+      }
+
+      body > .group-panel {
         top: auto;
         bottom: 16px;
         max-height: 38vh;
+      }
+
+      .minimap-shell {
+        right: 12px;
+        bottom: 74px;
       }
     }";
 
     format!(
         r"    :root {{
+      color-scheme: {color_scheme};
       --bg-color: {bg_color};
       --text-color: {text_color};
       --border-color: {border_color};
@@ -1006,6 +1165,18 @@ fn build_css(
       --grid-line: {grid_line};
       --ui-font: 'Inter', 'Segoe UI', system-ui, sans-serif;
       --mono-font: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
+    }}
+
+    @font-face {{
+      font-family: 'Inter';
+      src: local('Inter'), local('Inter Regular');
+      font-display: swap;
+    }}
+
+    @font-face {{
+      font-family: 'JetBrains Mono';
+      src: local('JetBrains Mono'), local('JetBrainsMono Nerd Font Mono'), local('JetBrains Mono Regular');
+      font-display: swap;
     }}
 
     * {{
@@ -1097,6 +1268,11 @@ fn build_css(
     }}
 {search_css}{type_filter_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
         bg_color = colors.background,
+        color_scheme = if matches!(theme, Theme::Dark) {
+            "dark"
+        } else {
+            "light"
+        },
         text_color = colors.text_primary,
         border_color = colors.node_stroke,
         node_bg = colors.node_fill,
@@ -1122,7 +1298,7 @@ const fn build_pan_zoom_js() -> &'static str {
 /// Build the group panel HTML structure.
 #[allow(clippy::needless_raw_string_hashes)]
 fn build_group_panel_html() -> String {
-    r#"  <div class="group-panel" id="group-panel">
+    r#"  <section class="group-panel" id="group-panel">
     <div class="group-panel-header">
       <button type="button" id="group-panel-collapse" class="group-panel-collapse-btn" aria-expanded="true" title="Collapse or expand panel">&#9662;</button>
       <span class="group-panel-title">Groups</span>
@@ -1134,7 +1310,7 @@ fn build_group_panel_html() -> String {
     <div class="group-panel-body" id="group-panel-body">
       <div class="group-list" id="group-list"></div>
     </div>
-  </div>
+  </section>
 "#
     .to_string()
 }
@@ -1194,6 +1370,7 @@ fn build_viewer_controls_html() -> String {
     r#"  <div class="viewer-controls" id="viewer-controls" aria-label="Diagram controls">
     <button type="button" class="viewer-control-button" id="zoom-in" title="Zoom in">+</button>
     <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out">-</button>
+    <span class="viewer-control-status" id="zoom-level">100%</span>
     <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen">Fit</button>
   </div>
   <div class="minimap-shell" id="minimap-shell" aria-label="Diagram minimap">
@@ -1212,7 +1389,7 @@ fn build_detail_drawer_html() -> String {
     r#"  <aside class="detail-drawer" id="detail-drawer" hidden>
     <div class="detail-drawer-header">
       <div>
-        <p class="detail-kicker" id="detail-kind"></p>
+        <p class="detail-kicker" id="detail-kind">Inspector</p>
         <h2 class="detail-title" id="detail-title">Object details</h2>
       </div>
       <button type="button" class="detail-close" id="detail-close" aria-label="Close details">&times;</button>
@@ -1236,7 +1413,7 @@ fn build_detail_drawer_html() -> String {
 
 /// Build the search panel HTML structure.
 #[allow(clippy::needless_raw_string_hashes)]
-fn build_search_panel_html(enable_column_type_filter: bool) -> String {
+fn build_search_panel_html(enable_column_type_filter: bool, enable_group_toggles: bool) -> String {
     let type_block = if enable_column_type_filter {
         r#"    <section class="type-filter-section" id="type-filter-section" hidden aria-label="Column type filter">
       <div class="type-filter-header">
@@ -1255,18 +1432,49 @@ fn build_search_panel_html(enable_column_type_filter: bool) -> String {
         ""
     };
 
+    let group_block = if enable_group_toggles {
+        r#"    <section class="group-panel" id="group-panel">
+      <div class="group-panel-header">
+        <button type="button" id="group-panel-collapse" class="group-panel-collapse-btn" aria-expanded="true" title="Collapse or expand groups">&#9662;</button>
+        <span class="group-panel-title">Groups</span>
+        <div class="group-panel-actions">
+          <button type="button" id="show-all-groups">Show All</button>
+          <button type="button" id="hide-all-groups">Hide All</button>
+        </div>
+      </div>
+      <div class="group-panel-body" id="group-panel-body">
+        <div class="group-list" id="group-list"></div>
+      </div>
+    </section>
+"#
+    } else {
+        ""
+    };
+
     format!(
-        r#"  <div class="search-panel">
+        r#"  <aside class="search-panel" id="search-panel">
+    <div class="search-panel-header">
+      <span class="search-panel-title">Explore</span>
+      <span class="search-panel-meta">Press / to focus</span>
+    </div>
     <div class="search-container">
       <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8"></circle>
         <path d="m21 21l-4.35-4.35"></path>
       </svg>
-      <input type="text" class="search-input" id="table-search" placeholder="Search tables (press / to focus)" autocomplete="off">
+      <input type="text" class="search-input" id="table-search" placeholder="Search tables, views, or columns" autocomplete="off">
       <button type="button" class="search-clear" id="search-clear" title="Clear search">&times;</button>
     </div>
     <div class="search-results" id="search-results"></div>
-{type_block}  </div>
+{type_block}    <section class="object-browser-section" aria-label="Schema objects">
+      <div class="object-browser-header">
+        <span>Objects</span>
+        <span class="object-browser-count" id="object-browser-count"></span>
+      </div>
+      <div class="object-browser-list" id="object-browser-list"></div>
+      <p class="object-browser-empty" id="object-browser-empty" hidden>No matching objects.</p>
+    </section>
+{group_block}  </aside>
 "#,
     )
 }
@@ -1383,7 +1591,8 @@ mod tests {
     fn test_css_dark_theme() {
         let css = build_css(Theme::Dark, true, false, false, false, false);
 
-        assert!(css.contains("--bg-color: #0f172a"));
+        assert!(css.contains("--bg-color: #0c0f1a"));
+        assert!(css.contains("color-scheme: dark"));
         assert!(css.contains("--text-color: #e2e8f0"));
     }
 
@@ -1391,7 +1600,8 @@ mod tests {
     fn test_css_light_theme() {
         let css = build_css(Theme::Light, true, false, false, false, false);
 
-        assert!(css.contains("--bg-color: #ffffff"));
+        assert!(css.contains("--bg-color: #f7f8fc"));
+        assert!(css.contains("color-scheme: light"));
         assert!(css.contains("--text-color: #1e293b"));
     }
 
@@ -1491,6 +1701,7 @@ mod tests {
 
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains(r#"id="table-search""#));
+        assert!(html.contains(r#"id="object-browser-list""#));
         assert!(html.contains("type-filter-section"));
         assert!(html.contains("filter-reset-bar"));
         assert!(html.contains("viewer-controls"));
@@ -1538,14 +1749,14 @@ mod tests {
     fn test_search_css_not_included_when_disabled() {
         let css = build_css(Theme::Light, false, false, false, false, false);
 
-        assert!(!css.contains("/* Search panel styles */"));
+        assert!(!css.contains("/* Explorer sidebar styles */"));
         assert!(!css.contains(".search-container"));
         assert!(!css.contains(".dimmed-by-search"));
     }
 
     #[test]
     fn test_search_panel_html_structure() {
-        let html = build_search_panel_html(true);
+        let html = build_search_panel_html(true, true);
 
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains(r#"class="search-icon""#));
@@ -1561,14 +1772,18 @@ mod tests {
         assert!(html.contains("type-filter-clear"));
         assert!(html.contains(">All<"));
         assert!(html.contains(">None<"));
+        assert!(html.contains(r#"id="object-browser-list""#));
+        assert!(html.contains(r#"id="object-browser-count""#));
+        assert!(html.contains(r#"id="group-panel""#));
     }
 
     #[test]
     fn test_search_panel_html_without_column_type_filter() {
-        let html = build_search_panel_html(false);
+        let html = build_search_panel_html(false, false);
 
         assert!(html.contains(r#"class="search-panel""#));
         assert!(!html.contains("type-filter-section"));
+        assert!(!html.contains(r#"id="group-panel""#));
     }
 
     #[test]
@@ -1599,6 +1814,7 @@ mod tests {
 
         assert!(html.contains(r#"id="zoom-in""#));
         assert!(html.contains(r#"id="zoom-out""#));
+        assert!(html.contains(r#"id="zoom-level""#));
         assert!(html.contains(r#"id="zoom-fit""#));
         assert!(html.contains(r#"id="minimap""#));
     }

@@ -76,25 +76,42 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
 }
 
 fn out_push_defs(out: &mut String, colors: &ThemeColors) {
-    let (grid_base, grid_dot, shadow_color, hatch_color) = if is_light_theme(colors) {
-        ("#f7f8fc", "#e8eaf0", "rgba(15, 23, 42, 0.12)", "#cbd5e1")
+    let (shadow_dy, shadow_blur, hatch_color) = if is_light_theme(colors) {
+        ("2", "5", "#cbd5e1")
     } else {
-        ("#0c0f1a", "#151928", "rgba(0, 0, 0, 0.52)", "#334155")
+        ("4", "8", "#334155")
     };
 
     let _ = write!(
         out,
         r##"<defs>
+<style>
+.edge-glow-path,
+.edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
+.edge-particle {{ fill: #fbbf24; }}
+.edge:hover .edge-glow-path,
+.edge:hover .edge-particles {{ opacity: 0.92; }}
+.edge:hover .edge-path {{ stroke: #f59e0b; }}
+.node:hover .table-body {{ stroke-width: 2.1px; }}
+.group-box,
+.group-band,
+.group-divider,
+.group-label {{ pointer-events: none; }}
+</style>
 <pattern id="canvas-grid" width="32" height="32" patternUnits="userSpaceOnUse">
-<rect width="32" height="32" fill="{grid_base}"/>
-<circle cx="2" cy="2" r="1.2" fill="{grid_dot}" fill-opacity="0.9"/>
+<rect width="32" height="32" fill="{}"/>
+<circle cx="2" cy="2" r="1.2" fill="{}" fill-opacity="0.9"/>
+<circle cx="18" cy="18" r="0.8" fill="{}" fill-opacity="0.54"/>
 </pattern>
 <pattern id="type-filter-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
 <rect width="8" height="8" fill="transparent"/>
 <rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
 </pattern>
 <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="150%">
-<feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="{shadow_color}"/>
+<feDropShadow dx="0" dy="{shadow_dy}" stdDeviation="{shadow_blur}" flood-color="{}"/>
+</filter>
+<filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
+<feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
 <filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
 <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b"/>
@@ -113,6 +130,11 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <path d="M6 1 L14 6 M6 6 L14 6 M6 11 L14 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
 </defs>"##,
+        colors.canvas_base,
+        colors.canvas_dot,
+        colors.canvas_dot,
+        colors.node_shadow,
+        colors.node_shadow,
         colors.arrow_fill,
         colors.text_secondary,
         colors.text_secondary,
@@ -207,16 +229,22 @@ fn render_node_internal(
 
     let mut line_y = node.y + 52.0;
     for (index, column) in node.columns.iter().enumerate() {
+        let _ = write!(
+            out,
+            r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
+            escape_attribute(&column.name),
+            column.nullable
+        );
         if index > 0 {
             let separator_y = line_y - 12.0;
             let _ = write!(
                 out,
-                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.75" stroke-width="1"/>"#,
+                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.92" stroke-width="1"/>"#,
                 node.x + 12.0,
                 separator_y,
                 node.x + node.width - 12.0,
                 separator_y,
-                node_style.stroke
+                node_style.separator
             );
         }
         let text = if node.kind == NodeKind::Enum {
@@ -226,9 +254,14 @@ fn render_node_internal(
         } else {
             format!("{}: {}", column.name, column.data_type)
         };
+        let font_style = if column.nullable {
+            r#" font-style="italic""#
+        } else {
+            ""
+        };
         let _ = write!(
             out,
-            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}">{}</text>"#,
+            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}"{}>{}</text>"#,
             node.x + 12.0,
             line_y,
             if column.nullable {
@@ -236,20 +269,24 @@ fn render_node_internal(
             } else {
                 colors.text_secondary
             },
+            font_style,
             escape_text(&text)
         );
-        if column.is_primary_key {
-            let icon_x = node.x + node.width - 26.0;
-            let icon_y = line_y - 8.5;
-            let _ = write!(
-                out,
-                r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
-                icon_x,
-                icon_y + 3.2,
-                icon_x + 3.2,
-                icon_y + 3.2
-            );
+
+        let mut icon_x = node.x + node.width - 22.0;
+        if column.is_indexed {
+            render_idx_indicator(out, icon_x, line_y - 9.0);
+            icon_x -= 16.0;
         }
+        if column.is_foreign_key {
+            render_fk_indicator(out, icon_x, line_y - 9.0);
+            icon_x -= 16.0;
+        }
+        if column.is_primary_key {
+            render_pk_indicator(out, icon_x, line_y - 8.5);
+        }
+
+        out.push_str("</g>");
         line_y += 18.0;
     }
     let _ = write!(
@@ -302,9 +339,10 @@ fn render_edge_internal(
         Some(stroke_dasharray) => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}"/>"##,
+                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"##,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
+                index,
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
@@ -315,15 +353,25 @@ fn render_edge_internal(
         None => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} />"##,
+                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"##,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
+                index,
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
                 edge_marker_attributes(uses_crow_markers, edge.nullable)
             );
         }
+    }
+
+    if edge.kind == EdgeKind::ForeignKey {
+        out.push_str(r#"<g class="edge-particles" opacity="0">"#);
+        let _ = write!(
+            out,
+            r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle>"##
+        );
+        out.push_str("</g>");
     }
 
     // Render the label if enabled
@@ -352,6 +400,33 @@ fn render_edge_internal(
     }
 
     out.push_str("</g>");
+}
+
+fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
+        x,
+        y + 3.2,
+        x + 3.2,
+        y + 3.2
+    );
+}
+
+fn render_fk_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r##"<path class="fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" fill="none" stroke="#38bdf8" stroke-width="1.4" stroke-linecap="round"/>"##,
+        x,
+        y + 3.4
+    );
+}
+
+fn render_idx_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r##"<path class="idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="#f59e0b"/>"##
+    );
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -396,6 +471,7 @@ struct NodeStyle {
     body_fill: &'static str,
     header_fill: &'static str,
     stroke: &'static str,
+    separator: &'static str,
 }
 
 struct EdgeStyle {
@@ -405,7 +481,7 @@ struct EdgeStyle {
 }
 
 fn is_light_theme(colors: &ThemeColors) -> bool {
-    colors.background == "#ffffff"
+    colors.background == "#f7f8fc"
 }
 
 const fn node_kind_name(kind: NodeKind) -> &'static str {
@@ -430,31 +506,37 @@ fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
             body_fill: "#151926",
             header_fill: "#8b5e1a",
             stroke: "#fbbf24",
+            separator: "#4a3415",
         },
         (NodeKind::Table, true) => NodeStyle {
             body_fill: "#fffaf0",
             header_fill: "#f59e0b",
             stroke: "#d97706",
+            separator: "#fed7aa",
         },
         (NodeKind::View, false) => NodeStyle {
             body_fill: "#10232a",
             header_fill: "#0f766e",
             stroke: "#2dd4bf",
+            separator: "#134e4a",
         },
         (NodeKind::View, true) => NodeStyle {
             body_fill: "#f0fdfa",
             header_fill: "#14b8a6",
             stroke: "#0f766e",
+            separator: "#99f6e4",
         },
         (NodeKind::Enum, false) => NodeStyle {
             body_fill: "#241533",
             header_fill: "#7c3aed",
             stroke: "#c084fc",
+            separator: "#4c1d95",
         },
         (NodeKind::Enum, true) => NodeStyle {
             body_fill: "#faf5ff",
             header_fill: "#a855f7",
             stroke: "#7e22ce",
+            separator: "#e9d5ff",
         },
     }
 }
@@ -562,12 +644,16 @@ mod tests {
                         data_type: "uuid PK".to_string(),
                         nullable: false,
                         is_primary_key: true,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     },
                     PositionedColumn {
                         name: "name".to_string(),
                         data_type: "text".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     },
                 ],
                 x: 56.0,
@@ -599,12 +685,16 @@ mod tests {
                             data_type: "uuid PK".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "name".to_string(),
                             data_type: "text".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 56.0,
@@ -625,18 +715,24 @@ mod tests {
                             data_type: "uuid PK".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "user_id".to_string(),
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
                         },
                         PositionedColumn {
                             name: "title".to_string(),
                             data_type: "text".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 56.0,
@@ -736,6 +832,8 @@ mod tests {
                         data_type: "status".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     }],
                     x: 56.0,
                     y: 56.0,
@@ -754,6 +852,8 @@ mod tests {
                         data_type: "int".to_string(),
                         nullable: false,
                         is_primary_key: false,
+                        is_foreign_key: false,
+                        is_indexed: false,
                     }],
                     x: 396.0,
                     y: 56.0,
@@ -773,12 +873,16 @@ mod tests {
                             data_type: String::new(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "inactive".to_string(),
                             data_type: String::new(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 396.0,
@@ -906,6 +1010,8 @@ mod tests {
                     data_type: "text".to_string(),
                     nullable: false,
                     is_primary_key: false,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
@@ -971,6 +1077,8 @@ mod tests {
                     data_type: "text".to_string(),
                     nullable: false,
                     is_primary_key: false,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
@@ -1010,9 +1118,10 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Dark theme background
-        assert!(svg.contains("#0f172a"));
+        assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
         assert!(svg.contains("#151926"));
+        assert!(svg.contains("edge-particles"));
     }
 
     #[test]
@@ -1025,7 +1134,7 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Light theme background
-        assert!(svg.contains("#ffffff"));
+        assert!(svg.contains("#f7f8fc"));
         // Light theme node fill
         assert!(svg.contains("#fffaf0"));
     }
@@ -1085,9 +1194,9 @@ mod tests {
         // Should contain legend elements
         assert!(svg.contains("class=\"legend\""));
         assert!(svg.contains("class=\"legend-background\""));
-        assert!(svg.contains("Legend"));
-        assert!(svg.contains("Primary Key"));
-        assert!(svg.contains("Foreign Key"));
+        assert!(svg.contains("LEGEND"));
+        assert!(svg.contains("Primary key"));
+        assert!(svg.contains("Foreign key"));
         assert!(svg.contains("Indexed"));
         assert!(svg.contains("nullable"));
     }
@@ -1195,12 +1304,16 @@ mod tests {
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "name".to_string(),
                             data_type: "text".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                     ],
                     x: 56.0,
@@ -1221,12 +1334,16 @@ mod tests {
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
                         },
                         PositionedColumn {
                             name: "user_id".to_string(),
                             data_type: "uuid".to_string(),
                             nullable: false,
                             is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
                         },
                     ],
                     x: 56.0,
@@ -1286,6 +1403,8 @@ mod tests {
                     data_type: "uuid".to_string(),
                     nullable: false,
                     is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,
@@ -1328,8 +1447,8 @@ mod tests {
         assert!(svg.contains(">User Domain<"));
         // Should contain dashed stroke for group
         assert!(svg.contains("stroke-dasharray=\"10,5\""));
-        // Should contain semi-transparent fill
-        assert!(svg.contains("fill-opacity=\"0.48\""));
+        // Should contain the refreshed group accent band
+        assert!(svg.contains("class=\"group-band\""));
     }
 
     #[test]
@@ -1386,7 +1505,7 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Dark theme background
-        assert!(svg.contains("#0f172a"));
+        assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
         assert!(svg.contains("#151926"));
     }
@@ -1401,7 +1520,7 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Light theme background
-        assert!(svg.contains("#ffffff"));
+        assert!(svg.contains("#f7f8fc"));
         // Light theme node fill
         assert!(svg.contains("#fffaf0"));
     }
@@ -1428,6 +1547,8 @@ mod tests {
                     data_type: "text".to_string(),
                     nullable: false,
                     is_primary_key: false,
+                    is_foreign_key: false,
+                    is_indexed: false,
                 }],
                 x: 56.0,
                 y: 56.0,

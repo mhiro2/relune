@@ -34,6 +34,7 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
   const zoomInBtn = document.getElementById('zoom-in');
   const zoomOutBtn = document.getElementById('zoom-out');
   const zoomFitBtn = document.getElementById('zoom-fit');
+  const zoomLevelEl = document.getElementById('zoom-level');
 
   if (viewportEl instanceof HTMLElement && canvasEl instanceof HTMLElement) {
     const runtime = getViewerRuntime();
@@ -64,8 +65,37 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
         };
       };
 
+      const overlayInset = (
+        element: Element | null,
+        side: 'left' | 'right' | 'top' | 'bottom',
+      ): number => {
+        if (!(element instanceof HTMLElement) || element.hasAttribute('hidden')) {
+          return 0;
+        }
+
+        const viewportRect = viewportEl.getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return 0;
+        }
+
+        switch (side) {
+          case 'left':
+            return Math.max(0, rect.right - viewportRect.left + 16);
+          case 'right':
+            return Math.max(0, viewportRect.right - rect.left + 16);
+          case 'top':
+            return Math.max(0, rect.bottom - viewportRect.top + 16);
+          case 'bottom':
+            return Math.max(0, viewportRect.bottom - rect.top + 16);
+        }
+      };
+
       const updateTransform = (): void => {
         canvasEl.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        if (zoomLevelEl instanceof HTMLElement) {
+          zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
+        }
         emitViewerEvent('relune:viewport-changed', currentState());
       };
 
@@ -84,17 +114,30 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
           return;
         }
 
-        const padding = 64;
+        const leftInset = overlayInset(document.getElementById('search-panel'), 'left');
+        const rightInset = overlayInset(document.getElementById('detail-drawer'), 'right');
+        const topInset = Math.max(
+          overlayInset(document.querySelector('h1'), 'top'),
+          overlayInset(document.getElementById('filter-reset-bar'), 'top'),
+        );
+        const bottomInset = Math.max(
+          overlayInset(document.getElementById('viewer-controls'), 'bottom'),
+          overlayInset(document.getElementById('minimap-shell'), 'bottom'),
+        );
+
+        const availableWidth = Math.max(rect.width - leftInset - rightInset, 120);
+        const availableHeight = Math.max(rect.height - topInset - bottomInset, 120);
+        const padding = 40;
         scale = clamp(
           Math.min(
-            (rect.width - padding) / diagram.width,
-            (rect.height - padding) / diagram.height,
+            (availableWidth - padding * 2) / diagram.width,
+            (availableHeight - padding * 2) / diagram.height,
           ),
           0.1,
           5,
         );
-        panX = rect.width / 2 - (diagram.x + diagram.width / 2) * scale;
-        panY = rect.height / 2 - (diagram.y + diagram.height / 2) * scale;
+        panX = leftInset + availableWidth / 2 - (diagram.x + diagram.width / 2) * scale;
+        panY = topInset + availableHeight / 2 - (diagram.y + diagram.height / 2) * scale;
         updateTransform();
       };
 
