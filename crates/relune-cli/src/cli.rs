@@ -172,6 +172,8 @@ pub enum RenderFormat {
     Svg,
     /// Self-contained HTML with embedded SVG.
     Html,
+    /// PNG raster image (rendered via resvg).
+    Png,
     /// Graph JSON (intermediate representation).
     GraphJson,
     /// Schema JSON (normalized export).

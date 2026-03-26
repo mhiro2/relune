@@ -51,13 +51,18 @@ impl OutputWriter {
 
     /// Write content to the output destination.
     pub fn write(&mut self, content: &str) -> io::Result<()> {
+        self.write_bytes(content.as_bytes())
+    }
+
+    /// Write raw bytes to the output destination.
+    pub fn write_bytes(&mut self, data: &[u8]) -> io::Result<()> {
         match &mut self.destination {
             OutputDestination::Stdout => {
-                print!("{content}");
+                io::stdout().write_all(data)?;
                 io::stdout().flush()
             }
             OutputDestination::TempFile { file, .. } => {
-                write!(file, "{content}")?;
+                file.write_all(data)?;
                 file.flush()
             }
         }

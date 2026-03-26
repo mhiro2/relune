@@ -3,7 +3,7 @@
 //! Config files are TOML format and support the following structure:
 //! ```toml
 //! [render]
-//! format = "svg"  # svg, html, graph-json, schema-json
+//! format = "svg"  # svg, html, png, graph-json, schema-json
 //! theme = "light" # light, dark
 //! layout = "hierarchical" # hierarchical, force-directed
 //! edge_style = "straight" # straight, orthogonal, curved
