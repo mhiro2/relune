@@ -47,6 +47,9 @@ fn main() {
         "src/js/group_toggle.js",
         "src/js/collapse.js",
         "src/js/highlight.js",
+        "src/js/minimap.js",
+        "src/js/shortcuts.js",
+        "src/js/load_motion.js",
     ] {
         let path = manifest_dir.join(rel);
         assert!(

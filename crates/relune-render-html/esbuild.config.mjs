@@ -12,6 +12,9 @@ const entries = [
   "group_toggle",
   "collapse",
   "highlight",
+  "minimap",
+  "shortcuts",
+  "load_motion",
 ];
 
 await Promise.all(

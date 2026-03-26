@@ -1,35 +1,30 @@
 import { syncEdgeDimming } from './edge_filters';
 import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { emitViewerEvent, getViewerRuntime } from './viewer_api';
 
 function columnMatchesSelectedType(columnType: string, selectedType: string): boolean {
-  const c = columnType.trim().toLowerCase();
-  const s = selectedType.trim().toLowerCase();
-  if (c === s) {
+  const column = columnType.trim().toLowerCase();
+  const selected = selectedType.trim().toLowerCase();
+  if (column === selected) {
     return true;
   }
+
   const base = (raw: string): string => {
-    const i = raw.indexOf('(');
-    return (i === -1 ? raw : raw.slice(0, i)).trim();
+    const index = raw.indexOf('(');
+    return (index === -1 ? raw : raw.slice(0, index)).trim();
   };
-  const baseC = base(c);
-  const baseS = base(s);
-  if (baseC === baseS) {
-    return true;
-  }
-  return c.includes(s) || s.includes(c);
+
+  const baseColumn = base(column);
+  const baseSelected = base(selected);
+  return baseColumn === baseSelected || column.includes(selected) || selected.includes(column);
 }
 
-function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: string[]): boolean {
-  const columns = table.columns ?? [];
-  for (const col of columns) {
-    const dt = col.data_type ?? '';
-    for (const sel of selectedTypes) {
-      if (columnMatchesSelectedType(dt, sel)) {
-        return true;
-      }
-    }
-  }
-  return false;
+function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: Set<string>): boolean {
+  return (table.columns ?? []).some((column) =>
+    Array.from(selectedTypes).some((selectedType) =>
+      columnMatchesSelectedType(column.data_type ?? '', selectedType),
+    ),
+  );
 }
 
 {
@@ -40,27 +35,39 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: string
   if (section === null || listEl === null || svgEl === null) {
     // Type filter markup or SVG not present.
   } else {
+    const runtime = getViewerRuntime();
     const listRoot = listEl;
     const svgRoot = svgEl;
     const summaryEl = document.getElementById('type-filter-summary');
     const clearBtn = document.getElementById('type-filter-clear');
+    const selectVisibleBtn = document.getElementById('type-filter-select-visible');
     const queryInput = document.getElementById('type-filter-query');
+    const resetBar = document.getElementById('filter-reset-bar');
+    const resetCopy = document.getElementById('filter-reset-copy');
+    const resetButton = document.getElementById('filter-reset-button');
 
     const metadata = parseReluneMetadata();
     const tables: TableMetadata[] = metadata?.tables ?? [];
-
     const typeSet = new Set<string>();
+    const selectedTypes = new Set<string>();
+    const typeTableCounts = new Map<string, number>();
+
     for (const table of tables) {
-      for (const col of table.columns ?? []) {
-        const dt = (col.data_type ?? '').trim();
-        if (dt !== '') {
-          typeSet.add(dt);
+      const tableTypes = new Set<string>();
+      for (const column of table.columns ?? []) {
+        const dataType = (column.data_type ?? '').trim();
+        if (dataType !== '') {
+          typeSet.add(dataType);
+          tableTypes.add(dataType);
         }
       }
+      tableTypes.forEach((dataType) => {
+        typeTableCounts.set(dataType, (typeTableCounts.get(dataType) ?? 0) + 1);
+      });
     }
 
-    const allTypes = Array.from(typeSet).sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: 'base' }),
+    const allTypes = Array.from(typeSet).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: 'base' }),
     );
 
     if (allTypes.length === 0) {
@@ -69,99 +76,137 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: string
       section.removeAttribute('hidden');
     }
 
-    const checkboxes: HTMLInputElement[] = [];
-
-    function visibleTypesForQuery(q: string): string[] {
-      const needle = q.trim().toLowerCase();
+    function visibleTypesForQuery(query: string): string[] {
+      const needle = query.trim().toLowerCase();
       if (needle === '') {
         return allTypes;
       }
-      return allTypes.filter((t) => t.toLowerCase().includes(needle));
+      return allTypes.filter((dataType) => dataType.toLowerCase().includes(needle));
     }
 
-    function rebuildList(): void {
-      listRoot.innerHTML = '';
-      checkboxes.length = 0;
-      const q = queryInput instanceof HTMLInputElement ? queryInput.value : '';
-      const visible = visibleTypesForQuery(q);
-
-      for (const dtype of visible) {
-        const row = document.createElement('label');
-        row.className = 'type-filter-item';
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.value = dtype;
-        cb.addEventListener('change', applyTypeFilter);
-
-        const span = document.createElement('span');
-        span.textContent = dtype;
-
-        row.appendChild(cb);
-        row.appendChild(span);
-        listRoot.appendChild(row);
-        checkboxes.push(cb);
-      }
+    function selectedTypeList(): string[] {
+      return Array.from(selectedTypes).sort((left, right) =>
+        left.localeCompare(right, undefined, { sensitivity: 'base' }),
+      );
     }
 
-    function selectedTypes(): string[] {
-      return checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
-    }
-
-    function applyTypeFilter(): void {
-      const selected = selectedTypes();
-      const nodes = svgRoot.querySelectorAll('.node');
-
-      if (selected.length === 0) {
-        nodes.forEach((node) => {
-          node.classList.remove('dimmed-by-type-filter');
-        });
-      } else {
-        nodes.forEach((node) => {
-          const tableId = node.getAttribute('data-id') ?? node.getAttribute('data-table-id') ?? '';
-          const table = tables.find((t) => t.id === tableId);
-          const matches = table !== undefined && tableMatchesAnySelectedType(table, selected);
-
-          if (matches) {
-            node.classList.remove('dimmed-by-type-filter');
-          } else {
-            node.classList.add('dimmed-by-type-filter');
-          }
-        });
-      }
-
+    function syncFilterChrome(): void {
+      const selected = selectedTypeList();
       if (summaryEl) {
         if (selected.length === 0) {
           summaryEl.textContent = '';
           summaryEl.classList.remove('visible');
         } else {
-          summaryEl.textContent = `${selected.length} type(s) · objects with any matching column`;
+          summaryEl.textContent = `${selected.length} type(s) selected across the schema`;
           summaryEl.classList.add('visible');
         }
       }
 
+      if (resetBar && resetCopy) {
+        resetBar.toggleAttribute('hidden', selected.length === 0);
+        if (selected.length > 0) {
+          const preview = selected.slice(0, 3).join(', ');
+          const suffix = selected.length > 3 ? ` +${selected.length - 3} more` : '';
+          resetCopy.textContent = `${selected.length} type filter(s): ${preview}${suffix}`;
+        } else {
+          resetCopy.textContent = '';
+        }
+      }
+
+      emitViewerEvent('relune:filters-changed', {
+        active: selected.length > 0,
+        selectedTypes: selected,
+      });
+    }
+
+    function rebuildList(): void {
+      listRoot.innerHTML = '';
+      const query = queryInput instanceof HTMLInputElement ? queryInput.value : '';
+      const visibleTypes = visibleTypesForQuery(query);
+
+      for (const dataType of visibleTypes) {
+        const row = document.createElement('label');
+        row.className = 'type-filter-item';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = dataType;
+        checkbox.checked = selectedTypes.has(dataType);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) {
+            selectedTypes.add(dataType);
+          } else {
+            selectedTypes.delete(dataType);
+          }
+          applyTypeFilter();
+        });
+
+        const label = document.createElement('span');
+        label.textContent = dataType;
+
+        const count = document.createElement('span');
+        count.className = 'type-filter-item-count';
+        count.textContent = String(typeTableCounts.get(dataType) ?? 0);
+
+        row.appendChild(checkbox);
+        row.appendChild(label);
+        row.appendChild(count);
+        listRoot.appendChild(row);
+      }
+    }
+
+    function applyTypeFilter(): void {
+      const nodes = svgRoot.querySelectorAll('.node');
+      if (selectedTypes.size === 0) {
+        nodes.forEach((node) => {
+          node.classList.remove('dimmed-by-type-filter', 'excluded-by-type-filter');
+        });
+      } else {
+        nodes.forEach((node) => {
+          const tableId = node.getAttribute('data-id') ?? node.getAttribute('data-table-id') ?? '';
+          const table = tables.find((candidate) => candidate.id === tableId);
+          const matches = table !== undefined && tableMatchesAnySelectedType(table, selectedTypes);
+          node.classList.toggle('dimmed-by-type-filter', !matches);
+          node.classList.toggle('excluded-by-type-filter', !matches);
+        });
+      }
+
+      syncFilterChrome();
       syncEdgeDimming(svgRoot);
     }
 
-    rebuildList();
-    queryInput?.addEventListener('input', () => {
-      const had = new Set(selectedTypes());
+    function clearSelection(): void {
+      selectedTypes.clear();
       rebuildList();
-      for (const cb of checkboxes) {
-        if (had.has(cb.value)) {
-          cb.checked = true;
-        }
-      }
+      applyTypeFilter();
+    }
+
+    runtime.filters = {
+      reset(): void {
+        clearSelection();
+      },
+      hasActiveFilters(): boolean {
+        return selectedTypes.size > 0;
+      },
+    };
+
+    queryInput?.addEventListener('input', () => {
+      rebuildList();
       applyTypeFilter();
     });
 
-    clearBtn?.addEventListener('click', () => {
-      for (const cb of checkboxes) {
-        cb.checked = false;
+    clearBtn?.addEventListener('click', clearSelection);
+    resetButton?.addEventListener('click', clearSelection);
+    selectVisibleBtn?.addEventListener('click', () => {
+      const query = queryInput instanceof HTMLInputElement ? queryInput.value : '';
+      for (const dataType of visibleTypesForQuery(query)) {
+        selectedTypes.add(dataType);
       }
+      rebuildList();
       applyTypeFilter();
     });
 
+    rebuildList();
     applyTypeFilter();
   }
 }
