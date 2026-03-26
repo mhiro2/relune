@@ -6,7 +6,9 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::{Enum, Schema, Table, TableId};
+use crate::model::{
+    Enum, ForeignKeyTargetResolution, Schema, Table, TableId, resolve_table_reference,
+};
 
 /// The kind of node in the schema graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +87,14 @@ pub enum GraphBuildError {
         /// The ambiguous enum type name.
         data_type: String,
     },
+    /// A foreign key reference is ambiguous across schemas.
+    #[error("ambiguous foreign key reference for table '{table}': '{reference}'")]
+    AmbiguousTableReference {
+        /// Table where the ambiguity was encountered.
+        table: String,
+        /// The ambiguous table reference.
+        reference: String,
+    },
 }
 
 const fn is_sql_identifier_continue(c: char) -> bool {
@@ -126,22 +136,12 @@ impl SchemaGraph {
         let mut graph = DiGraph::<GraphNode, GraphEdge>::new();
         let mut ids = BTreeMap::new();
 
-        let name_index = Self::build_name_index(schema);
         let enum_index = Self::add_enum_nodes(&mut graph, schema);
         Self::add_table_nodes(&mut graph, &mut ids, schema);
-        Self::add_table_edges(&mut graph, &ids, &name_index, &enum_index, schema)?;
+        Self::add_table_edges(&mut graph, &ids, &enum_index, schema)?;
         Self::add_view_nodes(&mut graph, &ids, schema);
 
         Ok(Self { graph })
-    }
-
-    fn build_name_index(schema: &Schema) -> HashMap<String, TableId> {
-        let mut index = HashMap::with_capacity(schema.tables.len() * 2);
-        for table in &schema.tables {
-            index.insert(table.name.to_lowercase(), table.id);
-            index.insert(table.stable_id.to_lowercase(), table.id);
-        }
-        index
     }
 
     fn add_enum_nodes(graph: &mut DiGraph<GraphNode, GraphEdge>, schema: &Schema) -> EnumIndex {
@@ -185,7 +185,6 @@ impl SchemaGraph {
     fn add_table_edges(
         graph: &mut DiGraph<GraphNode, GraphEdge>,
         ids: &BTreeMap<TableId, NodeIndex>,
-        name_index: &HashMap<String, TableId>,
         enum_index: &EnumIndex,
         schema: &Schema,
     ) -> Result<(), GraphBuildError> {
@@ -194,7 +193,7 @@ impl SchemaGraph {
                 .get(&table.id)
                 .ok_or_else(|| GraphBuildError::UnknownTable(table.stable_id.clone()))?;
 
-            Self::add_fk_edges(graph, from, table, ids, name_index)?;
+            Self::add_fk_edges(graph, from, table, ids, schema)?;
             Self::add_enum_ref_edges(graph, from, table, enum_index)?;
         }
         Ok(())
@@ -205,16 +204,32 @@ impl SchemaGraph {
         from: NodeIndex,
         table: &Table,
         ids: &BTreeMap<TableId, NodeIndex>,
-        name_index: &HashMap<String, TableId>,
+        schema: &Schema,
     ) -> Result<(), GraphBuildError> {
         for fk in &table.foreign_keys {
-            let fk_target = fk.to_table.to_lowercase();
-            let to = name_index
-                .get(&fk_target)
-                .and_then(|table_id| ids.get(table_id).copied())
+            let target_table = match resolve_table_reference(
+                schema,
+                Some(table),
+                fk.to_schema.as_deref(),
+                &fk.to_table,
+            ) {
+                ForeignKeyTargetResolution::Found(target_table) => target_table,
+                ForeignKeyTargetResolution::Missing => {
+                    return Err(GraphBuildError::UnknownTable(fk.to_table.clone()));
+                }
+                ForeignKeyTargetResolution::Ambiguous => {
+                    return Err(GraphBuildError::AmbiguousTableReference {
+                        table: table.qualified_name(),
+                        reference: fk.to_table.clone(),
+                    });
+                }
+            };
+            let to = ids
+                .get(&target_table.id)
+                .copied()
                 .ok_or_else(|| GraphBuildError::UnknownTable(fk.to_table.clone()))?;
 
-            let fk_nullable = fk.from_columns.iter().all(|col_name| {
+            let fk_nullable = fk.from_columns.iter().any(|col_name| {
                 table
                     .columns
                     .iter()
@@ -553,6 +568,90 @@ mod tests {
                 && edge.kind == EdgeKind::ViewDependency
                 && edge.label == "view dep"
         }));
+    }
+
+    #[test]
+    fn foreign_key_edges_are_nullable_when_any_source_column_is_nullable() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "users",
+                    None,
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "sessions",
+                    None,
+                    vec![
+                        make_column("id", "integer", false, true),
+                        make_column("tenant_id", "integer", true, false),
+                        make_column("user_id", "integer", false, false),
+                    ],
+                    vec![make_foreign_key(
+                        "users",
+                        &["tenant_id", "user_id"],
+                        &["id", "id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let edge = graph
+            .graph
+            .edge_references()
+            .find(|edge| edge.weight().kind == EdgeKind::ForeignKey)
+            .expect("foreign key edge");
+
+        assert!(edge.weight().nullable);
+    }
+
+    #[test]
+    fn from_schema_prefers_same_schema_target_for_unqualified_fk() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "users",
+                    Some("public"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "users",
+                    Some("audit"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    3,
+                    "sessions",
+                    Some("audit"),
+                    vec![
+                        make_column("id", "integer", false, true),
+                        make_column("user_id", "integer", false, false),
+                    ],
+                    vec![make_foreign_key("users", &["user_id"], &["id"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let edge = graph
+            .graph
+            .edge_references()
+            .find(|edge| edge.weight().kind == EdgeKind::ForeignKey)
+            .expect("foreign key edge");
+
+        assert_eq!(graph.graph[edge.target()].label, "audit.users");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Core data model for database schema representation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 /// SQL dialect for parsing.
@@ -118,10 +118,10 @@ impl Schema {
     pub fn validate(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 
-        // Check for duplicate table names using (schema, name) tuple
-        let mut seen_names: HashSet<(String, String)> = HashSet::new();
+        // Check for duplicate table names using an optional schema key.
+        let mut seen_names: HashSet<(Option<String>, String)> = HashSet::new();
         for table in &self.tables {
-            let schema = table.schema_name.as_deref().unwrap_or("").to_lowercase();
+            let schema = table.schema_name.as_deref().map(str::to_lowercase);
             let name = table.name.to_lowercase();
             if !seen_names.insert((schema, name)) {
                 errors.push(ValidationError {
@@ -131,28 +131,14 @@ impl Schema {
             }
         }
 
-        // Build lookup from (schema_lower, name_lower) and (schema_lower, stable_id_lower)
-        // to the table's column names, for FK target validation.
-        let mut table_columns: HashMap<(String, String), HashSet<String>> = HashMap::new();
-        for t in &self.tables {
-            let schema = t.schema_name.as_deref().unwrap_or("").to_lowercase();
-            let cols: HashSet<String> = t.columns.iter().map(|c| c.name.clone()).collect();
-            table_columns.insert((schema.clone(), t.name.to_lowercase()), cols.clone());
-            table_columns.insert((schema, t.stable_id.to_lowercase()), cols);
-        }
-
         for table in &self.tables {
-            Self::validate_table(table, &table_columns, &mut errors);
+            Self::validate_table(table, self, &mut errors);
         }
 
         errors
     }
 
-    fn validate_table(
-        table: &Table,
-        table_columns: &HashMap<(String, String), HashSet<String>>,
-        errors: &mut Vec<ValidationError>,
-    ) {
+    fn validate_table(table: &Table, schema: &Self, errors: &mut Vec<ValidationError>) {
         if table.name.trim().is_empty() {
             errors.push(ValidationError {
                 table: None,
@@ -178,15 +164,15 @@ impl Schema {
         }
 
         for fk in &table.foreign_keys {
-            Self::validate_fk(table, fk, &col_names, table_columns, errors);
+            Self::validate_fk(table, fk, schema, &col_names, errors);
         }
     }
 
     fn validate_fk(
         table: &Table,
         fk: &ForeignKey,
+        schema: &Self,
         col_names: &HashSet<String>,
-        table_columns: &HashMap<(String, String), HashSet<String>>,
         errors: &mut Vec<ValidationError>,
     ) {
         // FK columns must be present on both sides and keep the same arity.
@@ -214,34 +200,30 @@ impl Schema {
             }
         }
 
-        // Resolve the target table using (to_schema, to_table).
-        let to_key = fk.to_table.to_lowercase();
-        let target_cols = if fk.to_schema.is_some() {
-            let target_schema = fk.to_schema.as_deref().unwrap_or("").to_lowercase();
-            table_columns.get(&(target_schema, to_key))
-        } else {
-            // No explicit schema — try empty schema first, then any match
-            table_columns
-                .get(&(String::new(), to_key.clone()))
-                .or_else(|| {
-                    table_columns
-                        .iter()
-                        .find(|((_, n), _)| *n == to_key)
-                        .map(|(_, v)| v)
-                })
-        };
-
-        match target_cols {
-            None => {
+        match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
+            ForeignKeyTargetResolution::Missing => {
                 errors.push(ValidationError {
                     table: Some(table.name.clone()),
                     message: format!("FK references unknown table '{}'", fk.to_table),
                 });
             }
-            Some(ref_cols) => {
+            ForeignKeyTargetResolution::Ambiguous => {
+                errors.push(ValidationError {
+                    table: Some(table.qualified_name()),
+                    message: format!(
+                        "FK references ambiguous table '{}'; specify a schema name",
+                        fk.to_table
+                    ),
+                });
+            }
+            ForeignKeyTargetResolution::Found(ref_table) => {
                 // to_columns reference existing columns in the target table
                 for col in &fk.to_columns {
-                    if !ref_cols.contains(col) {
+                    if !ref_table
+                        .columns
+                        .iter()
+                        .any(|candidate| candidate.name == *col)
+                    {
                         errors.push(ValidationError {
                             table: Some(table.name.clone()),
                             message: format!(
@@ -268,6 +250,85 @@ impl Schema {
             foreign_key_count,
             view_count,
         }
+    }
+}
+
+pub(crate) enum ForeignKeyTargetResolution<'a> {
+    Found(&'a Table),
+    Missing,
+    Ambiguous,
+}
+
+pub(crate) fn resolve_table_reference<'a>(
+    schema: &'a Schema,
+    from_table: Option<&Table>,
+    to_schema: Option<&str>,
+    to_table: &str,
+) -> ForeignKeyTargetResolution<'a> {
+    let target_table = to_table.to_lowercase();
+
+    if let Some(target_schema) = to_schema {
+        return resolve_matching_tables(schema, &target_table, Some(target_schema));
+    }
+
+    if let Some(source_schema) = from_table.and_then(|table| table.schema_name.as_deref()) {
+        match resolve_matching_tables(schema, &target_table, Some(source_schema)) {
+            ForeignKeyTargetResolution::Found(table) => {
+                return ForeignKeyTargetResolution::Found(table);
+            }
+            ForeignKeyTargetResolution::Ambiguous => {
+                return ForeignKeyTargetResolution::Ambiguous;
+            }
+            ForeignKeyTargetResolution::Missing => {}
+        }
+    }
+
+    match resolve_matching_tables(schema, &target_table, None) {
+        ForeignKeyTargetResolution::Missing => {
+            resolve_matching_tables_any_schema(schema, &target_table)
+        }
+        resolution => resolution,
+    }
+}
+
+fn resolve_matching_tables<'a>(
+    schema: &'a Schema,
+    target_table: &str,
+    target_schema: Option<&str>,
+) -> ForeignKeyTargetResolution<'a> {
+    let target_schema = target_schema.map(str::to_lowercase);
+    let mut matches = schema.tables.iter().filter(|table| {
+        let schema_matches = match &target_schema {
+            Some(target_schema) => table
+                .schema_name
+                .as_deref()
+                .is_some_and(|schema_name| schema_name.to_lowercase() == *target_schema),
+            None => table.schema_name.is_none(),
+        };
+        schema_matches
+            && (table.name.to_lowercase() == target_table
+                || table.stable_id.to_lowercase() == target_table)
+    });
+
+    match (matches.next(), matches.next()) {
+        (None, _) => ForeignKeyTargetResolution::Missing,
+        (Some(table), None) => ForeignKeyTargetResolution::Found(table),
+        _ => ForeignKeyTargetResolution::Ambiguous,
+    }
+}
+
+fn resolve_matching_tables_any_schema<'a>(
+    schema: &'a Schema,
+    target_table: &str,
+) -> ForeignKeyTargetResolution<'a> {
+    let mut matches = schema.tables.iter().filter(|table| {
+        table.name.to_lowercase() == target_table || table.stable_id.to_lowercase() == target_table
+    });
+
+    match (matches.next(), matches.next()) {
+        (None, _) => ForeignKeyTargetResolution::Missing,
+        (Some(table), None) => ForeignKeyTargetResolution::Found(table),
+        _ => ForeignKeyTargetResolution::Ambiguous,
     }
 }
 
@@ -522,6 +583,19 @@ mod tests {
     }
 
     #[test]
+    fn validate_empty_schema_name_is_distinct_from_unqualified_tables() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", None, &["id"], vec![]),
+                make_table("users", Some(""), &["id"], vec![]),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
     fn validate_duplicate_within_same_schema() {
         let schema = Schema {
             tables: vec![
@@ -571,6 +645,89 @@ mod tests {
         let errs = schema.validate();
         assert_eq!(errs.len(), 1);
         assert!(errs[0].message.contains("unknown table"));
+    }
+
+    #[test]
+    fn validate_fk_uses_explicit_schema_when_targets_share_a_name() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                make_table("users", Some("auth"), &["id"], vec![]),
+                Table {
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["user_id".to_string()],
+                        to_schema: Some("auth".to_string()),
+                        to_table: "users".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    ..make_table("posts", None, &["id", "user_id"], vec![])
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn validate_fk_without_schema_prefers_same_schema_target() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                make_table("users", Some("auth"), &["id"], vec![]),
+                make_table(
+                    "posts",
+                    Some("auth"),
+                    &["id", "user_id"],
+                    vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["user_id".to_string()],
+                        to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn validate_fk_without_schema_is_ambiguous_when_targets_share_a_name() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                make_table("users", Some("auth"), &["id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["user_id".to_string()],
+                        to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("ambiguous"));
     }
 
     #[test]

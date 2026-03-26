@@ -362,13 +362,13 @@ impl TableDiff {
     }
 
     fn diff_foreign_keys(old_fks: &[ForeignKey], new_fks: &[ForeignKey]) -> Vec<ForeignKeyDiff> {
-        let old_map: HashMap<Cow<'_, str>, &ForeignKey> =
+        let old_map: HashMap<String, &ForeignKey> =
             old_fks.iter().map(|fk| (Self::fk_key(fk), fk)).collect();
-        let new_map: HashMap<Cow<'_, str>, &ForeignKey> =
+        let new_map: HashMap<String, &ForeignKey> =
             new_fks.iter().map(|fk| (Self::fk_key(fk), fk)).collect();
 
-        let old_keys: HashSet<&Cow<'_, str>> = old_map.keys().collect();
-        let new_keys: HashSet<&Cow<'_, str>> = new_map.keys().collect();
+        let old_keys: HashSet<&String> = old_map.keys().collect();
+        let new_keys: HashSet<&String> = new_map.keys().collect();
 
         let mut diffs = Vec::new();
 
@@ -394,24 +394,64 @@ impl TableDiff {
         diffs
     }
 
-    fn fk_key(fk: &ForeignKey) -> Cow<'_, str> {
-        // Use name if available (borrow), otherwise create a key from columns
-        match &fk.name {
-            Some(name) => Cow::Borrowed(name),
-            None => Cow::Owned(format!(
-                "{}_{}_{}",
-                fk.from_columns.join("_"),
-                fk.to_table,
-                fk.to_columns.join("_")
-            )),
+    fn fk_key(fk: &ForeignKey) -> String {
+        // Keep unnamed FK identity stable without relying on ambiguous separators.
+        if let Some(name) = &fk.name {
+            name.clone()
+        } else {
+            let mut key = String::new();
+            Self::push_key_option(&mut key, fk.to_schema.as_deref());
+            Self::push_key_part(&mut key, &fk.to_table);
+            Self::push_key_pairs(&mut key, &Self::fk_column_pairs(fk));
+            key
         }
     }
 
+    fn push_key_option(key: &mut String, value: Option<&str>) {
+        match value {
+            Some(value) => {
+                key.push('1');
+                key.push(':');
+                Self::push_key_part(key, value);
+            }
+            None => key.push_str("0;"),
+        }
+    }
+
+    fn push_key_pairs(key: &mut String, pairs: &[(String, String)]) {
+        key.push_str(&pairs.len().to_string());
+        key.push('[');
+        for (from_column, to_column) in pairs {
+            Self::push_key_part(key, from_column);
+            Self::push_key_part(key, to_column);
+        }
+        key.push(']');
+    }
+
+    fn push_key_part(key: &mut String, value: &str) {
+        key.push_str(&value.len().to_string());
+        key.push(':');
+        key.push_str(value);
+        key.push(';');
+    }
+
     fn fks_differ(a: &ForeignKey, b: &ForeignKey) -> bool {
-        a.from_columns != b.from_columns
+        a.from_columns.len() != b.from_columns.len()
+            || a.to_columns.len() != b.to_columns.len()
+            || Self::fk_column_pairs(a) != Self::fk_column_pairs(b)
             || a.to_schema != b.to_schema
             || a.to_table != b.to_table
-            || a.to_columns != b.to_columns
+    }
+
+    fn fk_column_pairs(fk: &ForeignKey) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = fk
+            .from_columns
+            .iter()
+            .cloned()
+            .zip(fk.to_columns.iter().cloned())
+            .collect();
+        pairs.sort_unstable();
+        pairs
     }
 
     fn diff_indexes(
@@ -839,6 +879,135 @@ mod tests {
             .unwrap();
         assert_eq!(posts_diff.column_diffs.len(), 1); // user_id added
         assert_eq!(posts_diff.fk_diffs.len(), 1); // FK added
+    }
+
+    #[test]
+    fn test_unnamed_foreign_keys_with_ambiguous_column_names_are_distinct() {
+        let before = Schema {
+            tables: vec![
+                create_test_table(
+                    "targets",
+                    vec![
+                        ("id1", "bigint", false, true),
+                        ("id2", "bigint", false, true),
+                    ],
+                    vec![],
+                ),
+                create_test_table(
+                    "child",
+                    vec![
+                        ("a_b", "bigint", false, false),
+                        ("c", "bigint", false, false),
+                        ("a", "bigint", false, false),
+                        ("b_c", "bigint", false, false),
+                    ],
+                    vec![
+                        ("", vec!["a_b", "c"], "targets", vec!["id1", "id2"]),
+                        ("", vec!["a", "b_c"], "targets", vec!["id1", "id2"]),
+                    ],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![
+                create_test_table(
+                    "targets",
+                    vec![
+                        ("id1", "bigint", false, true),
+                        ("id2", "bigint", false, true),
+                    ],
+                    vec![],
+                ),
+                create_test_table(
+                    "child",
+                    vec![
+                        ("a_b", "bigint", false, false),
+                        ("c", "bigint", false, false),
+                        ("a", "bigint", false, false),
+                        ("b_c", "bigint", false, false),
+                    ],
+                    vec![
+                        ("", vec!["a", "b_c"], "targets", vec!["id1", "id2"]),
+                        ("", vec!["a_b", "c"], "targets", vec!["id1", "id2"]),
+                    ],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert!(diff.is_empty());
+        assert!(diff.added_tables.is_empty());
+        assert!(diff.removed_tables.is_empty());
+        assert!(diff.modified_tables.is_empty());
+    }
+
+    #[test]
+    fn test_unnamed_foreign_keys_ignore_column_order_when_pairs_match() {
+        let before = Schema {
+            tables: vec![
+                create_test_table(
+                    "users",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("tenant_id", "bigint", false, true),
+                    ],
+                    vec![],
+                ),
+                create_test_table(
+                    "posts",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("user_id", "bigint", false, false),
+                        ("tenant_id", "bigint", false, false),
+                    ],
+                    vec![(
+                        "",
+                        vec!["user_id", "tenant_id"],
+                        "users",
+                        vec!["id", "tenant_id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![
+                create_test_table(
+                    "users",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("tenant_id", "bigint", false, true),
+                    ],
+                    vec![],
+                ),
+                create_test_table(
+                    "posts",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("user_id", "bigint", false, false),
+                        ("tenant_id", "bigint", false, false),
+                    ],
+                    vec![(
+                        "",
+                        vec!["tenant_id", "user_id"],
+                        "users",
+                        vec!["tenant_id", "id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert!(diff.is_empty());
     }
 
     #[test]

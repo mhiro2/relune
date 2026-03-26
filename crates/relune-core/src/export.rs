@@ -208,26 +208,39 @@ fn import_column(index: usize, export: &ColumnExport) -> Column {
 
 /// Import a `ForeignKey` from the stable format.
 fn import_fk(export: &ForeignKeyExport) -> ForeignKey {
-    use crate::model::ReferentialAction;
-
-    let from_action_str = |s: &Option<String>| -> ReferentialAction {
-        match s.as_deref() {
-            Some("CASCADE") => ReferentialAction::Cascade,
-            Some("SET NULL") => ReferentialAction::SetNull,
-            Some("SET DEFAULT") => ReferentialAction::SetDefault,
-            Some("RESTRICT") => ReferentialAction::Restrict,
-            _ => ReferentialAction::NoAction,
-        }
-    };
-
     ForeignKey {
         name: export.name.clone(),
         from_columns: export.from_columns.clone(),
         to_schema: export.to_schema.clone(),
         to_table: export.to_table.clone(),
         to_columns: export.to_columns.clone(),
-        on_delete: from_action_str(&export.on_delete),
-        on_update: from_action_str(&export.on_update),
+        on_delete: parse_referential_action(export.on_delete.as_deref()),
+        on_update: parse_referential_action(export.on_update.as_deref()),
+    }
+}
+
+fn parse_referential_action(action: Option<&str>) -> crate::model::ReferentialAction {
+    use crate::model::ReferentialAction;
+
+    let normalized = action.map(str::trim).filter(|s| !s.is_empty());
+    let normalized = normalized.map(str::to_ascii_uppercase);
+    let normalized = normalized.as_deref();
+
+    let stripped = normalized
+        .and_then(|value| value.strip_prefix("ON DELETE "))
+        .or_else(|| normalized.and_then(|value| value.strip_prefix("ON UPDATE ")))
+        .unwrap_or_else(|| normalized.unwrap_or(""));
+
+    if stripped.is_empty() || stripped == "NO ACTION" || stripped == "NOACTION" {
+        ReferentialAction::NoAction
+    } else {
+        match stripped {
+            "CASCADE" => ReferentialAction::Cascade,
+            "SET NULL" => ReferentialAction::SetNull,
+            "SET DEFAULT" => ReferentialAction::SetDefault,
+            "RESTRICT" => ReferentialAction::Restrict,
+            _ => ReferentialAction::NoAction,
+        }
     }
 }
 
@@ -455,6 +468,69 @@ mod tests {
         );
         assert_eq!(
             export.tables[2].foreign_keys[0].on_update.as_deref(),
+            Some("SET DEFAULT")
+        );
+    }
+
+    #[test]
+    fn test_import_normalizes_referential_action_strings() {
+        let export = SchemaExport::new(vec![
+            TableExport {
+                id: "public.accounts".to_string(),
+                schema: Some("public".to_string()),
+                name: "accounts".to_string(),
+                columns: vec![ColumnExport {
+                    name: "id".to_string(),
+                    data_type: "uuid".to_string(),
+                    nullable: false,
+                    primary_key: true,
+                }],
+                foreign_keys: vec![],
+                indexes: vec![],
+            },
+            TableExport {
+                id: "public.sessions".to_string(),
+                schema: Some("public".to_string()),
+                name: "sessions".to_string(),
+                columns: vec![
+                    ColumnExport {
+                        name: "id".to_string(),
+                        data_type: "uuid".to_string(),
+                        nullable: false,
+                        primary_key: true,
+                    },
+                    ColumnExport {
+                        name: "account_id".to_string(),
+                        data_type: "uuid".to_string(),
+                        nullable: false,
+                        primary_key: false,
+                    },
+                ],
+                foreign_keys: vec![ForeignKeyExport {
+                    name: Some("fk_sessions_account".to_string()),
+                    from_columns: vec!["account_id".to_string()],
+                    to_schema: Some("public".to_string()),
+                    to_table: "accounts".to_string(),
+                    to_columns: vec!["id".to_string()],
+                    on_delete: Some(" on delete cascade ".to_string()),
+                    on_update: Some("set default".to_string()),
+                }],
+                indexes: vec![],
+            },
+        ]);
+
+        let schema = import_schema(&export);
+        let fk = &schema.tables[1].foreign_keys[0];
+        assert_eq!(fk.on_delete, ReferentialAction::Cascade);
+        assert_eq!(fk.on_update, ReferentialAction::SetDefault);
+
+        let normalized = export_schema(&schema);
+        assert_eq!(
+            normalized.tables[1].foreign_keys[0].on_delete.as_deref(),
+            Some("CASCADE")
+        );
+        assert_eq!(
+            normalized.tables[1].foreign_keys[0].on_update.as_deref(),
             Some("SET DEFAULT")
         );
     }
