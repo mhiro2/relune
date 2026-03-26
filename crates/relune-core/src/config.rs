@@ -33,6 +33,13 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = u32::deserialize(deserializer)?;
+    if value > MAX_FOCUS_DEPTH {
+        tracing::warn!(
+            requested = value,
+            max = MAX_FOCUS_DEPTH,
+            "focus depth exceeds maximum, clamping to {MAX_FOCUS_DEPTH}",
+        );
+    }
     Ok(value.min(MAX_FOCUS_DEPTH))
 }
 
@@ -40,6 +47,13 @@ impl FocusSpec {
     /// Creates a new `FocusSpec`, clamping `depth` to [`MAX_FOCUS_DEPTH`].
     #[must_use]
     pub fn new(table: impl Into<String>, depth: u32) -> Self {
+        if depth > MAX_FOCUS_DEPTH {
+            tracing::warn!(
+                requested = depth,
+                max = MAX_FOCUS_DEPTH,
+                "focus depth exceeds maximum, clamping to {MAX_FOCUS_DEPTH}",
+            );
+        }
         Self {
             table: table.into(),
             depth: depth.min(MAX_FOCUS_DEPTH),
