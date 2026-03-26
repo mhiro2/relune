@@ -57,6 +57,7 @@ Options:
           Possible values:
           - svg:         SVG output
           - html:        Self-contained HTML with embedded SVG
+          - png:         PNG raster image (rendered via resvg)
           - graph-json:  Graph JSON (intermediate representation)
           - schema-json: Schema JSON (normalized export)
 
