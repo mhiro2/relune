@@ -1,4 +1,5 @@
 import { parseReluneMetadata, type GroupMetadata } from './metadata';
+import { emitViewerEvent } from './viewer_api';
 
 {
   const metadata = parseReluneMetadata();
@@ -120,6 +121,10 @@ import { parseReluneMetadata, type GroupMetadata } from './metadata';
             groupItem.classList.add('hidden-group');
           }
         }
+
+        emitViewerEvent('relune:groups-changed', {
+          visibleGroups: { ...visibleGroups },
+        });
       }
 
       function updateEdgeVisibility(): void {

@@ -212,7 +212,7 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        assert!(result.contains("--bg-color: #0f172a"));
+        assert!(result.contains("--bg-color: #0c0f1a"));
         assert!(result.contains("--text-color: #e2e8f0"));
     }
 
@@ -227,7 +227,7 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        assert!(result.contains("--bg-color: #ffffff"));
+        assert!(result.contains("--bg-color: #f7f8fc"));
         assert!(result.contains("--text-color: #1e293b"));
     }
 
@@ -251,8 +251,8 @@ mod tests {
 
         let result = render_html(&graph, svg, &options).unwrap();
 
-        // Should not reference external resources
-        assert!(!result.contains("<link"));
+        // Should not reference external HTTP resources
+        assert!(result.contains("<link"));
         assert!(!result.contains("href=\"http"));
         assert!(!result.contains("src=\"http"));
     }

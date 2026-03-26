@@ -12,7 +12,9 @@ pub struct Point {
 impl Point {
     /// Creates a new point with the given coordinates.
     #[must_use]
-    pub const fn new(x: f32, y: f32) -> Self {
+    pub fn new(x: f32, y: f32) -> Self {
+        debug_assert!(x.is_finite(), "point x must be finite");
+        debug_assert!(y.is_finite(), "point y must be finite");
         Self { x, y }
     }
 
@@ -41,7 +43,11 @@ pub struct Rect {
 impl Rect {
     /// Creates a new rectangle with the given position and dimensions.
     #[must_use]
-    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        debug_assert!(x.is_finite(), "rect x must be finite");
+        debug_assert!(y.is_finite(), "rect y must be finite");
+        debug_assert!(width.is_finite(), "rect width must be finite");
+        debug_assert!(height.is_finite(), "rect height must be finite");
         Self {
             x,
             y,
@@ -159,8 +165,10 @@ pub fn compute_node_height(column_count: usize, column_height: f32) -> f32 {
 /// * `column_height` - The height of each column row
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
-pub const fn compute_column_y(start_y: f32, index: usize, column_height: f32) -> f32 {
-    start_y + (index as f32) * column_height
+pub fn compute_column_y(start_y: f32, index: usize, column_height: f32) -> f32 {
+    debug_assert!(start_y.is_finite(), "column start_y must be finite");
+    debug_assert!(column_height.is_finite(), "column height must be finite");
+    (index as f32).mul_add(column_height, start_y)
 }
 
 /// Interpolates between two values.
@@ -171,6 +179,9 @@ pub const fn compute_column_y(start_y: f32, index: usize, column_height: f32) ->
 /// * `t` - The interpolation factor (0.0 to 1.0)
 #[must_use]
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    debug_assert!(a.is_finite(), "lerp start must be finite");
+    debug_assert!(b.is_finite(), "lerp end must be finite");
+    debug_assert!(t.is_finite(), "lerp factor must be finite");
     (b - a).mul_add(t.clamp(0.0, 1.0), a)
 }
 

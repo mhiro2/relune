@@ -229,16 +229,22 @@ fn render_node_internal(
 
     let mut line_y = node.y + 52.0;
     for (index, column) in node.columns.iter().enumerate() {
+        let _ = write!(
+            out,
+            r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
+            escape_attribute(&column.name),
+            column.nullable
+        );
         if index > 0 {
             let separator_y = line_y - 12.0;
             let _ = write!(
                 out,
-                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.75" stroke-width="1"/>"#,
+                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.92" stroke-width="1"/>"#,
                 node.x + 12.0,
                 separator_y,
                 node.x + node.width - 12.0,
                 separator_y,
-                node_style.stroke
+                node_style.separator
             );
         }
         let text = if node.kind == NodeKind::Enum {
@@ -248,9 +254,14 @@ fn render_node_internal(
         } else {
             format!("{}: {}", column.name, column.data_type)
         };
+        let font_style = if column.nullable {
+            r#" font-style="italic""#
+        } else {
+            ""
+        };
         let _ = write!(
             out,
-            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}">{}</text>"#,
+            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}"{}>{}</text>"#,
             node.x + 12.0,
             line_y,
             if column.nullable {
@@ -258,20 +269,24 @@ fn render_node_internal(
             } else {
                 colors.text_secondary
             },
+            font_style,
             escape_text(&text)
         );
-        if column.is_primary_key {
-            let icon_x = node.x + node.width - 26.0;
-            let icon_y = line_y - 8.5;
-            let _ = write!(
-                out,
-                r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
-                icon_x,
-                icon_y + 3.2,
-                icon_x + 3.2,
-                icon_y + 3.2
-            );
+
+        let mut icon_x = node.x + node.width - 22.0;
+        if column.is_indexed {
+            render_idx_indicator(out, icon_x, line_y - 9.0);
+            icon_x -= 16.0;
         }
+        if column.is_foreign_key {
+            render_fk_indicator(out, icon_x, line_y - 9.0);
+            icon_x -= 16.0;
+        }
+        if column.is_primary_key {
+            render_pk_indicator(out, icon_x, line_y - 8.5);
+        }
+
+        out.push_str("</g>");
         line_y += 18.0;
     }
     let _ = write!(
@@ -354,9 +369,7 @@ fn render_edge_internal(
         out.push_str(r#"<g class="edge-particles" opacity="0">"#);
         let _ = write!(
             out,
-            r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{}"/></animateMotion></circle>"##,
-            index,
-            index
+            r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle>"##
         );
         out.push_str("</g>");
     }
@@ -387,6 +400,33 @@ fn render_edge_internal(
     }
 
     out.push_str("</g>");
+}
+
+fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
+        x,
+        y + 3.2,
+        x + 3.2,
+        y + 3.2
+    );
+}
+
+fn render_fk_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r##"<path class="fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" fill="none" stroke="#38bdf8" stroke-width="1.4" stroke-linecap="round"/>"##,
+        x,
+        y + 3.4
+    );
+}
+
+fn render_idx_indicator(out: &mut String, x: f32, y: f32) {
+    let _ = write!(
+        out,
+        r##"<path class="idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="#f59e0b"/>"##
+    );
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -431,6 +471,7 @@ struct NodeStyle {
     body_fill: &'static str,
     header_fill: &'static str,
     stroke: &'static str,
+    separator: &'static str,
 }
 
 struct EdgeStyle {
@@ -465,31 +506,37 @@ fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
             body_fill: "#151926",
             header_fill: "#8b5e1a",
             stroke: "#fbbf24",
+            separator: "#4a3415",
         },
         (NodeKind::Table, true) => NodeStyle {
             body_fill: "#fffaf0",
             header_fill: "#f59e0b",
             stroke: "#d97706",
+            separator: "#fed7aa",
         },
         (NodeKind::View, false) => NodeStyle {
             body_fill: "#10232a",
             header_fill: "#0f766e",
             stroke: "#2dd4bf",
+            separator: "#134e4a",
         },
         (NodeKind::View, true) => NodeStyle {
             body_fill: "#f0fdfa",
             header_fill: "#14b8a6",
             stroke: "#0f766e",
+            separator: "#99f6e4",
         },
         (NodeKind::Enum, false) => NodeStyle {
             body_fill: "#241533",
             header_fill: "#7c3aed",
             stroke: "#c084fc",
+            separator: "#4c1d95",
         },
         (NodeKind::Enum, true) => NodeStyle {
             body_fill: "#faf5ff",
             header_fill: "#a855f7",
             stroke: "#7e22ce",
+            separator: "#e9d5ff",
         },
     }
 }
@@ -1071,9 +1118,10 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Dark theme background
-        assert!(svg.contains("#0f172a"));
+        assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
         assert!(svg.contains("#151926"));
+        assert!(svg.contains("edge-particles"));
     }
 
     #[test]
@@ -1086,7 +1134,7 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Light theme background
-        assert!(svg.contains("#ffffff"));
+        assert!(svg.contains("#f7f8fc"));
         // Light theme node fill
         assert!(svg.contains("#fffaf0"));
     }
@@ -1146,9 +1194,9 @@ mod tests {
         // Should contain legend elements
         assert!(svg.contains("class=\"legend\""));
         assert!(svg.contains("class=\"legend-background\""));
-        assert!(svg.contains("Legend"));
-        assert!(svg.contains("Primary Key"));
-        assert!(svg.contains("Foreign Key"));
+        assert!(svg.contains("LEGEND"));
+        assert!(svg.contains("Primary key"));
+        assert!(svg.contains("Foreign key"));
         assert!(svg.contains("Indexed"));
         assert!(svg.contains("nullable"));
     }
@@ -1399,8 +1447,8 @@ mod tests {
         assert!(svg.contains(">User Domain<"));
         // Should contain dashed stroke for group
         assert!(svg.contains("stroke-dasharray=\"10,5\""));
-        // Should contain semi-transparent fill
-        assert!(svg.contains("fill-opacity=\"0.48\""));
+        // Should contain the refreshed group accent band
+        assert!(svg.contains("class=\"group-band\""));
     }
 
     #[test]
@@ -1457,7 +1505,7 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Dark theme background
-        assert!(svg.contains("#0f172a"));
+        assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
         assert!(svg.contains("#151926"));
     }
@@ -1472,7 +1520,7 @@ mod tests {
         let svg = render_svg(&graph, options);
 
         // Light theme background
-        assert!(svg.contains("#ffffff"));
+        assert!(svg.contains("#f7f8fc"));
         // Light theme node fill
         assert!(svg.contains("#fffaf0"));
     }

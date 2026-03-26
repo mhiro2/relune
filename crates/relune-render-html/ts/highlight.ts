@@ -47,6 +47,10 @@ function metricCard(label: string, value: string): HTMLDivElement {
   const drawerRelations = document.getElementById('detail-relations');
   const drawerRelationsEmpty = document.getElementById('detail-relationships-empty');
   const drawerClose = document.getElementById('detail-close');
+  const searchInput = document.getElementById('table-search');
+  const objectBrowserList = document.getElementById('object-browser-list');
+  const objectBrowserCount = document.getElementById('object-browser-count');
+  const objectBrowserEmpty = document.getElementById('object-browser-empty');
 
   if (
     svgRoot &&
@@ -69,6 +73,38 @@ function metricCard(label: string, value: string): HTMLDivElement {
     const getNodeId = (node: Element): string | null =>
       node.getAttribute('data-id') ?? node.getAttribute('data-table-id');
 
+    const matchesBrowserQuery = (table: TableMetadata, query: string): boolean => {
+      const needle = query.trim().toLowerCase();
+      if (needle === '') {
+        return true;
+      }
+
+      return (
+        table.id.toLowerCase().includes(needle) ||
+        table.label.toLowerCase().includes(needle) ||
+        table.table_name.toLowerCase().includes(needle) ||
+        table.columns.some(
+          (column) =>
+            column.name.toLowerCase().includes(needle) ||
+            column.data_type.toLowerCase().includes(needle),
+        )
+      );
+    };
+
+    const centerNodeInViewport = (nodeId: string): void => {
+      const node = Array.from(getNodes()).find((candidate) => getNodeId(candidate) === nodeId);
+      const rect = node?.querySelector<SVGRectElement>('.table-body');
+      if (rect === undefined || rect === null) {
+        return;
+      }
+
+      const x = Number.parseFloat(rect.getAttribute('x') ?? '0');
+      const y = Number.parseFloat(rect.getAttribute('y') ?? '0');
+      const width = Number.parseFloat(rect.getAttribute('width') ?? '0');
+      const height = Number.parseFloat(rect.getAttribute('height') ?? '0');
+      runtime.viewport?.center(x + width / 2, y + height / 2);
+    };
+
     const clearHighlights = (): void => {
       getNodes().forEach((node) => {
         node.classList.remove(
@@ -84,6 +120,74 @@ function metricCard(label: string, value: string): HTMLDivElement {
       });
     };
 
+    const syncObjectBrowser = (): void => {
+      if (
+        !(objectBrowserList instanceof HTMLElement) ||
+        !(objectBrowserCount instanceof HTMLElement) ||
+        !(objectBrowserEmpty instanceof HTMLElement)
+      ) {
+        return;
+      }
+
+      clearChildren(objectBrowserList);
+      const query = searchInput instanceof HTMLInputElement ? searchInput.value : '';
+      const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
+      objectBrowserCount.textContent = `${visibleTables.length}/${tables.length}`;
+      objectBrowserEmpty.toggleAttribute('hidden', visibleTables.length > 0);
+
+      for (const table of visibleTables) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'object-browser-item';
+        item.classList.toggle('selected', selectedNode === table.id);
+
+        const node = Array.from(getNodes()).find((candidate) => getNodeId(candidate) === table.id);
+        item.classList.toggle(
+          'filtered-out',
+          node?.classList.contains('dimmed-by-search') === true ||
+            node?.classList.contains('dimmed-by-type-filter') === true,
+        );
+        item.classList.toggle('hidden-item', node?.classList.contains('hidden-by-group') === true);
+
+        const header = document.createElement('div');
+        header.className = 'object-browser-item-header';
+
+        const name = document.createElement('span');
+        name.className = 'object-browser-item-name';
+        name.textContent = table.label || table.table_name || table.id;
+
+        const kind = document.createElement('span');
+        kind.className = 'object-browser-kind';
+        kind.textContent = table.kind;
+
+        header.append(name, kind);
+
+        const meta = document.createElement('div');
+        meta.className = 'object-browser-item-meta';
+
+        const counts = document.createElement('span');
+        counts.textContent = `${table.columns.length} cols`;
+
+        const relations = document.createElement('span');
+        relations.textContent = `${table.inbound_count} in / ${table.outbound_count} out`;
+
+        meta.append(counts, relations);
+        item.append(header, meta);
+
+        item.addEventListener('click', () => {
+          if (selectedNode === table.id) {
+            runtime.selection?.clear();
+            return;
+          }
+
+          runtime.selection?.select(table.id);
+          centerNodeInViewport(table.id);
+        });
+
+        objectBrowserList.appendChild(item);
+      }
+    };
+
     const renderDrawer = (tableId: string | null): void => {
       if (tableId === null) {
         drawer.setAttribute('hidden', '');
@@ -93,6 +197,7 @@ function metricCard(label: string, value: string): HTMLDivElement {
         drawerColumnsEmpty.removeAttribute('hidden');
         drawerRelationsEmpty.removeAttribute('hidden');
         emitViewerEvent('relune:node-cleared', undefined);
+        syncObjectBrowser();
         return;
       }
 
@@ -171,6 +276,7 @@ function metricCard(label: string, value: string): HTMLDivElement {
         }
       }
       emitViewerEvent('relune:node-selected', { nodeId: tableId });
+      syncObjectBrowser();
     };
 
     const highlightNeighbors = (nodeId: string): void => {
@@ -270,6 +376,13 @@ function metricCard(label: string, value: string): HTMLDivElement {
       renderDrawer(null);
     });
 
+    searchInput?.addEventListener('input', () => {
+      syncObjectBrowser();
+    });
+    document.addEventListener('relune:filters-changed', syncObjectBrowser);
+    document.addEventListener('relune:search-changed', syncObjectBrowser);
+    document.addEventListener('relune:groups-changed', syncObjectBrowser);
+
     runtime.selection = {
       clear(): void {
         selectedNode = null;
@@ -289,5 +402,7 @@ function metricCard(label: string, value: string): HTMLDivElement {
         return selectedNode;
       },
     };
+
+    syncObjectBrowser();
   }
 }
