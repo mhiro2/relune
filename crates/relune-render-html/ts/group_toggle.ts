@@ -148,7 +148,7 @@ import { parseReluneMetadata, type GroupMetadata } from './metadata';
         for (const groupId of Object.keys(groupTableMap)) {
           if (!visibleGroups[groupId]) {
             const tableIds = groupTableMap[groupId];
-            if (tableIds.includes(nodeId)) {
+            if (tableIds?.includes(nodeId)) {
               return true;
             }
           }

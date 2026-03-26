@@ -177,16 +177,17 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       viewportEl.addEventListener(
         'touchstart',
         (event: TouchEvent) => {
-          if (event.touches.length === 1) {
+          const touches = event.touches;
+          if (touches.length === 1) {
             isDragging = true;
-            touchStartX = event.touches[0].clientX;
-            touchStartY = event.touches[0].clientY;
+            touchStartX = touches[0]!.clientX;
+            touchStartY = touches[0]!.clientY;
             startPanX = panX;
             startPanY = panY;
-          } else if (event.touches.length === 2) {
+          } else if (touches.length === 2) {
             isDragging = false;
-            const dx = event.touches[0].clientX - event.touches[1].clientX;
-            const dy = event.touches[0].clientY - event.touches[1].clientY;
+            const dx = touches[0]!.clientX - touches[1]!.clientX;
+            const dy = touches[0]!.clientY - touches[1]!.clientY;
             touchStartDist = Math.sqrt(dx * dx + dy * dy);
             touchStartScale = scale;
           }
@@ -197,18 +198,19 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       viewportEl.addEventListener(
         'touchmove',
         (event: TouchEvent) => {
-          if (event.touches.length === 1 && isDragging) {
-            panX = startPanX + (event.touches[0].clientX - touchStartX);
-            panY = startPanY + (event.touches[0].clientY - touchStartY);
+          const touches = event.touches;
+          if (touches.length === 1 && isDragging) {
+            panX = startPanX + (touches[0]!.clientX - touchStartX);
+            panY = startPanY + (touches[0]!.clientY - touchStartY);
             updateTransform();
-          } else if (event.touches.length === 2) {
+          } else if (touches.length === 2) {
             event.preventDefault();
-            const dx = event.touches[0].clientX - event.touches[1].clientX;
-            const dy = event.touches[0].clientY - event.touches[1].clientY;
+            const dx = touches[0]!.clientX - touches[1]!.clientX;
+            const dy = touches[0]!.clientY - touches[1]!.clientY;
             const dist = Math.sqrt(dx * dx + dy * dy);
             const rect = viewportEl.getBoundingClientRect();
-            const midX = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
-            const midY = (event.touches[0].clientY + event.touches[1].clientY) / 2 - rect.top;
+            const midX = (touches[0]!.clientX + touches[1]!.clientX) / 2 - rect.left;
+            const midY = (touches[0]!.clientY + touches[1]!.clientY) / 2 - rect.top;
             zoomAt(touchStartScale * (dist / touchStartDist), midX, midY);
           }
         },

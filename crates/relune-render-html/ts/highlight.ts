@@ -31,15 +31,8 @@ function metricCard(label: string, value: string): HTMLDivElement {
   const outboundMap: Record<string, { node: string; edge: EdgeMetadata }[]> = {};
 
   for (const edge of edges) {
-    if (outboundMap[edge.from] === undefined) {
-      outboundMap[edge.from] = [];
-    }
-    outboundMap[edge.from].push({ node: edge.to, edge });
-
-    if (inboundMap[edge.to] === undefined) {
-      inboundMap[edge.to] = [];
-    }
-    inboundMap[edge.to].push({ node: edge.from, edge });
+    (outboundMap[edge.from] ??= []).push({ node: edge.to, edge });
+    (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
   }
 
   const canvas = document.getElementById('canvas');
