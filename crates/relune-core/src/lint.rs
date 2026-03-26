@@ -9,7 +9,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::diagnostic::{DiagnosticCode, Severity};
-use crate::model::{ForeignKey, Schema, Table};
+use crate::model::{ForeignKey, Schema, Table, TableId};
 
 /// Unique identifier for a lint rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -253,7 +253,7 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
         check_foreign_key_indexes_nullable_and_target(schema, table, &mut result);
     }
 
-    // Sort issues by severity (errors first) then by table name
+    // Sort issues by severity (errors first) then by table name.
     result.issues.sort_by(|a, b| {
         let severity_order = |s: &Severity| match s {
             Severity::Error => 0,
@@ -271,8 +271,8 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
     result
 }
 
-/// Type alias for FK map (table name -> list of foreign keys).
-type FkMap = HashMap<String, Vec<Arc<ForeignKey>>>;
+/// Type alias for FK map keyed by table identifier.
+type FkMap = HashMap<TableId, Vec<Arc<ForeignKey>>>;
 
 /// Build maps of incoming and outgoing foreign keys for each table.
 ///
@@ -283,20 +283,16 @@ fn build_fk_maps(schema: &Schema) -> (FkMap, FkMap) {
     let mut outgoing: FkMap = HashMap::new();
 
     for table in &schema.tables {
-        let table_name = table.name.to_lowercase();
-
         for fk in &table.foreign_keys {
             let fk = Arc::new(fk.clone());
 
             // Record outgoing FK from this table
-            outgoing
-                .entry(table_name.clone())
-                .or_default()
-                .push(Arc::clone(&fk));
+            outgoing.entry(table.id).or_default().push(Arc::clone(&fk));
 
             // Record incoming FK to the target table
-            let target_name = fk.to_table.to_lowercase();
-            incoming.entry(target_name).or_default().push(fk);
+            if let Some(target_table) = resolve_referenced_table(schema, fk.as_ref()) {
+                incoming.entry(target_table.id).or_default().push(fk);
+            }
         }
     }
 
@@ -331,12 +327,11 @@ fn check_orphan_table(
     outgoing_fks: &FkMap,
     result: &mut LintResult,
 ) {
-    let table_name_lower = table.name.to_lowercase();
     let has_incoming = incoming_fks
-        .get(&table_name_lower)
+        .get(&table.id)
         .is_some_and(|fks| !fks.is_empty());
     let has_outgoing = outgoing_fks
-        .get(&table_name_lower)
+        .get(&table.id)
         .is_some_and(|fks| !fks.is_empty());
 
     if !has_incoming && !has_outgoing {
@@ -346,7 +341,7 @@ fn check_orphan_table(
                 LintRuleId::OrphanTable.default_severity(),
                 format!("Table '{}' has no foreign key relationships", table.name),
             )
-            .with_table(&table.name)
+            .with_table(table.qualified_name())
             .with_hint("Consider if this table should reference or be referenced by other tables"),
         );
     }
@@ -360,10 +355,8 @@ fn check_too_many_nullable(table: &Table, result: &mut LintResult) {
 
     let nullable_count = table.columns.iter().filter(|c| c.nullable).count();
     let total_columns = table.columns.len();
-    #[allow(clippy::cast_precision_loss)]
-    let nullable_ratio = nullable_count as f64 / total_columns as f64;
 
-    if nullable_ratio > 0.5 {
+    if nullable_count * 2 > total_columns {
         let nullable_columns: Vec<&str> = table
             .columns
             .iter()
@@ -376,11 +369,11 @@ fn check_too_many_nullable(table: &Table, result: &mut LintResult) {
                 LintRuleId::TooManyNullable,
                 LintRuleId::TooManyNullable.default_severity(),
                 format!(
-                    "Table '{}' has {}/{} ({:.0}%) nullable columns",
+                    "Table '{}' has {}/{} ({}%) nullable columns",
                     table.name,
                     nullable_count,
                     total_columns,
-                    nullable_ratio * 100.0
+                    (nullable_count * 100) / total_columns
                 ),
             )
             .with_table(&table.name)
@@ -547,7 +540,7 @@ fn column_list_has_prefix(index_cols: &[String], fk_cols: &[String]) -> bool {
 /// Returns whether the FK column list is covered by the table PK column order or any index prefix.
 fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
     if fk_cols.is_empty() {
-        return false;
+        return true;
     }
     let pk_cols: Vec<String> = table
         .columns
@@ -564,12 +557,30 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
         .any(|idx| column_list_has_prefix(&idx.columns, fk_cols))
 }
 
-fn resolve_referenced_table<'a>(schema: &'a Schema, to_table: &str) -> Option<&'a Table> {
-    let key = to_table.to_lowercase();
-    schema
+fn resolve_referenced_table<'a>(schema: &'a Schema, fk: &ForeignKey) -> Option<&'a Table> {
+    let target_table = fk.to_table.to_lowercase();
+    let target_schema = fk.to_schema.as_deref().map(str::to_lowercase);
+    let matches: Vec<&Table> = schema
         .tables
         .iter()
-        .find(|t| t.name.to_lowercase() == key || t.stable_id.to_lowercase() == key)
+        .filter(|table| {
+            let schema_matches = match &target_schema {
+                Some(target_schema) => table
+                    .schema_name
+                    .as_deref()
+                    .is_some_and(|schema_name| schema_name.to_lowercase() == *target_schema),
+                None => true,
+            };
+            schema_matches
+                && (table.name.to_lowercase() == target_table
+                    || table.stable_id.to_lowercase() == target_table)
+        })
+        .collect();
+    matches
+        .as_slice()
+        .first()
+        .copied()
+        .filter(|_| matches.len() == 1)
 }
 
 /// `true` when `to_columns` exactly matches the referenced table PK column list or some unique index column list.
@@ -613,7 +624,7 @@ fn table_nullable_columns(table: &Table) -> HashMap<&str, bool> {
 
 /// Check: foreign key columns should be indexed.
 fn check_foreign_key_index_coverage(table: &Table, fk: &ForeignKey, result: &mut LintResult) {
-    if fk.from_columns.is_empty() || fk_columns_are_indexed(table, &fk.from_columns) {
+    if fk_columns_are_indexed(table, &fk.from_columns) {
         return;
     }
 
@@ -684,7 +695,7 @@ fn check_foreign_key_target_uniqueness(
         return;
     }
 
-    let Some(ref_table) = resolve_referenced_table(schema, &fk.to_table) else {
+    let Some(ref_table) = resolve_referenced_table(schema, fk) else {
         return;
     };
     if referenced_columns_are_unique(ref_table, &fk.to_columns) {
@@ -762,6 +773,13 @@ fn check_foreign_key_indexes_nullable_and_target(
 mod tests {
     use super::*;
     use crate::model::{Column, ColumnId, Index, ReferentialAction, TableId};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TABLE_ID: AtomicU64 = AtomicU64::new(1);
+
+    fn next_table_id() -> TableId {
+        TableId(NEXT_TABLE_ID.fetch_add(1, Ordering::Relaxed))
+    }
 
     fn create_test_table(
         name: &str,
@@ -770,9 +788,29 @@ mod tests {
         indexes: Vec<crate::model::Index>,
     ) -> Table {
         Table {
-            id: TableId(0),
+            id: next_table_id(),
             stable_id: name.to_string(),
             schema_name: None,
+            name: name.to_string(),
+            columns,
+            foreign_keys,
+            indexes,
+            comment: None,
+        }
+    }
+
+    fn create_test_table_with_schema(
+        schema_name: Option<&str>,
+        name: &str,
+        columns: Vec<Column>,
+        foreign_keys: Vec<ForeignKey>,
+        indexes: Vec<crate::model::Index>,
+    ) -> Table {
+        Table {
+            id: next_table_id(),
+            stable_id: schema_name
+                .map_or_else(|| name.to_string(), |schema| format!("{schema}.{name}")),
+            schema_name: schema_name.map(str::to_string),
             name: name.to_string(),
             columns,
             foreign_keys,
@@ -932,6 +970,26 @@ mod tests {
     }
 
     #[test]
+    fn test_too_many_nullable_exact_half_is_ok() {
+        let table = create_test_table(
+            "profiles",
+            vec![
+                create_column("id", false, true),
+                create_column("bio", true, false),
+                create_column("avatar", true, false),
+                create_column("website", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+
+        let mut result = LintResult::new();
+        check_too_many_nullable(&table, &mut result);
+
+        assert!(result.issues.is_empty());
+    }
+
+    #[test]
     fn test_duplicated_fk_pattern() {
         let table = create_test_table(
             "orders",
@@ -1077,7 +1135,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fk_columns_are_indexed_rejects_empty_fk_columns() {
+    fn test_fk_columns_are_indexed_treats_empty_fk_columns_as_covered() {
         let table = create_test_table(
             "posts",
             vec![create_column("id", false, true)],
@@ -1085,7 +1143,70 @@ mod tests {
             vec![],
         );
 
-        assert!(!fk_columns_are_indexed(&table, &[]));
+        assert!(fk_columns_are_indexed(&table, &[]));
+    }
+
+    #[test]
+    fn test_orphan_table_respects_schema_qualified_targets() {
+        let public_users = create_test_table_with_schema(
+            Some("public"),
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+        let auth_users = create_test_table_with_schema(
+            Some("auth"),
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![Index {
+                name: Some("auth_users_email_idx".to_string()),
+                columns: vec!["email".to_string()],
+                is_unique: true,
+            }],
+        );
+        let posts = create_test_table_with_schema(
+            None,
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_id", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["user_id".to_string()],
+                to_schema: Some("auth".to_string()),
+                to_table: "users".to_string(),
+                to_columns: vec!["id".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![],
+        );
+
+        let result = lint_schema(&Schema {
+            tables: vec![public_users, auth_users, posts],
+            ..Schema::default()
+        });
+
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::OrphanTable
+                    && i.table_name == Some("public.users".to_string()))
+        );
+        assert!(
+            !result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::OrphanTable
+                    && i.table_name == Some("auth.users".to_string()))
+        );
     }
 
     #[test]
@@ -1152,6 +1273,68 @@ mod tests {
         let result = lint_schema(&schema);
         assert!(
             result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_non_unique_target_respects_schema() {
+        let public_users = create_test_table_with_schema(
+            Some("public"),
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let auth_users = create_test_table_with_schema(
+            Some("auth"),
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![Index {
+                name: Some("auth_users_email_unique".to_string()),
+                columns: vec!["email".to_string()],
+                is_unique: true,
+            }],
+        );
+        let posts = create_test_table_with_schema(
+            None,
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_email", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["user_email".to_string()],
+                to_schema: Some("auth".to_string()),
+                to_table: "users".to_string(),
+                to_columns: vec!["email".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![Index {
+                name: Some("posts_user_email_idx".to_string()),
+                columns: vec!["user_email".to_string()],
+                is_unique: false,
+            }],
+        );
+        let schema = Schema {
+            tables: vec![public_users, auth_users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+
+        assert!(
+            !result
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
