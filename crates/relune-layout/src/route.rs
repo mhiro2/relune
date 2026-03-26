@@ -5,6 +5,14 @@
 
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentSide {
+    North,
+    South,
+    East,
+    West,
+}
+
 /// Route an edge between two points.
 ///
 /// This function calculates the path for an edge given the positions
@@ -37,16 +45,11 @@ fn route_straight(
     h1: f32,
     x2: f32,
     y2: f32,
-    _w2: f32,
+    w2: f32,
     h2: f32,
 ) -> EdgeRoute {
-    // Start from right edge of source, end at left edge of target
-    let sx = x1 + w1;
-    let sy = y1 + h1 / 2.0;
-    let tx = x2;
-    let ty = y2 + h2 / 2.0;
+    let ((sx, sy), (tx, ty), _, _) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
 
-    // Label at midpoint of straight line
     let label_position = (f32::midpoint(sx, tx), f32::midpoint(sy, ty));
 
     EdgeRoute {
@@ -71,36 +74,32 @@ fn route_orthogonal(
     w2: f32,
     h2: f32,
 ) -> EdgeRoute {
-    // Determine if target is to the right or left
-    let target_is_right = x2 > x1 + w1;
+    let ((sx, sy), (tx, ty), source_side, target_side) =
+        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
 
-    let (sx, sy, tx, ty, mid_x) = if target_is_right {
-        // Target is to the right
-        let sx = x1 + w1;
-        let sy = y1 + h1 / 2.0;
-        let tx = x2;
-        let ty = y2 + h2 / 2.0;
-        let mid_x = sx + (tx - sx) / 2.0;
-        (sx, sy, tx, ty, mid_x)
+    let (control_points, label_position) = if matches!(
+        (source_side, target_side),
+        (AttachmentSide::East, AttachmentSide::West) | (AttachmentSide::West, AttachmentSide::East)
+    ) {
+        let mid_x = f32::midpoint(sx, tx);
+        (
+            vec![(mid_x, sy), (mid_x, ty)],
+            (mid_x, f32::midpoint(sy, ty)),
+        )
     } else {
-        // Target is to the left (or overlapping)
-        let sx = x1;
-        let sy = y1 + h1 / 2.0;
-        let tx = x2 + w2;
-        let ty = y2 + h2 / 2.0;
-        let mid_x = tx + (sx - tx) / 2.0;
-        (sx, sy, tx, ty, mid_x)
+        let mid_y = f32::midpoint(sy, ty);
+        (
+            vec![(sx, mid_y), (tx, mid_y)],
+            (f32::midpoint(sx, tx), mid_y),
+        )
     };
-
-    // Label at the middle of the vertical segment (the corner point)
-    let label_position = (mid_x, f32::midpoint(sy, ty));
 
     EdgeRoute {
         x1: sx,
         y1: sy,
         x2: tx,
         y2: ty,
-        control_points: vec![(mid_x, sy), (mid_x, ty)],
+        control_points,
         style: RouteStyle::Orthogonal,
         label_position,
     }
@@ -114,20 +113,33 @@ fn route_curved(
     h1: f32,
     x2: f32,
     y2: f32,
-    _w2: f32,
+    w2: f32,
     h2: f32,
 ) -> EdgeRoute {
-    let sx = x1 + w1;
-    let sy = y1 + h1 / 2.0;
-    let tx = x2;
-    let ty = y2 + h2 / 2.0;
+    let ((sx, sy), (tx, ty), source_side, target_side) =
+        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
 
-    // Calculate control points for a smooth curve
-    let dx = (tx - sx).abs();
-    let offset = dx * 0.3;
+    let offset = if matches!(
+        (source_side, target_side),
+        (AttachmentSide::East, AttachmentSide::West) | (AttachmentSide::West, AttachmentSide::East)
+    ) {
+        ((tx - sx).abs() * 0.3).max(24.0)
+    } else {
+        ((ty - sy).abs() * 0.3).max(24.0)
+    };
 
-    let cp1 = (sx + offset, sy);
-    let cp2 = (tx - offset, ty);
+    let cp1 = match source_side {
+        AttachmentSide::East => (sx + offset, sy),
+        AttachmentSide::West => (sx - offset, sy),
+        AttachmentSide::North => (sx, sy - offset),
+        AttachmentSide::South => (sx, sy + offset),
+    };
+    let cp2 = match target_side {
+        AttachmentSide::East => (tx + offset, ty),
+        AttachmentSide::West => (tx - offset, ty),
+        AttachmentSide::North => (tx, ty - offset),
+        AttachmentSide::South => (tx, ty + offset),
+    };
 
     // Label at the midpoint of the cubic bezier curve (t = 0.5)
     let label_position = calculate_cubic_bezier_midpoint(sx, sy, cp1, cp2, tx, ty);
@@ -140,6 +152,57 @@ fn route_curved(
         control_points: vec![cp1, cp2],
         style: RouteStyle::Curved,
         label_position,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attachment_points(
+    x1: f32,
+    y1: f32,
+    w1: f32,
+    h1: f32,
+    x2: f32,
+    y2: f32,
+    w2: f32,
+    h2: f32,
+) -> ((f32, f32), (f32, f32), AttachmentSide, AttachmentSide) {
+    let source_center_x = x1 + w1 / 2.0;
+    let source_center_y = y1 + h1 / 2.0;
+    let target_center_x = x2 + w2 / 2.0;
+    let target_center_y = y2 + h2 / 2.0;
+    let dx = target_center_x - source_center_x;
+    let dy = target_center_y - source_center_y;
+
+    if dx.abs() >= dy.abs() {
+        if dx >= 0.0 {
+            (
+                (x1 + w1, source_center_y),
+                (x2, target_center_y),
+                AttachmentSide::East,
+                AttachmentSide::West,
+            )
+        } else {
+            (
+                (x1, source_center_y),
+                (x2 + w2, target_center_y),
+                AttachmentSide::West,
+                AttachmentSide::East,
+            )
+        }
+    } else if dy >= 0.0 {
+        (
+            (source_center_x, y1 + h1),
+            (target_center_x, y2),
+            AttachmentSide::South,
+            AttachmentSide::North,
+        )
+    } else {
+        (
+            (source_center_x, y1),
+            (target_center_x, y2 + h2),
+            AttachmentSide::North,
+            AttachmentSide::South,
+        )
     }
 }
 
@@ -303,6 +366,47 @@ mod tests {
         let route = route_self_loop(0.0, 0.0, 100.0, 50.0, RouteStyle::Curved);
 
         assert!(route.control_points.len() >= 2);
+    }
+
+    #[test]
+    fn test_route_straight_uses_vertical_attachments_for_stacked_nodes() {
+        let route = route_edge(
+            0.0,
+            0.0,
+            120.0,
+            60.0,
+            10.0,
+            200.0,
+            120.0,
+            60.0,
+            RouteStyle::Straight,
+        );
+
+        assert!((route.x1 - 60.0).abs() < 0.001);
+        assert!((route.y1 - 60.0).abs() < 0.001);
+        assert!((route.x2 - 70.0).abs() < 0.001);
+        assert!((route.y2 - 200.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_route_orthogonal_uses_horizontal_middle_segment_for_stacked_nodes() {
+        let route = route_edge(
+            0.0,
+            0.0,
+            120.0,
+            60.0,
+            10.0,
+            200.0,
+            120.0,
+            60.0,
+            RouteStyle::Orthogonal,
+        );
+
+        assert_eq!(route.control_points.len(), 2);
+        assert!((route.control_points[0].0 - 60.0).abs() < 0.001);
+        assert!((route.control_points[0].1 - 130.0).abs() < 0.001);
+        assert!((route.control_points[1].0 - 70.0).abs() < 0.001);
+        assert!((route.control_points[1].1 - 130.0).abs() < 0.001);
     }
 
     #[test]
