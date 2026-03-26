@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 use crate::diagnostic::{DiagnosticCode, Severity};
 use crate::model::{ForeignKey, Schema, Table};
@@ -270,29 +271,32 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
     result
 }
 
+/// Type alias for FK map (table name -> list of foreign keys).
+type FkMap = HashMap<String, Vec<Arc<ForeignKey>>>;
+
 /// Build maps of incoming and outgoing foreign keys for each table.
-fn build_fk_maps(
-    schema: &Schema,
-) -> (
-    HashMap<String, Vec<ForeignKey>>,
-    HashMap<String, Vec<ForeignKey>>,
-) {
-    let mut incoming: HashMap<String, Vec<ForeignKey>> = HashMap::new();
-    let mut outgoing: HashMap<String, Vec<ForeignKey>> = HashMap::new();
+///
+/// Uses `Arc<ForeignKey>` to share FK references between incoming and outgoing maps
+/// without cloning the full FK struct twice.
+fn build_fk_maps(schema: &Schema) -> (FkMap, FkMap) {
+    let mut incoming: FkMap = HashMap::new();
+    let mut outgoing: FkMap = HashMap::new();
 
     for table in &schema.tables {
         let table_name = table.name.to_lowercase();
 
         for fk in &table.foreign_keys {
+            let fk = Arc::new(fk.clone());
+
             // Record outgoing FK from this table
             outgoing
                 .entry(table_name.clone())
                 .or_default()
-                .push(fk.clone());
+                .push(Arc::clone(&fk));
 
             // Record incoming FK to the target table
             let target_name = fk.to_table.to_lowercase();
-            incoming.entry(target_name).or_default().push(fk.clone());
+            incoming.entry(target_name).or_default().push(fk);
         }
     }
 
@@ -323,8 +327,8 @@ fn check_no_primary_key(table: &Table, result: &mut LintResult) {
 /// Check: Table has no incoming or outgoing foreign keys.
 fn check_orphan_table(
     table: &Table,
-    incoming_fks: &HashMap<String, Vec<ForeignKey>>,
-    outgoing_fks: &HashMap<String, Vec<ForeignKey>>,
+    incoming_fks: &FkMap,
+    outgoing_fks: &FkMap,
     result: &mut LintResult,
 ) {
     let table_name_lower = table.name.to_lowercase();
