@@ -480,10 +480,129 @@ fn assign_coordinates(
     (positioned_nodes, width, height)
 }
 
+/// Node count threshold above which the spatial grid is used for repulsion.
+const SPATIAL_GRID_THRESHOLD: usize = 64;
+
+/// Apply a single repulsion pair force between nodes `i` and `j`.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::too_many_arguments,
+    clippy::suboptimal_flops
+)]
+fn apply_repulsion_pair(
+    i: usize,
+    j: usize,
+    positions: &[(f32, f32)],
+    node_sizes: &[NodeSize],
+    config: &LayoutConfig,
+    repulsion_strength: f32,
+    min_distance: f32,
+    forces: &mut [(f32, f32)],
+) {
+    let dx = positions[i].0 - positions[j].0;
+    let dy = positions[i].1 - positions[j].1;
+    let min_gap = node_pair_spacing(node_sizes[i], node_sizes[j], config);
+    let dist_sq = dx * dx + dy * dy + min_distance + min_gap * min_gap * 0.25;
+    let dist = dist_sq.sqrt();
+
+    let force = repulsion_strength / dist_sq;
+    let fx = force * dx / dist;
+    let fy = force * dy / dist;
+
+    forces[i].0 += fx;
+    forces[i].1 += fy;
+    forces[j].0 -= fx;
+    forces[j].1 -= fy;
+}
+
+/// Compute repulsive forces using a uniform spatial grid.
+///
+/// Nodes are binned into grid cells. Repulsion is only computed between nodes
+/// in the same cell or in adjacent cells, giving O(V) amortised cost when
+/// the graph is spread out (each cell contains O(1) nodes on average).
+#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+fn compute_repulsion_with_grid(
+    positions: &[(f32, f32)],
+    node_sizes: &[NodeSize],
+    config: &LayoutConfig,
+    repulsion_strength: f32,
+    min_distance: f32,
+    forces: &mut [(f32, f32)],
+) {
+    use std::collections::HashMap;
+
+    let n = positions.len();
+    if n == 0 {
+        return;
+    }
+
+    // Choose cell size based on the effective interaction range.
+    // Repulsion falls off as 1/d^2, so beyond a few multiples of the
+    // typical node spacing the force is negligible.
+    let max_span = node_sizes
+        .iter()
+        .map(|s| s.width.max(s.height))
+        .fold(0.0_f32, f32::max);
+    let cell_size = (config.horizontal_spacing + max_span).max(1.0);
+    let inv_cell = 1.0 / cell_size;
+
+    // Build grid: map (cell_x, cell_y) → list of node indices
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (idx, &(px, py)) in positions.iter().enumerate() {
+        let cx = (px * inv_cell).floor() as i32;
+        let cy = (py * inv_cell).floor() as i32;
+        grid.entry((cx, cy)).or_default().push(idx);
+    }
+
+    // For each cell, compute repulsion within the cell and with 4 neighbours
+    // (right, below, below-right, below-left) to avoid double-counting.
+    let neighbour_offsets: [(i32, i32); 4] = [(1, 0), (0, 1), (1, 1), (-1, 1)];
+
+    for (&(cx, cy), cell_nodes) in &grid {
+        // Intra-cell pairs
+        for (a, &i) in cell_nodes.iter().enumerate() {
+            for &j in &cell_nodes[a + 1..] {
+                apply_repulsion_pair(
+                    i,
+                    j,
+                    positions,
+                    node_sizes,
+                    config,
+                    repulsion_strength,
+                    min_distance,
+                    forces,
+                );
+            }
+        }
+
+        // Cross-cell pairs with 4 neighbours
+        for &(dx, dy) in &neighbour_offsets {
+            if let Some(neighbour_nodes) = grid.get(&(cx + dx, cy + dy)) {
+                for &i in cell_nodes {
+                    for &j in neighbour_nodes {
+                        apply_repulsion_pair(
+                            i,
+                            j,
+                            positions,
+                            node_sizes,
+                            config,
+                            repulsion_strength,
+                            min_distance,
+                            forces,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Apply force-directed layout algorithm.
 ///
 /// This is a simple "force-lite" implementation that uses:
-/// - Repulsive forces between all pairs of nodes
+/// - Repulsive forces between nearby nodes (spatial grid for large graphs)
 /// - Attractive forces along edges
 /// - Centering gravity to prevent drift
 /// - Damping to stabilize
@@ -555,24 +674,31 @@ fn apply_force_layout(
         // Calculate forces
         let mut forces: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
 
-        // Repulsive forces between all pairs of nodes
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = positions[i].0 - positions[j].0;
-                let dy = positions[i].1 - positions[j].1;
-                let min_gap = node_pair_spacing(node_sizes[i], node_sizes[j], config);
-                let dist_sq = dx * dx + dy * dy + min_distance + min_gap * min_gap * 0.25;
-                let dist = dist_sq.sqrt();
-
-                // Repulsive force: F = k / d^2
-                let force = repulsion_strength / dist_sq;
-                let fx = force * dx / dist;
-                let fy = force * dy / dist;
-
-                forces[i].0 += fx;
-                forces[i].1 += fy;
-                forces[j].0 -= fx;
-                forces[j].1 -= fy;
+        // Repulsive forces between nearby nodes using spatial grid for O(V) amortised cost.
+        // For small graphs, fall back to the exact O(V^2) pairwise computation.
+        if n > SPATIAL_GRID_THRESHOLD {
+            compute_repulsion_with_grid(
+                &positions,
+                node_sizes,
+                config,
+                repulsion_strength,
+                min_distance,
+                &mut forces,
+            );
+        } else {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    apply_repulsion_pair(
+                        i,
+                        j,
+                        &positions,
+                        node_sizes,
+                        config,
+                        repulsion_strength,
+                        min_distance,
+                        &mut forces,
+                    );
+                }
             }
         }
 
@@ -1384,5 +1510,88 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn make_empty_schema() -> Schema {
+        Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    fn make_single_table_schema() -> Schema {
+        Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "users".to_string(),
+                schema_name: None,
+                name: "users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(1),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                }],
+                foreign_keys: vec![],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    #[test]
+    fn test_empty_schema_hierarchical() {
+        let schema = make_empty_schema();
+        let result = build_layout(&schema).unwrap();
+        assert!(result.nodes.is_empty());
+        assert!(result.edges.is_empty());
+        assert!(result.groups.is_empty());
+    }
+
+    #[test]
+    fn test_empty_schema_force_directed() {
+        let schema = make_empty_schema();
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            ..Default::default()
+        };
+        let result = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+        assert!(result.nodes.is_empty());
+        assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn test_single_node_hierarchical() {
+        let schema = make_single_table_schema();
+        let result = build_layout(&schema).unwrap();
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.edges.is_empty());
+        let node = &result.nodes[0];
+        assert!(node.x.is_finite());
+        assert!(node.y.is_finite());
+        assert!(node.width > 0.0);
+        assert!(node.height > 0.0);
+    }
+
+    #[test]
+    fn test_single_node_force_directed() {
+        let schema = make_single_table_schema();
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            ..Default::default()
+        };
+        let result = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.edges.is_empty());
+        let node = &result.nodes[0];
+        assert!(node.x.is_finite());
+        assert!(node.y.is_finite());
+        assert!(node.width > 0.0);
+        assert!(node.height > 0.0);
     }
 }
