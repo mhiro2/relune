@@ -21,7 +21,7 @@ pub fn render_group(out: &mut String, group: &PositionedGroup, colors: &ThemeCol
     // Render the group box with dashed stroke and semi-transparent fill
     let _ = write!(
         out,
-        r#"<rect class="group-box" data-group-id="{}" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="12" ry="12" fill="{}" fill-opacity="0.3" stroke="{}" stroke-width="1.5" stroke-dasharray="8,4"/>"#,
+        r#"<rect class="group-box" data-group-id="{}" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" fill-opacity="0.48" stroke="{}" stroke-width="1.5" stroke-dasharray="10,5"/>"#,
         escape_attribute(&group.id),
         group.x,
         group.y,
@@ -35,7 +35,7 @@ pub fn render_group(out: &mut String, group: &PositionedGroup, colors: &ThemeCol
     if !group.label.is_empty() {
         let _ = write!(
             out,
-            r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="12" font-weight="600" fill="{}">{}</text>"#,
+            r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="0.04em" fill="{}">{}</text>"#,
             group.x + 12.0,
             group.y + 20.0,
             colors.text_secondary,
@@ -82,8 +82,8 @@ mod tests {
 
         assert!(out.contains("class=\"group-box\""));
         assert!(out.contains("data-group-id=\"group1\""));
-        assert!(out.contains("stroke-dasharray=\"8,4\""));
-        assert!(out.contains("fill-opacity=\"0.3\""));
+        assert!(out.contains("stroke-dasharray=\"10,5\""));
+        assert!(out.contains("fill-opacity=\"0.48\""));
         assert!(out.contains("class=\"group-label\""));
         assert!(out.contains(">User Tables<"));
     }
@@ -165,7 +165,7 @@ mod tests {
         let mut out = String::new();
         render_group(&mut out, &group, &colors);
 
-        assert!(out.contains("rx=\"12\""));
-        assert!(out.contains("ry=\"12\""));
+        assert!(out.contains("rx=\"16\""));
+        assert!(out.contains("ry=\"16\""));
     }
 }

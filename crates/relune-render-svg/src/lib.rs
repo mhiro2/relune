@@ -38,12 +38,13 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{:.0}" height="{:.0}" viewBox="0 0 {:.0} {:.0}" fill="none">"#,
         graph.width, graph.height, graph.width, graph.height
     );
-    out_push_def_marker(&mut out, &colors);
+    out_push_defs(&mut out, &colors);
     let _ = write!(
         out,
         r#"<rect width="100%" height="100%" fill="{}"/>"#,
         colors.background
     );
+    out.push_str(r#"<rect width="100%" height="100%" fill="url(#canvas-grid)" opacity="0.92"/>"#);
 
     // Render groups FIRST (behind nodes and edges)
     for group in &graph.groups {
@@ -52,16 +53,17 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
 
     // Render edges with enhanced options
     let edge_options = EdgeRenderOptions {
+        stroke_width: 2.0,
         show_tooltips: options.show_tooltips,
         ..EdgeRenderOptions::default()
     };
-    for edge in &graph.edges {
-        render_edge_internal(&mut out, edge, &colors, &edge_options);
+    for (index, edge) in graph.edges.iter().enumerate() {
+        render_edge_internal(&mut out, edge, &colors, &edge_options, index);
     }
 
     // Render nodes
-    for node in &graph.nodes {
-        render_node_internal(&mut out, node, &colors, options.show_tooltips);
+    for (index, node) in graph.nodes.iter().enumerate() {
+        render_node_internal(&mut out, node, &colors, options.show_tooltips, index);
     }
 
     // Render legend if requested
@@ -73,31 +75,73 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
     out
 }
 
-fn out_push_def_marker(out: &mut String, colors: &ThemeColors) {
+fn out_push_defs(out: &mut String, colors: &ThemeColors) {
+    let (grid_base, grid_dot, shadow_color, hatch_color) = if is_light_theme(colors) {
+        ("#f7f8fc", "#e8eaf0", "rgba(15, 23, 42, 0.12)", "#cbd5e1")
+    } else {
+        ("#0c0f1a", "#151928", "rgba(0, 0, 0, 0.52)", "#334155")
+    };
+
     let _ = write!(
         out,
-        r#"<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="{}" /></marker></defs>"#,
-        colors.arrow_fill
+        r##"<defs>
+<pattern id="canvas-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+<rect width="32" height="32" fill="{grid_base}"/>
+<circle cx="2" cy="2" r="1.2" fill="{grid_dot}" fill-opacity="0.9"/>
+</pattern>
+<pattern id="type-filter-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+<rect width="8" height="8" fill="transparent"/>
+<rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
+</pattern>
+<filter id="node-shadow" x="-20%" y="-20%" width="140%" height="150%">
+<feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="{shadow_color}"/>
+</filter>
+<filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
+<feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b"/>
+</filter>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<path d="M0,0 L0,6 L9,3 z" fill="{}" />
+</marker>
+<marker id="cardinality-one" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M7 1 L7 11" stroke="{}" stroke-width="1.8" stroke-linecap="round"/>
+</marker>
+<marker id="cardinality-many" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M1 1 L10 6 M1 6 L10 6 M1 11 L10 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+<marker id="cardinality-zero-many" markerWidth="16" markerHeight="12" refX="14" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<circle cx="3.5" cy="6" r="2.2" fill="none" stroke="{}" stroke-width="1.4"/>
+<path d="M6 1 L14 6 M6 6 L14 6 M6 11 L14 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>"##,
+        colors.arrow_fill,
+        colors.text_secondary,
+        colors.text_secondary,
+        colors.text_secondary,
+        colors.text_secondary
     );
 }
 
 /// Node rendering for relune-layout `PositionedNode`.
+#[allow(clippy::cast_precision_loss)] // Entry animation indices are presentation-only.
+#[allow(clippy::too_many_lines)] // SVG node markup is easier to audit in one place.
 fn render_node_internal(
     out: &mut String,
     node: &relune_layout::PositionedNode,
     colors: &ThemeColors,
     show_tooltips: bool,
+    index: usize,
 ) {
     let kind = node_kind_name(node.kind);
     let node_style = node_style(node.kind, colors);
     let node_label = node_kind_label(node.kind);
     let _ = write!(
         out,
-        r#"<g class="table-node node node-kind-{}" data-table-id="{}" data-id="{}" data-node-kind="{}">"#,
+        r#"<g class="table-node node node-kind-{}" data-table-id="{}" data-id="{}" data-node-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
         escape_attribute(&node.id),
         escape_attribute(&node.id),
-        kind
+        kind,
+        index as f32 * 0.022
     );
 
     // Add tooltip if enabled
@@ -128,25 +172,53 @@ fn render_node_internal(
 
     let _ = write!(
         out,
-        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="12" ry="12" fill="{}" stroke="{}" stroke-width="1.5"/>"#,
+        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" stroke="{}" stroke-width="1.6" filter="url(#node-shadow)"/>"#,
         node.x, node.y, node.width, node.height, node_style.body_fill, node_style.stroke
     );
     let _ = write!(
         out,
-        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="34" rx="12" ry="12" fill="{}"/>"#,
+        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="36" rx="16" ry="16" fill="{}"/>"#,
         node.x, node.y, node.width, node_style.header_fill
     );
     let _ = write!(
         out,
-        r#"<text class="table-name" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="14" font-weight="700" fill="{}">{}</text>"#,
+        r#"<rect class="table-header-underlay" x="{:.1}" y="{:.1}" width="{:.1}" height="18" fill="{}" fill-opacity="0.28"/>"#,
+        node.x,
+        node.y + 18.0,
+        node.width,
+        node_style.header_fill
+    );
+    let _ = write!(
+        out,
+        r#"<text class="table-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="14" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
         node.x + 12.0,
-        node.y + 22.0,
+        node.y + 23.0,
         colors.text_primary,
         escape_text(&node.label)
     );
+    let _ = write!(
+        out,
+        r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="10" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
+        node.x + node.width - 12.0,
+        node.y + 23.0,
+        colors.text_primary,
+        escape_text(&kind.to_ascii_uppercase())
+    );
 
     let mut line_y = node.y + 52.0;
-    for column in &node.columns {
+    for (index, column) in node.columns.iter().enumerate() {
+        if index > 0 {
+            let separator_y = line_y - 12.0;
+            let _ = write!(
+                out,
+                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.75" stroke-width="1"/>"#,
+                node.x + 12.0,
+                separator_y,
+                node.x + node.width - 12.0,
+                separator_y,
+                node_style.stroke
+            );
+        }
         let text = if node.kind == NodeKind::Enum {
             format!("• {}", column.name)
         } else if column.data_type.is_empty() {
@@ -156,27 +228,52 @@ fn render_node_internal(
         };
         let _ = write!(
             out,
-            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="{}">{}</text>"#,
+            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}">{}</text>"#,
             node.x + 12.0,
             line_y,
-            colors.text_secondary,
+            if column.nullable {
+                colors.text_muted
+            } else {
+                colors.text_secondary
+            },
             escape_text(&text)
         );
+        if column.is_primary_key {
+            let icon_x = node.x + node.width - 26.0;
+            let icon_y = line_y - 8.5;
+            let _ = write!(
+                out,
+                r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
+                icon_x,
+                icon_y + 3.2,
+                icon_x + 3.2,
+                icon_y + 3.2
+            );
+        }
         line_y += 18.0;
     }
+    let _ = write!(
+        out,
+        r#"<rect class="type-filter-overlay" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="url(#type-filter-hatch)" opacity="0"/>"#,
+        node.x, node.y, node.width, node.height
+    );
     out.push_str("</g>");
 }
 
 /// Edge rendering for relune-layout `PositionedEdge`.
+#[allow(clippy::cast_precision_loss)] // Entry animation indices are presentation-only.
+#[allow(clippy::suboptimal_flops)] // Render-time coordinate math favors readability here.
 fn render_edge_internal(
     out: &mut String,
     edge: &relune_layout::PositionedEdge,
     colors: &ThemeColors,
     options: &EdgeRenderOptions,
+    index: usize,
 ) {
     let kind = edge_kind_name(edge.kind);
     let edge_style = edge_style(edge.kind, colors);
     let path_d = crate::edge::edge_route_svg_path_d(&edge.route, options.curve_offset);
+    let uses_crow_markers = edge.kind == EdgeKind::ForeignKey;
 
     let stroke_dasharray = if options.dashed {
         Some("5,3")
@@ -186,11 +283,12 @@ fn render_edge_internal(
 
     let _ = write!(
         out,
-        r#"<g class="edge edge-kind-{}" data-from="{}" data-to="{}" data-edge-kind="{}">"#,
+        r#"<g class="edge edge-kind-{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
         escape_attribute(&edge.from),
         escape_attribute(&edge.to),
-        kind
+        kind,
+        index as f32 * 0.016 + 0.04
     );
 
     // Add tooltip if enabled
@@ -204,20 +302,26 @@ fn render_edge_internal(
         Some(stroke_dasharray) => {
             let _ = write!(
                 out,
-                r#"<path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" marker-end="url(#arrow)" stroke-dasharray="{}"/>"#,
+                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}"/>"##,
+                escape_attribute(&path_d),
+                options.stroke_width + 2.0,
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
+                edge_marker_attributes(uses_crow_markers, edge.nullable),
                 stroke_dasharray
             );
         }
         None => {
             let _ = write!(
                 out,
-                r#"<path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" marker-end="url(#arrow)"/>"#,
+                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} />"##,
+                escape_attribute(&path_d),
+                options.stroke_width + 2.0,
                 escape_attribute(&path_d),
                 edge_style.stroke,
-                options.stroke_width
+                options.stroke_width,
+                edge_marker_attributes(uses_crow_markers, edge.nullable)
             );
         }
     }
@@ -226,10 +330,20 @@ fn render_edge_internal(
     if options.show_labels && !edge.label.is_empty() {
         let label_x = edge.label_x;
         let label_y = edge.label_y;
+        let label_width = estimate_label_width(&edge.label);
+        let _ = write!(
+            out,
+            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="18" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
+            label_width.mul_add(-0.5, label_x),
+            label_y - 12.0,
+            label_width,
+            node_label_background(colors),
+            edge_style.stroke
+        );
 
         let _ = write!(
             out,
-            r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="11" fill="{}">{}</text>"#,
+            r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="{}">{}</text>"#,
             label_x,
             label_y,
             edge_style.label_fill.unwrap_or(colors.text_muted),
@@ -312,30 +426,35 @@ const fn node_kind_label(kind: NodeKind) -> &'static str {
 
 fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
     match (kind, is_light_theme(colors)) {
-        (NodeKind::Table, _) => NodeStyle {
-            body_fill: colors.node_fill,
-            header_fill: colors.header_fill,
-            stroke: colors.node_stroke,
+        (NodeKind::Table, false) => NodeStyle {
+            body_fill: "#151926",
+            header_fill: "#8b5e1a",
+            stroke: "#fbbf24",
+        },
+        (NodeKind::Table, true) => NodeStyle {
+            body_fill: "#fffaf0",
+            header_fill: "#f59e0b",
+            stroke: "#d97706",
         },
         (NodeKind::View, false) => NodeStyle {
-            body_fill: "#102a30",
+            body_fill: "#10232a",
             header_fill: "#0f766e",
-            stroke: "#14b8a6",
+            stroke: "#2dd4bf",
         },
         (NodeKind::View, true) => NodeStyle {
             body_fill: "#f0fdfa",
-            header_fill: "#99f6e4",
+            header_fill: "#14b8a6",
             stroke: "#0f766e",
         },
         (NodeKind::Enum, false) => NodeStyle {
-            body_fill: "#2b2113",
-            header_fill: "#a16207",
-            stroke: "#f59e0b",
+            body_fill: "#241533",
+            header_fill: "#7c3aed",
+            stroke: "#c084fc",
         },
         (NodeKind::Enum, true) => NodeStyle {
-            body_fill: "#fffbeb",
-            header_fill: "#fde68a",
-            stroke: "#d97706",
+            body_fill: "#faf5ff",
+            header_fill: "#a855f7",
+            stroke: "#7e22ce",
         },
     }
 }
@@ -351,7 +470,11 @@ const fn edge_kind_name(kind: EdgeKind) -> &'static str {
 fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
     match (kind, is_light_theme(colors)) {
         (EdgeKind::ForeignKey, _) => EdgeStyle {
-            stroke: colors.edge_stroke,
+            stroke: if is_light_theme(colors) {
+                "#64748b"
+            } else {
+                "#475569"
+            },
             dasharray: None,
             label_fill: None,
         },
@@ -375,6 +498,33 @@ fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
             dasharray: Some("4,4"),
             label_fill: Some("#115e59"),
         },
+    }
+}
+
+const fn edge_marker_attributes(uses_crow_markers: bool, nullable: bool) -> &'static str {
+    if uses_crow_markers {
+        if nullable {
+            r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-one)""#
+        } else {
+            r#" marker-start="url(#cardinality-many)" marker-end="url(#cardinality-one)""#
+        }
+    } else {
+        r#" marker-end="url(#arrow)""#
+    }
+}
+
+fn estimate_label_width(text: &str) -> f32 {
+    text.chars()
+        .map(|ch| if ch.is_ascii() { 6.4 } else { 10.0 })
+        .sum::<f32>()
+        + 18.0
+}
+
+fn node_label_background(colors: &ThemeColors) -> &'static str {
+    if is_light_theme(colors) {
+        "#ffffff"
+    } else {
+        "#111827"
     }
 }
 
@@ -567,7 +717,7 @@ mod tests {
         assert!(svg.contains("user_id"));
         // Should contain edge path
         assert!(svg.contains("<path"));
-        assert!(svg.contains("marker-end=\"url(#arrow)\""));
+        assert!(svg.contains("marker-end=\"url(#cardinality-one)\""));
         // Should contain arrow marker definition
         assert!(svg.contains("<marker id=\"arrow\""));
     }
@@ -862,7 +1012,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0f172a"));
         // Dark theme node fill
-        assert!(svg.contains("#111827"));
+        assert!(svg.contains("#151926"));
     }
 
     #[test]
@@ -877,7 +1027,7 @@ mod tests {
         // Light theme background
         assert!(svg.contains("#ffffff"));
         // Light theme node fill
-        assert!(svg.contains("#f8fafc"));
+        assert!(svg.contains("#fffaf0"));
     }
 
     #[test]
@@ -1177,9 +1327,9 @@ mod tests {
         assert!(svg.contains("class=\"group-label\""));
         assert!(svg.contains(">User Domain<"));
         // Should contain dashed stroke for group
-        assert!(svg.contains("stroke-dasharray=\"8,4\""));
+        assert!(svg.contains("stroke-dasharray=\"10,5\""));
         // Should contain semi-transparent fill
-        assert!(svg.contains("fill-opacity=\"0.3\""));
+        assert!(svg.contains("fill-opacity=\"0.48\""));
     }
 
     #[test]
@@ -1238,7 +1388,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0f172a"));
         // Dark theme node fill
-        assert!(svg.contains("#111827"));
+        assert!(svg.contains("#151926"));
     }
 
     #[test]
@@ -1253,7 +1403,7 @@ mod tests {
         // Light theme background
         assert!(svg.contains("#ffffff"));
         // Light theme node fill
-        assert!(svg.contains("#f8fafc"));
+        assert!(svg.contains("#fffaf0"));
     }
 
     #[test]
@@ -1262,8 +1412,8 @@ mod tests {
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
         // Group box should have rounded corners
-        assert!(svg.contains("rx=\"12\""));
-        assert!(svg.contains("ry=\"12\""));
+        assert!(svg.contains("rx=\"16\""));
+        assert!(svg.contains("ry=\"16\""));
     }
 
     #[test]
