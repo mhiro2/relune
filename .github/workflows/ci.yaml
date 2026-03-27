@@ -82,7 +82,7 @@ jobs:
       - name: Install frontend packages
         run: pnpm --dir crates/relune-render-html install --frozen-lockfile
       - name: Test
-        run: make test
+        run: make test-ci
       - name: Coverage analysis
         uses: k1LoW/octocov-action@73d561f65d59e66899ed5c87e4621a913b5d5c20 # v1.5.0
         with:
