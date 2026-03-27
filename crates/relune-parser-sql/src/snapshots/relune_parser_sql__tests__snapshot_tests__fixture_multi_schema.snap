@@ -162,7 +162,8 @@ expression: snapshot_data(&output)
             "to_columns": [
               "id"
             ],
-            "to_table": "public.users"
+            "to_schema": "public",
+            "to_table": "users"
           }
         ],
         "id": 2,
@@ -331,7 +332,8 @@ expression: snapshot_data(&output)
             "to_columns": [
               "id"
             ],
-            "to_table": "inventory.products"
+            "to_schema": "inventory",
+            "to_table": "products"
           }
         ],
         "id": 4,
@@ -433,7 +435,8 @@ expression: snapshot_data(&output)
             "to_columns": [
               "id"
             ],
-            "to_table": "public.users"
+            "to_schema": "public",
+            "to_table": "users"
           }
         ],
         "id": 5,
@@ -534,7 +537,8 @@ expression: snapshot_data(&output)
             "to_columns": [
               "id"
             ],
-            "to_table": "sales.orders"
+            "to_schema": "sales",
+            "to_table": "orders"
           },
           {
             "from_columns": [
@@ -545,7 +549,8 @@ expression: snapshot_data(&output)
             "to_columns": [
               "id"
             ],
-            "to_table": "inventory.products"
+            "to_schema": "inventory",
+            "to_table": "products"
           }
         ],
         "id": 6,
@@ -655,7 +660,8 @@ expression: snapshot_data(&output)
             "to_columns": [
               "id"
             ],
-            "to_table": "sales.orders"
+            "to_schema": "sales",
+            "to_table": "orders"
           }
         ],
         "id": 7,

@@ -551,8 +551,8 @@ impl LayoutGraphBuilder {
 
                 for target_id in seen_targets {
                     edges.push(LayoutEdge {
-                        from: target_id,
-                        to: view.id.clone(),
+                        from: view.id.clone(),
+                        to: target_id,
                         name: Some("view dep".to_string()),
                         from_columns: vec![],
                         to_columns: vec![],
@@ -671,13 +671,13 @@ impl LayoutGraphBuilder {
                 .filter(|e| e.from == node.id && !e.is_self_loop && e.kind == EdgeKind::ForeignKey)
                 .collect();
 
-            if outbound_fks.len() != 2 {
+            if outbound_fks.len() < 2 {
                 continue;
             }
 
             let target_tables: BTreeSet<&str> =
                 outbound_fks.iter().map(|e| e.to.as_str()).collect();
-            if target_tables.len() != 2 {
+            if target_tables.len() < 2 {
                 continue;
             }
 
@@ -691,7 +691,7 @@ impl LayoutGraphBuilder {
                 .iter()
                 .filter(|c| fk_columns.contains(c.name.as_str()))
                 .count();
-            if fk_column_count < 2 {
+            if fk_column_count < target_tables.len() {
                 continue;
             }
 
@@ -716,10 +716,22 @@ impl LayoutGraphBuilder {
     fn do_collapse_join_tables(&self, nodes: &mut Vec<LayoutNode>, edges: &mut Vec<LayoutEdge>) {
         use tracing::debug;
 
-        // Find all join table candidates to collapse
+        // Find all binary join table candidates we can safely collapse.
         let join_table_ids: BTreeSet<String> = nodes
             .iter()
             .filter(|n| n.kind == NodeKind::Table && n.is_join_table_candidate)
+            .filter(|node| {
+                let target_tables: BTreeSet<&str> = edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.from == node.id
+                            && !edge.is_self_loop
+                            && edge.kind == EdgeKind::ForeignKey
+                    })
+                    .map(|edge| edge.to.as_str())
+                    .collect();
+                target_tables.len() == 2
+            })
             .map(|n| n.id.clone())
             .collect();
 
@@ -1011,8 +1023,8 @@ mod tests {
             edge.from == "users" && edge.to == "status" && edge.kind == EdgeKind::EnumReference
         }));
         assert!(graph.edges.iter().any(|edge| {
-            edge.from == "users"
-                && edge.to == "active_users"
+            edge.from == "active_users"
+                && edge.to == "users"
                 && edge.kind == EdgeKind::ViewDependency
         }));
     }
@@ -1438,6 +1450,148 @@ mod collapse_tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
+    fn test_join_table_detection_supports_multi_table_junctions() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "roles".to_string(),
+                    schema_name: None,
+                    name: "roles".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(3),
+                    stable_id: "teams".to_string(),
+                    schema_name: None,
+                    name: "teams".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(3),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(4),
+                    stable_id: "user_role_teams".to_string(),
+                    schema_name: None,
+                    name: "user_role_teams".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(4),
+                            name: "user_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(5),
+                            name: "role_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(6),
+                            name: "team_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(7),
+                            name: "created_at".to_string(),
+                            data_type: "timestamp".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![
+                        ForeignKey {
+                            name: Some("fk_user_role_teams_user".to_string()),
+                            from_columns: vec!["user_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_user_role_teams_role".to_string()),
+                            from_columns: vec!["role_id".to_string()],
+                            to_schema: None,
+                            to_table: "roles".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_user_role_teams_team".to_string()),
+                            from_columns: vec!["team_id".to_string()],
+                            to_schema: None,
+                            to_table: "teams".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                    ],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let junction = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "user_role_teams")
+            .unwrap();
+
+        assert!(junction.is_join_table_candidate);
+    }
+
+    #[test]
     fn test_collapse_join_tables_removes_node() {
         let schema = make_many_to_many_schema();
 
@@ -1461,6 +1615,140 @@ mod collapse_tests {
 
         // Should have 1 edge (users <-> roles)
         assert_eq!(graph_collapsed.edges.len(), 1);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn test_collapse_join_tables_preserves_multi_table_junctions() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "roles".to_string(),
+                    schema_name: None,
+                    name: "roles".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(3),
+                    stable_id: "teams".to_string(),
+                    schema_name: None,
+                    name: "teams".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(3),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(4),
+                    stable_id: "user_role_teams".to_string(),
+                    schema_name: None,
+                    name: "user_role_teams".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(4),
+                            name: "user_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(5),
+                            name: "role_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(6),
+                            name: "team_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![
+                        ForeignKey {
+                            name: Some("fk_user_role_teams_user".to_string()),
+                            from_columns: vec!["user_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_user_role_teams_role".to_string()),
+                            from_columns: vec!["role_id".to_string()],
+                            to_schema: None,
+                            to_table: "roles".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_user_role_teams_team".to_string()),
+                            from_columns: vec!["team_id".to_string()],
+                            to_schema: None,
+                            to_table: "teams".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                    ],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new()
+            .collapse_join_tables(true)
+            .build(&schema);
+
+        assert_eq!(graph.nodes.len(), 4);
+        assert!(graph.nodes.iter().any(|node| node.id == "user_role_teams"));
+        assert_eq!(graph.edges.len(), 3);
+        assert!(graph.edges.iter().all(|edge| !edge.is_collapsed_join));
     }
 
     #[test]

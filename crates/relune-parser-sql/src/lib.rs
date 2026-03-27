@@ -132,6 +132,26 @@ impl ParseContext {
     }
 }
 
+struct ParsedColumn {
+    name: String,
+    data_type: String,
+    nullable: bool,
+    is_primary_key: bool,
+}
+
+impl ParsedColumn {
+    fn into_column(self, id: ColumnId) -> Column {
+        Column {
+            id,
+            name: self.name,
+            data_type: self.data_type,
+            nullable: self.nullable,
+            is_primary_key: self.is_primary_key,
+            comment: None,
+        }
+    }
+}
+
 /// Extension trait to add optional span support.
 trait WithSpanOpt: Sized {
     fn with_span_opt(self, span: Option<SourceSpan>) -> Self;
@@ -350,7 +370,15 @@ fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
 fn source_span_from_sql_span(input: &str, span: SqlSpan) -> Option<SourceSpan> {
     let start = location_to_offset(input, span.start)?;
     let end = location_to_offset(input, span.end)?;
-    let length = end.saturating_sub(start).max(1);
+    debug_assert!(
+        end >= start,
+        "sql span end must not precede start: {span:?}"
+    );
+    if end < start {
+        return None;
+    }
+
+    let length = (end - start).max(1);
     Some(SourceSpan::new(start, length))
 }
 
@@ -408,9 +436,91 @@ fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
     }
 }
 
-fn normalized_stable_id_for_object_name(name: &ObjectName) -> String {
-    let (schema_name, object_name) = split_object_name(name);
+fn split_object_name_parts(name: &ObjectName) -> Vec<String> {
+    name.0.iter().map(object_name_part_to_string).collect()
+}
+
+fn warn_truncated_object_name(
+    ctx: &mut ParseContext,
+    input: &str,
+    name: &ObjectName,
+    max_parts: usize,
+    context: &str,
+) {
+    let parts = split_object_name_parts(name);
+    if parts.len() <= max_parts {
+        return;
+    }
+
+    let ignored = parts[..parts.len() - max_parts].join(".");
+    let retained = parts[parts.len() - max_parts..].join(".");
+    ctx.diagnostics.push(
+        Diagnostic::warning(
+            codes::parse_unsupported(),
+            format!(
+                "{context}: object name `{name}` has more than {max_parts} parts; ignoring leading qualifier(s) `{ignored}` and using `{retained}`"
+            ),
+        )
+        .with_span_opt(span_from_spanned(input, name)),
+    );
+}
+
+fn split_object_name_with_diagnostics(
+    ctx: &mut ParseContext,
+    input: &str,
+    name: &ObjectName,
+    context: &str,
+) -> (Option<String>, String) {
+    warn_truncated_object_name(ctx, input, name, 2, context);
+    split_object_name(name)
+}
+
+fn normalized_stable_id_for_object_name_with_diagnostics(
+    ctx: &mut ParseContext,
+    input: &str,
+    name: &ObjectName,
+    context: &str,
+) -> String {
+    let (schema_name, object_name) = split_object_name_with_diagnostics(ctx, input, name, context);
     normalized_stable_id(schema_name.as_deref(), &object_name)
+}
+
+fn foreign_key_target(
+    ctx: &mut ParseContext,
+    input: &str,
+    target: &ObjectName,
+    context: &str,
+) -> (Option<String>, String) {
+    split_object_name_with_diagnostics(ctx, input, target, context)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_foreign_key(
+    ctx: &mut ParseContext,
+    input: &str,
+    constraint_name: Option<&sqlparser::ast::Ident>,
+    from_columns: Vec<String>,
+    foreign_table: &ObjectName,
+    referred_columns: &[sqlparser::ast::Ident],
+    on_delete: Option<sqlparser::ast::ReferentialAction>,
+    on_update: Option<sqlparser::ast::ReferentialAction>,
+    context: &str,
+) -> ForeignKey {
+    let (to_schema, to_table) = foreign_key_target(ctx, input, foreign_table, context);
+    let to_columns = referred_columns
+        .iter()
+        .map(|column| normalize_identifier(&column.value))
+        .collect();
+
+    ForeignKey {
+        name: constraint_name.map(|ident| normalize_identifier(&ident.value)),
+        from_columns,
+        to_schema: to_schema.map(|schema| normalize_identifier(&schema)),
+        to_table: normalize_identifier(&to_table),
+        to_columns,
+        on_delete: convert_referential_action(on_delete),
+        on_update: convert_referential_action(on_update),
+    }
 }
 
 /// Parse SQL statements with error recovery.
@@ -556,7 +666,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 representation,
             } => {
                 if let Some(UserDefinedTypeRepresentation::Enum { labels }) = representation {
-                    let enum_def = parse_create_type_enum(name, labels);
+                    let enum_def = parse_create_type_enum(&mut ctx, input, name, labels);
                     enums.push(enum_def);
                 } else {
                     ctx.warn_unsupported(
@@ -585,9 +695,13 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 );
             }
             Statement::CreateView(create_view) => {
-                if let Some(view) =
-                    parse_create_view(&create_view.name, &create_view.columns, &create_view.query)
-                {
+                if let Some(view) = parse_create_view(
+                    &mut ctx,
+                    input,
+                    &create_view.name,
+                    &create_view.columns,
+                    &create_view.query,
+                ) {
                     views.push(view);
                 }
             }
@@ -699,7 +813,8 @@ fn parse_create_table(
     input: &str,
     create: &sqlparser::ast::CreateTable,
 ) -> Option<Table> {
-    let (schema_name, name) = split_object_name(&create.name);
+    let (schema_name, name) =
+        split_object_name_with_diagnostics(ctx, input, &create.name, "CREATE TABLE");
     let stable_id = normalized_stable_id(schema_name.as_deref(), &name);
 
     let table_id = ctx.next_table_id();
@@ -709,53 +824,8 @@ fn parse_create_table(
     let mut next_column_id: u64 = 1;
 
     for column in &create.columns {
-        let mut nullable = true;
-        let mut is_primary_key = false;
-
-        for option in &column.options {
-            match &option.option {
-                ColumnOption::NotNull => nullable = false,
-                ColumnOption::Null => nullable = true,
-                ColumnOption::PrimaryKey(_) => {
-                    is_primary_key = true;
-                    nullable = false;
-                }
-                ColumnOption::Unique(_)
-                | ColumnOption::Default(_)
-                | ColumnOption::Check(_)
-                | ColumnOption::DialectSpecific(_)
-                | ColumnOption::CharacterSet(_)
-                | ColumnOption::Collation(_)
-                | ColumnOption::OnUpdate(_)
-                | ColumnOption::Generated { .. }
-                | ColumnOption::Comment(_)
-                | ColumnOption::ForeignKey(_)
-                | ColumnOption::Materialized(_)
-                | ColumnOption::Ephemeral(_)
-                | ColumnOption::Alias(_)
-                | ColumnOption::Options(_)
-                | ColumnOption::Identity(_)
-                | ColumnOption::OnConflict(_)
-                | ColumnOption::Policy(_)
-                | ColumnOption::Tags(_)
-                | ColumnOption::Srid(_)
-                | ColumnOption::Invisible => {
-                    // Informational only, not relevant to schema extraction, or handled separately
-                }
-            }
-        }
-
-        // Normalize the column name
-        let column_name = normalize_identifier(&column.name.value);
-
-        columns.push(Column {
-            id: ColumnId(next_column_id),
-            name: column_name,
-            data_type: column.data_type.to_string(),
-            nullable,
-            is_primary_key,
-            comment: None,
-        });
+        let parsed_column = parsed_column_from_column_def(column);
+        columns.push(parsed_column.into_column(ColumnId(next_column_id)));
         next_column_id += 1;
     }
 
@@ -765,25 +835,17 @@ fn parse_create_table(
         for option in &column.options {
             if let ColumnOption::ForeignKey(constraint) = &option.option {
                 let from_column = normalize_identifier(&column.name.value);
-                let to_table = normalize_object_name(&constraint.foreign_table);
-                let to_columns: Vec<String> = constraint
-                    .referred_columns
-                    .iter()
-                    .map(|c| normalize_identifier(&c.value))
-                    .collect();
-
-                foreign_keys.push(ForeignKey {
-                    name: option
-                        .name
-                        .as_ref()
-                        .map(|ident| normalize_identifier(&ident.value)),
-                    from_columns: vec![from_column],
-                    to_schema: None,
-                    to_table,
-                    to_columns,
-                    on_delete: convert_referential_action(constraint.on_delete),
-                    on_update: convert_referential_action(constraint.on_update),
-                });
+                foreign_keys.push(build_foreign_key(
+                    ctx,
+                    input,
+                    option.name.as_ref(),
+                    vec![from_column],
+                    &constraint.foreign_table,
+                    &constraint.referred_columns,
+                    constraint.on_delete,
+                    constraint.on_update,
+                    "CREATE TABLE inline FOREIGN KEY",
+                ));
             }
         }
     }
@@ -813,25 +875,17 @@ fn parse_create_table(
                     .iter()
                     .map(|c| normalize_identifier(&c.value))
                     .collect();
-                let to_table = normalize_object_name(&foreign_key.foreign_table);
-                let to_cols: Vec<String> = foreign_key
-                    .referred_columns
-                    .iter()
-                    .map(|c| normalize_identifier(&c.value))
-                    .collect();
-
-                foreign_keys.push(ForeignKey {
-                    name: foreign_key
-                        .name
-                        .as_ref()
-                        .map(|ident| normalize_identifier(&ident.value)),
-                    from_columns: from_cols,
-                    to_schema: None,
-                    to_table,
-                    to_columns: to_cols,
-                    on_delete: convert_referential_action(foreign_key.on_delete),
-                    on_update: convert_referential_action(foreign_key.on_update),
-                });
+                foreign_keys.push(build_foreign_key(
+                    ctx,
+                    input,
+                    foreign_key.name.as_ref(),
+                    from_cols,
+                    &foreign_key.foreign_table,
+                    &foreign_key.referred_columns,
+                    foreign_key.on_delete,
+                    foreign_key.on_update,
+                    "CREATE TABLE FOREIGN KEY",
+                ));
             }
             TableConstraint::Check(_) | TableConstraint::Index(_) => {
                 // Check constraints and Index constraints are informational only
@@ -886,7 +940,12 @@ fn parse_create_index(
     table_map: &std::collections::HashMap<String, usize>,
 ) {
     // Get the table name
-    let stable_id = normalized_stable_id_for_object_name(&create_index.table_name);
+    let stable_id = normalized_stable_id_for_object_name_with_diagnostics(
+        ctx,
+        input,
+        &create_index.table_name,
+        "CREATE INDEX",
+    );
 
     // Find the table
     let Some(&table_idx) = table_map.get(&stable_id) else {
@@ -943,7 +1002,12 @@ fn parse_comment(
 
     match object_type {
         sqlparser::ast::CommentObject::Table => {
-            let stable_id = normalized_stable_id_for_object_name(object_name);
+            let stable_id = normalized_stable_id_for_object_name_with_diagnostics(
+                ctx,
+                input,
+                object_name,
+                "COMMENT ON TABLE",
+            );
 
             if let Some(&table_idx) = table_map.get(&stable_id) {
                 tables[table_idx].comment = Some(comment_text);
@@ -959,11 +1023,7 @@ fn parse_comment(
         }
         sqlparser::ast::CommentObject::Column => {
             // For columns, object_name is typically "table.column" or "schema.table.column"
-            let parts: Vec<String> = object_name
-                .0
-                .iter()
-                .map(object_name_part_to_string)
-                .collect();
+            let parts = split_object_name_parts(object_name);
 
             // Extract column name (last part) and table name (remaining parts)
             if parts.len() < 2 {
@@ -977,22 +1037,15 @@ fn parse_comment(
                 return;
             }
 
+            warn_truncated_object_name(ctx, input, object_name, 3, "COMMENT ON COLUMN");
+
             let column_name = normalize_identifier(&parts[parts.len() - 1]);
             let table_parts = &parts[..parts.len() - 1];
 
             let stable_id = match table_parts {
                 [table] => normalize_identifier(table),
-                [schema, table] => normalized_stable_id(Some(schema), table),
-                _ => {
-                    ctx.diagnostics.push(
-                        Diagnostic::warning(
-                            codes::parse_unsupported(),
-                            format!("Invalid COMMENT ON COLUMN syntax: {}", parts.join(".")),
-                        )
-                        .with_span_opt(span_from_spanned(input, object_name)),
-                    );
-                    return;
-                }
+                [schema, table] | [.., schema, table] => normalized_stable_id(Some(schema), table),
+                _ => unreachable!("COMMENT ON COLUMN must have at least two parts"),
             };
 
             if let Some(&table_idx) = table_map.get(&stable_id) {
@@ -1032,8 +1085,12 @@ fn parse_comment(
 }
 
 /// Build `stable_id` the same way as [`parse_create_table`] so `ALTER TABLE` resolves targets.
-fn stable_id_for_alter_target(table_name: &ObjectName) -> String {
-    normalized_stable_id_for_object_name(table_name)
+fn stable_id_for_alter_target(
+    ctx: &mut ParseContext,
+    input: &str,
+    table_name: &ObjectName,
+) -> String {
+    normalized_stable_id_for_object_name_with_diagnostics(ctx, input, table_name, "ALTER TABLE")
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1045,7 +1102,7 @@ fn apply_alter_table_operations(
     table_name: &ObjectName,
     operations: &[AlterTableOperation],
 ) {
-    let stable_id = stable_id_for_alter_target(table_name);
+    let stable_id = stable_id_for_alter_target(ctx, input, table_name);
     let Some(&idx) = table_map.get(&stable_id) else {
         ctx.diagnostics.push(
             Diagnostic::warning(
@@ -1183,7 +1240,12 @@ fn apply_single_alter_operation(
                 sqlparser::ast::RenameTableNameKind::As(name)
                 | sqlparser::ast::RenameTableNameKind::To(name) => name,
             };
-            let (new_schema_raw, new_name_raw) = split_object_name(renamed_target);
+            let (new_schema_raw, new_name_raw) = split_object_name_with_diagnostics(
+                ctx,
+                input,
+                renamed_target,
+                "ALTER TABLE RENAME TO",
+            );
             let renamed_stable_id = normalized_stable_id(new_schema_raw.as_deref(), &new_name_raw);
             let table = &mut tables[idx];
             table.schema_name = new_schema_raw.map(|s| normalize_identifier(&s));
@@ -1242,7 +1304,7 @@ fn apply_single_alter_operation(
     }
 }
 
-fn column_from_column_def_body(column: &sqlparser::ast::ColumnDef) -> Column {
+fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedColumn {
     let mut nullable = true;
     let mut is_primary_key = false;
 
@@ -1278,13 +1340,11 @@ fn column_from_column_def_body(column: &sqlparser::ast::ColumnDef) -> Column {
     }
 
     let column_name = normalize_identifier(&column.name.value);
-    Column {
-        id: ColumnId(0),
+    ParsedColumn {
         name: column_name,
         data_type: column.data_type.to_string(),
         nullable,
         is_primary_key,
-        comment: None,
     }
 }
 
@@ -1313,32 +1373,23 @@ fn add_column_from_alter(
     }
 
     let next_id = table.columns.iter().map(|c| c.id.0).max().unwrap_or(0) + 1;
-    let mut col = column_from_column_def_body(column_def);
-    col.id = ColumnId(next_id);
+    let col = parsed_column_from_column_def(column_def).into_column(ColumnId(next_id));
     table.columns.push(col);
 
     for option in &column_def.options {
         if let ColumnOption::ForeignKey(constraint) = &option.option {
             let from_column = col_name.clone();
-            let to_table = normalize_object_name(&constraint.foreign_table);
-            let to_columns: Vec<String> = constraint
-                .referred_columns
-                .iter()
-                .map(|c| normalize_identifier(&c.value))
-                .collect();
-
-            table.foreign_keys.push(ForeignKey {
-                name: option
-                    .name
-                    .as_ref()
-                    .map(|ident| normalize_identifier(&ident.value)),
-                from_columns: vec![from_column],
-                to_schema: None,
-                to_table,
-                to_columns,
-                on_delete: convert_referential_action(constraint.on_delete),
-                on_update: convert_referential_action(constraint.on_update),
-            });
+            table.foreign_keys.push(build_foreign_key(
+                ctx,
+                input,
+                option.name.as_ref(),
+                vec![from_column],
+                &constraint.foreign_table,
+                &constraint.referred_columns,
+                constraint.on_delete,
+                constraint.on_update,
+                "ALTER TABLE ADD COLUMN inline FOREIGN KEY",
+            ));
         }
     }
 }
@@ -1377,25 +1428,17 @@ fn apply_add_table_constraint(
                 .iter()
                 .map(|c| normalize_identifier(&c.value))
                 .collect();
-            let to_table = normalize_object_name(&foreign_key.foreign_table);
-            let to_cols: Vec<String> = foreign_key
-                .referred_columns
-                .iter()
-                .map(|c| normalize_identifier(&c.value))
-                .collect();
-
-            table.foreign_keys.push(ForeignKey {
-                name: foreign_key
-                    .name
-                    .as_ref()
-                    .map(|ident| normalize_identifier(&ident.value)),
-                from_columns: from_cols,
-                to_schema: None,
-                to_table,
-                to_columns: to_cols,
-                on_delete: convert_referential_action(foreign_key.on_delete),
-                on_update: convert_referential_action(foreign_key.on_update),
-            });
+            table.foreign_keys.push(build_foreign_key(
+                ctx,
+                input,
+                foreign_key.name.as_ref(),
+                from_cols,
+                &foreign_key.foreign_table,
+                &foreign_key.referred_columns,
+                foreign_key.on_delete,
+                foreign_key.on_update,
+                "ALTER TABLE ADD CONSTRAINT FOREIGN KEY",
+            ));
         }
         TableConstraint::Check(_) | TableConstraint::Index(_) => {}
         TableConstraint::FulltextOrSpatial(_) => {
@@ -1408,8 +1451,14 @@ fn apply_add_table_constraint(
 }
 
 /// Parse a CREATE TYPE ... AS ENUM statement into an Enum.
-fn parse_create_type_enum(name: &ObjectName, labels: &[sqlparser::ast::Ident]) -> Enum {
-    let (schema_name, type_name) = split_object_name(name);
+fn parse_create_type_enum(
+    ctx: &mut ParseContext,
+    input: &str,
+    name: &ObjectName,
+    labels: &[sqlparser::ast::Ident],
+) -> Enum {
+    let (schema_name, type_name) =
+        split_object_name_with_diagnostics(ctx, input, name, "CREATE TYPE");
 
     // Generate a stable ID for the enum
     let id = normalized_stable_id(schema_name.as_deref(), &type_name);
@@ -1432,11 +1481,14 @@ fn parse_create_type_enum(name: &ObjectName, labels: &[sqlparser::ast::Ident]) -
 /// Parse a CREATE VIEW statement into a View.
 #[allow(clippy::unnecessary_wraps)]
 fn parse_create_view(
+    ctx: &mut ParseContext,
+    input: &str,
     name: &ObjectName,
     view_columns: &[sqlparser::ast::ViewColumnDef],
     query: &sqlparser::ast::Query,
 ) -> Option<View> {
-    let (schema_name, view_name) = split_object_name(name);
+    let (schema_name, view_name) =
+        split_object_name_with_diagnostics(ctx, input, name, "CREATE VIEW");
 
     // Generate a stable ID for the view
     let id = normalized_stable_id(schema_name.as_deref(), &view_name);
@@ -1567,15 +1619,6 @@ const fn convert_referential_action(
     }
 }
 
-/// Normalize an `ObjectName` to a single string (schema.table or just table).
-fn normalize_object_name(name: &ObjectName) -> String {
-    name.0
-        .iter()
-        .map(|part| normalize_identifier(&object_name_part_to_string(part)))
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
 fn error_summary(output: &ParseOutput) -> String {
     let messages = output
         .diagnostics
@@ -1655,6 +1698,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_target_schema_for_create_table_foreign_keys() {
+        let sql = r"
+        CREATE TABLE auth.accounts (
+          id BIGINT PRIMARY KEY
+        );
+
+        CREATE TABLE auth.orgs (
+          id BIGINT PRIMARY KEY
+        );
+
+        CREATE TABLE public.users (
+          id BIGINT PRIMARY KEY,
+          account_id BIGINT REFERENCES auth.accounts(id),
+          org_id BIGINT,
+          CONSTRAINT fk_users_org FOREIGN KEY (org_id) REFERENCES auth.orgs(id)
+        );
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema
+            .tables
+            .iter()
+            .find(|table| table.stable_id == "public.users")
+            .expect("users table should exist");
+
+        assert_eq!(users.foreign_keys.len(), 2);
+        assert_eq!(users.foreign_keys[0].to_schema.as_deref(), Some("auth"));
+        assert_eq!(users.foreign_keys[0].to_table, "accounts");
+        assert_eq!(users.foreign_keys[1].to_schema.as_deref(), Some("auth"));
+        assert_eq!(users.foreign_keys[1].to_table, "orgs");
+    }
+
+    #[test]
     fn parses_create_index() {
         let sql = r"
         CREATE TABLE users (
@@ -1702,6 +1778,30 @@ mod tests {
         assert_eq!(schema.tables[0].name, "users");
         assert_eq!(schema.tables[1].schema_name, Some("app".to_string()));
         assert_eq!(schema.tables[1].name, "posts");
+    }
+
+    #[test]
+    fn warns_when_object_names_have_more_than_two_parts() {
+        let sql = r"
+        CREATE TABLE db.public.users (
+          id BIGINT PRIMARY KEY
+        );
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let schema = output.schema.expect("schema should exist");
+
+        assert_eq!(schema.tables.len(), 1);
+        assert_eq!(schema.tables[0].stable_id, "public.users");
+        let warning = output
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code == codes::parse_unsupported()
+                    && diagnostic.message.contains("db.public.users")
+            })
+            .expect("warning should exist");
+        assert!(warning.message.contains("ignoring leading qualifier"));
     }
 
     #[test]
@@ -1820,6 +1920,36 @@ mod tests {
                 .iter()
                 .any(|fk| fk.name.as_deref() == Some("fk_users_org"))
         );
+    }
+
+    #[test]
+    fn parses_target_schema_for_alter_table_foreign_keys() {
+        let sql = r"
+        CREATE TABLE auth.orgs (id BIGINT PRIMARY KEY);
+        CREATE TABLE auth.accounts (id BIGINT PRIMARY KEY);
+        CREATE TABLE public.users (
+          id BIGINT PRIMARY KEY,
+          org_id BIGINT
+        );
+
+        ALTER TABLE public.users ADD COLUMN account_id BIGINT REFERENCES auth.accounts(id);
+        ALTER TABLE public.users ADD CONSTRAINT fk_users_org
+          FOREIGN KEY (org_id) REFERENCES auth.orgs(id);
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema
+            .tables
+            .iter()
+            .find(|table| table.stable_id == "public.users")
+            .expect("users table should exist");
+
+        assert_eq!(users.foreign_keys.len(), 2);
+        assert_eq!(users.foreign_keys[0].to_schema.as_deref(), Some("auth"));
+        assert_eq!(users.foreign_keys[0].to_table, "accounts");
+        assert_eq!(users.foreign_keys[1].name.as_deref(), Some("fk_users_org"));
+        assert_eq!(users.foreign_keys[1].to_schema.as_deref(), Some("auth"));
+        assert_eq!(users.foreign_keys[1].to_table, "orgs");
     }
 
     #[test]
@@ -1986,6 +2116,42 @@ mod tests {
         assert_eq!(table.columns[0].id, ColumnId(1));
         assert_eq!(table.columns[1].id, ColumnId(2));
         assert_eq!(table.columns[2].id, ColumnId(3));
+    }
+
+    #[test]
+    fn generates_column_ids_for_alter_table_add_column() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY
+        );
+
+        ALTER TABLE users ADD COLUMN name TEXT NOT NULL;
+        ALTER TABLE users ADD COLUMN email TEXT;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let table = &schema.tables[0];
+
+        assert_eq!(table.columns[0].id, ColumnId(1));
+        assert_eq!(table.columns[1].id, ColumnId(2));
+        assert_eq!(table.columns[2].id, ColumnId(3));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "sql span end must not precede start")]
+    fn rejects_reversed_sql_spans_in_debug_builds() {
+        let span = SqlSpan::new(Location::new(1, 5), Location::new(1, 3));
+
+        let _ = source_span_from_sql_span("abcd", span);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn ignores_reversed_sql_spans_in_release_builds() {
+        let span = SqlSpan::new(Location::new(1, 5), Location::new(1, 3));
+
+        assert_eq!(source_span_from_sql_span("abcd", span), None);
     }
 
     #[test]

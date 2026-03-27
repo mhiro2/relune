@@ -92,6 +92,44 @@ pub enum GroupingStrategy {
 
 /// Specifies layout configuration hints.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LayoutCompactionSpec {
+    /// Node count threshold for enabling automatic compaction.
+    /// Set to 0 to disable automatic compaction.
+    #[serde(default = "default_large_schema_threshold")]
+    pub threshold: usize,
+    /// Minimum horizontal spacing when compaction is active.
+    #[serde(default = "default_compact_horizontal_spacing")]
+    pub min_horizontal_spacing: f32,
+    /// Minimum vertical spacing when compaction is active.
+    #[serde(default = "default_compact_vertical_spacing")]
+    pub min_vertical_spacing: f32,
+    /// Minimum node width when compaction is active.
+    #[serde(default = "default_compact_node_width")]
+    pub min_node_width: f32,
+    /// Minimum node padding when compaction is active.
+    #[serde(default = "default_compact_node_padding")]
+    pub min_node_padding: f32,
+    /// Multiplier applied to `threshold` to decide when columns are hidden automatically.
+    /// Set to 0 to keep columns visible even in compact mode.
+    #[serde(default = "default_hide_columns_threshold_multiplier")]
+    pub hide_columns_threshold_multiplier: usize,
+}
+
+impl Default for LayoutCompactionSpec {
+    fn default() -> Self {
+        Self {
+            threshold: default_large_schema_threshold(),
+            min_horizontal_spacing: default_compact_horizontal_spacing(),
+            min_vertical_spacing: default_compact_vertical_spacing(),
+            min_node_width: default_compact_node_width(),
+            min_node_padding: default_compact_node_padding(),
+            hide_columns_threshold_multiplier: default_hide_columns_threshold_multiplier(),
+        }
+    }
+}
+
+/// Specifies layout configuration hints.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LayoutSpec {
     /// Layout algorithm.
     #[serde(default)]
@@ -111,6 +149,9 @@ pub struct LayoutSpec {
     /// Iteration count for force-directed layout.
     #[serde(default = "default_force_iterations")]
     pub force_iterations: usize,
+    /// Automatic compaction settings for large schemas.
+    #[serde(default)]
+    pub compaction: LayoutCompactionSpec,
 }
 
 /// Layout algorithm for positioning nodes.
@@ -132,6 +173,24 @@ const fn default_vertical_spacing() -> f32 {
 }
 const fn default_force_iterations() -> usize {
     150
+}
+const fn default_large_schema_threshold() -> usize {
+    50
+}
+const fn default_compact_horizontal_spacing() -> f32 {
+    160.0
+}
+const fn default_compact_vertical_spacing() -> f32 {
+    80.0
+}
+const fn default_compact_node_width() -> f32 {
+    140.0
+}
+const fn default_compact_node_padding() -> f32 {
+    4.0
+}
+const fn default_hide_columns_threshold_multiplier() -> usize {
+    2
 }
 
 /// Direction for layout flow.
@@ -158,6 +217,7 @@ impl Default for LayoutSpec {
             horizontal_spacing: default_horizontal_spacing(),
             vertical_spacing: default_vertical_spacing(),
             force_iterations: default_force_iterations(),
+            compaction: LayoutCompactionSpec::default(),
         }
     }
 }

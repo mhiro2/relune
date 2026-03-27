@@ -5,8 +5,8 @@
 
 use relune_app::{
     ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy,
-    InspectFormat, InspectRequest, LayoutAlgorithm, LayoutDirection, LayoutSpec, OutputFormat,
-    RenderOptions, RenderRequest, RouteStyle,
+    InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection,
+    LayoutSpec, OutputFormat, RenderOptions, RenderRequest, RouteStyle,
 };
 use serde::{Deserialize, Serialize};
 
@@ -127,6 +127,7 @@ impl WasmRenderRequest {
             horizontal_spacing,
             vertical_spacing,
             force_iterations: 150,
+            compaction: LayoutCompactionSpec::default(),
         };
 
         Ok(RenderRequest {
