@@ -190,6 +190,7 @@ mod tests {
                 kind: EdgeKind::ForeignKey,
                 is_self_loop: false,
                 nullable: false,
+                target_cardinality: relune_core::layout::Cardinality::One,
                 is_collapsed_join: false,
                 collapsed_join_table: None,
             }],

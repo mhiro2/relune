@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use relune_core::{EdgeKind, NodeKind};
+use relune_core::{EdgeKind, NodeKind, layout::Cardinality};
 
 pub mod edge;
 pub mod escape;
@@ -212,7 +212,10 @@ fn render_node_internal(
     );
     let _ = write!(
         out,
-        r#"<text class="table-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="14" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
+        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="18"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="14" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
+        node.x + 12.0,
+        node.y + 8.0,
+        (node.width - 96.0).max(24.0),
         node.x + 12.0,
         node.y + 23.0,
         colors.text_primary,
@@ -228,7 +231,7 @@ fn render_node_internal(
     );
 
     let mut line_y = node.y + 52.0;
-    for (index, column) in node.columns.iter().enumerate() {
+    for (column_index, column) in node.columns.iter().enumerate() {
         let _ = write!(
             out,
             r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
@@ -261,7 +264,10 @@ fn render_node_internal(
         };
         let _ = write!(
             out,
-            r#"<text class="column-name" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}"{}>{}</text>"#,
+            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}"{}>{}</text>"#,
+            node.x + 12.0,
+            line_y - 12.5,
+            column_text_width(node, column),
             node.x + 12.0,
             line_y,
             if column.nullable {
@@ -346,7 +352,7 @@ fn render_edge_internal(
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
-                edge_marker_attributes(uses_crow_markers, edge.nullable),
+                edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality,),
                 stroke_dasharray
             );
         }
@@ -360,7 +366,7 @@ fn render_edge_internal(
                 escape_attribute(&path_d),
                 edge_style.stroke,
                 options.stroke_width,
-                edge_marker_attributes(uses_crow_markers, edge.nullable)
+                edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality)
             );
         }
     }
@@ -583,16 +589,41 @@ fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
     }
 }
 
-const fn edge_marker_attributes(uses_crow_markers: bool, nullable: bool) -> &'static str {
+const fn edge_marker_attributes(
+    uses_crow_markers: bool,
+    nullable: bool,
+    target_cardinality: Cardinality,
+) -> &'static str {
     if uses_crow_markers {
-        if nullable {
-            r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-one)""#
-        } else {
-            r#" marker-start="url(#cardinality-many)" marker-end="url(#cardinality-one)""#
+        match (nullable, target_cardinality) {
+            (true, Cardinality::Many) => {
+                r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-many)""#
+            }
+            (true, _) => {
+                r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-one)""#
+            }
+            (false, Cardinality::Many) => {
+                r#" marker-start="url(#cardinality-many)" marker-end="url(#cardinality-many)""#
+            }
+            (false, _) => {
+                r#" marker-start="url(#cardinality-many)" marker-end="url(#cardinality-one)""#
+            }
         }
     } else {
         r#" marker-end="url(#arrow)""#
     }
+}
+
+fn column_text_width(
+    node: &relune_layout::PositionedNode,
+    column: &relune_layout::PositionedColumn,
+) -> f32 {
+    let icon_slots = usize::from(column.is_indexed)
+        + usize::from(column.is_foreign_key)
+        + usize::from(column.is_primary_key);
+    #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
+    let reserved = (icon_slots as f32).mul_add(16.0, if icon_slots > 0 { 14.0 } else { 0.0 });
+    (node.width - 24.0 - reserved).max(18.0)
 }
 
 fn estimate_label_width(text: &str) -> f32 {
@@ -760,6 +791,7 @@ mod tests {
                 },
                 is_self_loop: false,
                 nullable: false,
+                target_cardinality: Cardinality::One,
                 from_columns: vec!["user_id".to_string()],
                 to_columns: vec!["id".to_string()],
                 is_collapsed_join: false,
@@ -799,6 +831,8 @@ mod tests {
         assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(svg.contains("<rect"));
         assert!(svg.contains("<text"));
+        assert!(svg.contains("node-0-header-clip"));
+        assert!(svg.contains("node-0-column-0-clip"));
     }
 
     #[test]
@@ -911,6 +945,7 @@ mod tests {
                     },
                     is_self_loop: false,
                     nullable: false,
+                    target_cardinality: Cardinality::One,
                     from_columns: vec![],
                     to_columns: vec![],
                     is_collapsed_join: false,
@@ -934,6 +969,7 @@ mod tests {
                     },
                     is_self_loop: false,
                     nullable: false,
+                    target_cardinality: Cardinality::One,
                     from_columns: vec!["status".to_string()],
                     to_columns: vec![],
                     is_collapsed_join: false,
@@ -1037,6 +1073,7 @@ mod tests {
                 },
                 is_self_loop: false,
                 nullable: false,
+                target_cardinality: Cardinality::One,
                 from_columns: vec!["test_id".to_string()],
                 to_columns: vec!["id".to_string()],
                 is_collapsed_join: false,
@@ -1221,6 +1258,7 @@ mod tests {
                 },
                 is_self_loop: false,
                 nullable: false,
+                target_cardinality: Cardinality::One,
                 from_columns: vec!["user_id".to_string()],
                 to_columns: vec!["id".to_string()],
                 is_collapsed_join: false,
@@ -1240,6 +1278,43 @@ mod tests {
         assert!(svg.contains("data-from=\"users\""));
         assert!(svg.contains("data-to=\"posts\""));
         assert!(svg.contains("class=\"edge-label\""));
+    }
+
+    #[test]
+    fn test_render_many_target_uses_many_marker() {
+        let graph = relune_layout::PositionedGraph {
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from: "audit_entries".to_string(),
+                to: "users".to_string(),
+                label: "actor_email".to_string(),
+                kind: EdgeKind::ForeignKey,
+                route: EdgeRoute {
+                    x1: 100.0,
+                    y1: 50.0,
+                    x2: 300.0,
+                    y2: 150.0,
+                    control_points: vec![],
+                    style: RouteStyle::Straight,
+                    label_position: (200.0, 100.0),
+                },
+                is_self_loop: false,
+                nullable: false,
+                target_cardinality: Cardinality::Many,
+                from_columns: vec!["actor_email".to_string()],
+                to_columns: vec!["email".to_string()],
+                is_collapsed_join: false,
+                collapsed_join_table: None,
+                label_x: 200.0,
+                label_y: 100.0,
+            }],
+            groups: vec![],
+            width: 400.0,
+            height: 200.0,
+        };
+
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+        assert!(svg.contains("marker-end=\"url(#cardinality-many)\""));
     }
 
     #[test]
@@ -1371,6 +1446,7 @@ mod tests {
                 },
                 is_self_loop: false,
                 nullable: false,
+                target_cardinality: Cardinality::One,
                 from_columns: vec!["user_id".to_string()],
                 to_columns: vec!["id".to_string()],
                 is_collapsed_join: false,

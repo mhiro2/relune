@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{Level, debug, info, span, warn};
+use unicode_width::UnicodeWidthChar;
 
 use relune_core::{
     EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection, LayoutSpec, NodeKind, Schema,
@@ -16,7 +17,7 @@ use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
 use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
-use crate::route::{route_edge, route_self_loop};
+use crate::route::{route_edge_with_offset, route_self_loop_with_offset};
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
 /// Layout mode alias shared with `relune-core`.
@@ -292,6 +293,8 @@ pub struct PositionedEdge {
     pub is_self_loop: bool,
     /// Whether the FK columns are nullable.
     pub nullable: bool,
+    /// Cardinality at the target endpoint.
+    pub target_cardinality: relune_core::layout::Cardinality,
     /// The FK column names on the source table.
     pub from_columns: Vec<String>,
     /// The referenced column names on the target table.
@@ -356,7 +359,6 @@ pub fn build_layout_with_config(
 
     info!("Building layout for {} tables", schema.tables.len());
 
-    // Step 1: Build the graph from schema
     let mut graph = LayoutGraphBuilder::new()
         .filter(request.filter.clone())
         .grouping(request.grouping)
@@ -369,13 +371,20 @@ pub fn build_layout_with_config(
         graph.edges.len()
     );
 
-    // Step 2: Apply focus if specified
     if let Some(ref focus) = request.focus {
         let extractor = FocusExtractor;
         graph = extractor.extract(&graph, focus)?;
         debug!("Applied focus, resulting in {} nodes", graph.nodes.len());
     }
 
+    build_layout_from_graph_with_config(graph, config)
+}
+
+/// Build a positioned layout from a precomputed graph.
+pub fn build_layout_from_graph_with_config(
+    mut graph: LayoutGraph,
+    config: &LayoutConfig,
+) -> Result<PositionedGraph, LayoutError> {
     // Step 2b: Compute compacted config based on graph size and apply if needed
     let compacted = config.compute_compacted_config(graph.nodes.len());
     let effective_config = if config.should_compact(graph.nodes.len()) {
@@ -995,7 +1004,12 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
                 '_' | '-' | '.' | ':' | ',' | '(' | ')' | '[' | ']' | ' ' => 0.38,
                 _ if ch.is_ascii_punctuation() => 0.52,
                 _ if ch.is_ascii() => 0.62,
-                _ => 1.0,
+                _ => match ch.width_cjk().or_else(|| ch.width()) {
+                    Some(0) => 0.0,
+                    Some(1) => 0.94,
+                    Some(_) => 1.12,
+                    None => 1.0,
+                },
             };
             font_size * width_factor
         })
@@ -1012,21 +1026,47 @@ fn route_edges(
         .iter()
         .map(|n| (n.id.as_str(), (n.x, n.y, n.width, n.height)))
         .collect();
+    let edge_counts = edge_lane_counts(graph);
+    let mut seen_lanes = std::collections::BTreeMap::new();
 
     let mut edges = Vec::new();
 
     for edge in &graph.edges {
+        let lane_key = canonical_edge_pair(&edge.from, &edge.to);
+        let lane_index = seen_lanes
+            .entry(lane_key.clone())
+            .and_modify(|count| *count += 1usize)
+            .or_insert(0usize);
+        let lane_total = edge_counts.get(&lane_key).copied().unwrap_or(1);
         let from_pos = node_positions.get(edge.from.as_str());
         let to_pos = node_positions.get(edge.to.as_str());
 
         let route = if edge.is_self_loop {
             if let Some(&(x, y, w, h)) = from_pos {
-                route_self_loop(x, y, w, h, config.edge_style)
+                route_self_loop_with_offset(
+                    x,
+                    y,
+                    w,
+                    h,
+                    config.edge_style,
+                    self_loop_radius_offset(*lane_index),
+                )
             } else {
                 continue;
             }
         } else if let (Some(&(x1, y1, w1, h1)), Some(&(x2, y2, w2, h2))) = (from_pos, to_pos) {
-            route_edge(x1, y1, w1, h1, x2, y2, w2, h2, config.edge_style)
+            route_edge_with_offset(
+                x1,
+                y1,
+                w1,
+                h1,
+                x2,
+                y2,
+                w2,
+                h2,
+                config.edge_style,
+                centered_lane_offset(*lane_index, lane_total),
+            )
         } else {
             continue;
         };
@@ -1049,6 +1089,7 @@ fn route_edges(
             route,
             is_self_loop: edge.is_self_loop,
             nullable: edge.nullable,
+            target_cardinality: edge.target_cardinality,
             from_columns: edge.from_columns.clone(),
             to_columns: edge.to_columns.clone(),
             is_collapsed_join: edge.is_collapsed_join,
@@ -1059,6 +1100,35 @@ fn route_edges(
     }
 
     edges
+}
+
+fn canonical_edge_pair(from: &str, to: &str) -> (String, String) {
+    if from <= to {
+        (from.to_string(), to.to_string())
+    } else {
+        (to.to_string(), from.to_string())
+    }
+}
+
+fn edge_lane_counts(graph: &LayoutGraph) -> std::collections::BTreeMap<(String, String), usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    for edge in &graph.edges {
+        *counts
+            .entry(canonical_edge_pair(&edge.from, &edge.to))
+            .or_insert(0) += 1;
+    }
+    counts
+}
+
+#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
+fn self_loop_radius_offset(lane_index: usize) -> f32 {
+    lane_index as f32 * 18.0
+}
+
+#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
+fn centered_lane_offset(lane_index: usize, lane_total: usize) -> f32 {
+    let center = (lane_total.saturating_sub(1)) as f32 * 0.5;
+    (lane_index as f32 - center) * 14.0
 }
 
 /// Calculate positions for groups.
@@ -1787,5 +1857,93 @@ mod tests {
         assert!(node.y.is_finite());
         assert!(node.width > 0.0);
         assert!(node.height > 0.0);
+    }
+
+    #[test]
+    fn test_estimate_text_width_counts_cjk_as_wider_than_ascii() {
+        let ascii = estimate_text_width("users", COLUMN_FONT_SIZE);
+        let cjk = estimate_text_width("利用者", COLUMN_FONT_SIZE);
+
+        assert!(cjk > ascii);
+    }
+
+    #[test]
+    fn test_route_edges_offsets_parallel_foreign_keys() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "posts".to_string(),
+                    schema_name: None,
+                    name: "posts".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(2),
+                            name: "author_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(3),
+                            name: "reviewer_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![
+                        ForeignKey {
+                            name: Some("fk_posts_author".to_string()),
+                            from_columns: vec!["author_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_posts_reviewer".to_string()),
+                            from_columns: vec!["reviewer_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                    ],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = build_layout(&schema).unwrap();
+        assert_eq!(graph.edges.len(), 2);
+        assert!(
+            (graph.edges[0].route.x1 - graph.edges[1].route.x1).abs() > f32::EPSILON
+                || (graph.edges[0].route.y1 - graph.edges[1].route.y1).abs() > f32::EPSILON
+        );
     }
 }
