@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use relune_core::SchemaStats;
 use relune_layout::{
-    FocusExtractor, LayoutConfig, LayoutGraphBuilder, LayoutRequest, build_layout_with_config,
+    FocusExtractor, LayoutConfig, LayoutGraphBuilder, build_layout_from_graph_with_config,
 };
 use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
 use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg};
@@ -17,6 +17,7 @@ use crate::schema_input::schema_from_input;
 
 /// Execute a render request.
 #[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::too_many_lines)] // This usecase keeps parse, graph, layout, and render timing in one flow.
 pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     let _total_span = info_span!("render_pipeline").entered();
     let _total_start = Instant::now();
@@ -44,16 +45,14 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
         "parse complete"
     );
 
-    // Step 2: Build graph
+    // Step 2: Build graph when the selected output needs graph data.
     let graph_start = Instant::now();
-    let layout_request = LayoutRequest {
-        filter: request.filter.clone(),
-        focus: request.focus.clone(),
-        grouping: request.grouping,
-        collapse_join_tables: false,
-    };
     let layout_config = LayoutConfig::from(&request.layout);
-    let graph = {
+    let graph = matches!(
+        request.output_format,
+        OutputFormat::Svg | OutputFormat::Html | OutputFormat::GraphJson
+    )
+    .then(|| {
         let _span = info_span!("graph_build").entered();
         let mut g = LayoutGraphBuilder::new()
             .filter(request.filter.clone())
@@ -65,15 +64,24 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
                 .extract(&g, focus)
                 .map_err(relune_layout::LayoutError::from)?;
         }
-        g
-    };
+        Ok::<_, AppError>(g)
+    })
+    .transpose()?;
     let graph_time = graph_start.elapsed();
 
-    // Step 3: Layout
+    // Step 3: Layout for visual outputs.
     let layout_start = Instant::now();
-    let positioned = {
+    let positioned = if matches!(
+        request.output_format,
+        OutputFormat::Svg | OutputFormat::Html
+    ) {
         let _span = info_span!("layout").entered();
-        build_layout_with_config(&schema, &layout_request, &layout_config)?
+        Some(build_layout_from_graph_with_config(
+            graph.clone().expect("visual outputs require a graph"),
+            &layout_config,
+        )?)
+    } else {
+        None
     };
     let layout_time = layout_start.elapsed();
 
@@ -82,9 +90,20 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     let content = {
         let _span = info_span!("render", format = ?request.output_format).entered();
         match request.output_format {
-            OutputFormat::Svg => render_svg_output(&positioned, &stats, request.options),
-            OutputFormat::Html => render_html_output(&positioned, &graph, &stats, request.options)?,
-            OutputFormat::GraphJson => serde_json::to_string_pretty(&graph)?,
+            OutputFormat::Svg => render_svg_output(
+                positioned.as_ref().expect("svg output requires layout"),
+                &stats,
+                request.options,
+            ),
+            OutputFormat::Html => render_html_output(
+                positioned.as_ref().expect("html output requires layout"),
+                graph.as_ref().expect("html output requires graph"),
+                &stats,
+                request.options,
+            )?,
+            OutputFormat::GraphJson => {
+                serde_json::to_string_pretty(graph.as_ref().expect("graph json requires graph"))?
+            }
             OutputFormat::SchemaJson => {
                 let export = relune_core::export::export_schema(&schema);
                 serde_json::to_string_pretty(&export)?
