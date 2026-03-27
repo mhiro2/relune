@@ -46,8 +46,8 @@ pub mod model;
 
 // Re-exports for convenience
 pub use config::{
-    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm, LayoutDirection,
-    LayoutSpec,
+    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm, LayoutCompactionSpec,
+    LayoutDirection, LayoutSpec,
 };
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 pub use diff::{ChangeKind, SchemaDiff, diff_schemas};

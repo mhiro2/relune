@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{Level, debug, info, span, warn};
 
-use relune_core::{EdgeKind, LayoutAlgorithm, LayoutDirection, LayoutSpec, NodeKind, Schema};
+use relune_core::{
+    EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection, LayoutSpec, NodeKind, Schema,
+};
 
 use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
@@ -16,9 +18,6 @@ use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{route_edge, route_self_loop};
 use relune_core::layout::{EdgeRoute, RouteStyle};
-
-/// Default threshold for enabling compact mode automatically.
-pub const DEFAULT_LARGE_SCHEMA_THRESHOLD: usize = 50;
 
 /// Layout mode alias shared with `relune-core`.
 pub type LayoutMode = LayoutAlgorithm;
@@ -69,16 +68,15 @@ pub struct LayoutConfig {
     /// Whether to show column details in nodes.
     /// When false, only table names are displayed.
     pub show_columns: bool,
-    /// Threshold for automatic compact mode.
-    /// When the number of nodes exceeds this value, compact settings are applied.
-    /// Set to 0 to disable automatic compaction.
-    pub large_schema_threshold: usize,
     /// Layout mode (hierarchical or force-directed).
     #[serde(default)]
     pub mode: LayoutMode,
     /// Number of iterations for force-directed layout.
     #[serde(default = "default_force_iterations")]
     pub force_iterations: usize,
+    /// Automatic compaction settings for large schemas.
+    #[serde(default)]
+    pub compaction: LayoutCompactionSpec,
 }
 
 impl Default for LayoutConfig {
@@ -95,9 +93,9 @@ impl Default for LayoutConfig {
             direction: LayoutDirection::TopToBottom,
             edge_style: RouteStyle::Straight,
             show_columns: true,
-            large_schema_threshold: DEFAULT_LARGE_SCHEMA_THRESHOLD,
             mode: LayoutAlgorithm::default(),
             force_iterations: default_force_iterations(),
+            compaction: LayoutCompactionSpec::default(),
         }
     }
 }
@@ -126,6 +124,18 @@ impl LayoutConfig {
         if self.node_padding < 0.0 {
             self.node_padding = defaults.node_padding;
         }
+        if self.compaction.min_horizontal_spacing <= 0.0 {
+            self.compaction.min_horizontal_spacing = defaults.compaction.min_horizontal_spacing;
+        }
+        if self.compaction.min_vertical_spacing <= 0.0 {
+            self.compaction.min_vertical_spacing = defaults.compaction.min_vertical_spacing;
+        }
+        if self.compaction.min_node_width <= 0.0 {
+            self.compaction.min_node_width = defaults.compaction.min_node_width;
+        }
+        if self.compaction.min_node_padding < 0.0 {
+            self.compaction.min_node_padding = defaults.compaction.min_node_padding;
+        }
         self
     }
 }
@@ -139,6 +149,7 @@ impl From<&LayoutSpec> for LayoutConfig {
             vertical_spacing: spec.vertical_spacing,
             direction: spec.direction,
             force_iterations: spec.force_iterations,
+            compaction: spec.compaction.clone(),
             ..Default::default()
         }
         .validated()
@@ -163,23 +174,33 @@ pub struct CompactedConfig {
 impl LayoutConfig {
     /// Compute compacted configuration values based on the number of nodes.
     ///
-    /// When the node count exceeds `large_schema_threshold`, this method returns
+    /// When the node count exceeds `compaction.threshold`, this method returns
     /// reduced spacing and sizing values to create a more compact layout.
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn compute_compacted_config(&self, node_count: usize) -> CompactedConfig {
-        if self.large_schema_threshold > 0 && node_count > self.large_schema_threshold {
+        if self.compaction.threshold > 0 && node_count > self.compaction.threshold {
             // Calculate compaction factor based on how much we exceed the threshold
-            let excess_ratio = (node_count as f32 / self.large_schema_threshold as f32).min(2.0);
+            let excess_ratio = (node_count as f32 / self.compaction.threshold as f32).min(2.0);
             let compaction_factor = 1.0 / excess_ratio;
 
             // Apply compaction with minimum bounds to maintain readability
             CompactedConfig {
-                horizontal_spacing: (self.horizontal_spacing * compaction_factor).max(160.0),
-                vertical_spacing: (self.vertical_spacing * compaction_factor).max(80.0),
-                node_width: (self.node_width * compaction_factor).max(140.0),
-                node_padding: (self.node_padding * compaction_factor).max(4.0),
-                hide_columns: !self.show_columns || node_count > self.large_schema_threshold * 2,
+                horizontal_spacing: (self.horizontal_spacing * compaction_factor)
+                    .max(self.compaction.min_horizontal_spacing),
+                vertical_spacing: (self.vertical_spacing * compaction_factor)
+                    .max(self.compaction.min_vertical_spacing),
+                node_width: (self.node_width * compaction_factor)
+                    .max(self.compaction.min_node_width),
+                node_padding: (self.node_padding * compaction_factor)
+                    .max(self.compaction.min_node_padding),
+                hide_columns: !self.show_columns
+                    || (self.compaction.hide_columns_threshold_multiplier > 0
+                        && node_count
+                            > self
+                                .compaction
+                                .threshold
+                                .saturating_mul(self.compaction.hide_columns_threshold_multiplier)),
             }
         } else {
             CompactedConfig {
@@ -195,7 +216,7 @@ impl LayoutConfig {
     /// Check if compact mode should be enabled based on node count.
     #[must_use]
     pub const fn should_compact(&self, node_count: usize) -> bool {
-        self.large_schema_threshold > 0 && node_count > self.large_schema_threshold
+        self.compaction.threshold > 0 && node_count > self.compaction.threshold
     }
 }
 
@@ -361,7 +382,7 @@ pub fn build_layout_with_config(
         info!(
             "Large schema detected ({} nodes > {} threshold), applying compact mode",
             graph.nodes.len(),
-            config.large_schema_threshold
+            config.compaction.threshold
         );
         LayoutConfig {
             horizontal_spacing: compacted.horizontal_spacing,
@@ -1111,7 +1132,10 @@ fn position_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relune_core::{Column, ColumnId, ForeignKey, ReferentialAction, Table, TableId};
+    use relune_core::{
+        Column, ColumnId, ForeignKey, LayoutCompactionSpec, LayoutSpec, ReferentialAction, Table,
+        TableId,
+    };
 
     fn make_test_schema() -> Schema {
         Schema {
@@ -1314,6 +1338,69 @@ mod tests {
                     comment: None,
                 },
             ],
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    fn make_fully_connected_cycle_schema() -> Schema {
+        let table_names = ["accounts", "projects", "roles", "teams"];
+        let tables = table_names
+            .iter()
+            .enumerate()
+            .map(|(table_idx, table_name)| {
+                let columns = std::iter::once(Column {
+                    id: ColumnId((table_idx * 10 + 1) as u64),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                })
+                .chain(
+                    table_names
+                        .iter()
+                        .enumerate()
+                        .filter(move |(_, candidate)| *candidate != table_name)
+                        .map(|(target_idx, target_name)| Column {
+                            id: ColumnId((table_idx * 10 + target_idx + 2) as u64),
+                            name: format!("{target_name}_id"),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        }),
+                )
+                .collect();
+                let foreign_keys = table_names
+                    .iter()
+                    .filter(|candidate| *candidate != table_name)
+                    .map(|target_name| ForeignKey {
+                        name: Some(format!("fk_{table_name}_{target_name}")),
+                        from_columns: vec![format!("{target_name}_id")],
+                        to_schema: None,
+                        to_table: (*target_name).to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    })
+                    .collect();
+
+                Table {
+                    id: TableId((table_idx + 40) as u64),
+                    stable_id: (*table_name).to_string(),
+                    schema_name: None,
+                    name: (*table_name).to_string(),
+                    columns,
+                    foreign_keys,
+                    indexes: vec![],
+                    comment: None,
+                }
+            })
+            .collect();
+
+        Schema {
+            tables,
             views: vec![],
             enums: vec![],
         }
@@ -1561,6 +1648,61 @@ mod tests {
         assert!(!positioned.columns[0].is_indexed);
         assert!(positioned.columns[1].is_foreign_key);
         assert!(positioned.columns[1].is_indexed);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_compaction_respects_layout_spec_overrides() {
+        let spec = LayoutSpec {
+            horizontal_spacing: 320.0,
+            vertical_spacing: 180.0,
+            compaction: LayoutCompactionSpec {
+                threshold: 10,
+                min_horizontal_spacing: 220.0,
+                min_vertical_spacing: 120.0,
+                min_node_width: 180.0,
+                min_node_padding: 6.0,
+                hide_columns_threshold_multiplier: 3,
+            },
+            ..Default::default()
+        };
+
+        let config = LayoutConfig::from(&spec);
+        let compacted = config.compute_compacted_config(20);
+        assert_eq!(compacted.horizontal_spacing, 220.0);
+        assert_eq!(compacted.vertical_spacing, 120.0);
+        assert_eq!(compacted.node_width, 180.0);
+        assert_eq!(compacted.node_padding, 6.0);
+        assert!(!compacted.hide_columns);
+
+        let hidden_columns = config.compute_compacted_config(31);
+        assert!(hidden_columns.hide_columns);
+    }
+
+    #[test]
+    fn test_hierarchical_layout_handles_fully_connected_cycles() {
+        let schema = make_fully_connected_cycle_schema();
+        let layout_graph = LayoutGraphBuilder::new().build(&schema);
+        let ranks = assign_ranks(&layout_graph, RankAssignmentStrategy::LongestPath);
+        let ordered_nodes = order_nodes_within_layers(&layout_graph, &ranks);
+        let graph = build_layout(&schema).unwrap();
+
+        let ordered_node_count: usize = ordered_nodes.iter().map(Vec::len).sum();
+        assert_eq!(ordered_node_count, layout_graph.nodes.len());
+        assert_eq!(ranks.node_rank.len(), layout_graph.nodes.len());
+
+        assert_eq!(graph.nodes.len(), 4);
+        assert_eq!(graph.edges.len(), 12);
+
+        let node_ids: std::collections::BTreeSet<_> =
+            graph.nodes.iter().map(|node| node.id.as_str()).collect();
+        assert_eq!(node_ids.len(), 4);
+        for node in &graph.nodes {
+            assert!(node.x.is_finite());
+            assert!(node.y.is_finite());
+            assert!(node.width > 0.0);
+            assert!(node.height > 0.0);
+        }
     }
 
     fn make_empty_schema() -> Schema {

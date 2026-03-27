@@ -61,8 +61,8 @@ pub use usecases::lint::{format_lint_json, format_lint_text};
 
 // Re-export commonly used types from relune-core for convenience
 pub use relune_core::{
-    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm, LayoutDirection,
-    LayoutSpec, RouteStyle,
+    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm, LayoutCompactionSpec,
+    LayoutDirection, LayoutSpec, RouteStyle,
 };
 
 /// Returns whether live database introspection support is compiled in.
