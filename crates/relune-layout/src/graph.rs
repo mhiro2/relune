@@ -551,8 +551,8 @@ impl LayoutGraphBuilder {
 
                 for target_id in seen_targets {
                     edges.push(LayoutEdge {
-                        from: target_id,
-                        to: view.id.clone(),
+                        from: view.id.clone(),
+                        to: target_id,
                         name: Some("view dep".to_string()),
                         from_columns: vec![],
                         to_columns: vec![],
@@ -1023,8 +1023,8 @@ mod tests {
             edge.from == "users" && edge.to == "status" && edge.kind == EdgeKind::EnumReference
         }));
         assert!(graph.edges.iter().any(|edge| {
-            edge.from == "users"
-                && edge.to == "active_users"
+            edge.from == "active_users"
+                && edge.to == "users"
                 && edge.kind == EdgeKind::ViewDependency
         }));
     }

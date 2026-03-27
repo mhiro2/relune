@@ -1349,8 +1349,9 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(table_idx, table_name)| {
+                let base_id = u64::try_from(table_idx * 10).unwrap();
                 let columns = std::iter::once(Column {
-                    id: ColumnId((table_idx * 10 + 1) as u64),
+                    id: ColumnId(base_id + 1),
                     name: "id".to_string(),
                     data_type: "int".to_string(),
                     nullable: false,
@@ -1363,7 +1364,7 @@ mod tests {
                         .enumerate()
                         .filter(move |(_, candidate)| *candidate != table_name)
                         .map(|(target_idx, target_name)| Column {
-                            id: ColumnId((table_idx * 10 + target_idx + 2) as u64),
+                            id: ColumnId(base_id + u64::try_from(target_idx).unwrap() + 2),
                             name: format!("{target_name}_id"),
                             data_type: "int".to_string(),
                             nullable: false,
@@ -1387,7 +1388,7 @@ mod tests {
                     .collect();
 
                 Table {
-                    id: TableId((table_idx + 40) as u64),
+                    id: TableId(u64::try_from(table_idx).unwrap() + 40),
                     stable_id: (*table_name).to_string(),
                     schema_name: None,
                     name: (*table_name).to_string(),
