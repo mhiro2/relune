@@ -7,8 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use relune_core::{FocusSpec, Schema};
 use thiserror::Error;
+use tracing::debug;
 
-use crate::graph::{LayoutEdge, LayoutGraph, LayoutGraphBuilder, LayoutNode};
+use crate::graph::{LayoutGraph, LayoutGraphBuilder, LayoutNode};
 
 /// Error during focus extraction.
 #[derive(Debug, Error)]
@@ -128,22 +129,31 @@ impl FocusExtractor {
             .collect();
 
         // Filter edges to only those between included nodes
-        let edges: Vec<LayoutEdge> = graph
-            .edges
-            .iter()
-            .filter(|edge| {
-                let from_included = graph
-                    .node_index
-                    .get(&edge.from)
-                    .is_some_and(|&idx| included_indices.contains(&idx));
-                let to_included = graph
-                    .node_index
-                    .get(&edge.to)
-                    .is_some_and(|&idx| included_indices.contains(&idx));
-                from_included && to_included
-            })
-            .cloned()
-            .collect();
+        let mut edges = Vec::new();
+        for edge in &graph.edges {
+            let Some(&from_idx) = graph.node_index.get(&edge.from) else {
+                debug!(
+                    from = %edge.from,
+                    to = %edge.to,
+                    kind = ?edge.kind,
+                    "Skipping edge during focus extraction because the source node is missing"
+                );
+                continue;
+            };
+            let Some(&to_idx) = graph.node_index.get(&edge.to) else {
+                debug!(
+                    from = %edge.from,
+                    to = %edge.to,
+                    kind = ?edge.kind,
+                    "Skipping edge during focus extraction because the target node is missing"
+                );
+                continue;
+            };
+
+            if included_indices.contains(&from_idx) && included_indices.contains(&to_idx) {
+                edges.push(edge.clone());
+            }
+        }
 
         // Rebuild indices
         let mut node_index = BTreeMap::new();
@@ -318,5 +328,91 @@ mod tests {
 
         let result = extractor.extract(&graph, &focus);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_focused_graph_skips_dangling_edges() {
+        let extractor = FocusExtractor;
+        let graph = LayoutGraph {
+            nodes: vec![
+                LayoutNode {
+                    id: "users".to_string(),
+                    label: "users".to_string(),
+                    schema_name: None,
+                    table_name: "users".to_string(),
+                    kind: relune_core::NodeKind::Table,
+                    columns: vec![],
+                    inbound_count: 0,
+                    outbound_count: 0,
+                    has_self_loop: false,
+                    is_join_table_candidate: false,
+                    group_index: Some(1),
+                },
+                LayoutNode {
+                    id: "posts".to_string(),
+                    label: "posts".to_string(),
+                    schema_name: None,
+                    table_name: "posts".to_string(),
+                    kind: relune_core::NodeKind::Table,
+                    columns: vec![],
+                    inbound_count: 0,
+                    outbound_count: 0,
+                    has_self_loop: false,
+                    is_join_table_candidate: false,
+                    group_index: Some(2),
+                },
+            ],
+            edges: vec![
+                crate::LayoutEdge {
+                    from: "posts".to_string(),
+                    to: "users".to_string(),
+                    name: Some("fk_posts_users".to_string()),
+                    from_columns: vec!["user_id".to_string()],
+                    to_columns: vec!["id".to_string()],
+                    kind: relune_core::EdgeKind::ForeignKey,
+                    is_self_loop: false,
+                    nullable: false,
+                    is_collapsed_join: false,
+                    collapsed_join_table: None,
+                },
+                crate::LayoutEdge {
+                    from: "ghost".to_string(),
+                    to: "users".to_string(),
+                    name: Some("fk_ghost_users".to_string()),
+                    from_columns: vec!["ghost_id".to_string()],
+                    to_columns: vec!["id".to_string()],
+                    kind: relune_core::EdgeKind::ForeignKey,
+                    is_self_loop: false,
+                    nullable: false,
+                    is_collapsed_join: false,
+                    collapsed_join_table: None,
+                },
+            ],
+            groups: vec![],
+            node_index: BTreeMap::from([
+                ("users".to_string(), 0_usize),
+                ("posts".to_string(), 1_usize),
+            ]),
+            reverse_index: BTreeMap::from([
+                (0_usize, "users".to_string()),
+                (1_usize, "posts".to_string()),
+            ]),
+        };
+
+        let focused = extractor.build_focused_graph(&graph, &BTreeSet::from([0_usize, 1_usize]));
+
+        assert_eq!(focused.nodes.len(), 2);
+        assert_eq!(focused.edges.len(), 1);
+        assert_eq!(focused.edges[0].from, "posts");
+        assert_eq!(focused.edges[0].to, "users");
+        assert_eq!(focused.nodes[0].group_index, None);
+        assert_eq!(focused.nodes[1].group_index, None);
+        assert_eq!(
+            focused.node_index,
+            BTreeMap::from([
+                ("users".to_string(), 0_usize),
+                ("posts".to_string(), 1_usize),
+            ])
+        );
     }
 }
