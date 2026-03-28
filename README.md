@@ -78,6 +78,7 @@ Compare schema revisions and integrate with automation:
 
 - text diff output
 - JSON output for CI and tooling
+- SVG/HTML visual diff with color-coded overlays
 
 ### Multiple input sources
 
