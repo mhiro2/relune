@@ -3,7 +3,14 @@
 //! Embedded viewer scripts are generated from TypeScript in `ts/` into `src/js/` by `build.rs` (`pnpm run build`; outputs are gitignored).
 
 use crate::options::{HtmlRenderOptions, Theme};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use relune_render_theme::{escape_xml_text, get_colors};
+use std::sync::LazyLock;
+
+static FAVICON_DATA_URI: LazyLock<String> = LazyLock::new(|| {
+    let encoded = STANDARD.encode(include_bytes!("../assets/favicon.png"));
+    format!("data:image/png;base64,{encoded}")
+});
 
 /// Escape JSON content for safe embedding in a script tag.
 pub fn escape_json_for_script(json: &str) -> String {
@@ -107,7 +114,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title}</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230c0f1a'/%3E%3Cpath d='M16 18h18M16 32h32M16 46h22' stroke='%23f59e0b' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='18' r='6' fill='%232dd4bf'/%3E%3C/svg%3E">
+  <link rel="icon" href="{favicon_data_uri}">
   <style>
 {css}
   </style>
@@ -133,6 +140,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 </body>
 </html>"#,
         title = escape_xml_text(title),
+        favicon_data_uri = FAVICON_DATA_URI.as_str(),
         heading = heading.unwrap_or_default(),
         search_panel = search_panel.unwrap_or_default(),
         filter_reset_bar = filter_reset_bar.unwrap_or_default(),
@@ -1532,6 +1540,7 @@ mod tests {
         assert!(html.contains("</html>"));
         assert!(html.contains("<style>"));
         assert!(html.contains("</style>"));
+        assert!(html.contains(r#"<link rel="icon" href="data:image/png;base64,"#));
     }
 
     #[test]

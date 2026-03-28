@@ -23,6 +23,7 @@ rust-version = "1.94"
 
 [workspace.dependencies]
 anyhow = "1"
+base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 insta = { version = "1.43", features = ["json"] }
 petgraph = "0.8"
