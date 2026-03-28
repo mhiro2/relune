@@ -258,16 +258,27 @@ function metricCard(label: string, value: string): HTMLDivElement {
           name.className = 'detail-column-name';
           name.textContent = column.name;
 
-          const meta = document.createElement('span');
-          meta.className = 'detail-column-meta';
-          const flags = [];
-          if (column.is_primary_key) {
-            flags.push('PK');
-          }
-          flags.push(column.nullable ? 'nullable' : 'required');
-          meta.textContent = `${column.data_type || 'type unknown'} · ${flags.join(' · ')}`;
+          const pills = document.createElement('span');
+          pills.className = 'detail-column-pills';
 
-          columnEl.append(name, meta);
+          if (column.is_primary_key) {
+            const pk = document.createElement('span');
+            pk.className = 'detail-column-pill detail-column-pill-pk';
+            pk.textContent = 'PK';
+            pills.appendChild(pk);
+          }
+
+          const typePill = document.createElement('span');
+          typePill.className = 'detail-column-pill';
+          typePill.textContent = column.data_type || 'unknown';
+          pills.appendChild(typePill);
+
+          const nullPill = document.createElement('span');
+          nullPill.className = `detail-column-pill ${column.nullable ? 'detail-column-pill-nullable' : 'detail-column-pill-required'}`;
+          nullPill.textContent = column.nullable ? 'nullable' : 'required';
+          pills.appendChild(nullPill);
+
+          columnEl.append(name, pills);
           drawerColumns.appendChild(columnEl);
         }
       }

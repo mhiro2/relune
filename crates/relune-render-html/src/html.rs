@@ -1023,16 +1023,22 @@ fn build_css(
 
     .detail-columns,
     .detail-relations {
-      display: grid;
-      gap: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .detail-columns .detail-column {
+      flex: 1 1 100%;
     }
 
     .detail-column,
     .detail-relation {
       border: 1px solid rgba(148, 163, 184, 0.12);
       border-radius: 12px;
-      padding: 10px 12px;
+      padding: 8px 12px;
       background: rgba(148, 163, 184, 0.05);
+      transition: border-color 0.15s, background-color 0.15s;
     }
 
     .detail-relation:hover {
@@ -1045,13 +1051,45 @@ fn build_css(
       display: block;
       font-family: var(--mono-font);
       font-size: 13px;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
+    }
+
+    .detail-column-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .detail-column-pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      background: rgba(148, 163, 184, 0.12);
+      opacity: 0.78;
+    }
+
+    .detail-column-pill-pk {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--accent-color);
+      opacity: 1;
+    }
+
+    .detail-column-pill-required {
+      opacity: 0.56;
+    }
+
+    .detail-column-pill-nullable {
+      opacity: 0.56;
     }
 
     .detail-column-meta,
     .detail-relation-meta {
-      font-size: 12px;
-      opacity: 0.72;
+      font-size: 11px;
+      opacity: 0.65;
+      letter-spacing: 0.01em;
     }
 
     .detail-relation-meta {
@@ -2019,6 +2057,15 @@ mod tests {
         assert!(!html.contains("clearHighlights"));
         assert!(!html.contains("inboundMap"));
         assert!(!html.contains("outboundMap"));
+    }
+
+    #[test]
+    fn test_detail_drawer_pill_css() {
+        let css = build_css(Theme::Dark, false, false, false, false, true);
+
+        assert!(css.contains(".detail-column-pills"));
+        assert!(css.contains(".detail-column-pill"));
+        assert!(css.contains(".detail-column-pill-pk"));
     }
 
     #[test]
