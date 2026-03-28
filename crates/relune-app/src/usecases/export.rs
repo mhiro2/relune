@@ -29,12 +29,26 @@ fn graph_for_export(request: &ExportRequest, schema: &Schema) -> Result<LayoutGr
     Ok(graph)
 }
 
+const fn export_format_uses_graph(format: ExportFormat) -> bool {
+    matches!(
+        format,
+        ExportFormat::GraphJson
+            | ExportFormat::LayoutJson
+            | ExportFormat::Mermaid
+            | ExportFormat::D2
+            | ExportFormat::Dot
+    )
+}
+
 /// Execute an export request.
 #[allow(clippy::needless_pass_by_value)] // Owned request matches other usecases and CLI call sites.
 pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
     // Parse input
     let (schema, diagnostics) = schema_from_input(&request.input)?;
     let stats = schema.stats();
+    let mut graph = export_format_uses_graph(request.format)
+        .then(|| graph_for_export(&request, &schema))
+        .transpose()?;
 
     // Build content based on format
     let content = match request.format {
@@ -43,18 +57,21 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
             serde_json::to_string_pretty(&export)?
         }
         ExportFormat::GraphJson => {
-            let graph = graph_for_export(&request, &schema)?;
-            serde_json::to_string_pretty(&graph)?
+            serde_json::to_string_pretty(graph.as_ref().expect("graph json requires graph"))?
         }
         ExportFormat::LayoutJson => {
-            let graph = graph_for_export(&request, &schema)?;
             let config = LayoutConfig::from(&request.layout);
-            let positioned = build_layout_from_graph_with_config(graph, &config)?;
+            let positioned = build_layout_from_graph_with_config(
+                graph.take().expect("layout json requires graph"),
+                &config,
+            )?;
             serde_json::to_string_pretty(&positioned)?
         }
-        ExportFormat::Mermaid => layout_graph_to_mermaid(&graph_for_export(&request, &schema)?),
-        ExportFormat::D2 => layout_graph_to_d2(&graph_for_export(&request, &schema)?),
-        ExportFormat::Dot => layout_graph_to_dot(&graph_for_export(&request, &schema)?),
+        ExportFormat::Mermaid => {
+            layout_graph_to_mermaid(graph.as_ref().expect("mermaid requires graph"))
+        }
+        ExportFormat::D2 => layout_graph_to_d2(graph.as_ref().expect("d2 requires graph")),
+        ExportFormat::Dot => layout_graph_to_dot(graph.as_ref().expect("dot requires graph")),
     };
 
     Ok(ExportResult {
@@ -68,7 +85,17 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
 mod tests {
     use super::*;
     use crate::request::InputSource;
-    use relune_core::{FilterSpec, LayoutAlgorithm, LayoutSpec, RouteStyle};
+    use relune_core::{FilterSpec, FocusSpec, LayoutAlgorithm, LayoutSpec, RouteStyle};
+
+    fn graph_table_names(content: &str) -> std::collections::BTreeSet<String> {
+        let graph: serde_json::Value = serde_json::from_str(content).unwrap();
+        graph["nodes"]
+            .as_array()
+            .expect("nodes array")
+            .iter()
+            .map(|node| node["table_name"].as_str().expect("table_name").to_string())
+            .collect()
+    }
 
     #[test]
     fn test_export_schema_json() {
@@ -98,15 +125,47 @@ mod tests {
                 id INT PRIMARY KEY,
                 user_id INT REFERENCES users(id)
             );
+            CREATE TABLE comments (
+                id INT PRIMARY KEY,
+                post_id INT REFERENCES posts(id)
+            );
         ";
 
-        let request = ExportRequest::from_sql(sql).with_format(ExportFormat::GraphJson);
+        let request = ExportRequest::from_sql(sql)
+            .with_format(ExportFormat::GraphJson)
+            .with_focus(FocusSpec {
+                table: "posts".to_string(),
+                depth: 1,
+            });
 
         let result = export(request).unwrap();
+        let graph: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        let nodes = graph["nodes"].as_array().expect("nodes array");
+        let node_ids = nodes
+            .iter()
+            .map(|node| node["table_name"].as_str().expect("table_name").to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        let edges = graph["edges"].as_array().expect("edges array");
+        let edge_ids = edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge["from"].as_str().expect("from").to_string(),
+                    edge["to"].as_str().expect("to").to_string(),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_nodes = ["comments", "posts", "users"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_edges = [("comments", "posts"), ("posts", "users")]
+            .into_iter()
+            .map(|(from, to)| (from.to_string(), to.to_string()))
+            .collect::<std::collections::BTreeSet<_>>();
 
-        assert!(result.content.contains("\"nodes\""));
-        assert!(result.content.contains("\"edges\""));
-        assert_eq!(result.stats.table_count, 2);
+        assert_eq!(node_ids, expected_nodes);
+        assert_eq!(edge_ids, expected_edges);
     }
 
     #[test]
@@ -179,8 +238,6 @@ mod tests {
 
     #[test]
     fn test_export_with_filter() {
-        // Note: Filter is applied during graph building, not during schema export
-        // For schema export, all tables are exported; filter affects graph-based exports
         let sql = r"
             CREATE TABLE users (
                 id INT PRIMARY KEY
@@ -199,15 +256,13 @@ mod tests {
         };
 
         let request = ExportRequest::from_sql(sql)
-            .with_format(ExportFormat::SchemaJson)
+            .with_format(ExportFormat::GraphJson)
             .with_filter(filter);
 
         let result = export(request).unwrap();
+        let table_names = graph_table_names(&result.content);
 
-        // Export should succeed
-        assert!(result.content.contains("users"));
-        // Schema export includes all tables; filter affects graph exports
-        assert!(result.stats.table_count >= 1);
+        assert_eq!(table_names, std::iter::once("users".to_string()).collect());
     }
 
     #[test]
