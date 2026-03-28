@@ -815,4 +815,47 @@ mod tests {
         let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
         assert!(overlay.is_empty());
     }
+
+    #[test]
+    fn test_diff_render_svg() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));\nCREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id));";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        assert!(result.rendered.is_some());
+        let svg = result.rendered.unwrap();
+        assert!(svg.contains("<svg"));
+        // Added table should have overlay-info class
+        assert!(svg.contains("overlay-info"));
+        // Modified table should have overlay-warning class
+        assert!(svg.contains("overlay-warning"));
+    }
+
+    #[test]
+    fn test_diff_render_html() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Html,
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        assert!(result.rendered.is_some());
+        let html = result.rendered.unwrap();
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("overlay-warning"));
+        // Metadata should include diff issues
+        assert!(html.contains("diff-modified"));
+    }
 }
