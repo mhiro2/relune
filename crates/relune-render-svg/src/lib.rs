@@ -257,13 +257,15 @@ fn render_node_internal(
         r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="36" rx="16" ry="16" fill="{}"/>"#,
         node.x, node.y, node.width, node_style.header_fill
     );
+    // Gradient transition from header to body — eliminates the hard underlay band
     let _ = write!(
         out,
-        r#"<rect class="table-header-underlay" x="{:.1}" y="{:.1}" width="{:.1}" height="18" fill="{}" fill-opacity="0.28"/>"#,
+        r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="20" fill="url(#header-fade-{index})"/>"#,
+        node_style.header_fill,
+        node_style.header_fill,
         node.x,
-        node.y + 18.0,
-        node.width,
-        node_style.header_fill
+        node.y + 16.0,
+        node.width
     );
     let _ = write!(
         out,
