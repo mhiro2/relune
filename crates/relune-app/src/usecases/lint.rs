@@ -280,6 +280,7 @@ mod tests {
                 Severity::Warning,
                 "Table 'test' has no primary key",
             )
+            .with_table_id("test")
             .with_table("test")
             .with_hint("Add a primary key"),
         );

@@ -122,7 +122,13 @@ pub struct LintIssue {
     pub severity: Severity,
     /// Human-readable message describing the issue.
     pub message: String,
-    /// The table name where the issue was found, if applicable.
+    /// Stable table identifier for programmatic use (matches `Table::stable_id`).
+    ///
+    /// Renderers and overlay builders use this to map lint issues to diagram nodes
+    /// without ambiguity, even in multi-schema environments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_id: Option<String>,
+    /// Human-readable table name for display (e.g., CLI output).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table_name: Option<String>,
     /// The column name where the issue was found, if applicable.
@@ -141,13 +147,21 @@ impl LintIssue {
             rule_id,
             severity,
             message: message.into(),
+            table_id: None,
             table_name: None,
             column_name: None,
             hint: None,
         }
     }
 
-    /// Adds a table name to the issue.
+    /// Sets the stable table identifier (matches `Table::stable_id`).
+    #[must_use]
+    pub fn with_table_id(mut self, table_id: impl Into<String>) -> Self {
+        self.table_id = Some(table_id.into());
+        self
+    }
+
+    /// Sets the human-readable table name for display.
     #[must_use]
     pub fn with_table(mut self, table_name: impl Into<String>) -> Self {
         self.table_name = Some(table_name.into());
@@ -255,7 +269,7 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
         check_foreign_key_indexes_nullable_and_target(schema, table, &mut result);
     }
 
-    // Sort issues by severity (errors first) then by table name.
+    // Sort issues by severity (errors first) then by table identifier.
     result.issues.sort_by(|a, b| {
         let severity_order = |s: &Severity| match s {
             Severity::Error => 0,
@@ -265,7 +279,7 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
         };
         severity_order(&a.severity)
             .cmp(&severity_order(&b.severity))
-            .then_with(|| a.table_name.cmp(&b.table_name))
+            .then_with(|| a.table_id.cmp(&b.table_id))
             .then_with(|| a.column_name.cmp(&b.column_name))
             .then_with(|| a.rule_id.as_str().cmp(b.rule_id.as_str()))
     });
@@ -314,9 +328,13 @@ fn check_no_primary_key(table: &Table, result: &mut LintResult) {
             LintIssue::new(
                 LintRuleId::NoPrimaryKey,
                 LintRuleId::NoPrimaryKey.default_severity(),
-                format!("Table '{}' has no primary key defined", table.name),
+                format!(
+                    "Table '{}' has no primary key defined",
+                    table.qualified_name()
+                ),
             )
-            .with_table(&table.name)
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name())
             .with_hint("Consider adding a primary key column (e.g., 'id') or a unique index"),
         );
     }
@@ -341,8 +359,12 @@ fn check_orphan_table(
             LintIssue::new(
                 LintRuleId::OrphanTable,
                 LintRuleId::OrphanTable.default_severity(),
-                format!("Table '{}' has no foreign key relationships", table.name),
+                format!(
+                    "Table '{}' has no foreign key relationships",
+                    table.qualified_name()
+                ),
             )
+            .with_table_id(&table.stable_id)
             .with_table(table.qualified_name())
             .with_hint("Consider if this table should reference or be referenced by other tables"),
         );
@@ -372,13 +394,14 @@ fn check_too_many_nullable(table: &Table, result: &mut LintResult) {
                 LintRuleId::TooManyNullable.default_severity(),
                 format!(
                     "Table '{}' has {}/{} ({}%) nullable columns",
-                    table.name,
+                    table.qualified_name(),
                     nullable_count,
                     total_columns,
                     (nullable_count * 100) / total_columns
                 ),
             )
-            .with_table(&table.name)
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name())
             .with_hint(format!(
                 "Nullable columns: {}. Consider making frequently used columns NOT NULL",
                 nullable_columns.join(", ")
@@ -414,10 +437,11 @@ fn check_suspicious_join_table(table: &Table, result: &mut LintResult) {
                 LintRuleId::SuspiciousJoinTable.default_severity(),
                 format!(
                     "Table '{}' appears to be a join table but has no foreign keys",
-                    table.name
+                    table.qualified_name()
                 ),
             )
-            .with_table(&table.name)
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name())
             .with_hint("Join tables should have foreign keys to the tables they connect"),
         );
     } else if fk_count == 1 {
@@ -427,10 +451,11 @@ fn check_suspicious_join_table(table: &Table, result: &mut LintResult) {
                 LintRuleId::SuspiciousJoinTable.default_severity(),
                 format!(
                     "Table '{}' appears to be a join table but only has 1 foreign key",
-                    table.name
+                    table.qualified_name()
                 ),
             )
-            .with_table(&table.name)
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name())
             .with_hint("Join tables typically have 2 foreign keys for many-to-many relationships"),
         );
     } else if fk_count > 2 {
@@ -449,12 +474,13 @@ fn check_suspicious_join_table(table: &Table, result: &mut LintResult) {
                     LintRuleId::SuspiciousJoinTable.default_severity(),
                     format!(
                         "Table '{}' has {} foreign keys to {} different table(s)",
-                        table.name,
+                        table.qualified_name(),
                         fk_count,
                         target_tables.len()
                     ),
                 )
-                .with_table(&table.name)
+                .with_table_id(&table.stable_id)
+                .with_table(table.qualified_name())
                 .with_hint("Review if multiple FKs to the same table are intentional"),
             );
         }
@@ -504,12 +530,13 @@ fn check_duplicated_fk_pattern(table: &Table, result: &mut LintResult) {
                     LintRuleId::DuplicatedFkPattern.default_severity(),
                     format!(
                         "Table '{}' has {} foreign keys to table '{}'",
-                        table.name,
+                        table.qualified_name(),
                         fks.len(),
                         target_table
                     ),
                 )
-                .with_table(&table.name)
+                .with_table_id(&table.stable_id)
+                .with_table(table.qualified_name())
                 .with_hint(format!(
                     "FKs: {}. This may indicate a design pattern or potential consolidation",
                     fk_names.join("; ")
@@ -621,12 +648,13 @@ fn check_foreign_key_index_coverage(table: &Table, fk: &ForeignKey, result: &mut
             LintRuleId::MissingForeignKeyIndex.default_severity(),
             format!(
                 "Foreign key on table '{}' ({}) has no index whose leading columns match {:?}",
-                table.name,
+                table.qualified_name(),
                 fk_labels_for_message(fk),
                 fk.from_columns
             ),
         )
-        .with_table(&table.name)
+        .with_table_id(&table.stable_id)
+        .with_table(table.qualified_name())
         .with_hint(
             "Add an index starting with the FK columns (same order) to speed joins and cascades",
         ),
@@ -660,11 +688,12 @@ fn check_nullable_foreign_key_lazy_load(
             LintRuleId::NullableForeignKeyLazyLoad.default_severity(),
             format!(
                 "Foreign key on table '{}' ({}) includes nullable column(s); optional relations often trigger per-row lookups (N+1) in ORMs",
-                table.name,
+                table.qualified_name(),
                 fk_labels_for_message(fk)
             ),
         )
-        .with_table(&table.name)
+        .with_table_id(&table.stable_id)
+        .with_table(table.qualified_name())
         .with_hint(
             "Use eager loading, joins, or dataloader patterns; consider NOT NULL if the relation is required",
         ),
@@ -695,12 +724,13 @@ fn check_foreign_key_target_uniqueness(
             LintRuleId::ForeignKeyNonUniqueTarget.default_severity(),
             format!(
                 "Foreign key on table '{}' ({}) references columns on '{}' that are not the full primary key or a unique index",
-                table.name,
+                table.qualified_name(),
                 fk_labels_for_message(fk),
-                ref_table.name
+                ref_table.qualified_name()
             ),
         )
-        .with_table(&table.name)
+        .with_table_id(&table.stable_id)
+        .with_table(table.qualified_name())
         .with_hint(
             "Point the FK at the referenced table primary key or a unique constraint with matching column order",
         ),
@@ -716,10 +746,11 @@ fn check_non_snake_case_identifiers(table: &Table, result: &mut LintResult) {
                 LintRuleId::NonSnakeCaseIdentifier.default_severity(),
                 format!(
                     "Table name '{}' should use snake_case (lowercase ASCII letters, digits, underscores)",
-                    table.name
+                    table.qualified_name()
                 ),
             )
-            .with_table(&table.name)
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name())
             .with_hint("Example: rename to `user_accounts` instead of `UserAccounts`"),
         );
     }
@@ -731,10 +762,11 @@ fn check_non_snake_case_identifiers(table: &Table, result: &mut LintResult) {
                     LintRuleId::NonSnakeCaseIdentifier.default_severity(),
                     format!(
                         "Column '{}' on table '{}' should use snake_case (lowercase ASCII letters, digits, underscores)",
-                        col.name, table.name
+                        col.name, table.qualified_name()
                     ),
                 )
-                .with_table(&table.name)
+                .with_table_id(&table.stable_id)
+                .with_table(table.qualified_name())
                 .with_column(&col.name),
             );
         }
@@ -1026,11 +1058,13 @@ mod tests {
     #[test]
     fn test_lint_issue_with_options() {
         let issue = LintIssue::new(LintRuleId::NoPrimaryKey, Severity::Warning, "Test message")
-            .with_table("users")
+            .with_table_id("public.users")
+            .with_table("public.users")
             .with_column("id")
             .with_hint("Add a primary key");
 
-        assert_eq!(issue.table_name, Some("users".to_string()));
+        assert_eq!(issue.table_id, Some("public.users".to_string()));
+        assert_eq!(issue.table_name, Some("public.users".to_string()));
         assert_eq!(issue.column_name, Some("id".to_string()));
         assert_eq!(issue.hint, Some("Add a primary key".to_string()));
     }
@@ -1185,14 +1219,14 @@ mod tests {
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::OrphanTable
-                    && i.table_name == Some("public.users".to_string()))
+                    && i.table_id == Some("public.users".to_string()))
         );
         assert!(
             !result
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::OrphanTable
-                    && i.table_name == Some("auth.users".to_string()))
+                    && i.table_id == Some("auth.users".to_string()))
         );
     }
 
@@ -1326,6 +1360,88 @@ mod tests {
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
         );
+    }
+
+    #[test]
+    fn test_multi_schema_table_id_uniqueness() {
+        // Two tables with the same name in different schemas must produce
+        // distinct table_id values so overlay mapping is unambiguous.
+        let public_users = create_test_table_with_schema(
+            Some("public"),
+            "users",
+            vec![
+                create_column("name", false, false),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let auth_users = create_test_table_with_schema(
+            Some("auth"),
+            "users",
+            vec![
+                create_column("name", false, false),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+
+        let result = lint_schema(&Schema {
+            tables: vec![public_users, auth_users],
+            ..Schema::default()
+        });
+
+        // Both tables should have NoPrimaryKey issues with distinct table_ids
+        let no_pk_issues: Vec<_> = result
+            .issues
+            .iter()
+            .filter(|i| i.rule_id == LintRuleId::NoPrimaryKey)
+            .collect();
+        assert_eq!(no_pk_issues.len(), 2);
+
+        let table_ids: HashSet<_> = no_pk_issues
+            .iter()
+            .filter_map(|i| i.table_id.as_deref())
+            .collect();
+        assert_eq!(table_ids.len(), 2, "table_id must be unique across schemas");
+        assert!(table_ids.contains("public.users"));
+        assert!(table_ids.contains("auth.users"));
+
+        // table_name should also be schema-qualified for display
+        assert!(
+            no_pk_issues
+                .iter()
+                .all(|i| i.table_name.as_deref().is_some_and(|n| n.contains('.')))
+        );
+    }
+
+    #[test]
+    fn test_table_id_set_on_all_issues() {
+        // Every issue produced by lint_schema should have a table_id set.
+        let table = create_test_table(
+            "UserAccounts",
+            vec![
+                create_column("Name", true, false),
+                create_column("Email", true, false),
+                create_column("Bio", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let result = lint_schema(&Schema {
+            tables: vec![table],
+            ..Schema::default()
+        });
+
+        assert!(!result.issues.is_empty());
+        for issue in &result.issues {
+            assert!(
+                issue.table_id.is_some(),
+                "issue {:?} should have table_id set",
+                issue.rule_id
+            );
+        }
     }
 
     #[test]
