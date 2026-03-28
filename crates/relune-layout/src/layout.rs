@@ -17,7 +17,7 @@ use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
 use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
-use crate::route::{route_edge_with_offset, route_self_loop_with_offset};
+use crate::route::{Rect, nudge_label, route_edge_with_offset, route_self_loop_with_offset};
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
 /// Layout mode alias shared with `relune-core`.
@@ -1079,7 +1079,24 @@ fn route_edges(
             }
         });
 
-        let (label_x, label_y) = route.label_position;
+        // Nudge label away from overlapping nodes (Task 23: label collision avoidance).
+        let obstacles: Vec<Rect> = positioned_nodes
+            .iter()
+            .filter(|n| n.id != edge.from && n.id != edge.to)
+            .map(|n| Rect {
+                x: n.x,
+                y: n.y,
+                w: n.width,
+                h: n.height,
+            })
+            .collect();
+        let (label_x, label_y) = nudge_label(
+            route.label_position,
+            (route.x1, route.y1),
+            (route.x2, route.y2),
+            &obstacles,
+            4.0,
+        );
 
         edges.push(PositionedEdge {
             from: edge.from.clone(),

@@ -388,6 +388,74 @@ impl AttachmentSide {
     }
 }
 
+/// A rectangle representing an obstacle on the canvas (typically a node).
+#[derive(Debug, Clone, Copy)]
+pub struct Rect {
+    /// Left edge X coordinate.
+    pub x: f32,
+    /// Top edge Y coordinate.
+    pub y: f32,
+    /// Width.
+    pub w: f32,
+    /// Height.
+    pub h: f32,
+}
+
+/// Nudge a label position so it does not overlap any of the given rectangles.
+///
+/// The label is shifted outward along the perpendicular to the edge direction
+/// until it clears all obstacles by at least `margin` pixels.
+#[must_use]
+pub fn nudge_label(
+    label: (f32, f32),
+    edge_start: (f32, f32),
+    edge_end: (f32, f32),
+    obstacles: &[Rect],
+    margin: f32,
+) -> (f32, f32) {
+    // Estimated label bounding box (half-sizes).
+    let label_half_w = 40.0;
+    let label_half_h = 10.0;
+
+    let overlaps = |lx: f32, ly: f32| -> bool {
+        obstacles.iter().any(|r| {
+            lx + label_half_w + margin > r.x
+                && lx - label_half_w - margin < r.x + r.w
+                && ly + label_half_h + margin > r.y
+                && ly - label_half_h - margin < r.y + r.h
+        })
+    };
+
+    if !overlaps(label.0, label.1) {
+        return label;
+    }
+
+    // Perpendicular direction to the edge vector.
+    let dx = edge_end.0 - edge_start.0;
+    let dy = edge_end.1 - edge_start.1;
+    let len = dx.hypot(dy).max(1.0);
+    // Normal: rotate 90 degrees.
+    let nx = -dy / len;
+    let ny = dx / len;
+
+    // Try shifting in both perpendicular directions with increasing step.
+    #[allow(clippy::cast_precision_loss)]
+    for step in 1..=8_i32 {
+        let offset = step as f32 * 12.0;
+        let candidate_pos = (label.0 + nx * offset, label.1 + ny * offset);
+        if !overlaps(candidate_pos.0, candidate_pos.1) {
+            return candidate_pos;
+        }
+        let candidate_neg = (label.0 - nx * offset, label.1 - ny * offset);
+        if !overlaps(candidate_neg.0, candidate_neg.1) {
+            return candidate_neg;
+        }
+    }
+
+    // Fallback: return original position.
+    label
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,6 +702,43 @@ mod tests {
 
         assert!(offset.control_points[0].0 > base.control_points[0].0);
         assert!(offset.label_position.0 > base.label_position.0);
+    }
+
+    #[test]
+    fn test_nudge_label_no_overlap_returns_original() {
+        let label = (150.0, 75.0);
+        let obstacles = vec![Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        }];
+        let result = nudge_label(label, (100.0, 25.0), (200.0, 125.0), &obstacles, 4.0);
+        assert!((result.0 - label.0).abs() < 0.001);
+        assert!((result.1 - label.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_nudge_label_overlapping_is_moved_away() {
+        // Label sits right on top of a node
+        let label = (50.0, 25.0);
+        let obstacles = vec![Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        }];
+        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &obstacles, 4.0);
+        // Should have moved away from the obstacle
+        assert!((result.0 - label.0).abs() > 0.001 || (result.1 - label.1).abs() > 0.001);
+    }
+
+    #[test]
+    fn test_nudge_label_empty_obstacles() {
+        let label = (50.0, 25.0);
+        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &[], 4.0);
+        assert!((result.0 - label.0).abs() < 0.001);
+        assert!((result.1 - label.1).abs() < 0.001);
     }
 
     #[test]
