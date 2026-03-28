@@ -899,24 +899,29 @@ fn build_css(
       width: 100%;
       height: 150px;
       cursor: pointer;
+      background: rgba(148, 163, 184, 0.04);
     }
 
     .minimap-node {
-      fill: rgba(148, 163, 184, 0.46);
-      stroke: rgba(148, 163, 184, 0.7);
-      stroke-width: 0.4;
+      fill: rgba(148, 163, 184, 0.58);
+      stroke: rgba(148, 163, 184, 0.82);
+      stroke-width: 0.6;
       rx: 2;
+      transition: fill 0.15s, stroke 0.15s;
     }
 
     .minimap-node.selected {
-      fill: rgba(245, 158, 11, 0.72);
-      stroke: rgba(245, 158, 11, 1);
+      fill: var(--accent-color);
+      stroke: var(--accent-color);
+      filter: drop-shadow(0 0 3px var(--accent-soft));
     }
 
     .minimap-frame {
-      fill: rgba(245, 158, 11, 0.14);
-      stroke: rgba(245, 158, 11, 0.88);
-      stroke-width: 1.4;
+      fill: rgba(245, 158, 11, 0.1);
+      stroke: var(--accent-color);
+      stroke-width: 1.8;
+      stroke-dasharray: 4 2;
+      rx: 2;
     }
 
     .detail-drawer {
@@ -2078,5 +2083,15 @@ mod tests {
         assert!(css.contains(".detail-drawer"));
         // minimap-shell should use 22px, not 18px
         assert!(!css.contains("border-radius: 18px"));
+    }
+
+    #[test]
+    fn test_minimap_enhanced_visibility() {
+        let css = build_css(Theme::Dark, false, true, false, false, true);
+
+        assert!(css.contains(".minimap-node.selected"));
+        assert!(css.contains("drop-shadow"));
+        assert!(css.contains("stroke-dasharray"));
+        assert!(css.contains(".minimap-frame"));
     }
 }
