@@ -1,5 +1,6 @@
 //! Lint use case implementation.
 
+use std::collections::HashSet;
 use std::fmt::Write;
 
 use crate::error::AppError;
@@ -19,11 +20,7 @@ pub fn lint(request: LintRequest) -> Result<LintResult, AppError> {
 
     // Filter by rules if specified
     if !request.rules.is_empty() {
-        let rules: Vec<LintRuleId> = request
-            .rules
-            .iter()
-            .filter_map(|r| parse_rule_id(r))
-            .collect();
+        let rules = parse_rule_ids(&request.rules)?;
         lint_result
             .issues
             .retain(|issue| rules.contains(&issue.rule_id));
@@ -124,6 +121,30 @@ fn parse_rule_id(s: &str) -> Option<LintRuleId> {
     }
 }
 
+/// Parse and validate requested rule IDs.
+fn parse_rule_ids(rule_ids: &[String]) -> Result<HashSet<LintRuleId>, AppError> {
+    let mut parsed = HashSet::with_capacity(rule_ids.len());
+    let mut invalid = Vec::new();
+
+    for rule_id in rule_ids {
+        match parse_rule_id(rule_id) {
+            Some(parsed_rule) => {
+                parsed.insert(parsed_rule);
+            }
+            None => invalid.push(rule_id.clone()),
+        }
+    }
+
+    if invalid.is_empty() {
+        Ok(parsed)
+    } else {
+        Err(AppError::input(format!(
+            "Unknown lint rule id(s): {}",
+            invalid.join(", ")
+        )))
+    }
+}
+
 /// Calculate stats from issues.
 fn calculate_stats(issues: &[LintIssue]) -> relune_core::LintStats {
     let mut stats = relune_core::LintStats::default();
@@ -152,6 +173,7 @@ const fn format_severity(severity: Severity) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AppError;
 
     #[test]
     fn test_lint_no_issues() {
@@ -170,13 +192,10 @@ mod tests {
         let request = LintRequest::from_sql(sql);
         let result = lint(request).unwrap();
 
-        // Should not have no-primary-key or orphan-table issues
-        assert!(
-            !result
-                .issues
-                .iter()
-                .any(|i| i.rule_id == LintRuleId::NoPrimaryKey)
-        );
+        assert!(result.issues.is_empty());
+        assert_eq!(result.stats.total, 0);
+        assert_eq!(result.stats.errors, 0);
+        assert_eq!(result.stats.warnings, 0);
     }
 
     #[test]
@@ -217,6 +236,27 @@ mod tests {
                 .iter()
                 .all(|i| i.rule_id == LintRuleId::OrphanTable)
         );
+    }
+
+    #[test]
+    fn test_lint_rejects_unknown_rule_ids() {
+        let sql = r"
+            CREATE TABLE users (
+                id INT PRIMARY KEY
+            );
+        ";
+
+        let request =
+            LintRequest::from_sql(sql).with_rules(vec!["definitely-not-a-rule".to_string()]);
+        let err = lint(request).expect_err("unknown rule ids should be rejected");
+
+        match err {
+            AppError::Input(message) => {
+                assert!(message.contains("Unknown lint rule id"));
+                assert!(message.contains("definitely-not-a-rule"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

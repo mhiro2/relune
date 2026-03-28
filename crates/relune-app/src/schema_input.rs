@@ -126,6 +126,7 @@ pub async fn schema_from_db_url_async(url: &str) -> Result<Schema, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AppError;
     use crate::request::InputSource;
 
     #[test]
@@ -133,6 +134,20 @@ mod tests {
         let input = InputSource::sql_text("CREATE TABLE t (id INT PRIMARY KEY);");
         let (schema, _diagnostics) = schema_from_input(&input).expect("schema");
         assert_eq!(schema.tables.len(), 1);
+    }
+
+    #[test]
+    fn rejects_invalid_sql_text() {
+        let input = InputSource::sql_text("THIS IS NOT VALID SQL");
+        let err = schema_from_input(&input).expect_err("invalid SQL should fail");
+        assert!(matches!(err, AppError::Input(_) | AppError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_malformed_schema_json() {
+        let input = InputSource::schema_json("{\"tables\":");
+        let err = schema_from_input(&input).expect_err("malformed JSON should fail");
+        assert!(matches!(err, AppError::Json(_)));
     }
 
     #[test]
