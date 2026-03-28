@@ -825,7 +825,10 @@ fn build_css(
     }
 
     .viewer-control-button {
-      min-width: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 36px;
       height: 34px;
       border: 1px solid var(--panel-border);
       background: transparent;
@@ -836,8 +839,14 @@ fn build_css(
       transition: transform 0.16s, border-color 0.16s, background-color 0.16s;
     }
 
+    .viewer-control-button svg {
+      width: 16px;
+      height: 16px;
+      pointer-events: none;
+    }
+
     .viewer-control-fit {
-      min-width: 56px;
+      min-width: 36px;
     }
 
     .viewer-control-status {
@@ -1439,10 +1448,10 @@ fn build_filter_reset_bar_html() -> String {
 #[allow(clippy::needless_raw_string_hashes)]
 fn build_viewer_controls_html() -> String {
     r#"  <div class="viewer-controls" id="viewer-controls" aria-label="Diagram controls">
-    <button type="button" class="viewer-control-button" id="zoom-in" title="Zoom in">+</button>
-    <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out">-</button>
+    <button type="button" class="viewer-control-button" id="zoom-in" title="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
     <span class="viewer-control-status" id="zoom-level">100%</span>
-    <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen">Fit</button>
+    <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
   </div>
   <div class="minimap-shell" id="minimap-shell" aria-label="Diagram minimap">
     <div class="minimap-header">
@@ -1894,6 +1903,19 @@ mod tests {
         assert!(html.contains(r#"id="zoom-level""#));
         assert!(html.contains(r#"id="zoom-fit""#));
         assert!(html.contains(r#"id="minimap""#));
+        // Verify SVG icons replaced text labels
+        assert!(html.contains("<svg"));
+        assert!(!html.contains(">+</button>"));
+        assert!(!html.contains(">-</button>"));
+        assert!(!html.contains(">Fit</button>"));
+    }
+
+    #[test]
+    fn test_viewer_controls_svg_icons_in_css() {
+        let css = build_css(Theme::Dark, false, true, false, false, true);
+
+        assert!(css.contains(".viewer-control-button svg"));
+        assert!(css.contains("width: 16px"));
     }
 
     #[test]
