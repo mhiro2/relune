@@ -864,11 +864,11 @@ fn build_css(
 
     .minimap-shell {
       position: fixed;
-      right: 16px;
+      right: 12px;
       bottom: 88px;
-      width: min(240px, calc(100vw - 32px));
+      width: min(240px, calc(100vw - 24px));
       border: 1px solid var(--panel-border);
-      border-radius: 18px;
+      border-radius: 22px;
       background: var(--panel-bg);
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
@@ -880,7 +880,7 @@ fn build_css(
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--panel-border);
       font-size: 11px;
       text-transform: uppercase;
@@ -931,7 +931,7 @@ fn build_css(
       border-radius: 22px;
       background: var(--panel-bg);
       box-shadow: var(--panel-shadow);
-      backdrop-filter: blur(18px);
+      backdrop-filter: blur(16px);
       z-index: 250;
     }
 
@@ -991,7 +991,7 @@ fn build_css(
 
     .detail-metric {
       padding: 10px 12px;
-      border-radius: 14px;
+      border-radius: 12px;
       background: rgba(148, 163, 184, 0.08);
     }
 
@@ -1030,7 +1030,7 @@ fn build_css(
     .detail-column,
     .detail-relation {
       border: 1px solid rgba(148, 163, 184, 0.12);
-      border-radius: 14px;
+      border-radius: 12px;
       padding: 10px 12px;
       background: rgba(148, 163, 184, 0.05);
     }
@@ -1071,7 +1071,7 @@ fn build_css(
 
     .detail-issue {
       border: 1px solid rgba(148, 163, 184, 0.12);
-      border-radius: 14px;
+      border-radius: 12px;
       padding: 10px 12px;
       margin-bottom: 6px;
     }
@@ -2019,5 +2019,17 @@ mod tests {
         assert!(!html.contains("clearHighlights"));
         assert!(!html.contains("inboundMap"));
         assert!(!html.contains("outboundMap"));
+    }
+
+    #[test]
+    fn test_panel_radius_consistency() {
+        let css = build_css(Theme::Dark, true, true, false, false, true);
+
+        // All major panels use 22px radius
+        assert!(css.contains(".search-panel"));
+        assert!(css.contains(".minimap-shell"));
+        assert!(css.contains(".detail-drawer"));
+        // minimap-shell should use 22px, not 18px
+        assert!(!css.contains("border-radius: 18px"));
     }
 }
