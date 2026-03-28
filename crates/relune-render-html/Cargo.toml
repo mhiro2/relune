@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+base64.workspace = true
 relune-core = { path = "../relune-core" }
 relune-layout = { path = "../relune-layout" }
 relune-render-theme = { path = "../relune-render-theme" }

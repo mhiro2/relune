@@ -189,9 +189,7 @@ fn render_cardinality_labels(
         Cardinality::One
     };
 
-    // Target side cardinality (the referenced table's primary key)
-    // Always 1 for a PK reference
-    let target_card = Cardinality::One;
+    let target_card = edge.target_cardinality;
 
     // Source label position (near x1, y1)
     let (source_x, source_y) = if going_right {
@@ -322,6 +320,7 @@ mod tests {
             },
             is_self_loop: false,
             nullable,
+            target_cardinality: Cardinality::One,
             from_columns,
             to_columns,
             is_collapsed_join: false,
@@ -434,8 +433,7 @@ mod tests {
 
         // Non-nullable FK should show "1" at source
         assert!(out.contains(">1</text>"));
-        // Target (PK) should always show "1"
-        // Count occurrences - should have at least 2 "1"s (source and target)
+        // Target unique reference should show "1"
         let one_count = out.matches(">1</text>").count();
         assert!(one_count >= 2);
     }
@@ -468,8 +466,38 @@ mod tests {
 
         // Nullable FK should show "0..1" at source
         assert!(out.contains(">0..1</text>"));
-        // Target should still show "1"
+        // Target unique reference should still show "1"
         assert!(out.contains(">1</text>"));
+    }
+
+    #[test]
+    fn test_render_cardinality_many_target() {
+        let mut edge = make_edge(
+            "audit_entries",
+            "users",
+            "actor_email",
+            100.0,
+            100.0,
+            300.0,
+            100.0,
+            false,
+            vec!["actor_email".to_string()],
+            vec!["email".to_string()],
+        );
+        edge.target_cardinality = Cardinality::Many;
+
+        let colors = create_test_theme();
+        let options = EdgeRenderOptions {
+            show_cardinality: true,
+            show_labels: false,
+            show_fk_columns: false,
+            ..Default::default()
+        };
+
+        let mut out = String::new();
+        render_edge(&mut out, &edge, &colors, &options);
+
+        assert!(out.contains(">N</text>"));
     }
 
     #[test]
@@ -611,6 +639,7 @@ mod tests {
             },
             is_self_loop: false,
             nullable: false,
+            target_cardinality: Cardinality::One,
             from_columns: vec![],
             to_columns: vec![],
             is_collapsed_join: false,

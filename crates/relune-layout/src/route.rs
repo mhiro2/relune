@@ -30,10 +30,27 @@ pub fn route_edge(
     h2: f32,
     style: RouteStyle,
 ) -> EdgeRoute {
+    route_edge_with_offset(x1, y1, w1, h1, x2, y2, w2, h2, style, 0.0)
+}
+
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn route_edge_with_offset(
+    x1: f32,
+    y1: f32,
+    w1: f32,
+    h1: f32,
+    x2: f32,
+    y2: f32,
+    w2: f32,
+    h2: f32,
+    style: RouteStyle,
+    lane_offset: f32,
+) -> EdgeRoute {
     match style {
-        RouteStyle::Straight => route_straight(x1, y1, w1, h1, x2, y2, w2, h2),
-        RouteStyle::Orthogonal => route_orthogonal(x1, y1, w1, h1, x2, y2, w2, h2),
-        RouteStyle::Curved => route_curved(x1, y1, w1, h1, x2, y2, w2, h2),
+        RouteStyle::Straight => route_straight(x1, y1, w1, h1, x2, y2, w2, h2, lane_offset),
+        RouteStyle::Orthogonal => route_orthogonal(x1, y1, w1, h1, x2, y2, w2, h2, lane_offset),
+        RouteStyle::Curved => route_curved(x1, y1, w1, h1, x2, y2, w2, h2, lane_offset),
     }
 }
 
@@ -47,8 +64,12 @@ fn route_straight(
     y2: f32,
     w2: f32,
     h2: f32,
+    lane_offset: f32,
 ) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), _, _) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    let ((sx, sy), (tx, ty), source_side, target_side) =
+        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    let (sx, sy) = offset_attachment_point((sx, sy), source_side, lane_offset);
+    let (tx, ty) = offset_attachment_point((tx, ty), target_side, lane_offset);
 
     let label_position = (f32::midpoint(sx, tx), f32::midpoint(sy, ty));
 
@@ -73,26 +94,15 @@ fn route_orthogonal(
     y2: f32,
     w2: f32,
     h2: f32,
+    lane_offset: f32,
 ) -> EdgeRoute {
     let ((sx, sy), (tx, ty), source_side, target_side) =
         attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    let (sx, sy) = offset_attachment_point((sx, sy), source_side, lane_offset);
+    let (tx, ty) = offset_attachment_point((tx, ty), target_side, lane_offset);
 
-    let (control_points, label_position) = if matches!(
-        (source_side, target_side),
-        (AttachmentSide::East, AttachmentSide::West) | (AttachmentSide::West, AttachmentSide::East)
-    ) {
-        let mid_x = f32::midpoint(sx, tx);
-        (
-            vec![(mid_x, sy), (mid_x, ty)],
-            (mid_x, f32::midpoint(sy, ty)),
-        )
-    } else {
-        let mid_y = f32::midpoint(sy, ty);
-        (
-            vec![(sx, mid_y), (tx, mid_y)],
-            (f32::midpoint(sx, tx), mid_y),
-        )
-    };
+    let (control_points, label_position) =
+        orthogonal_control_points((sx, sy), (tx, ty), source_side, target_side);
 
     EdgeRoute {
         x1: sx,
@@ -115,31 +125,23 @@ fn route_curved(
     y2: f32,
     w2: f32,
     h2: f32,
+    lane_offset: f32,
 ) -> EdgeRoute {
     let ((sx, sy), (tx, ty), source_side, target_side) =
         attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    let (sx, sy) = offset_attachment_point((sx, sy), source_side, lane_offset);
+    let (tx, ty) = offset_attachment_point((tx, ty), target_side, lane_offset);
 
-    let offset = if matches!(
-        (source_side, target_side),
-        (AttachmentSide::East, AttachmentSide::West) | (AttachmentSide::West, AttachmentSide::East)
-    ) {
+    let offset = if source_side.is_horizontal() && target_side.is_horizontal() {
         ((tx - sx).abs() * 0.3).max(24.0)
-    } else {
+    } else if source_side.is_vertical() && target_side.is_vertical() {
         ((ty - sy).abs() * 0.3).max(24.0)
+    } else {
+        (((tx - sx).abs() + (ty - sy).abs()) * 0.2).max(28.0)
     };
 
-    let cp1 = match source_side {
-        AttachmentSide::East => (sx + offset, sy),
-        AttachmentSide::West => (sx - offset, sy),
-        AttachmentSide::North => (sx, sy - offset),
-        AttachmentSide::South => (sx, sy + offset),
-    };
-    let cp2 = match target_side {
-        AttachmentSide::East => (tx + offset, ty),
-        AttachmentSide::West => (tx - offset, ty),
-        AttachmentSide::North => (tx, ty - offset),
-        AttachmentSide::South => (tx, ty + offset),
-    };
+    let cp1 = step_from_attachment((sx, sy), source_side, offset);
+    let cp2 = step_from_attachment((tx, ty), target_side, offset);
 
     // Label at the midpoint of the cubic bezier curve (t = 0.5)
     let label_position = calculate_cubic_bezier_midpoint(sx, sy, cp1, cp2, tx, ty);
@@ -243,8 +245,20 @@ fn calculate_cubic_bezier_midpoint(
 /// Route a self-loop edge.
 #[must_use]
 pub fn route_self_loop(x: f32, y: f32, w: f32, h: f32, style: RouteStyle) -> EdgeRoute {
+    route_self_loop_with_offset(x, y, w, h, style, 0.0)
+}
+
+#[must_use]
+pub(crate) fn route_self_loop_with_offset(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    style: RouteStyle,
+    radius_offset: f32,
+) -> EdgeRoute {
     // Self-loops go around the node
-    let loop_radius = 20.0;
+    let loop_radius = 20.0 + radius_offset.max(0.0);
 
     match style {
         RouteStyle::Straight => {
@@ -297,6 +311,80 @@ fn route_self_loop_curved(x: f32, y: f32, w: f32, h: f32, radius: f32) -> EdgeRo
         control_points: vec![cp1, cp2],
         style: RouteStyle::Curved,
         label_position,
+    }
+}
+
+fn offset_attachment_point(
+    point: (f32, f32),
+    side: AttachmentSide,
+    lane_offset: f32,
+) -> (f32, f32) {
+    match side {
+        AttachmentSide::East | AttachmentSide::West => (point.0, point.1 + lane_offset),
+        AttachmentSide::North | AttachmentSide::South => (point.0 + lane_offset, point.1),
+    }
+}
+
+fn step_from_attachment(point: (f32, f32), side: AttachmentSide, distance: f32) -> (f32, f32) {
+    match side {
+        AttachmentSide::East => (point.0 + distance, point.1),
+        AttachmentSide::West => (point.0 - distance, point.1),
+        AttachmentSide::North => (point.0, point.1 - distance),
+        AttachmentSide::South => (point.0, point.1 + distance),
+    }
+}
+
+fn orthogonal_control_points(
+    source: (f32, f32),
+    target: (f32, f32),
+    source_side: AttachmentSide,
+    target_side: AttachmentSide,
+) -> (Vec<(f32, f32)>, (f32, f32)) {
+    let (sx, sy) = source;
+    let (tx, ty) = target;
+
+    if matches!(
+        (source_side, target_side),
+        (AttachmentSide::East, AttachmentSide::West) | (AttachmentSide::West, AttachmentSide::East)
+    ) {
+        let mid_x = f32::midpoint(sx, tx);
+        return (
+            vec![(mid_x, sy), (mid_x, ty)],
+            (mid_x, f32::midpoint(sy, ty)),
+        );
+    }
+
+    if matches!(
+        (source_side, target_side),
+        (AttachmentSide::North, AttachmentSide::South)
+            | (AttachmentSide::South, AttachmentSide::North)
+    ) {
+        let mid_y = f32::midpoint(sy, ty);
+        return (
+            vec![(sx, mid_y), (tx, mid_y)],
+            (f32::midpoint(sx, tx), mid_y),
+        );
+    }
+
+    let bend_offset = 28.0;
+    let source_bend = step_from_attachment(source, source_side, bend_offset);
+    let target_bend = step_from_attachment(target, target_side, bend_offset);
+    let elbow = if source_side.is_horizontal() {
+        (source_bend.0, target_bend.1)
+    } else {
+        (target_bend.0, source_bend.1)
+    };
+
+    (vec![source_bend, elbow, target_bend], elbow)
+}
+
+impl AttachmentSide {
+    const fn is_horizontal(self) -> bool {
+        matches!(self, Self::East | Self::West)
+    }
+
+    const fn is_vertical(self) -> bool {
+        matches!(self, Self::North | Self::South)
     }
 }
 
@@ -366,6 +454,38 @@ mod tests {
         let route = route_self_loop(0.0, 0.0, 100.0, 50.0, RouteStyle::Curved);
 
         assert!(route.control_points.len() >= 2);
+    }
+
+    #[test]
+    fn test_route_straight_with_lane_offset_shifts_horizontal_attachment() {
+        let route = route_edge_with_offset(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            200.0,
+            0.0,
+            100.0,
+            50.0,
+            RouteStyle::Straight,
+            12.0,
+        );
+
+        assert!((route.y1 - 37.0).abs() < 0.001);
+        assert!((route.y2 - 37.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_orthogonal_control_points_support_mixed_attachment_sides() {
+        let (control_points, label_position) = orthogonal_control_points(
+            (100.0, 40.0),
+            (160.0, 120.0),
+            AttachmentSide::East,
+            AttachmentSide::North,
+        );
+
+        assert_eq!(control_points.len(), 3);
+        assert_eq!(label_position, (128.0, 92.0));
     }
 
     #[test]
@@ -504,6 +624,16 @@ mod tests {
         let ty = 50.0 * 0.75; // y + h * 0.75
         assert!(route.label_position.1 > sy);
         assert!(route.label_position.1 < ty);
+    }
+
+    #[test]
+    fn test_self_loop_offset_pushes_loop_farther_out() {
+        let base = route_self_loop_with_offset(0.0, 0.0, 100.0, 50.0, RouteStyle::Orthogonal, 0.0);
+        let offset =
+            route_self_loop_with_offset(0.0, 0.0, 100.0, 50.0, RouteStyle::Orthogonal, 18.0);
+
+        assert!(offset.control_points[0].0 > base.control_points[0].0);
+        assert!(offset.label_position.0 > base.label_position.0);
     }
 
     #[test]

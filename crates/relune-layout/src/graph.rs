@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use relune_core::{
     EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, NodeKind, Schema, Table,
-    View,
+    View, layout::Cardinality,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -57,6 +57,70 @@ fn column_flag_sets(table: &Table) -> (BTreeSet<String>, BTreeSet<String>) {
         .flat_map(|index| index.columns.iter().cloned())
         .collect();
     (foreign_key_columns, indexed_columns)
+}
+
+fn resolve_foreign_key_target<'a>(
+    tables: &[&'a Table],
+    table: &Table,
+    to_table: &str,
+) -> Option<&'a Table> {
+    let target = to_table.to_lowercase();
+
+    tables
+        .iter()
+        .copied()
+        .find(|candidate| {
+            candidate.schema_name == table.schema_name
+                && (candidate.name.to_lowercase() == target
+                    || candidate.stable_id.to_lowercase() == target)
+        })
+        .or_else(|| {
+            tables.iter().copied().find(|candidate| {
+                candidate.name.to_lowercase() == target
+                    || candidate.stable_id.to_lowercase() == target
+            })
+        })
+}
+
+fn has_unique_column_set(table: &Table, columns: &[String]) -> bool {
+    let primary_key: Vec<&str> = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.name.as_str())
+        .collect();
+    if !primary_key.is_empty()
+        && primary_key.len() == columns.len()
+        && primary_key
+            .iter()
+            .map(|column| (*column).to_string())
+            .eq(columns.iter().cloned())
+    {
+        return true;
+    }
+
+    table
+        .indexes
+        .iter()
+        .any(|index| index.is_unique && index.columns == columns)
+}
+
+fn infer_target_cardinality(
+    tables: &[&Table],
+    source_table: &Table,
+    to_table: &str,
+    to_columns: &[String],
+) -> Cardinality {
+    resolve_foreign_key_target(tables, source_table, to_table).map_or(
+        Cardinality::Many,
+        |target_table| {
+            if has_unique_column_set(target_table, to_columns) {
+                Cardinality::One
+            } else {
+                Cardinality::Many
+            }
+        },
+    )
 }
 
 impl EnumIndex {
@@ -209,6 +273,8 @@ pub struct LayoutEdge {
     pub is_self_loop: bool,
     /// Whether the FK columns are nullable.
     pub nullable: bool,
+    /// Cardinality at the target endpoint.
+    pub target_cardinality: Cardinality,
     /// Whether this edge represents a collapsed join table (many-to-many relationship).
     #[serde(default)]
     pub is_collapsed_join: bool,
@@ -455,6 +521,8 @@ impl LayoutGraphBuilder {
                     || table_ids.contains(fk.to_table.as_str())
                     || tables.iter().any(|t| t.name == fk.to_table)
                 {
+                    let target_cardinality =
+                        infer_target_cardinality(tables, table, &fk.to_table, &fk.to_columns);
                     edges.push(LayoutEdge {
                         from: table.stable_id.clone(),
                         to: fk.to_table.clone(),
@@ -464,6 +532,7 @@ impl LayoutGraphBuilder {
                         kind: EdgeKind::ForeignKey,
                         is_self_loop,
                         nullable: fk_nullable,
+                        target_cardinality,
                         is_collapsed_join: false,
                         collapsed_join_table: None,
                     });
@@ -481,6 +550,7 @@ impl LayoutGraphBuilder {
                         kind: EdgeKind::EnumReference,
                         is_self_loop: false,
                         nullable: column.nullable,
+                        target_cardinality: Cardinality::One,
                         is_collapsed_join: false,
                         collapsed_join_table: None,
                     });
@@ -559,6 +629,7 @@ impl LayoutGraphBuilder {
                         kind: EdgeKind::ViewDependency,
                         is_self_loop: false,
                         nullable: false,
+                        target_cardinality: Cardinality::One,
                         is_collapsed_join: false,
                         collapsed_join_table: None,
                     });
@@ -786,6 +857,7 @@ impl LayoutGraphBuilder {
                 kind: EdgeKind::ForeignKey,
                 is_self_loop: edge1.to == edge2.to,
                 nullable: edge1.nullable && edge2.nullable,
+                target_cardinality: Cardinality::Many,
                 is_collapsed_join: true,
                 collapsed_join_table: Some(CollapsedJoinTable {
                     table_id: join_table_id.clone(),
@@ -1170,6 +1242,130 @@ mod tests {
 
         assert!(user_id.is_foreign_key);
         assert!(user_id.is_indexed);
+    }
+
+    #[test]
+    fn test_foreign_key_target_cardinality_uses_unique_indexes() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(1),
+                            name: "id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: true,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(2),
+                            name: "email".to_string(),
+                            data_type: "text".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![],
+                    indexes: vec![Index {
+                        name: Some("users_email_key".to_string()),
+                        columns: vec!["email".to_string()],
+                        is_unique: true,
+                    }],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "posts".to_string(),
+                    schema_name: None,
+                    name: "posts".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(3),
+                        name: "author_email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: Some("fk_posts_author_email".to_string()),
+                        from_columns: vec!["author_email".to_string()],
+                        to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["email".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        assert_eq!(graph.edges[0].target_cardinality, Cardinality::One);
+    }
+
+    #[test]
+    fn test_foreign_key_target_cardinality_is_many_without_uniqueness() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "posts".to_string(),
+                    schema_name: None,
+                    name: "posts".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "author_email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: Some("fk_posts_author_email".to_string()),
+                        from_columns: vec!["author_email".to_string()],
+                        to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["email".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        assert_eq!(graph.edges[0].target_cardinality, Cardinality::Many);
     }
 }
 

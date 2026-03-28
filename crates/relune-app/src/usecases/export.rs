@@ -7,7 +7,8 @@ use crate::schema_input::schema_from_input;
 use relune_core::Schema;
 use relune_layout::{
     FocusExtractor, LayoutConfig, LayoutGraph, LayoutGraphBuilder, LayoutRequest,
-    build_layout_with_config, layout_graph_to_d2, layout_graph_to_dot, layout_graph_to_mermaid,
+    build_layout_from_graph_with_config, layout_graph_to_d2, layout_graph_to_dot,
+    layout_graph_to_mermaid,
 };
 
 fn graph_for_export(request: &ExportRequest, schema: &Schema) -> Result<LayoutGraph, AppError> {
@@ -46,14 +47,9 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
             serde_json::to_string_pretty(&graph)?
         }
         ExportFormat::LayoutJson => {
-            let layout_request = LayoutRequest {
-                filter: request.filter.clone(),
-                focus: request.focus.clone(),
-                grouping: request.grouping,
-                collapse_join_tables: false,
-            };
+            let graph = graph_for_export(&request, &schema)?;
             let config = LayoutConfig::from(&request.layout);
-            let positioned = build_layout_with_config(&schema, &layout_request, &config)?;
+            let positioned = build_layout_from_graph_with_config(graph, &config)?;
             serde_json::to_string_pretty(&positioned)?
         }
         ExportFormat::Mermaid => layout_graph_to_mermaid(&graph_for_export(&request, &schema)?),

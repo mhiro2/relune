@@ -16,8 +16,6 @@ pub enum RankAssignmentStrategy {
     Topological,
     /// Longest path ranking (minimizes height).
     LongestPath,
-    /// Network simplex (better quality, slower).
-    NetworkSimplex,
 }
 
 /// Result of rank assignment.
@@ -42,10 +40,6 @@ pub fn assign_ranks(graph: &LayoutGraph, strategy: RankAssignmentStrategy) -> Ra
     match strategy {
         RankAssignmentStrategy::Topological => assign_ranks_topological(graph),
         RankAssignmentStrategy::LongestPath => assign_ranks_longest_path(graph),
-        RankAssignmentStrategy::NetworkSimplex => {
-            // Fall back to longest path for now
-            assign_ranks_longest_path(graph)
-        }
     }
 }
 
@@ -109,65 +103,7 @@ fn detect_cycle_nodes(graph: &LayoutGraph) -> Vec<String> {
 }
 
 fn assign_ranks_topological(graph: &LayoutGraph) -> RankAssignment {
-    let n = graph.nodes.len();
-    if n == 0 {
-        return RankAssignment {
-            node_rank: Vec::new(),
-            num_ranks: 0,
-            nodes_by_rank: Vec::new(),
-        };
-    }
-
-    // Build adjacency list and in-degree count
-    let mut in_degree = vec![0usize; n];
-    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); n];
-
-    for edge in &graph.edges {
-        if edge.is_self_loop {
-            continue;
-        }
-        if let (Some(&from_idx), Some(&to_idx)) = (
-            graph.node_index.get(&edge.from),
-            graph.node_index.get(&edge.to),
-        ) {
-            adjacency[from_idx].push(to_idx);
-            in_degree[to_idx] += 1;
-        }
-    }
-
-    // Kahn's algorithm with level tracking
-    let mut node_rank = vec![0usize; n];
-    let mut queue: VecDeque<usize> = VecDeque::new();
-
-    // Start with nodes that have no incoming edges
-    for (idx, &deg) in in_degree.iter().enumerate() {
-        if deg == 0 {
-            queue.push_back(idx);
-        }
-    }
-
-    let mut processed = 0;
-    while let Some(idx) = queue.pop_front() {
-        processed += 1;
-        for &neighbor in &adjacency[idx] {
-            in_degree[neighbor] -= 1;
-            if in_degree[neighbor] == 0 {
-                node_rank[neighbor] = node_rank[idx] + 1;
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    // Handle cycles - assign remaining nodes to appropriate ranks
-    if processed < n {
-        for idx in 0..n {
-            if node_rank[idx] == 0 && in_degree[idx] > 0 {
-                node_rank[idx] = 0;
-            }
-        }
-    }
-
-    build_rank_assignment(graph, node_rank)
+    assign_ranks_via_components(graph)
 }
 
 fn assign_ranks_longest_path(graph: &LayoutGraph) -> RankAssignment {
@@ -180,10 +116,31 @@ fn assign_ranks_longest_path(graph: &LayoutGraph) -> RankAssignment {
         };
     }
 
-    // Build reverse adjacency (incoming edges)
-    let mut incoming: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n]; // (from_idx, edge_idx)
+    assign_ranks_via_components(graph)
+}
 
-    for (edge_idx, edge) in graph.edges.iter().enumerate() {
+#[derive(Debug)]
+struct StronglyConnectedComponents {
+    component_of: Vec<usize>,
+    components: Vec<Vec<usize>>,
+}
+
+fn assign_ranks_via_components(graph: &LayoutGraph) -> RankAssignment {
+    let n = graph.nodes.len();
+    if n == 0 {
+        return RankAssignment {
+            node_rank: Vec::new(),
+            num_ranks: 0,
+            nodes_by_rank: Vec::new(),
+        };
+    }
+
+    let scc = strongly_connected_components(graph);
+    let component_count = scc.components.len();
+    let mut adjacency = vec![Vec::new(); component_count];
+    let mut in_degree = vec![0usize; component_count];
+
+    for edge in &graph.edges {
         if edge.is_self_loop {
             continue;
         }
@@ -191,59 +148,132 @@ fn assign_ranks_longest_path(graph: &LayoutGraph) -> RankAssignment {
             graph.node_index.get(&edge.from),
             graph.node_index.get(&edge.to),
         ) {
-            incoming[to_idx].push((from_idx, edge_idx));
+            let from_component = scc.component_of[from_idx];
+            let to_component = scc.component_of[to_idx];
+            if from_component != to_component && !adjacency[from_component].contains(&to_component)
+            {
+                adjacency[from_component].push(to_component);
+                in_degree[to_component] += 1;
+            }
         }
     }
 
-    // Find nodes with no incoming edges (sources)
-    #[allow(clippy::collection_is_never_read)]
-    let mut sources = Vec::new();
-    for (idx, inc) in incoming.iter().enumerate().take(n) {
-        if inc.is_empty() {
-            sources.push(idx);
+    let component_height: Vec<usize> = scc
+        .components
+        .iter()
+        .map(|component| component.len().max(1))
+        .collect();
+    let mut base_rank = vec![0usize; component_count];
+    let mut queue = VecDeque::new();
+
+    for (component_idx, &degree) in in_degree.iter().enumerate() {
+        if degree == 0 {
+            queue.push_back(component_idx);
         }
     }
 
-    // Longest path from sources
+    while let Some(component_idx) = queue.pop_front() {
+        let next_rank = base_rank[component_idx] + component_height[component_idx];
+        for &neighbor in &adjacency[component_idx] {
+            base_rank[neighbor] = base_rank[neighbor].max(next_rank);
+            in_degree[neighbor] -= 1;
+            if in_degree[neighbor] == 0 {
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
     let mut node_rank = vec![0usize; n];
-    let mut visited = vec![false; n];
-
-    #[allow(clippy::items_after_statements)]
-    fn dfs(
-        idx: usize,
-        incoming: &[Vec<(usize, usize)>],
-        node_rank: &mut [usize],
-        visited: &mut [bool],
-    ) {
-        if visited[idx] {
-            return;
-        }
-        visited[idx] = true;
-
-        let mut max_pred_rank = 0;
-        for &(pred_idx, _) in &incoming[idx] {
-            dfs(pred_idx, incoming, node_rank, visited);
-            max_pred_rank = max_pred_rank.max(node_rank[pred_idx]);
-        }
-
-        if !incoming[idx].is_empty() {
-            node_rank[idx] = max_pred_rank + 1;
-        }
-    }
-
-    // Process all nodes
-    for idx in 0..n {
-        dfs(idx, &incoming, &mut node_rank, &mut visited);
-    }
-
-    // Handle isolated nodes and self-loops
-    for idx in 0..n {
-        if !visited[idx] {
-            node_rank[idx] = 0;
+    for (component_idx, component_nodes) in scc.components.iter().enumerate() {
+        let mut ordered_nodes = component_nodes.clone();
+        ordered_nodes.sort_unstable();
+        for (offset, node_idx) in ordered_nodes.into_iter().enumerate() {
+            node_rank[node_idx] = base_rank[component_idx] + offset;
         }
     }
 
     build_rank_assignment(graph, node_rank)
+}
+
+#[allow(clippy::items_after_statements)] // Keep Tarjan helpers scoped to SCC construction.
+fn strongly_connected_components(graph: &LayoutGraph) -> StronglyConnectedComponents {
+    let n = graph.nodes.len();
+    let mut adjacency = vec![Vec::new(); n];
+    for edge in &graph.edges {
+        if edge.is_self_loop {
+            continue;
+        }
+        if let (Some(&from_idx), Some(&to_idx)) = (
+            graph.node_index.get(&edge.from),
+            graph.node_index.get(&edge.to),
+        ) {
+            adjacency[from_idx].push(to_idx);
+        }
+    }
+
+    struct TarjanState {
+        index: usize,
+        indices: Vec<Option<usize>>,
+        lowlinks: Vec<usize>,
+        stack: Vec<usize>,
+        on_stack: Vec<bool>,
+        component_of: Vec<usize>,
+        components: Vec<Vec<usize>>,
+    }
+
+    fn strong_connect(idx: usize, adjacency: &[Vec<usize>], state: &mut TarjanState) {
+        let current_index = state.index;
+        state.indices[idx] = Some(current_index);
+        state.lowlinks[idx] = current_index;
+        state.index += 1;
+        state.stack.push(idx);
+        state.on_stack[idx] = true;
+
+        for &neighbor in &adjacency[idx] {
+            if state.indices[neighbor].is_none() {
+                strong_connect(neighbor, adjacency, state);
+                state.lowlinks[idx] = state.lowlinks[idx].min(state.lowlinks[neighbor]);
+            } else if state.on_stack[neighbor] {
+                state.lowlinks[idx] =
+                    state.lowlinks[idx].min(state.indices[neighbor].unwrap_or_default());
+            }
+        }
+
+        if state.lowlinks[idx] == current_index {
+            let component_idx = state.components.len();
+            let mut component = Vec::new();
+            while let Some(node_idx) = state.stack.pop() {
+                state.on_stack[node_idx] = false;
+                state.component_of[node_idx] = component_idx;
+                component.push(node_idx);
+                if node_idx == idx {
+                    break;
+                }
+            }
+            state.components.push(component);
+        }
+    }
+
+    let mut state = TarjanState {
+        index: 0,
+        indices: vec![None; n],
+        lowlinks: vec![0; n],
+        stack: Vec::new(),
+        on_stack: vec![false; n],
+        component_of: vec![0; n],
+        components: Vec::new(),
+    };
+
+    for idx in 0..n {
+        if state.indices[idx].is_none() {
+            strong_connect(idx, &adjacency, &mut state);
+        }
+    }
+
+    StronglyConnectedComponents {
+        component_of: state.component_of,
+        components: state.components,
+    }
 }
 
 fn build_rank_assignment(_graph: &LayoutGraph, node_rank: Vec<usize>) -> RankAssignment {
@@ -443,5 +473,97 @@ mod tests {
             detect_cycle_nodes(&graph),
             vec!["a".to_string(), "b".to_string()]
         );
+    }
+
+    #[test]
+    fn test_assign_ranks_spreads_cycle_nodes_across_layers() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "a".to_string(),
+                    schema_name: None,
+                    name: "a".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["b_id".to_string()],
+                        to_schema: None,
+                        to_table: "b".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "b".to_string(),
+                    schema_name: None,
+                    name: "b".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["c_id".to_string()],
+                        to_schema: None,
+                        to_table: "c".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(3),
+                    stable_id: "c".to_string(),
+                    schema_name: None,
+                    name: "c".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(3),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["a_id".to_string()],
+                        to_schema: None,
+                        to_table: "a".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
+        let mut cycle_ranks = ranks.node_rank;
+        cycle_ranks.sort_unstable();
+
+        assert_eq!(cycle_ranks, vec![0, 1, 2]);
     }
 }
