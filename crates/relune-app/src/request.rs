@@ -454,6 +454,18 @@ pub struct DiffRequest {
     pub format: DiffFormat,
     /// Optional output file path.
     pub output_path: Option<PathBuf>,
+    /// Rendering options (used when format is Svg or Html).
+    #[serde(default)]
+    pub options: RenderOptions,
+    /// Filter specification for tables (used when format is Svg or Html).
+    #[serde(default)]
+    pub filter: FilterSpec,
+    /// Grouping specification (used when format is Svg or Html).
+    #[serde(default)]
+    pub grouping: GroupingSpec,
+    /// Layout specification (used when format is Svg or Html).
+    #[serde(default)]
+    pub layout: LayoutSpec,
 }
 
 impl DiffRequest {
@@ -490,6 +502,10 @@ pub enum DiffFormat {
     Text,
     /// JSON output.
     Json,
+    /// SVG diagram with diff overlay.
+    Svg,
+    /// Self-contained HTML with diff overlay.
+    Html,
 }
 
 #[cfg(test)]
