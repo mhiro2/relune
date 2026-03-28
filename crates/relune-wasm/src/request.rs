@@ -139,6 +139,7 @@ impl WasmRenderRequest {
             layout,
             options: RenderOptions::default(),
             output_path: None, // Not applicable in WASM
+            overlay: None,
         })
     }
 }

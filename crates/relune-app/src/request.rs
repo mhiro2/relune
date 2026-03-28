@@ -178,6 +178,10 @@ pub struct RenderRequest {
     pub options: RenderOptions,
     /// Optional output file path. If None, output goes to stdout.
     pub output_path: Option<PathBuf>,
+    /// Optional overlay annotations (lint warnings, diff markers, etc.)
+    /// to attach to nodes and edges in the rendered output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<relune_layout::DiagramOverlay>,
 }
 
 impl RenderRequest {

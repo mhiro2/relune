@@ -7,7 +7,7 @@ use relune_layout::{
     FocusExtractor, LayoutConfig, LayoutGraphBuilder, build_layout_from_graph_with_config,
 };
 use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
-use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg};
+use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg_with_overlay};
 use tracing::{debug, info, info_span};
 
 use crate::error::AppError;
@@ -94,12 +94,14 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
                 positioned.as_ref().expect("svg output requires layout"),
                 &stats,
                 request.options,
+                request.overlay.as_ref(),
             ),
             OutputFormat::Html => render_html_output(
                 positioned.as_ref().expect("html output requires layout"),
                 graph.as_ref().expect("html output requires graph"),
                 &stats,
                 request.options,
+                request.overlay.as_ref(),
             )?,
             OutputFormat::GraphJson => {
                 serde_json::to_string_pretty(graph.as_ref().expect("graph json requires graph"))?
@@ -138,6 +140,7 @@ fn render_svg_output(
     positioned: &relune_layout::PositionedGraph,
     _stats: &SchemaStats,
     options: RenderOptions,
+    overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> String {
     let options = SvgRenderOptions {
         theme: map_svg_theme(options.theme),
@@ -147,7 +150,7 @@ fn render_svg_output(
         compact: false,
         show_tooltips: true,
     };
-    render_svg(positioned, options)
+    render_svg_with_overlay(positioned, options, overlay)
 }
 
 /// Render to HTML format.
@@ -156,8 +159,9 @@ fn render_html_output(
     graph: &relune_layout::LayoutGraph,
     _stats: &SchemaStats,
     options: RenderOptions,
+    overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<String, AppError> {
-    // First render SVG
+    // First render SVG (with overlay)
     let svg_options = SvgRenderOptions {
         theme: map_svg_theme(options.theme),
         show_legend: options.show_legend,
@@ -166,15 +170,15 @@ fn render_html_output(
         compact: false,
         show_tooltips: true,
     };
-    let svg = render_svg(positioned, svg_options);
+    let svg = render_svg_with_overlay(positioned, svg_options, overlay);
 
-    // Then wrap in HTML
+    // Then wrap in HTML (with overlay)
     let html_options = HtmlRenderOptions {
         theme: map_html_theme(options.theme),
         include_legend: options.show_legend || options.show_stats,
         ..Default::default()
     };
-    let html = relune_render_html::render_html(graph, &svg, &html_options)?;
+    let html = relune_render_html::render_html_with_overlay(graph, &svg, &html_options, overlay)?;
 
     Ok(html)
 }

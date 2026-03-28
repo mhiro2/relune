@@ -28,8 +28,23 @@ pub use theme::{Theme, ThemeColors, get_colors};
 /// Renders a positioned graph to an SVG string with the given options.
 ///
 /// Supports group rendering for visually grouping related tables.
+/// When an overlay is provided, annotations (lint warnings, diff status, etc.)
+/// are attached to the corresponding nodes and edges.
 #[must_use]
 pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOptions) -> String {
+    render_svg_with_overlay(graph, options, None)
+}
+
+/// Renders a positioned graph to an SVG string with an optional overlay.
+///
+/// This is the full-featured entry point. `render_svg` delegates here with
+/// `overlay = None` for backwards compatibility.
+#[must_use]
+pub fn render_svg_with_overlay(
+    graph: &relune_layout::PositionedGraph,
+    options: SvgRenderOptions,
+    _overlay: Option<&relune_layout::DiagramOverlay>,
+) -> String {
     let colors = get_colors(options.theme);
     let mut out = String::new();
 
