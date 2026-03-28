@@ -1060,6 +1060,69 @@ fn build_css(
       opacity: 0.62;
     }
 
+    .detail-issue {
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      border-radius: 14px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+    }
+
+    .detail-issue-error { border-color: rgba(248, 113, 113, 0.4); }
+    .detail-issue-warning { border-color: rgba(251, 191, 36, 0.4); }
+    .detail-issue-info { border-color: rgba(56, 189, 248, 0.4); }
+
+    .detail-issue-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .detail-issue-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .detail-issue-badge-error { background: rgba(248, 113, 113, 0.22); color: #f87171; }
+    .detail-issue-badge-warning { background: rgba(251, 191, 36, 0.22); color: #fbbf24; }
+    .detail-issue-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
+    .detail-issue-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
+
+    .detail-issue-message {
+      font-size: 13px;
+    }
+
+    .detail-issue-hint {
+      display: block;
+      font-size: 12px;
+      opacity: 0.72;
+      margin-top: 4px;
+      padding-left: 4px;
+    }
+
+    .object-browser-issue-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      font-size: 10px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .object-browser-issue-badge-error { background: rgba(248, 113, 113, 0.22); color: #f87171; }
+    .object-browser-issue-badge-warning { background: rgba(251, 191, 36, 0.22); color: #fbbf24; }
+    .object-browser-issue-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
+    .object-browser-issue-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
+
     .canvas svg .node,
     .canvas svg .edge {
       opacity: 0;
@@ -1413,6 +1476,11 @@ fn build_detail_drawer_html() -> String {
       <h3>Relationships</h3>
       <div class="detail-empty" id="detail-relationships-empty">No relationships for this object.</div>
       <div class="detail-relations" id="detail-relations"></div>
+    </section>
+    <section class="detail-section">
+      <h3>Health</h3>
+      <div class="detail-empty" id="detail-issues-empty">No issues detected.</div>
+      <div class="detail-issues" id="detail-issues"></div>
     </section>
   </aside>
 "#
