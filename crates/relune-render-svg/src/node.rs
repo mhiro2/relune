@@ -10,8 +10,6 @@ use crate::theme::{Theme, get_colors};
 
 /// PK badge background color (green)
 const PK_BG: &str = "#22c55e";
-/// PK badge text color (white)
-const PK_TEXT: &str = "#ffffff";
 /// FK indicator color (blue)
 const FK_COLOR: &str = "#3b82f6";
 /// IDX indicator color (amber)
@@ -300,50 +298,29 @@ fn generate_node_tooltip(
     lines.join("\n")
 }
 
-/// Renders a primary key badge with a "PK" label.
+/// Unified column-metadata badge renderer (same form-factor as `lib.rs`).
+fn render_column_badge(out: &mut String, x: f32, y: f32, label: &str, bg: &str, fg: &str) {
+    let _ = write!(
+        out,
+        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="20" height="13" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
+        x + 2.5,
+        y + 9.5,
+    );
+}
+
+/// Renders a primary key badge.
 fn render_pk_badge(out: &mut String, x: f32, y: f32) {
-    // Badge background
-    let _ = write!(
-        out,
-        r#"<rect class="pk-badge" x="{x:.1}" y="{y:.1}" width="24" height="14" rx="4" fill="{PK_BG}"/>"#
-    );
-
-    // "PK" text
-    let _ = write!(
-        out,
-        r#"<text x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="700" fill="{PK_TEXT}">PK</text>"#,
-        x + 4.0,
-        y + 10.0
-    );
+    render_column_badge(out, x, y, "PK", PK_BG, PK_BG);
 }
 
-/// Renders a foreign key indicator with an arrow icon.
+/// Renders a foreign key badge.
 fn render_fk_indicator(out: &mut String, x: f32, y: f32) {
-    // Arrow icon path
-    let _ = write!(
-        out,
-        r#"<path class="fk-indicator" d="M{:.1} {:.1} L{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{FK_COLOR}" stroke-width="1.5" fill="none"/>"#,
-        x,
-        y + 7.0, // start point
-        x + 10.0,
-        y + 7.0, // arrow body
-        x + 6.0,
-        y + 3.0, // arrow head top
-        x + 10.0,
-        y + 7.0, // arrow head connection
-        x + 6.0,
-        y + 11.0, // arrow head bottom
-    );
+    render_column_badge(out, x, y, "FK", FK_COLOR, FK_COLOR);
 }
 
-/// Renders an index indicator with "IDX" label.
+/// Renders an index badge.
 fn render_idx_indicator(out: &mut String, x: f32, y: f32) {
-    // "IDX" text
-    let _ = write!(
-        out,
-        r#"<text class="idx-indicator" x="{x:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="8" font-weight="600" fill="{IDX_COLOR}">IDX</text>"#,
-        y + 10.0
-    );
+    render_column_badge(out, x, y, "IX", IDX_COLOR, IDX_COLOR);
 }
 
 use crate::escape::{escape_attribute, escape_text};
@@ -424,6 +401,6 @@ mod tests {
         assert!(out.contains("data-table-id=\"users\""));
         assert!(out.contains("class=\"table-header\""));
         assert!(out.contains("class=\"column-row\""));
-        assert!(out.contains("pk-badge"));
+        assert!(out.contains("col-badge"));
     }
 }

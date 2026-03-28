@@ -509,31 +509,29 @@ fn render_edge_internal(
     out.push_str("</g>");
 }
 
-fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
+/// Unified column-metadata badge renderer.
+///
+/// All indicators share the same rounded-rect + label form-factor so they are
+/// instantly distinguishable at a glance regardless of density.
+fn render_column_badge(out: &mut String, x: f32, y: f32, label: &str, bg: &str, fg: &str) {
     let _ = write!(
         out,
-        r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
-        x,
-        y + 3.2,
-        x + 3.2,
-        y + 3.2
+        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="20" height="13" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
+        x + 2.5,
+        y + 9.5,
     );
+}
+
+fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
+    render_column_badge(out, x, y, "PK", "#fbbf24", "#fbbf24");
 }
 
 fn render_fk_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
-        out,
-        r##"<path class="fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" fill="none" stroke="#38bdf8" stroke-width="1.4" stroke-linecap="round"/>"##,
-        x,
-        y + 3.4
-    );
+    render_column_badge(out, x, y, "FK", "#38bdf8", "#38bdf8");
 }
 
 fn render_idx_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
-        out,
-        r##"<path class="idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="#f59e0b"/>"##
-    );
+    render_column_badge(out, x, y, "IX", "#f59e0b", "#f59e0b");
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
