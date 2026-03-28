@@ -261,13 +261,13 @@ fn render_node_internal(
     );
     let _ = write!(
         out,
-        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="36" rx="16" ry="16" fill="{}"/>"#,
+        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="32" rx="16" ry="16" fill="{}"/>"#,
         node.x, node.y, node.width, node_style.header_fill
     );
     // Gradient transition from header to body — eliminates the hard underlay band
     let _ = write!(
         out,
-        r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="20" fill="url(#header-fade-{index})"/>"#,
+        r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{index})"/>"#,
         node_style.header_fill,
         node_style.header_fill,
         node.x,
@@ -276,21 +276,21 @@ fn render_node_internal(
     );
     let _ = write!(
         out,
-        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="18"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="14" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
-        node.x + 12.0,
+        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
+        node.x + 10.0,
         node.y + 8.0,
-        (node.width - 96.0).max(24.0),
-        node.x + 12.0,
-        node.y + 23.0,
+        (node.width - 80.0).max(24.0),
+        node.x + 10.0,
+        node.y + 21.0,
         colors.text_primary,
         escape_text(&node.label)
     );
     let _ = write!(
         out,
-        r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="10" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
-        node.x + node.width - 12.0,
-        node.y + 23.0,
-        colors.text_primary,
+        r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="9" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
+        node.x + node.width - 10.0,
+        node.y + 21.0,
+        colors.text_muted,
         escape_text(&kind.to_ascii_uppercase())
     );
 
@@ -307,7 +307,7 @@ fn render_node_internal(
         );
     }
 
-    let mut line_y = node.y + 52.0;
+    let mut line_y = node.y + 46.0;
     for (column_index, column) in node.columns.iter().enumerate() {
         let _ = write!(
             out,
@@ -319,10 +319,10 @@ fn render_node_internal(
             let separator_y = line_y - 12.0;
             let _ = write!(
                 out,
-                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.92" stroke-width="1"/>"#,
-                node.x + 12.0,
+                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.38" stroke-width="1"/>"#,
+                node.x + 10.0,
                 separator_y,
-                node.x + node.width - 12.0,
+                node.x + node.width - 10.0,
                 separator_y,
                 node_style.separator
             );
@@ -341,11 +341,11 @@ fn render_node_internal(
         };
         let _ = write!(
             out,
-            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}"{}>{}</text>"#,
-            node.x + 12.0,
+            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>{}</text>"#,
+            node.x + 10.0,
             line_y - 12.5,
             column_text_width(node, column),
-            node.x + 12.0,
+            node.x + 10.0,
             line_y,
             if column.nullable {
                 colors.text_muted
@@ -730,7 +730,7 @@ fn column_text_width(
         + usize::from(column.is_primary_key);
     #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
     let reserved = (icon_slots as f32).mul_add(16.0, if icon_slots > 0 { 14.0 } else { 0.0 });
-    (node.width - 24.0 - reserved).max(18.0)
+    (node.width - 20.0 - reserved).max(18.0)
 }
 
 fn estimate_label_width(text: &str) -> f32 {

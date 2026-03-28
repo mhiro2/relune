@@ -29,9 +29,9 @@ const fn default_force_iterations() -> usize {
 }
 
 /// Node header font size used for width estimation.
-const HEADER_FONT_SIZE: f32 = 14.0;
+const HEADER_FONT_SIZE: f32 = 13.0;
 /// Node column font size used for width estimation.
-const COLUMN_FONT_SIZE: f32 = 12.0;
+const COLUMN_FONT_SIZE: f32 = 11.5;
 /// Lower bound factor applied to configured node width.
 const MIN_NODE_WIDTH_FACTOR: f32 = 0.72;
 /// Space reserved for badges and padding in width estimation.
