@@ -140,18 +140,18 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
 <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b"/>
 </filter>
-<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-<path d="M0,0 L0,6 L9,3 z" fill="{}" />
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+<path d="M1,1 L7,4 L1,7" fill="none" stroke="{}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
-<marker id="cardinality-one" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<path d="M7 1 L7 11" stroke="{}" stroke-width="1.8" stroke-linecap="round"/>
+<marker id="cardinality-one" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M8 2 L8 12" stroke="{}" stroke-width="1.6" stroke-linecap="round"/>
 </marker>
-<marker id="cardinality-many" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<path d="M1 1 L10 6 M1 6 L10 6 M1 11 L10 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="cardinality-many" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M2 2 L12 7 M2 7 L12 7 M2 12 L12 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
-<marker id="cardinality-zero-many" markerWidth="16" markerHeight="12" refX="14" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<circle cx="3.5" cy="6" r="2.2" fill="none" stroke="{}" stroke-width="1.4"/>
-<path d="M6 1 L14 6 M6 6 L14 6 M6 11 L14 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="cardinality-zero-many" markerWidth="20" markerHeight="14" refX="18" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<circle cx="4" cy="7" r="2.6" fill="none" stroke="{}" stroke-width="1.3"/>
+<path d="M8 2 L18 7 M8 7 L18 7 M8 12 L18 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
 </defs>"##,
         colors.canvas_base,
