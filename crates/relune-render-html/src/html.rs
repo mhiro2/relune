@@ -168,37 +168,28 @@ fn build_css(
     enable_highlight: bool,
 ) -> String {
     let colors = get_colors(theme);
-    let (
-        viewer_bg,
-        panel_bg,
-        panel_border,
-        panel_shadow,
-        accent_color,
-        accent_soft,
-        grid_dot,
-        grid_line,
-    ) = match theme {
-        Theme::Dark => (
-            "radial-gradient(circle at top, rgba(245, 158, 11, 0.16), transparent 34%), linear-gradient(180deg, #0b1020 0%, #111827 52%, #0a0f1c 100%)",
-            "rgba(10, 15, 28, 0.9)",
-            "rgba(148, 163, 184, 0.18)",
-            "0 18px 48px rgba(2, 6, 23, 0.52)",
-            "#f59e0b",
-            "rgba(245, 158, 11, 0.16)",
-            "rgba(148, 163, 184, 0.12)",
-            "rgba(148, 163, 184, 0.05)",
-        ),
-        Theme::Light => (
-            "radial-gradient(circle at top, rgba(217, 119, 6, 0.12), transparent 32%), linear-gradient(180deg, #f8fafc 0%, #eef2ff 42%, #f8fafc 100%)",
-            "rgba(255, 255, 255, 0.86)",
-            "rgba(71, 85, 105, 0.16)",
-            "0 16px 36px rgba(15, 23, 42, 0.12)",
-            "#c2410c",
-            "rgba(194, 65, 12, 0.12)",
-            "rgba(71, 85, 105, 0.12)",
-            "rgba(71, 85, 105, 0.04)",
-        ),
-    };
+    let accent_color = colors.glow_color;
+    let (viewer_bg, panel_bg, panel_border, panel_shadow, accent_soft, grid_dot, grid_line) =
+        match theme {
+            Theme::Dark => (
+                "radial-gradient(circle at top, rgba(245, 158, 11, 0.16), transparent 34%), linear-gradient(180deg, #0b1020 0%, #111827 52%, #0a0f1c 100%)",
+                "rgba(10, 15, 28, 0.9)",
+                "rgba(148, 163, 184, 0.18)",
+                "0 18px 48px rgba(2, 6, 23, 0.52)",
+                "rgba(245, 158, 11, 0.16)",
+                "rgba(148, 163, 184, 0.12)",
+                "rgba(148, 163, 184, 0.05)",
+            ),
+            Theme::Light => (
+                "radial-gradient(circle at top, rgba(217, 119, 6, 0.12), transparent 32%), linear-gradient(180deg, #f8fafc 0%, #eef2ff 42%, #f8fafc 100%)",
+                "rgba(255, 255, 255, 0.86)",
+                "rgba(71, 85, 105, 0.16)",
+                "0 16px 36px rgba(15, 23, 42, 0.12)",
+                "rgba(194, 65, 12, 0.12)",
+                "rgba(71, 85, 105, 0.12)",
+                "rgba(71, 85, 105, 0.04)",
+            ),
+        };
 
     let search_css = if enable_search {
         r"

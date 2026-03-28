@@ -108,20 +108,26 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 
     let _ = write!(
         out,
-        r##"<defs>
+        r"<defs>
 <style>
 .edge-glow-path,
 .edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
-.edge-particle {{ fill: #fbbf24; }}
+.edge-particle {{ fill: {glow_particle}; }}
 .edge:hover .edge-glow-path,
 .edge:hover .edge-particles {{ opacity: 0.92; }}
-.edge:hover .edge-path {{ stroke: #f59e0b; }}
+.edge:hover .edge-path {{ stroke: {glow_color}; }}
 .node:hover .table-body {{ stroke-width: 2.1px; }}
 .group-box,
 .group-band,
 .group-divider,
 .group-label {{ pointer-events: none; }}
-</style>
+</style>",
+        glow_color = colors.glow_color,
+        glow_particle = colors.glow_particle,
+    );
+    let _ = write!(
+        out,
+        r#"
 <pattern id="canvas-grid" width="32" height="32" patternUnits="userSpaceOnUse">
 <rect width="32" height="32" fill="{}"/>
 <circle cx="2" cy="2" r="1.2" fill="{}" fill-opacity="0.9"/>
@@ -138,7 +144,7 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
 <filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
-<feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b"/>
+<feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="{}"/>
 </filter>
 <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
 <path d="M1,1 L7,4 L1,7" fill="none" stroke="{}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -153,12 +159,13 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <circle cx="4" cy="7" r="2.6" fill="none" stroke="{}" stroke-width="1.3"/>
 <path d="M8 2 L18 7 M8 7 L18 7 M8 12 L18 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
-</defs>"##,
+</defs>"#,
         colors.canvas_base,
         colors.canvas_dot,
         colors.canvas_dot,
         colors.node_shadow,
         colors.node_shadow,
+        colors.glow_color,
         colors.arrow_fill,
         colors.text_secondary,
         colors.text_secondary,
@@ -442,11 +449,12 @@ fn render_edge_internal(
     };
 
     // Render the path with CSS class and data attributes
+    let glow = colors.glow_color;
     match stroke_dasharray {
         Some(stroke_dasharray) => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"##,
+                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"#,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
                 index,
@@ -460,7 +468,7 @@ fn render_edge_internal(
         None => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"##,
+                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"#,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
                 index,
