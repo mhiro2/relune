@@ -87,12 +87,12 @@ impl RenderStats {
 
 /// Custom serialization for Duration.
 mod duration_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
     use std::time::Duration;
 
     #[derive(Serialize)]
     struct DurationData {
-        millis: u64,
+        secs: u64,
         nanos: u32,
     }
 
@@ -101,9 +101,11 @@ mod duration_serde {
     where
         S: Serializer,
     {
-        let millis = duration.as_millis() as u64;
-        let nanos = duration.subsec_nanos();
-        DurationData { millis, nanos }.serialize(serializer)
+        DurationData {
+            secs: duration.as_secs(),
+            nanos: duration.subsec_nanos(),
+        }
+        .serialize(serializer)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -112,11 +114,14 @@ mod duration_serde {
     {
         #[derive(Deserialize)]
         struct DurationData {
-            millis: u64,
+            secs: u64,
             nanos: u32,
         }
         let data = DurationData::deserialize(deserializer)?;
-        Ok(Duration::from_millis(data.millis) + Duration::from_nanos(u64::from(data.nanos)))
+        if data.nanos >= 1_000_000_000 {
+            return Err(D::Error::custom("nanos must be less than 1_000_000_000"));
+        }
+        Ok(Duration::new(data.secs, data.nanos))
     }
 }
 
@@ -384,18 +389,19 @@ mod tests {
     #[test]
     fn test_duration_serialization() {
         let stats = RenderStats {
-            parse_time: Duration::from_millis(100),
+            parse_time: Duration::new(1, 250_000_000),
             ..Default::default()
         };
         let json = serde_json::to_string(&stats).unwrap();
         assert!(json.contains("\"parse_time\""));
-        assert!(json.contains("\"millis\":100"));
+        assert!(json.contains("\"secs\":1"));
+        assert!(json.contains("\"nanos\":250000000"));
     }
 
     #[test]
     fn test_duration_deserialization() {
-        let json = r#"{"table_count":0,"column_count":0,"edge_count":0,"view_count":0,"parse_time":{"millis":50,"nanos":0},"graph_time":{"millis":0,"nanos":0},"layout_time":{"millis":0,"nanos":0},"render_time":{"millis":0,"nanos":0},"total_time":{"millis":50,"nanos":0}}"#;
+        let json = r#"{"table_count":0,"column_count":0,"edge_count":0,"view_count":0,"parse_time":{"secs":1,"nanos":250000000},"graph_time":{"secs":0,"nanos":0},"layout_time":{"secs":0,"nanos":0},"render_time":{"secs":0,"nanos":0},"total_time":{"secs":1,"nanos":250000000}}"#;
         let stats: RenderStats = serde_json::from_str(json).unwrap();
-        assert_eq!(stats.parse_time, Duration::from_millis(50));
+        assert_eq!(stats.parse_time, Duration::new(1, 250_000_000));
     }
 }

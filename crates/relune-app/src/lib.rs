@@ -125,11 +125,37 @@ mod tests {
             depth: 1,
         };
 
-        let request = RenderRequest::from_sql(sql).with_focus(focus);
+        let request = RenderRequest::from_sql(sql)
+            .with_output_format(OutputFormat::GraphJson)
+            .with_focus(focus);
 
         let result = render(request).unwrap();
-        // Focus should include posts, users (referenced), and comments (references posts)
-        assert!(result.stats.table_count >= 2);
+        let graph: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        let nodes = graph["nodes"].as_array().expect("nodes array");
+        let node_ids = nodes
+            .iter()
+            .map(|node| node["table_name"].as_str().expect("table_name"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let edges = graph["edges"].as_array().expect("edges array");
+        let edge_ids = edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge["from"].as_str().expect("from"),
+                    edge["to"].as_str().expect("to"),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let expected_nodes = ["comments", "posts", "users"]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_edges = [("comments", "posts"), ("posts", "users")]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(node_ids, expected_nodes);
+        assert_eq!(edge_ids, expected_edges);
     }
 
     #[test]
@@ -248,14 +274,13 @@ mod tests {
 
     #[test]
     fn test_render_with_filter() {
-        // Note: Filter functionality affects graph building, not the full schema stats
-        // The filter is applied during layout graph construction
         let sql = r"
             CREATE TABLE users (
                 id INT PRIMARY KEY
             );
             CREATE TABLE posts (
                 id INT PRIMARY KEY
+                , user_id INT REFERENCES users(id)
             );
             CREATE TABLE comments (
                 id INT PRIMARY KEY
@@ -267,11 +292,36 @@ mod tests {
             exclude: vec![],
         };
 
-        let request = RenderRequest::from_sql(sql).with_filter(filter);
+        let request = RenderRequest::from_sql(sql)
+            .with_output_format(OutputFormat::GraphJson)
+            .with_filter(filter);
         let result = render(request).unwrap();
 
-        // Render should succeed
-        assert!(result.content.contains("<svg"));
+        let graph: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        let nodes = graph["nodes"].as_array().expect("nodes array");
+        let node_ids = nodes
+            .iter()
+            .map(|node| node["table_name"].as_str().expect("table_name"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let edges = graph["edges"].as_array().expect("edges array");
+        let edge_ids = edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge["from"].as_str().expect("from"),
+                    edge["to"].as_str().expect("to"),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let expected_nodes = ["posts", "users"]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_edges =
+            std::iter::once(("posts", "users")).collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(node_ids, expected_nodes);
+        assert_eq!(edge_ids, expected_edges);
     }
 
     #[test]
