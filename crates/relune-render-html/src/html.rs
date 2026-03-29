@@ -825,7 +825,10 @@ fn build_css(
     }
 
     .viewer-control-button {
-      min-width: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 36px;
       height: 34px;
       border: 1px solid var(--panel-border);
       background: transparent;
@@ -836,8 +839,14 @@ fn build_css(
       transition: transform 0.16s, border-color 0.16s, background-color 0.16s;
     }
 
+    .viewer-control-button svg {
+      width: 16px;
+      height: 16px;
+      pointer-events: none;
+    }
+
     .viewer-control-fit {
-      min-width: 56px;
+      min-width: 36px;
     }
 
     .viewer-control-status {
@@ -855,11 +864,11 @@ fn build_css(
 
     .minimap-shell {
       position: fixed;
-      right: 16px;
+      right: 12px;
       bottom: 88px;
-      width: min(240px, calc(100vw - 32px));
+      width: min(240px, calc(100vw - 24px));
       border: 1px solid var(--panel-border);
-      border-radius: 18px;
+      border-radius: 22px;
       background: var(--panel-bg);
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
@@ -871,7 +880,7 @@ fn build_css(
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--panel-border);
       font-size: 11px;
       text-transform: uppercase;
@@ -890,24 +899,29 @@ fn build_css(
       width: 100%;
       height: 150px;
       cursor: pointer;
+      background: rgba(148, 163, 184, 0.04);
     }
 
     .minimap-node {
-      fill: rgba(148, 163, 184, 0.46);
-      stroke: rgba(148, 163, 184, 0.7);
-      stroke-width: 0.4;
+      fill: rgba(148, 163, 184, 0.58);
+      stroke: rgba(148, 163, 184, 0.82);
+      stroke-width: 0.6;
       rx: 2;
+      transition: fill 0.15s, stroke 0.15s;
     }
 
     .minimap-node.selected {
-      fill: rgba(245, 158, 11, 0.72);
-      stroke: rgba(245, 158, 11, 1);
+      fill: var(--accent-color);
+      stroke: var(--accent-color);
+      filter: drop-shadow(0 0 3px var(--accent-soft));
     }
 
     .minimap-frame {
-      fill: rgba(245, 158, 11, 0.14);
-      stroke: rgba(245, 158, 11, 0.88);
-      stroke-width: 1.4;
+      fill: rgba(245, 158, 11, 0.1);
+      stroke: var(--accent-color);
+      stroke-width: 1.8;
+      stroke-dasharray: 4 2;
+      rx: 2;
     }
 
     .detail-drawer {
@@ -922,7 +936,7 @@ fn build_css(
       border-radius: 22px;
       background: var(--panel-bg);
       box-shadow: var(--panel-shadow);
-      backdrop-filter: blur(18px);
+      backdrop-filter: blur(16px);
       z-index: 250;
     }
 
@@ -982,7 +996,7 @@ fn build_css(
 
     .detail-metric {
       padding: 10px 12px;
-      border-radius: 14px;
+      border-radius: 12px;
       background: rgba(148, 163, 184, 0.08);
     }
 
@@ -1014,16 +1028,22 @@ fn build_css(
 
     .detail-columns,
     .detail-relations {
-      display: grid;
-      gap: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .detail-columns .detail-column {
+      flex: 1 1 100%;
     }
 
     .detail-column,
     .detail-relation {
       border: 1px solid rgba(148, 163, 184, 0.12);
-      border-radius: 14px;
-      padding: 10px 12px;
+      border-radius: 12px;
+      padding: 8px 12px;
       background: rgba(148, 163, 184, 0.05);
+      transition: border-color 0.15s, background-color 0.15s;
     }
 
     .detail-relation:hover {
@@ -1036,13 +1056,45 @@ fn build_css(
       display: block;
       font-family: var(--mono-font);
       font-size: 13px;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
+    }
+
+    .detail-column-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .detail-column-pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      background: rgba(148, 163, 184, 0.12);
+      opacity: 0.78;
+    }
+
+    .detail-column-pill-pk {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--accent-color);
+      opacity: 1;
+    }
+
+    .detail-column-pill-required {
+      opacity: 0.56;
+    }
+
+    .detail-column-pill-nullable {
+      opacity: 0.56;
     }
 
     .detail-column-meta,
     .detail-relation-meta {
-      font-size: 12px;
-      opacity: 0.72;
+      font-size: 11px;
+      opacity: 0.65;
+      letter-spacing: 0.01em;
     }
 
     .detail-relation-meta {
@@ -1062,7 +1114,7 @@ fn build_css(
 
     .detail-issue {
       border: 1px solid rgba(148, 163, 184, 0.12);
-      border-radius: 14px;
+      border-radius: 12px;
       padding: 10px 12px;
       margin-bottom: 6px;
     }
@@ -1439,10 +1491,10 @@ fn build_filter_reset_bar_html() -> String {
 #[allow(clippy::needless_raw_string_hashes)]
 fn build_viewer_controls_html() -> String {
     r#"  <div class="viewer-controls" id="viewer-controls" aria-label="Diagram controls">
-    <button type="button" class="viewer-control-button" id="zoom-in" title="Zoom in">+</button>
-    <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out">-</button>
+    <button type="button" class="viewer-control-button" id="zoom-in" title="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
     <span class="viewer-control-status" id="zoom-level">100%</span>
-    <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen">Fit</button>
+    <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
   </div>
   <div class="minimap-shell" id="minimap-shell" aria-label="Diagram minimap">
     <div class="minimap-header">
@@ -1894,6 +1946,19 @@ mod tests {
         assert!(html.contains(r#"id="zoom-level""#));
         assert!(html.contains(r#"id="zoom-fit""#));
         assert!(html.contains(r#"id="minimap""#));
+        // Verify SVG icons replaced text labels
+        assert!(html.contains("<svg"));
+        assert!(!html.contains(">+</button>"));
+        assert!(!html.contains(">-</button>"));
+        assert!(!html.contains(">Fit</button>"));
+    }
+
+    #[test]
+    fn test_viewer_controls_svg_icons_in_css() {
+        let css = build_css(Theme::Dark, false, true, false, false, true);
+
+        assert!(css.contains(".viewer-control-button svg"));
+        assert!(css.contains("width: 16px"));
     }
 
     #[test]
@@ -1997,5 +2062,36 @@ mod tests {
         assert!(!html.contains("clearHighlights"));
         assert!(!html.contains("inboundMap"));
         assert!(!html.contains("outboundMap"));
+    }
+
+    #[test]
+    fn test_detail_drawer_pill_css() {
+        let css = build_css(Theme::Dark, false, false, false, false, true);
+
+        assert!(css.contains(".detail-column-pills"));
+        assert!(css.contains(".detail-column-pill"));
+        assert!(css.contains(".detail-column-pill-pk"));
+    }
+
+    #[test]
+    fn test_panel_radius_consistency() {
+        let css = build_css(Theme::Dark, true, true, false, false, true);
+
+        // All major panels use 22px radius
+        assert!(css.contains(".search-panel"));
+        assert!(css.contains(".minimap-shell"));
+        assert!(css.contains(".detail-drawer"));
+        // minimap-shell should use 22px, not 18px
+        assert!(!css.contains("border-radius: 18px"));
+    }
+
+    #[test]
+    fn test_minimap_enhanced_visibility() {
+        let css = build_css(Theme::Dark, false, true, false, false, true);
+
+        assert!(css.contains(".minimap-node.selected"));
+        assert!(css.contains("drop-shadow"));
+        assert!(css.contains("stroke-dasharray"));
+        assert!(css.contains(".minimap-frame"));
     }
 }
