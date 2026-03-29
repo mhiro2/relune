@@ -9,6 +9,7 @@ pub mod focus;
 pub mod graph;
 pub mod layout;
 pub mod order;
+pub mod overlay;
 pub mod rank;
 pub mod route;
 
@@ -25,6 +26,9 @@ pub use layout::{
 };
 pub use order::{
     CrossingReductionStrategy, order_nodes_within_layers, order_nodes_within_layers_with_strategy,
+};
+pub use overlay::{
+    Annotation, DiagramOverlay, EdgeOverlay, NodeOverlay, OverlaySeverity, edge_key,
 };
 pub use rank::{RankAssignmentStrategy, assign_ranks};
 pub use relune_core::layout::{EdgeRoute, RouteStyle};

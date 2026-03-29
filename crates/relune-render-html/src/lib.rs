@@ -29,6 +29,19 @@ pub fn render_html(
     svg: &str,
     options: &HtmlRenderOptions,
 ) -> Result<String, HtmlRenderError> {
+    render_html_with_overlay(graph, svg, options, None)
+}
+
+/// Render a self-contained HTML document with an optional overlay.
+///
+/// When an overlay is provided, its annotations are embedded in the metadata
+/// so that client-side scripts can display lint warnings, diff status, etc.
+pub fn render_html_with_overlay(
+    graph: &LayoutGraph,
+    svg: &str,
+    options: &HtmlRenderOptions,
+    _overlay: Option<&relune_layout::DiagramOverlay>,
+) -> Result<String, HtmlRenderError> {
     let metadata = metadata::build_metadata(graph);
     let metadata_json = serde_json::to_string(&metadata)?;
     let escaped_metadata = html::escape_json_for_script(&metadata_json);

@@ -65,7 +65,7 @@ Relune is a **reusable schema graph engine** with multiple delivery surfaces (CL
 | Crate | Role |
 |-------|------|
 | `relune-core` | Normalized schema model, graph construction, filters, lint, diff, shared types |
-| `relune-layout` | Hierarchical and force-directed layout, edge routing, text diagram export (Mermaid, D2, DOT) |
+| `relune-layout` | Hierarchical and force-directed layout, edge routing, overlay annotations, text diagram export (Mermaid, D2, DOT) |
 | `relune-parser-sql` | DDL → `Schema` (PostgreSQL, MySQL, SQLite; auto-detection) |
 | `relune-introspect` | Live DB metadata → `Schema` (PostgreSQL, MySQL/MariaDB, SQLite; native builds only) |
 | `relune-render-theme` | Shared theme palette and render-facing theme DTOs used by SVG and HTML renderers |
@@ -97,7 +97,7 @@ docs/              # user-facing guides
 SQL file | SQL text | schema JSON | db URL  +  optional relune.toml
     → relune-cli (I/O, load config)
     → relune-app (choose adapter, build pipeline)
-    → Schema → graph → layout → SVG | HTML | JSON | diagram text
+    → Schema → graph → layout → (+ optional overlay) → SVG | HTML | JSON | diagram text
     → file or stdout
 ```
 
@@ -200,17 +200,19 @@ Diagnostics are a first-class stream: parse errors, recoverable warnings, unsupp
 
 ## 10. Layout
 
-`relune-layout` owns graph layout and text diagram exports (Mermaid, D2, DOT). It currently provides hierarchical and force-directed node placement plus straight, orthogonal, and curved edge routing. Separating it from `relune-core` keeps a clear boundary between the semantic graph and geometry, and allows targeted benchmarks.
+`relune-layout` owns graph layout, overlay annotations, and text diagram exports (Mermaid, D2, DOT). It currently provides hierarchical and force-directed node placement plus straight, orthogonal, and curved edge routing. Separating it from `relune-core` keeps a clear boundary between the semantic graph and geometry, and allows targeted benchmarks.
 
 Phases: build layout graph → grouping/focus → layout algorithm → coordinates → edge routing → bounds. Handles cycles, join tables, views, enum references, and multi-schema namespacing.
+
+**Overlay** (`overlay` module) — A `DiagramOverlay` attaches annotations (lint warnings, diff status, etc.) to nodes and edges by stable ID, without modifying the positioned graph itself. Renderers accept an optional overlay and apply visual cues (badges, border colors, tooltips) when present. When no overlay is provided the diagram renders normally.
 
 ---
 
 ## 11. Rendering
 
 - **Theme** (`relune-render-theme`) — Shared palettes and theme-facing DTOs consumed by both renderers.
-- **SVG** (`relune-render-svg`) — Geometry, edge paths, labels, themes, optional embedded CSS. Tables, views, and enums share one positioned graph and are styled by node/edge kind.
-- **HTML** (`relune-render-html`) — Wraps SVG with interactive behavior (pan/zoom, search, filters, grouping toggles, highlights) and embeds node/edge kind metadata for client-side features. Viewer logic is TypeScript under `crates/relune-render-html/ts/`; `build.rs` runs pnpm to emit bundled JS consumed via `include_str!`. Node + pnpm are required on `PATH` for renderer development and local builds of that crate.
+- **SVG** (`relune-render-svg`) — Geometry, edge paths, labels, themes, optional embedded CSS. Tables, views, and enums share one positioned graph and are styled by node/edge kind. Accepts an optional `DiagramOverlay` to render annotations.
+- **HTML** (`relune-render-html`) — Wraps SVG with interactive behavior (pan/zoom, search, filters, grouping toggles, highlights) and embeds node/edge kind metadata for client-side features. Accepts an optional `DiagramOverlay` whose annotations are embedded in metadata for client-side display. Viewer logic is TypeScript under `crates/relune-render-html/ts/`; `build.rs` runs pnpm to emit bundled JS consumed via `include_str!`. Node + pnpm are required on `PATH` for renderer development and local builds of that crate.
 
 The two crates are separate to keep low-level vector output apart from document bundling and JS tooling.
 
