@@ -204,7 +204,9 @@ Diagnostics are a first-class stream: parse errors, recoverable warnings, unsupp
 
 `relune-layout` owns graph layout, overlay annotations, and text diagram exports (Mermaid, D2, DOT). It currently provides hierarchical and force-directed node placement plus straight, orthogonal, and curved edge routing. Separating it from `relune-core` keeps a clear boundary between the semantic graph and geometry, and allows targeted benchmarks.
 
-Phases: build layout graph → grouping/focus → layout algorithm → coordinates → edge routing → bounds. Handles cycles, join tables, views, enum references, and multi-schema namespacing.
+Phases: build layout graph → grouping/focus → layout algorithm → coordinates → **auto-tune spacing** → edge routing → **obstacle avoidance** → **label collision avoidance** → bounds. Handles cycles, join tables, views, enum references, and multi-schema namespacing.
+
+**Quality passes** — After edge routing, two post-processing passes improve readability: (1) `detour_around_obstacles` reroutes Straight/Orthogonal edge segments that cross through intermediate nodes; (2) `nudge_label` shifts edge labels away from overlapping nodes. Additionally, `auto_tuned` adjusts horizontal/vertical spacing based on node count and edge density before coordinate assignment, and `centered_lane_offset` scales the gap between parallel edges sharing the same node pair for join-heavy schemas.
 
 **Overlay** (`overlay` module) — A `DiagramOverlay` attaches annotations (lint warnings, diff status, etc.) to nodes and edges by stable ID, without modifying the positioned graph itself. Renderers accept an optional overlay and apply visual cues (badges, border colors, tooltips) when present. When no overlay is provided the diagram renders normally.
 
