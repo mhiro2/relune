@@ -78,6 +78,9 @@ pub struct LayoutConfig {
     /// Automatic compaction settings for large schemas.
     #[serde(default)]
     pub compaction: LayoutCompactionSpec,
+    /// When true, spacing is automatically adjusted based on graph density.
+    #[serde(default)]
+    pub auto_tune_spacing: bool,
 }
 
 impl Default for LayoutConfig {
@@ -97,6 +100,7 @@ impl Default for LayoutConfig {
             mode: LayoutAlgorithm::default(),
             force_iterations: default_force_iterations(),
             compaction: LayoutCompactionSpec::default(),
+            auto_tune_spacing: true,
         }
     }
 }
@@ -151,6 +155,7 @@ impl From<&LayoutSpec> for LayoutConfig {
             direction: spec.direction,
             force_iterations: spec.force_iterations,
             compaction: spec.compaction.clone(),
+            auto_tune_spacing: spec.auto_tune_spacing,
             ..Default::default()
         }
         .validated()
@@ -218,6 +223,52 @@ impl LayoutConfig {
     #[must_use]
     pub const fn should_compact(&self, node_count: usize) -> bool {
         self.compaction.threshold > 0 && node_count > self.compaction.threshold
+    }
+
+    /// Auto-tune spacing based on node count and edge density.
+    ///
+    /// This adjusts `horizontal_spacing` and `vertical_spacing` so that
+    /// small schemas stay roomy, medium schemas stay balanced, and large /
+    /// dense schemas compress proportionally without exceeding screen real-estate.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn auto_tuned(mut self, node_count: usize, edge_count: usize) -> Self {
+        if node_count == 0 {
+            return self;
+        }
+
+        // Density = edges per node.  A linear chain has density ~1, a
+        // fully-connected graph approaches N-1.
+        let density = edge_count as f32 / node_count as f32;
+
+        // --- Node-count factor: reduce spacing as graph grows. ---
+        let count_factor = match node_count {
+            0..=6 => 1.0,
+            7..=15 => 0.9,
+            16..=30 => 0.8,
+            31..=60 => 0.7,
+            _ => 0.6,
+        };
+
+        // --- Density factor: denser graphs need more room for edges. ---
+        let density_factor = if density <= 1.0 {
+            // Sparse: tighten a bit.
+            0.9
+        } else if density <= 2.0 {
+            1.0
+        } else {
+            // Dense: widen to avoid congestion, cap at 1.2×.
+            (density * 0.4).min(1.2)
+        };
+
+        let combined = count_factor * density_factor;
+
+        self.horizontal_spacing =
+            (self.horizontal_spacing * combined).max(self.compaction.min_horizontal_spacing);
+        self.vertical_spacing =
+            (self.vertical_spacing * combined).max(self.compaction.min_vertical_spacing);
+
+        self
     }
 }
 
@@ -385,13 +436,22 @@ pub fn build_layout_from_graph_with_config(
     mut graph: LayoutGraph,
     config: &LayoutConfig,
 ) -> Result<PositionedGraph, LayoutError> {
+    // Step 2a: Auto-tune spacing based on graph density before compaction.
+    let tuned_config = if config.auto_tune_spacing {
+        config
+            .clone()
+            .auto_tuned(graph.nodes.len(), graph.edges.len())
+    } else {
+        config.clone()
+    };
+
     // Step 2b: Compute compacted config based on graph size and apply if needed
-    let compacted = config.compute_compacted_config(graph.nodes.len());
-    let effective_config = if config.should_compact(graph.nodes.len()) {
+    let compacted = tuned_config.compute_compacted_config(graph.nodes.len());
+    let effective_config = if tuned_config.should_compact(graph.nodes.len()) {
         info!(
             "Large schema detected ({} nodes > {} threshold), applying compact mode",
             graph.nodes.len(),
-            config.compaction.threshold
+            tuned_config.compaction.threshold
         );
         LayoutConfig {
             horizontal_spacing: compacted.horizontal_spacing,
@@ -399,10 +459,10 @@ pub fn build_layout_from_graph_with_config(
             node_width: compacted.node_width,
             node_padding: compacted.node_padding,
             show_columns: !compacted.hide_columns,
-            ..config.clone()
+            ..tuned_config
         }
     } else {
-        config.clone()
+        tuned_config
     };
 
     // Step 2c: If compact mode hides columns, strip them from graph nodes
@@ -1784,6 +1844,70 @@ mod tests {
 
         let hidden_columns = config.compute_compacted_config(31);
         assert!(hidden_columns.hide_columns);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_auto_tuned_identity_for_empty_graph() {
+        let config = LayoutConfig::default();
+        let tuned = config.clone().auto_tuned(0, 0);
+        assert_eq!(tuned.horizontal_spacing, config.horizontal_spacing);
+        assert_eq!(tuned.vertical_spacing, config.vertical_spacing);
+    }
+
+    #[test]
+    fn test_auto_tuned_shrinks_spacing_for_medium_graph() {
+        let config = LayoutConfig::default();
+        let tuned = config.clone().auto_tuned(20, 20);
+        assert!(
+            tuned.horizontal_spacing < config.horizontal_spacing,
+            "medium graph should have tighter spacing"
+        );
+    }
+
+    #[test]
+    fn test_auto_tuned_widens_for_dense_graph() {
+        let config = LayoutConfig::default();
+        // 5 nodes, 15 edges => density = 3.0 (very dense)
+        let sparse = config.clone().auto_tuned(5, 3);
+        let dense = config.auto_tuned(5, 15);
+        assert!(
+            dense.horizontal_spacing > sparse.horizontal_spacing,
+            "dense graph should have wider spacing than sparse one of same node count"
+        );
+    }
+
+    #[test]
+    fn test_auto_tuned_respects_minimum_spacing() {
+        let config = LayoutConfig::default();
+        let tuned = config.clone().auto_tuned(100, 50);
+        assert!(tuned.horizontal_spacing >= config.compaction.min_horizontal_spacing);
+        assert!(tuned.vertical_spacing >= config.compaction.min_vertical_spacing);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_auto_tune_disabled_preserves_custom_spacing() {
+        let config = LayoutConfig {
+            horizontal_spacing: 500.0,
+            vertical_spacing: 200.0,
+            auto_tune_spacing: false,
+            ..Default::default()
+        };
+
+        // auto_tuned() always mutates; the guard is in build_layout_from_graph_with_config.
+        // Verify the build-path logic inline.
+        let effective = if config.auto_tune_spacing {
+            config.clone().auto_tuned(50, 80)
+        } else {
+            config.clone()
+        };
+        assert_eq!(effective.horizontal_spacing, 500.0);
+        assert_eq!(effective.vertical_spacing, 200.0);
+
+        // Contrast: when enabled, spacing IS changed.
+        let tuned = config.auto_tuned(50, 80);
+        assert_ne!(tuned.horizontal_spacing, 500.0);
     }
 
     #[test]

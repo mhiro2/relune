@@ -128,6 +128,7 @@ impl WasmRenderRequest {
             vertical_spacing,
             force_iterations: 150,
             compaction: LayoutCompactionSpec::default(),
+            ..Default::default()
         };
 
         Ok(RenderRequest {
