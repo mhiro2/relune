@@ -108,20 +108,26 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 
     let _ = write!(
         out,
-        r##"<defs>
+        r"<defs>
 <style>
 .edge-glow-path,
 .edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
-.edge-particle {{ fill: #fbbf24; }}
+.edge-particle {{ fill: {glow_particle}; }}
 .edge:hover .edge-glow-path,
 .edge:hover .edge-particles {{ opacity: 0.92; }}
-.edge:hover .edge-path {{ stroke: #f59e0b; }}
+.edge:hover .edge-path {{ stroke: {glow_color}; }}
 .node:hover .table-body {{ stroke-width: 2.1px; }}
 .group-box,
 .group-band,
 .group-divider,
 .group-label {{ pointer-events: none; }}
-</style>
+</style>",
+        glow_color = colors.glow_color,
+        glow_particle = colors.glow_particle,
+    );
+    let _ = write!(
+        out,
+        r#"
 <pattern id="canvas-grid" width="32" height="32" patternUnits="userSpaceOnUse">
 <rect width="32" height="32" fill="{}"/>
 <circle cx="2" cy="2" r="1.2" fill="{}" fill-opacity="0.9"/>
@@ -138,27 +144,28 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
 <filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
-<feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b"/>
+<feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="{}"/>
 </filter>
-<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-<path d="M0,0 L0,6 L9,3 z" fill="{}" />
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+<path d="M1,1 L7,4 L1,7" fill="none" stroke="{}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
-<marker id="cardinality-one" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<path d="M7 1 L7 11" stroke="{}" stroke-width="1.8" stroke-linecap="round"/>
+<marker id="cardinality-one" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M8 2 L8 12" stroke="{}" stroke-width="1.6" stroke-linecap="round"/>
 </marker>
-<marker id="cardinality-many" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<path d="M1 1 L10 6 M1 6 L10 6 M1 11 L10 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="cardinality-many" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M2 2 L12 7 M2 7 L12 7 M2 12 L12 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
-<marker id="cardinality-zero-many" markerWidth="16" markerHeight="12" refX="14" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<circle cx="3.5" cy="6" r="2.2" fill="none" stroke="{}" stroke-width="1.4"/>
-<path d="M6 1 L14 6 M6 6 L14 6 M6 11 L14 6" stroke="{}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="cardinality-zero-many" markerWidth="20" markerHeight="14" refX="18" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<circle cx="4" cy="7" r="2.6" fill="none" stroke="{}" stroke-width="1.3"/>
+<path d="M8 2 L18 7 M8 7 L18 7 M8 12 L18 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
 </marker>
-</defs>"##,
+</defs>"#,
         colors.canvas_base,
         colors.canvas_dot,
         colors.canvas_dot,
         colors.node_shadow,
         colors.node_shadow,
+        colors.glow_color,
         colors.arrow_fill,
         colors.text_secondary,
         colors.text_secondary,
@@ -254,34 +261,36 @@ fn render_node_internal(
     );
     let _ = write!(
         out,
-        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="36" rx="16" ry="16" fill="{}"/>"#,
+        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="32" rx="16" ry="16" fill="{}"/>"#,
         node.x, node.y, node.width, node_style.header_fill
     );
+    // Gradient transition from header to body — eliminates the hard underlay band
     let _ = write!(
         out,
-        r#"<rect class="table-header-underlay" x="{:.1}" y="{:.1}" width="{:.1}" height="18" fill="{}" fill-opacity="0.28"/>"#,
+        r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{index})"/>"#,
+        node_style.header_fill,
+        node_style.header_fill,
         node.x,
-        node.y + 18.0,
-        node.width,
-        node_style.header_fill
+        node.y + 16.0,
+        node.width
     );
     let _ = write!(
         out,
-        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="18"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="14" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
-        node.x + 12.0,
+        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
+        node.x + 10.0,
         node.y + 8.0,
-        (node.width - 96.0).max(24.0),
-        node.x + 12.0,
-        node.y + 23.0,
+        (node.width - 80.0).max(24.0),
+        node.x + 10.0,
+        node.y + 21.0,
         colors.text_primary,
         escape_text(&node.label)
     );
     let _ = write!(
         out,
-        r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="10" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
-        node.x + node.width - 12.0,
-        node.y + 23.0,
-        colors.text_primary,
+        r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="9" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
+        node.x + node.width - 10.0,
+        node.y + 21.0,
+        colors.text_muted,
         escape_text(&kind.to_ascii_uppercase())
     );
 
@@ -298,7 +307,7 @@ fn render_node_internal(
         );
     }
 
-    let mut line_y = node.y + 52.0;
+    let mut line_y = node.y + 46.0;
     for (column_index, column) in node.columns.iter().enumerate() {
         let _ = write!(
             out,
@@ -310,10 +319,10 @@ fn render_node_internal(
             let separator_y = line_y - 12.0;
             let _ = write!(
                 out,
-                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.92" stroke-width="1"/>"#,
-                node.x + 12.0,
+                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.38" stroke-width="1"/>"#,
+                node.x + 10.0,
                 separator_y,
-                node.x + node.width - 12.0,
+                node.x + node.width - 10.0,
                 separator_y,
                 node_style.separator
             );
@@ -332,11 +341,11 @@ fn render_node_internal(
         };
         let _ = write!(
             out,
-            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" fill="{}"{}>{}</text>"#,
-            node.x + 12.0,
+            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>{}</text>"#,
+            node.x + 10.0,
             line_y - 12.5,
             column_text_width(node, column),
-            node.x + 12.0,
+            node.x + 10.0,
             line_y,
             if column.nullable {
                 colors.text_muted
@@ -440,11 +449,12 @@ fn render_edge_internal(
     };
 
     // Render the path with CSS class and data attributes
+    let glow = colors.glow_color;
     match stroke_dasharray {
         Some(stroke_dasharray) => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"##,
+                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"#,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
                 index,
@@ -458,7 +468,7 @@ fn render_edge_internal(
         None => {
             let _ = write!(
                 out,
-                r##"<path class="edge-glow-path" d="{}" stroke="#f59e0b" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"##,
+                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"#,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
                 index,
@@ -507,31 +517,29 @@ fn render_edge_internal(
     out.push_str("</g>");
 }
 
-fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
+/// Unified column-metadata badge renderer.
+///
+/// All indicators share the same rounded-rect + label form-factor so they are
+/// instantly distinguishable at a glance regardless of density.
+fn render_column_badge(out: &mut String, x: f32, y: f32, label: &str, bg: &str, fg: &str) {
     let _ = write!(
         out,
-        r##"<path class="pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"##,
-        x,
-        y + 3.2,
-        x + 3.2,
-        y + 3.2
+        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="20" height="13" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
+        x + 2.5,
+        y + 9.5,
     );
+}
+
+fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
+    render_column_badge(out, x, y, "PK", "#fbbf24", "#fbbf24");
 }
 
 fn render_fk_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
-        out,
-        r##"<path class="fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" fill="none" stroke="#38bdf8" stroke-width="1.4" stroke-linecap="round"/>"##,
-        x,
-        y + 3.4
-    );
+    render_column_badge(out, x, y, "FK", "#38bdf8", "#38bdf8");
 }
 
 fn render_idx_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
-        out,
-        r##"<path class="idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="#f59e0b"/>"##
-    );
+    render_column_badge(out, x, y, "IX", "#f59e0b", "#f59e0b");
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -722,7 +730,7 @@ fn column_text_width(
         + usize::from(column.is_primary_key);
     #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
     let reserved = (icon_slots as f32).mul_add(16.0, if icon_slots > 0 { 14.0 } else { 0.0 });
-    (node.width - 24.0 - reserved).max(18.0)
+    (node.width - 20.0 - reserved).max(18.0)
 }
 
 fn estimate_label_width(text: &str) -> f32 {

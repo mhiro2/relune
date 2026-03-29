@@ -77,6 +77,8 @@ mod tests {
             group_fill: "#0f172acc",
             group_band_fill: "#172036",
             group_stroke: "#334155",
+            glow_color: "#f59e0b",
+            glow_particle: "#fbbf24",
         }
     }
 

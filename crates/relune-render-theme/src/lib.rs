@@ -52,6 +52,10 @@ pub struct ThemeColors {
     pub group_band_fill: &'static str,
     /// Group border stroke.
     pub group_stroke: &'static str,
+    /// Accent glow color used for hover/highlight effects on edges and nodes.
+    pub glow_color: &'static str,
+    /// Secondary glow particle color (slightly lighter than `glow_color`).
+    pub glow_particle: &'static str,
 }
 
 /// Returns the color palette for the given theme.
@@ -75,6 +79,8 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_fill: "#0f172acc",
             group_band_fill: "#172036",
             group_stroke: "#334155",
+            glow_color: "#f59e0b",
+            glow_particle: "#fbbf24",
         },
         Theme::Light => ThemeColors {
             background: "#f7f8fc",
@@ -93,6 +99,8 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_fill: "#ffffffd9",
             group_band_fill: "#eef2ff",
             group_stroke: "#cbd5e1",
+            glow_color: "#d97706",
+            glow_particle: "#f59e0b",
         },
     }
 }
