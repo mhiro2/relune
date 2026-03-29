@@ -1137,15 +1137,34 @@ fn edge_lane_counts(graph: &LayoutGraph) -> std::collections::BTreeMap<(String, 
     counts
 }
 
-#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
-fn self_loop_radius_offset(lane_index: usize) -> f32 {
-    lane_index as f32 * 18.0
-}
+/// Base gap between parallel self-loop edges.
+const SELF_LOOP_LANE_GAP: f32 = 18.0;
+/// Base gap between parallel non-loop edges.
+const BASE_LANE_GAP: f32 = 14.0;
+/// Minimum lane gap used when many edges fan out.
+const MIN_LANE_GAP: f32 = 10.0;
+/// Maximum lane gap.
+const MAX_LANE_GAP: f32 = 20.0;
 
 #[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
+fn self_loop_radius_offset(lane_index: usize) -> f32 {
+    lane_index as f32 * SELF_LOOP_LANE_GAP
+}
+
+/// Compute the perpendicular offset for a lane in a group of parallel edges.
+///
+/// For join-heavy schemas the gap narrows gracefully so that a large fan-out
+/// still fits between nodes, while small fan-outs keep a comfortable distance.
+#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
 fn centered_lane_offset(lane_index: usize, lane_total: usize) -> f32 {
+    let gap = if lane_total <= 2 {
+        BASE_LANE_GAP
+    } else {
+        // Shrink gap as more edges share the same node pair, but keep a floor.
+        (BASE_LANE_GAP * 2.0 / (lane_total as f32).sqrt()).clamp(MIN_LANE_GAP, MAX_LANE_GAP)
+    };
     let center = (lane_total.saturating_sub(1)) as f32 * 0.5;
-    (lane_index as f32 - center) * 14.0
+    (lane_index as f32 - center) * gap
 }
 
 /// Calculate positions for groups.
@@ -1882,6 +1901,17 @@ mod tests {
         let cjk = estimate_text_width("利用者", COLUMN_FONT_SIZE);
 
         assert!(cjk > ascii);
+    }
+
+    #[test]
+    fn test_centered_lane_offset_scales_with_fan_out() {
+        // 2 parallel edges: standard gap
+        let gap_2 = (centered_lane_offset(1, 2) - centered_lane_offset(0, 2)).abs();
+        // 6 parallel edges: gap should be narrower
+        let gap_6 = (centered_lane_offset(1, 6) - centered_lane_offset(0, 6)).abs();
+
+        assert!(gap_6 < gap_2, "gap should shrink for larger fan-out");
+        assert!(gap_6 >= MIN_LANE_GAP, "gap must not drop below minimum");
     }
 
     #[test]
