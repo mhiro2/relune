@@ -59,6 +59,8 @@ Options:
           Possible values:
           - text: Human-readable text output
           - json: JSON output
+          - svg:  SVG diagram with diff overlay
+          - html: Self-contained HTML with diff overlay
 
   -o, --out <FILE>
           Output file path; stdout if omitted

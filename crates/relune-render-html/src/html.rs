@@ -1081,6 +1081,52 @@ fn build_css(
       opacity: 0.56;
     }
 
+    .detail-column-pill-diff {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      opacity: 1;
+    }
+
+    .detail-column-pill-diff-added {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+    }
+
+    .detail-column-pill-diff-removed {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+
+    .detail-column-pill-diff-modified {
+      background: rgba(245, 158, 11, 0.2);
+      color: #f59e0b;
+    }
+
+    .detail-diff-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .detail-diff-badge-added {
+      background: rgba(34, 197, 94, 0.18);
+      color: #22c55e;
+    }
+
+    .detail-diff-badge-removed {
+      background: rgba(239, 68, 68, 0.18);
+      color: #ef4444;
+    }
+
+    .detail-diff-badge-modified {
+      background: rgba(245, 158, 11, 0.18);
+      color: #f59e0b;
+    }
+
     .detail-column-meta,
     .detail-relation-meta {
       font-size: 11px;

@@ -578,4 +578,8 @@ pub enum DiffFormat {
     Text,
     /// JSON output.
     Json,
+    /// SVG diagram with diff overlay.
+    Svg,
+    /// Self-contained HTML with diff overlay.
+    Html,
 }

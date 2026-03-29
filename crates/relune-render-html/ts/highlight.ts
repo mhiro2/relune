@@ -10,6 +10,13 @@ function clearChildren(element: HTMLElement): void {
   element.replaceChildren();
 }
 
+function diffBadge(kind: string): HTMLDivElement {
+  const badge = document.createElement('div');
+  badge.className = `detail-diff-badge detail-diff-badge-${kind}`;
+  badge.textContent = kind;
+  return badge;
+}
+
 function metricCard(label: string, value: string): HTMLDivElement {
   const card = document.createElement('div');
   card.className = 'detail-metric';
@@ -239,6 +246,9 @@ function metricCard(label: string, value: string): HTMLDivElement {
         : table.table_name;
 
       clearChildren(drawerMetrics);
+      if (table.diff_kind) {
+        drawerMetrics.append(diffBadge(table.diff_kind));
+      }
       drawerMetrics.append(
         metricCard('Columns', String(table.columns.length)),
         metricCard('Inbound', String(table.inbound_count)),
@@ -277,6 +287,13 @@ function metricCard(label: string, value: string): HTMLDivElement {
           nullPill.className = `detail-column-pill ${column.nullable ? 'detail-column-pill-nullable' : 'detail-column-pill-required'}`;
           nullPill.textContent = column.nullable ? 'nullable' : 'required';
           pills.appendChild(nullPill);
+
+          if (column.diff_kind) {
+            const diffPill = document.createElement('span');
+            diffPill.className = `detail-column-pill detail-column-pill-diff detail-column-pill-diff-${column.diff_kind}`;
+            diffPill.textContent = column.diff_kind;
+            pills.appendChild(diffPill);
+          }
 
           columnEl.append(name, pills);
           drawerColumns.appendChild(columnEl);

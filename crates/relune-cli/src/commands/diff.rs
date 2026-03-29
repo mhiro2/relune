@@ -32,12 +32,15 @@ pub fn run_diff(
         format: match merged.format {
             DiffFormat::Text => relune_app::DiffFormat::Text,
             DiffFormat::Json => relune_app::DiffFormat::Json,
+            DiffFormat::Svg => relune_app::DiffFormat::Svg,
+            DiffFormat::Html => relune_app::DiffFormat::Html,
         },
         output_path: args.out.clone(),
+        ..Default::default()
     };
 
     // Execute diff
-    let result = diff(request).context("Failed to compute schema diff")?;
+    let mut result = diff(request).context("Failed to compute schema diff")?;
 
     // Print diagnostics
     let diag_printer = DiagnosticPrinter::new(color);
@@ -51,10 +54,12 @@ pub fn run_diff(
     }
 
     // Format output
+    let rendered = result.rendered.take();
     let content = match merged.format {
         DiffFormat::Text => format_diff_text(&result),
         DiffFormat::Json => serde_json::to_string_pretty(&result.diff)
             .context("Failed to serialize diff to JSON")?,
+        DiffFormat::Svg | DiffFormat::Html => rendered.unwrap_or_default(),
     };
 
     // Write output

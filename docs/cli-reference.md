@@ -148,12 +148,13 @@ When `--before <FILE>` or `--after <FILE>` is used, Relune inspects the file con
 
 | Option | Description |
 |--------|-------------|
-| `-f`, `--format text\|json` | Output format |
+| `-f`, `--format text\|json\|svg\|html` | Output format |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
 | `--dialect` | For SQL parsing on both sides |
 
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
+relune diff --before old.sql --after new.sql --format html -o diff.html
 relune --config relune.toml diff --before old.sql --after new.sql
 ```

@@ -8,6 +8,7 @@ export interface ColumnMetadata {
   data_type: string;
   nullable: boolean;
   is_primary_key: boolean;
+  diff_kind?: 'added' | 'removed' | 'modified' | null;
 }
 
 export interface IssueMetadata {
@@ -28,6 +29,7 @@ export interface TableMetadata {
   outbound_count: number;
   is_join_table_candidate: boolean;
   issues?: IssueMetadata[];
+  diff_kind?: 'added' | 'removed' | 'modified' | null;
 }
 
 export interface EdgeMetadata {
@@ -38,6 +40,7 @@ export interface EdgeMetadata {
   to_columns: string[];
   kind: 'foreign_key' | 'enum_reference' | 'view_dependency';
   issues?: IssueMetadata[];
+  diff_kind?: 'added' | 'removed' | 'modified' | null;
 }
 
 export interface GroupMetadata {

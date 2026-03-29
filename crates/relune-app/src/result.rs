@@ -344,6 +344,9 @@ pub struct DiffResult {
     /// Diagnostics collected during processing.
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
+    /// Rendered content (SVG or HTML) when a visual format was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rendered: Option<String>,
 }
 
 impl DiffResult {

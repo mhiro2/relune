@@ -113,7 +113,7 @@ Semantic validation is also applied after merge:
 
 | Key | Values |
 |-----|--------|
-| `format` | `text`, `json` |
+| `format` | `text`, `json`, `svg`, `html` |
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 
 `diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format` and `--dialect` only, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.

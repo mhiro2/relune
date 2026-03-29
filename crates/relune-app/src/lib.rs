@@ -55,7 +55,7 @@ pub use error::AppError;
 pub use usecases::{diff, export, inspect, lint, render};
 
 // Re-export from usecases for convenience
-pub use usecases::diff::format_diff_text;
+pub use usecases::diff::{build_diff_overlay, build_diff_schema, format_diff_text};
 pub use usecases::inspect::format_inspect_text;
 pub use usecases::lint::{format_lint_json, format_lint_text};
 

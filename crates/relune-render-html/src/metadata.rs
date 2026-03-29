@@ -42,6 +42,9 @@ pub struct TableMetadata {
     /// Overlay lint/health annotations (empty when no overlay provided).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<IssueMetadata>,
+    /// Diff change kind (present only when rendering a diff).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_kind: Option<String>,
 }
 
 /// Metadata about a column.
@@ -62,6 +65,9 @@ pub struct ColumnMetadata {
     /// Whether the column appears in an index.
     #[serde(default)]
     pub is_indexed: bool,
+    /// Diff change kind for this column (present only when rendering a diff).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_kind: Option<String>,
 }
 
 /// Metadata about a single edge/relation.
@@ -82,6 +88,9 @@ pub struct EdgeMetadata {
     /// Overlay lint/health annotations (empty when no overlay provided).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<IssueMetadata>,
+    /// Diff change kind for this edge (present only when rendering a diff).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_kind: Option<String>,
 }
 
 /// A single lint/health issue for client-side display.
@@ -119,9 +128,16 @@ pub fn build_metadata_with_overlay(
         .nodes
         .iter()
         .map(|node| {
-            let issues = overlay
-                .and_then(|o| o.node(&node.id))
+            let node_overlay = overlay.and_then(|o| o.node(&node.id));
+            let issues = node_overlay
                 .map(|no| annotations_to_issues(&no.annotations))
+                .unwrap_or_default();
+            let diff_kind = node_overlay.and_then(|no| extract_diff_kind(&no.annotations));
+            // Build per-column diff_kind map from the table-level diff hint
+            let column_diff_kinds = diff_kind
+                .as_deref()
+                .and(node_overlay)
+                .map(|no| extract_column_diff_kinds(&no.annotations))
                 .unwrap_or_default();
             TableMetadata {
                 id: node.id.clone(),
@@ -132,19 +148,24 @@ pub fn build_metadata_with_overlay(
                 columns: node
                     .columns
                     .iter()
-                    .map(|c| ColumnMetadata {
-                        name: c.name.clone(),
-                        data_type: c.data_type.clone(),
-                        nullable: c.nullable,
-                        is_primary_key: c.is_primary_key,
-                        is_foreign_key: c.is_foreign_key,
-                        is_indexed: c.is_indexed,
+                    .map(|c| {
+                        let col_diff = column_diff_kinds.get(c.name.as_str()).copied();
+                        ColumnMetadata {
+                            name: c.name.clone(),
+                            data_type: c.data_type.clone(),
+                            nullable: c.nullable,
+                            is_primary_key: c.is_primary_key,
+                            is_foreign_key: c.is_foreign_key,
+                            is_indexed: c.is_indexed,
+                            diff_kind: col_diff.map(ToString::to_string),
+                        }
                     })
                     .collect(),
                 inbound_count: node.inbound_count,
                 outbound_count: node.outbound_count,
                 is_join_table_candidate: node.is_join_table_candidate,
                 issues,
+                diff_kind,
             }
         })
         .collect();
@@ -153,10 +174,11 @@ pub fn build_metadata_with_overlay(
         .edges
         .iter()
         .map(|edge| {
-            let issues = overlay
-                .and_then(|o| o.edges.get(&edge_key(&edge.from, &edge.to)))
+            let edge_overlay = overlay.and_then(|o| o.edges.get(&edge_key(&edge.from, &edge.to)));
+            let issues = edge_overlay
                 .map(|eo| annotations_to_issues(&eo.annotations))
                 .unwrap_or_default();
+            let diff_kind = edge_overlay.and_then(|eo| extract_diff_kind(&eo.annotations));
             EdgeMetadata {
                 from: edge.from.clone(),
                 to: edge.to.clone(),
@@ -165,6 +187,7 @@ pub fn build_metadata_with_overlay(
                 to_columns: edge.to_columns.clone(),
                 kind: edge.kind,
                 issues,
+                diff_kind,
             }
         })
         .collect();
@@ -188,6 +211,46 @@ pub fn build_metadata_with_overlay(
         edges,
         groups,
     }
+}
+
+/// Extract diff change kind from annotations, if any diff annotation is present.
+fn extract_diff_kind(annotations: &[relune_layout::overlay::Annotation]) -> Option<String> {
+    annotations.iter().find_map(|a| {
+        a.rule_id.as_deref().and_then(|id| match id {
+            "diff-added" => Some("added".to_string()),
+            "diff-removed" => Some("removed".to_string()),
+            "diff-modified" => Some("modified".to_string()),
+            _ => None,
+        })
+    })
+}
+
+/// Parse per-column diff kinds from the hint of a `diff-modified` annotation.
+///
+/// The hint format is: `"+ col_a, - col_b, ~ col_c"`.
+fn extract_column_diff_kinds(
+    annotations: &[relune_layout::overlay::Annotation],
+) -> std::collections::HashMap<&str, &str> {
+    let mut map = std::collections::HashMap::new();
+    for annotation in annotations {
+        if annotation.rule_id.as_deref() != Some("diff-modified") {
+            continue;
+        }
+        let Some(ref hint) = annotation.hint else {
+            continue;
+        };
+        for part in hint.split(", ") {
+            let part = part.trim();
+            if let Some(name) = part.strip_prefix("+ ") {
+                map.insert(name, "added");
+            } else if let Some(name) = part.strip_prefix("- ") {
+                map.insert(name, "removed");
+            } else if let Some(name) = part.strip_prefix("~ ") {
+                map.insert(name, "modified");
+            }
+        }
+    }
+    map
 }
 
 fn annotations_to_issues(annotations: &[relune_layout::overlay::Annotation]) -> Vec<IssueMetadata> {
