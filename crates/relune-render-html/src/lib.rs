@@ -40,9 +40,9 @@ pub fn render_html_with_overlay(
     graph: &LayoutGraph,
     svg: &str,
     options: &HtmlRenderOptions,
-    _overlay: Option<&relune_layout::DiagramOverlay>,
+    overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<String, HtmlRenderError> {
-    let metadata = metadata::build_metadata(graph);
+    let metadata = metadata::build_metadata_with_overlay(graph, overlay);
     let metadata_json = serde_json::to_string(&metadata)?;
     let escaped_metadata = html::escape_json_for_script(&metadata_json);
 

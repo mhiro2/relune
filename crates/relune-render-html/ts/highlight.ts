@@ -1,4 +1,9 @@
-import { parseReluneMetadata, type EdgeMetadata, type TableMetadata } from './metadata';
+import {
+  parseReluneMetadata,
+  type EdgeMetadata,
+  type IssueMetadata,
+  type TableMetadata,
+} from './metadata';
 import { emitViewerEvent, getViewerRuntime } from './viewer_api';
 
 function clearChildren(element: HTMLElement): void {
@@ -46,6 +51,8 @@ function metricCard(label: string, value: string): HTMLDivElement {
   const drawerColumnsEmpty = document.getElementById('detail-columns-empty');
   const drawerRelations = document.getElementById('detail-relations');
   const drawerRelationsEmpty = document.getElementById('detail-relationships-empty');
+  const drawerIssues = document.getElementById('detail-issues');
+  const drawerIssuesEmpty = document.getElementById('detail-issues-empty');
   const drawerClose = document.getElementById('detail-close');
   const searchInput = document.getElementById('table-search');
   const objectBrowserList = document.getElementById('object-browser-list');
@@ -160,7 +167,23 @@ function metricCard(label: string, value: string): HTMLDivElement {
         kind.className = 'object-browser-kind';
         kind.textContent = table.kind;
 
-        header.append(name, kind);
+        // Add severity badge if table has issues
+        const tableIssues = table.issues ?? [];
+        if (tableIssues.length > 0) {
+          const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
+          const maxSeverity = tableIssues.reduce((max, issue) => {
+            return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0)
+              ? issue.severity
+              : max;
+          }, 'hint' as string);
+          const issueBadge = document.createElement('span');
+          issueBadge.className = `object-browser-issue-badge object-browser-issue-badge-${maxSeverity}`;
+          issueBadge.textContent = String(tableIssues.length);
+          issueBadge.title = `${tableIssues.length} issue${tableIssues.length === 1 ? '' : 's'}`;
+          header.append(name, issueBadge, kind);
+        } else {
+          header.append(name, kind);
+        }
 
         const meta = document.createElement('div');
         meta.className = 'object-browser-item-meta';
@@ -194,8 +217,10 @@ function metricCard(label: string, value: string): HTMLDivElement {
         clearChildren(drawerMetrics);
         clearChildren(drawerColumns);
         clearChildren(drawerRelations);
+        if (drawerIssues) clearChildren(drawerIssues);
         drawerColumnsEmpty.removeAttribute('hidden');
         drawerRelationsEmpty.removeAttribute('hidden');
+        if (drawerIssuesEmpty) drawerIssuesEmpty.removeAttribute('hidden');
         emitViewerEvent('relune:node-cleared', undefined);
         syncObjectBrowser();
         return;
@@ -275,6 +300,44 @@ function metricCard(label: string, value: string): HTMLDivElement {
           drawerRelations.appendChild(relationEl);
         }
       }
+      // Render lint/health issues section
+      if (drawerIssues instanceof HTMLElement && drawerIssuesEmpty instanceof HTMLElement) {
+        clearChildren(drawerIssues);
+        const issues: IssueMetadata[] = table.issues ?? [];
+        if (issues.length === 0) {
+          drawerIssuesEmpty.removeAttribute('hidden');
+        } else {
+          drawerIssuesEmpty.setAttribute('hidden', '');
+          for (const issue of issues) {
+            const issueEl = document.createElement('div');
+            issueEl.className = `detail-issue detail-issue-${issue.severity}`;
+
+            const header = document.createElement('div');
+            header.className = 'detail-issue-header';
+
+            const badge = document.createElement('span');
+            badge.className = `detail-issue-badge detail-issue-badge-${issue.severity}`;
+            badge.textContent = issue.severity;
+
+            const msg = document.createElement('span');
+            msg.className = 'detail-issue-message';
+            msg.textContent = issue.message;
+
+            header.append(badge, msg);
+            issueEl.appendChild(header);
+
+            if (issue.hint) {
+              const hintEl = document.createElement('span');
+              hintEl.className = 'detail-issue-hint';
+              hintEl.textContent = `→ ${issue.hint}`;
+              issueEl.appendChild(hintEl);
+            }
+
+            drawerIssues.appendChild(issueEl);
+          }
+        }
+      }
+
       emitViewerEvent('relune:node-selected', { nodeId: tableId });
       syncObjectBrowser();
     };

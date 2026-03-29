@@ -10,6 +10,13 @@ export interface ColumnMetadata {
   is_primary_key: boolean;
 }
 
+export interface IssueMetadata {
+  severity: 'error' | 'warning' | 'info' | 'hint';
+  message: string;
+  hint?: string | null;
+  rule_id?: string | null;
+}
+
 export interface TableMetadata {
   id: string;
   label: string;
@@ -20,6 +27,7 @@ export interface TableMetadata {
   inbound_count: number;
   outbound_count: number;
   is_join_table_candidate: boolean;
+  issues?: IssueMetadata[];
 }
 
 export interface EdgeMetadata {
@@ -29,6 +37,7 @@ export interface EdgeMetadata {
   from_columns: string[];
   to_columns: string[];
   kind: 'foreign_key' | 'enum_reference' | 'view_dependency';
+  issues?: IssueMetadata[];
 }
 
 export interface GroupMetadata {

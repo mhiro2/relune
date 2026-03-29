@@ -43,7 +43,7 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
 pub fn render_svg_with_overlay(
     graph: &relune_layout::PositionedGraph,
     options: SvgRenderOptions,
-    _overlay: Option<&relune_layout::DiagramOverlay>,
+    overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> String {
     let colors = get_colors(options.theme);
     let mut out = String::new();
@@ -73,12 +73,21 @@ pub fn render_svg_with_overlay(
         ..EdgeRenderOptions::default()
     };
     for (index, edge) in graph.edges.iter().enumerate() {
-        render_edge_internal(&mut out, edge, &colors, &edge_options, index);
+        let edge_overlay = overlay.and_then(|o| o.edge(&edge.from, &edge.to));
+        render_edge_internal(&mut out, edge, &colors, &edge_options, index, edge_overlay);
     }
 
     // Render nodes
     for (index, node) in graph.nodes.iter().enumerate() {
-        render_node_internal(&mut out, node, &colors, options.show_tooltips, index);
+        let node_overlay = overlay.and_then(|o| o.node(&node.id));
+        render_node_internal(
+            &mut out,
+            node,
+            &colors,
+            options.show_tooltips,
+            index,
+            node_overlay,
+        );
     }
 
     // Render legend if requested
@@ -167,21 +176,34 @@ fn render_node_internal(
     colors: &ThemeColors,
     show_tooltips: bool,
     index: usize,
+    overlay: Option<&relune_layout::NodeOverlay>,
 ) {
     let kind = node_kind_name(node.kind);
     let node_style = node_style(node.kind, colors);
     let node_label = node_kind_label(node.kind);
+    let max_severity = overlay.and_then(relune_layout::NodeOverlay::max_severity);
+
+    // Add overlay severity CSS class if present
+    let severity_class = match max_severity {
+        Some(relune_layout::OverlaySeverity::Error) => " overlay-error",
+        Some(relune_layout::OverlaySeverity::Warning) => " overlay-warning",
+        Some(relune_layout::OverlaySeverity::Info) => " overlay-info",
+        Some(relune_layout::OverlaySeverity::Hint) => " overlay-hint",
+        None => "",
+    };
+
     let _ = write!(
         out,
-        r#"<g class="table-node node node-kind-{}" data-table-id="{}" data-id="{}" data-node-kind="{}" style="--enter-delay:{:.3}s">"#,
+        r#"<g class="table-node node node-kind-{}{}" data-table-id="{}" data-id="{}" data-node-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
+        severity_class,
         escape_attribute(&node.id),
         escape_attribute(&node.id),
         kind,
         index as f32 * 0.022
     );
 
-    // Add tooltip if enabled
+    // Add tooltip if enabled (with overlay annotations appended)
     if show_tooltips {
         let column_count = node.columns.len();
         let pk_count = node.columns.iter().filter(|c| c.is_primary_key).count();
@@ -200,6 +222,18 @@ fn render_node_internal(
                 if pk_count == 1 { "" } else { "s" }
             ));
         }
+        if let Some(node_overlay) = overlay
+            && !node_overlay.annotations.is_empty()
+        {
+            tooltip_parts.push(String::new());
+            for annotation in &node_overlay.annotations {
+                let severity_label = overlay_severity_label(annotation.severity);
+                tooltip_parts.push(format!("[{}] {}", severity_label, annotation.message));
+                if let Some(ref hint) = annotation.hint {
+                    tooltip_parts.push(format!("  → {hint}"));
+                }
+            }
+        }
         let _ = write!(
             out,
             r"<title>{}</title>",
@@ -207,10 +241,16 @@ fn render_node_internal(
         );
     }
 
+    // Node border: override stroke color when overlay severity is present
+    let (stroke_color, stroke_width) = match max_severity {
+        Some(severity) => (overlay_severity_color(severity, colors), "2.4"),
+        None => (node_style.stroke, "1.6"),
+    };
+
     let _ = write!(
         out,
-        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" stroke="{}" stroke-width="1.6" filter="url(#node-shadow)"/>"#,
-        node.x, node.y, node.width, node.height, node_style.body_fill, node_style.stroke
+        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" stroke="{}" stroke-width="{}" filter="url(#node-shadow)"/>"#,
+        node.x, node.y, node.width, node.height, node_style.body_fill, stroke_color, stroke_width
     );
     let _ = write!(
         out,
@@ -244,6 +284,19 @@ fn render_node_internal(
         colors.text_primary,
         escape_text(&kind.to_ascii_uppercase())
     );
+
+    // Render severity badge when overlay has annotations
+    if let Some(severity) = max_severity {
+        let annotation_count = overlay.map_or(0, |o| o.annotations.len());
+        render_severity_badge(
+            out,
+            node.x + node.width - 12.0,
+            node.y - 6.0,
+            severity,
+            annotation_count,
+            colors,
+        );
+    }
 
     let mut line_y = node.y + 52.0;
     for (column_index, column) in node.columns.iter().enumerate() {
@@ -321,17 +374,20 @@ fn render_node_internal(
 /// Edge rendering for relune-layout `PositionedEdge`.
 #[allow(clippy::cast_precision_loss)] // Entry animation indices are presentation-only.
 #[allow(clippy::suboptimal_flops)] // Render-time coordinate math favors readability here.
+#[allow(clippy::too_many_lines)] // SVG edge markup with overlay integration is clearer in one block.
 fn render_edge_internal(
     out: &mut String,
     edge: &relune_layout::PositionedEdge,
     colors: &ThemeColors,
     options: &EdgeRenderOptions,
     index: usize,
+    overlay: Option<&relune_layout::EdgeOverlay>,
 ) {
     let kind = edge_kind_name(edge.kind);
     let edge_style = edge_style(edge.kind, colors);
     let path_d = crate::edge::edge_route_svg_path_d(&edge.route, options.curve_offset);
     let uses_crow_markers = edge.kind == EdgeKind::ForeignKey;
+    let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
 
     let stroke_dasharray = if options.dashed {
         Some("5,3")
@@ -339,21 +395,49 @@ fn render_edge_internal(
         edge_style.dasharray
     };
 
+    // Add overlay severity CSS class if present
+    let severity_class = match max_severity {
+        Some(relune_layout::OverlaySeverity::Error) => " overlay-error",
+        Some(relune_layout::OverlaySeverity::Warning) => " overlay-warning",
+        Some(relune_layout::OverlaySeverity::Info) => " overlay-info",
+        Some(relune_layout::OverlaySeverity::Hint) => " overlay-hint",
+        None => "",
+    };
+
     let _ = write!(
         out,
-        r#"<g class="edge edge-kind-{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
+        r#"<g class="edge edge-kind-{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
+        severity_class,
         escape_attribute(&edge.from),
         escape_attribute(&edge.to),
         kind,
         index as f32 * 0.016 + 0.04
     );
 
-    // Add tooltip if enabled
+    // Add tooltip if enabled (with overlay annotations appended)
     if options.show_tooltips {
-        let tooltip_text = generate_edge_tooltip(edge);
+        let mut tooltip_text = generate_edge_tooltip(edge);
+        if let Some(edge_overlay) = overlay
+            && !edge_overlay.annotations.is_empty()
+        {
+            tooltip_text.push('\n');
+            for annotation in &edge_overlay.annotations {
+                let severity_label = overlay_severity_label(annotation.severity);
+                let _ = write!(tooltip_text, "\n[{severity_label}] {}", annotation.message);
+                if let Some(ref hint) = annotation.hint {
+                    let _ = write!(tooltip_text, "\n  → {hint}");
+                }
+            }
+        }
         let _ = write!(out, r"<title>{}</title>", escape_text(&tooltip_text));
     }
+
+    // Override stroke color when overlay severity is present
+    let effective_stroke = match max_severity {
+        Some(severity) => overlay_severity_color(severity, colors),
+        None => edge_style.stroke,
+    };
 
     // Render the path with CSS class and data attributes
     match stroke_dasharray {
@@ -365,7 +449,7 @@ fn render_edge_internal(
                 options.stroke_width + 2.0,
                 index,
                 escape_attribute(&path_d),
-                edge_style.stroke,
+                effective_stroke,
                 options.stroke_width,
                 edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality,),
                 stroke_dasharray
@@ -379,7 +463,7 @@ fn render_edge_internal(
                 options.stroke_width + 2.0,
                 index,
                 escape_attribute(&path_d),
-                edge_style.stroke,
+                effective_stroke,
                 options.stroke_width,
                 edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality)
             );
@@ -654,6 +738,60 @@ fn node_label_background(colors: &ThemeColors) -> &'static str {
     } else {
         "#111827"
     }
+}
+
+/// Returns a display-friendly label for an overlay severity level.
+const fn overlay_severity_label(severity: relune_layout::OverlaySeverity) -> &'static str {
+    match severity {
+        relune_layout::OverlaySeverity::Error => "error",
+        relune_layout::OverlaySeverity::Warning => "warning",
+        relune_layout::OverlaySeverity::Info => "info",
+        relune_layout::OverlaySeverity::Hint => "hint",
+    }
+}
+
+/// Returns the stroke/fill color for an overlay severity, themed for light/dark.
+fn overlay_severity_color(
+    severity: relune_layout::OverlaySeverity,
+    colors: &ThemeColors,
+) -> &'static str {
+    let light = is_light_theme(colors);
+    match (severity, light) {
+        (relune_layout::OverlaySeverity::Error, false) => "#f87171",
+        (relune_layout::OverlaySeverity::Error, true) => "#dc2626",
+        (relune_layout::OverlaySeverity::Warning, false) => "#fbbf24",
+        (relune_layout::OverlaySeverity::Warning, true) => "#d97706",
+        (relune_layout::OverlaySeverity::Info, false) => "#38bdf8",
+        (relune_layout::OverlaySeverity::Info, true) => "#0284c7",
+        (relune_layout::OverlaySeverity::Hint, false) => "#94a3b8",
+        (relune_layout::OverlaySeverity::Hint, true) => "#64748b",
+    }
+}
+
+/// Renders a small badge at the top-right corner of a node showing issue count.
+fn render_severity_badge(
+    out: &mut String,
+    x: f32,
+    y: f32,
+    severity: relune_layout::OverlaySeverity,
+    count: usize,
+    colors: &ThemeColors,
+) {
+    let fill = overlay_severity_color(severity, colors);
+    let text_fill = if is_light_theme(colors) {
+        "#ffffff"
+    } else {
+        "#0c0f1a"
+    };
+    let label = count.to_string();
+    let badge_width = if count >= 10 { 22.0 } else { 18.0 };
+    let badge_x = x - badge_width / 2.0;
+    let _ = write!(
+        out,
+        r#"<rect class="overlay-badge" x="{badge_x:.1}" y="{y:.1}" width="{badge_width:.1}" height="18" rx="9" fill="{fill}"/><text x="{:.1}" y="{:.1}" font-family="'Inter', system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle" fill="{text_fill}">{label}</text>"#,
+        badge_x + badge_width / 2.0,
+        y + 13.0,
+    );
 }
 
 use escape::{escape_attribute, escape_text};
@@ -1672,6 +1810,73 @@ mod tests {
         // Raw special characters should not appear (except in SVG syntax)
         assert!(!svg.contains("Test & <Table>"));
         assert!(!svg.contains("Group & <Test>"));
+    }
+
+    #[test]
+    fn test_render_svg_with_node_overlay_adds_severity_class() {
+        let graph = single_node_graph();
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.add_node_annotation(
+            "users",
+            relune_layout::Annotation {
+                severity: relune_layout::OverlaySeverity::Warning,
+                message: "No primary key".to_string(),
+                hint: Some("Add a PK column".to_string()),
+                rule_id: Some("no-primary-key".to_string()),
+            },
+        );
+
+        let options = SvgRenderOptions {
+            show_tooltips: true,
+            ..Default::default()
+        };
+        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
+
+        assert!(svg.contains("overlay-warning"));
+        assert!(svg.contains("overlay-badge"));
+        assert!(svg.contains("[warning] No primary key"));
+        assert!(svg.contains("Add a PK column"));
+    }
+
+    #[test]
+    fn test_render_svg_with_edge_overlay_changes_stroke() {
+        let graph = multi_node_graph();
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.add_edge_annotation(
+            "posts",
+            "users",
+            relune_layout::Annotation {
+                severity: relune_layout::OverlaySeverity::Warning,
+                message: "Missing index on FK".to_string(),
+                hint: None,
+                rule_id: Some("missing-foreign-key-index".to_string()),
+            },
+        );
+
+        let options = SvgRenderOptions {
+            show_tooltips: true,
+            ..Default::default()
+        };
+        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
+
+        // Edge should have overlay-warning class
+        assert!(svg.contains("edge-kind-foreign-key overlay-warning"));
+        // Tooltip should include annotation
+        assert!(svg.contains("[warning] Missing index on FK"));
+    }
+
+    #[test]
+    fn test_render_svg_without_overlay_unchanged() {
+        let graph = single_node_graph();
+        let options = SvgRenderOptions::default();
+
+        let svg_no_overlay = render_svg_with_overlay(&graph, options, None);
+        let svg_empty_overlay =
+            render_svg_with_overlay(&graph, options, Some(&relune_layout::DiagramOverlay::new()));
+
+        // Both should produce identical output (no overlay classes/badges)
+        assert!(!svg_no_overlay.contains("overlay-"));
+        assert!(!svg_empty_overlay.contains("overlay-"));
     }
 }
 
