@@ -17,7 +17,10 @@ use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
 use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
-use crate::route::{Rect, nudge_label, route_edge_with_offset, route_self_loop_with_offset};
+use crate::route::{
+    Rect, detour_around_obstacles, nudge_label, route_edge_column_aware,
+    route_self_loop_with_offset,
+};
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
 /// Layout mode alias shared with `relune-core`.
@@ -1076,7 +1079,36 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
         .sum()
 }
 
+/// Compute the Y offset from node center for a column-aligned attachment point.
+///
+/// Returns 0.0 when columns are empty, hidden, or the target column is not found,
+/// which causes the edge to fall back to center attachment.
+fn column_y_offset_from_center(
+    node: &PositionedNode,
+    edge_columns: &[String],
+    config: &LayoutConfig,
+) -> f32 {
+    if edge_columns.is_empty() || node.columns.is_empty() {
+        return 0.0;
+    }
+    let Some(col_index) = node
+        .columns
+        .iter()
+        .position(|c| edge_columns.contains(&c.name))
+    else {
+        return 0.0;
+    };
+    let center_y = node.height / 2.0;
+    #[allow(clippy::cast_precision_loss)]
+    let col_y = (col_index as f32).mul_add(
+        config.column_height,
+        config.node_padding + config.header_height,
+    ) + config.column_height / 2.0;
+    col_y - center_y
+}
+
 /// Route all edges in the graph.
+#[allow(clippy::too_many_lines)]
 fn route_edges(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
@@ -1085,6 +1117,10 @@ fn route_edges(
     let node_positions: std::collections::BTreeMap<&str, (f32, f32, f32, f32)> = positioned_nodes
         .iter()
         .map(|n| (n.id.as_str(), (n.x, n.y, n.width, n.height)))
+        .collect();
+    let node_by_id: std::collections::BTreeMap<&str, &PositionedNode> = positioned_nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n))
         .collect();
     let edge_counts = edge_lane_counts(graph);
     let mut seen_lanes = std::collections::BTreeMap::new();
@@ -1115,7 +1151,16 @@ fn route_edges(
                 continue;
             }
         } else if let (Some(&(x1, y1, w1, h1)), Some(&(x2, y2, w2, h2))) = (from_pos, to_pos) {
-            route_edge_with_offset(
+            let lane = centered_lane_offset(*lane_index, lane_total);
+
+            let src_col = node_by_id.get(edge.from.as_str()).map_or(0.0, |n| {
+                column_y_offset_from_center(n, &edge.from_columns, config)
+            });
+            let tgt_col = node_by_id.get(edge.to.as_str()).map_or(0.0, |n| {
+                column_y_offset_from_center(n, &edge.to_columns, config)
+            });
+
+            route_edge_column_aware(
                 x1,
                 y1,
                 w1,
@@ -1125,7 +1170,10 @@ fn route_edges(
                 w2,
                 h2,
                 config.edge_style,
-                centered_lane_offset(*lane_index, lane_total),
+                lane,
+                lane,
+                src_col,
+                tgt_col,
             )
         } else {
             continue;
@@ -1139,7 +1187,7 @@ fn route_edges(
             }
         });
 
-        // Nudge label away from overlapping nodes (Task 23: label collision avoidance).
+        // Build obstacle list from all nodes except the edge's endpoints.
         let obstacles: Vec<Rect> = positioned_nodes
             .iter()
             .filter(|n| n.id != edge.from && n.id != edge.to)
@@ -1150,6 +1198,11 @@ fn route_edges(
                 h: n.height,
             })
             .collect();
+
+        // Detour edge segments around intermediate nodes (Task 25: obstacle avoidance).
+        let route = detour_around_obstacles(&route, &obstacles);
+
+        // Nudge label away from overlapping nodes (Task 23: label collision avoidance).
         let (label_x, label_y) = nudge_label(
             route.label_position,
             (route.x1, route.y1),
@@ -1908,6 +1961,129 @@ mod tests {
         // Contrast: when enabled, spacing IS changed.
         let tuned = config.auto_tuned(50, 80);
         assert_ne!(tuned.horizontal_spacing, 500.0);
+    }
+
+    #[test]
+    fn test_column_y_offset_from_center_basic() {
+        let config = LayoutConfig::default();
+        let layout_node = crate::graph::LayoutNode {
+            id: "t".to_string(),
+            label: "t".to_string(),
+            schema_name: None,
+            table_name: "t".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![
+                crate::graph::LayoutColumn {
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
+                    nullable: false,
+                },
+                crate::graph::LayoutColumn {
+                    name: "user_id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: true,
+                    nullable: false,
+                },
+            ],
+            inbound_count: 0,
+            outbound_count: 0,
+            has_self_loop: false,
+            is_join_table_candidate: false,
+            group_index: None,
+        };
+        let height = estimate_node_height(&layout_node, &config);
+        let node = PositionedNode {
+            id: "t".to_string(),
+            label: "t".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![
+                PositionedColumn {
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
+                    nullable: false,
+                },
+                PositionedColumn {
+                    name: "user_id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: true,
+                    nullable: false,
+                },
+            ],
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        };
+
+        // user_id is column index 1.
+        let offset = column_y_offset_from_center(&node, &["user_id".to_string()], &config);
+        let expected_col_y = 1.0f32.mul_add(
+            config.column_height,
+            config.node_padding + config.header_height,
+        ) + config.column_height / 2.0;
+        let expected = expected_col_y - node.height / 2.0;
+        assert!(
+            (offset - expected).abs() < 0.01,
+            "got {offset}, expected {expected}"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
+        let config = LayoutConfig::default();
+        let empty_node = PositionedNode {
+            id: "t".to_string(),
+            label: "t".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![],
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 50.0,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        };
+
+        // No columns in node → 0 (center).
+        assert_eq!(
+            column_y_offset_from_center(&empty_node, &["user_id".to_string()], &config),
+            0.0
+        );
+        // Empty edge columns → 0 (center).
+        assert_eq!(column_y_offset_from_center(&empty_node, &[], &config), 0.0);
+
+        let node_with_col = PositionedNode {
+            columns: vec![PositionedColumn {
+                name: "id".to_string(),
+                data_type: "int".to_string(),
+                is_primary_key: true,
+                is_foreign_key: false,
+                is_indexed: false,
+                nullable: false,
+            }],
+            height: 60.0,
+            ..empty_node
+        };
+        // Column not found → 0 (center).
+        assert_eq!(
+            column_y_offset_from_center(&node_with_col, &["nonexistent".to_string()], &config),
+            0.0
+        );
     }
 
     #[test]
