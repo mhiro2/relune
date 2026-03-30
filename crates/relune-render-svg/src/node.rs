@@ -143,8 +143,8 @@ pub fn render_node(out: &mut String, node: &PositionedNode, options: &NodeRender
             data_type: c.data_type.clone(),
             nullable: c.nullable,
             is_pk: c.is_primary_key,
-            is_fk: false,
-            is_idx: false,
+            is_fk: c.is_foreign_key,
+            is_idx: c.is_indexed,
         })
         .collect();
 
@@ -235,19 +235,18 @@ pub fn render_node(out: &mut String, node: &PositionedNode, options: &NodeRender
             escape_text(&column_text)
         );
 
-        // Primary key badge
-        if options.show_pk && column.is_pk {
-            render_pk_badge(out, node.x + node.width - 36.0, line_y - 10.0);
-        }
-
-        // Foreign key indicator
-        if options.show_fk && column.is_fk {
-            render_fk_indicator(out, node.x + node.width - 28.0, line_y - 10.0);
-        }
-
-        // Index indicator
+        // Badges: render right-to-left with 24px spacing (badge width 20 + 4px gap)
+        let mut icon_x = node.x + node.width - 22.0;
         if options.show_idx && column.is_idx {
-            render_idx_indicator(out, node.x + node.width - 28.0, line_y - 10.0);
+            render_idx_indicator(out, icon_x, line_y - 10.0);
+            icon_x -= 24.0;
+        }
+        if options.show_fk && column.is_fk {
+            render_fk_indicator(out, icon_x, line_y - 10.0);
+            icon_x -= 24.0;
+        }
+        if options.show_pk && column.is_pk {
+            render_pk_badge(out, icon_x, line_y - 10.0);
         }
 
         out.push_str("</g>");

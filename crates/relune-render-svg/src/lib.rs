@@ -363,11 +363,11 @@ fn render_node_internal(
         let mut icon_x = node.x + node.width - 22.0;
         if column.is_indexed {
             render_idx_indicator(out, icon_x, line_y - 9.0);
-            icon_x -= 16.0;
+            icon_x -= 24.0;
         }
         if column.is_foreign_key {
             render_fk_indicator(out, icon_x, line_y - 9.0);
-            icon_x -= 16.0;
+            icon_x -= 24.0;
         }
         if column.is_primary_key {
             render_pk_indicator(out, icon_x, line_y - 8.5);
@@ -1072,7 +1072,7 @@ fn column_text_width(
         + usize::from(column.is_foreign_key)
         + usize::from(column.is_primary_key);
     #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
-    let reserved = (icon_slots as f32).mul_add(16.0, if icon_slots > 0 { 14.0 } else { 0.0 });
+    let reserved = (icon_slots as f32).mul_add(24.0, if icon_slots > 0 { 14.0 } else { 0.0 });
     (node.width - 20.0 - reserved).max(18.0)
 }
 
