@@ -28,6 +28,13 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
   };
 }
 
+interface AvailableViewportRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 {
   const viewportEl = document.getElementById('viewport');
   const canvasEl = document.getElementById('canvas');
@@ -51,6 +58,54 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       let startY = 0;
       let startPanX = 0;
       let startPanY = 0;
+
+      const getAvailableViewport = (): AvailableViewportRect => {
+        const rect = viewportEl.getBoundingClientRect();
+        const leftInset = overlayInset(document.getElementById('search-panel'), 'left');
+        const rightInset = overlayInset(document.getElementById('detail-drawer'), 'right');
+        const topInset = Math.max(
+          overlayInset(document.querySelector('h1'), 'top'),
+          overlayInset(document.getElementById('filter-reset-bar'), 'top'),
+        );
+        const bottomInset = Math.max(
+          overlayInset(document.getElementById('viewer-controls'), 'bottom'),
+          overlayInset(document.getElementById('minimap-shell'), 'bottom'),
+        );
+
+        return {
+          left: leftInset,
+          top: topInset,
+          width: Math.max(rect.width - leftInset - rightInset, 120),
+          height: Math.max(rect.height - topInset - bottomInset, 120),
+        };
+      };
+
+      const clampAxis = (
+        nextPan: number,
+        contentSize: number,
+        viewportStart: number,
+        viewportSize: number,
+      ): number => {
+        if (contentSize <= viewportSize) {
+          return viewportStart + (viewportSize - contentSize) / 2;
+        }
+
+        const padding = clamp(viewportSize * 0.08, 24, 80);
+        const minPan = viewportStart + viewportSize - contentSize - padding;
+        const maxPan = viewportStart + padding;
+        return clamp(nextPan, minPan, maxPan);
+      };
+
+      const clampPan = (nextPanX: number, nextPanY: number): { panX: number; panY: number } => {
+        const availableViewport = getAvailableViewport();
+        const scaledWidth = diagram.width * scale;
+        const scaledHeight = diagram.height * scale;
+
+        return {
+          panX: clampAxis(nextPanX, scaledWidth, availableViewport.left, availableViewport.width),
+          panY: clampAxis(nextPanY, scaledHeight, availableViewport.top, availableViewport.height),
+        };
+      };
 
       const currentState = (): ViewportState => {
         const rect = viewportEl.getBoundingClientRect();
@@ -92,7 +147,17 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       };
 
       const updateTransform = (): void => {
-        canvasEl.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        const constrainedPan = clampPan(panX, panY);
+        panX = constrainedPan.panX;
+        panY = constrainedPan.panY;
+
+        const scaledWidth = diagram.width * scale;
+        const scaledHeight = diagram.height * scale;
+        svg.style.width = `${scaledWidth}px`;
+        svg.style.height = `${scaledHeight}px`;
+        canvasEl.style.width = `${scaledWidth}px`;
+        canvasEl.style.height = `${scaledHeight}px`;
+        canvasEl.style.transform = `translate(${panX}px, ${panY}px)`;
         if (zoomLevelEl instanceof HTMLElement) {
           zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
         }
@@ -100,7 +165,7 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       };
 
       const zoomAt = (nextScale: number, localX: number, localY: number): void => {
-        const clampedScale = clamp(nextScale, 0.1, 5);
+        const clampedScale = clamp(nextScale, 0.1, 2);
         const scaleFactor = clampedScale / scale;
         panX = localX - (localX - panX) * scaleFactor;
         panY = localY - (localY - panY) * scaleFactor;
@@ -109,42 +174,36 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       };
 
       const fitToScreen = (): void => {
-        const rect = viewportEl.getBoundingClientRect();
-        if (diagram.width <= 0 || diagram.height <= 0 || rect.width <= 0 || rect.height <= 0) {
+        const availableViewport = getAvailableViewport();
+        if (
+          diagram.width <= 0 ||
+          diagram.height <= 0 ||
+          availableViewport.width <= 0 ||
+          availableViewport.height <= 0
+        ) {
           return;
         }
 
-        const leftInset = overlayInset(document.getElementById('search-panel'), 'left');
-        const rightInset = overlayInset(document.getElementById('detail-drawer'), 'right');
-        const topInset = Math.max(
-          overlayInset(document.querySelector('h1'), 'top'),
-          overlayInset(document.getElementById('filter-reset-bar'), 'top'),
-        );
-        const bottomInset = Math.max(
-          overlayInset(document.getElementById('viewer-controls'), 'bottom'),
-          overlayInset(document.getElementById('minimap-shell'), 'bottom'),
-        );
-
-        const availableWidth = Math.max(rect.width - leftInset - rightInset, 120);
-        const availableHeight = Math.max(rect.height - topInset - bottomInset, 120);
         const padding = 40;
         scale = clamp(
           Math.min(
-            (availableWidth - padding * 2) / diagram.width,
-            (availableHeight - padding * 2) / diagram.height,
+            (availableViewport.width - padding * 2) / diagram.width,
+            (availableViewport.height - padding * 2) / diagram.height,
           ),
           0.1,
-          5,
+          2,
         );
-        panX = leftInset + availableWidth / 2 - (diagram.x + diagram.width / 2) * scale;
-        panY = topInset + availableHeight / 2 - (diagram.y + diagram.height / 2) * scale;
+        panX = availableViewport.left + (availableViewport.width - diagram.width * scale) / 2;
+        panY = availableViewport.top + (availableViewport.height - diagram.height * scale) / 2;
         updateTransform();
       };
 
       const centerOnContent = (contentX: number, contentY: number): void => {
-        const rect = viewportEl.getBoundingClientRect();
-        panX = rect.width / 2 - contentX * scale;
-        panY = rect.height / 2 - contentY * scale;
+        const availableViewport = getAvailableViewport();
+        panX =
+          availableViewport.left + availableViewport.width / 2 - (contentX - diagram.x) * scale;
+        panY =
+          availableViewport.top + availableViewport.height / 2 - (contentY - diagram.y) * scale;
         updateTransform();
       };
 
@@ -202,6 +261,15 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
         'wheel',
         (event: WheelEvent) => {
           event.preventDefault();
+          if (!event.ctrlKey && event.deltaMode === 0) {
+            panX -= event.deltaX;
+            panY -= event.deltaY;
+            updateTransform();
+            return;
+          }
+          if (event.deltaY === 0) {
+            return;
+          }
           const rect = viewportEl.getBoundingClientRect();
           zoomAt(
             scale * (event.deltaY > 0 ? 0.9 : 1.1),

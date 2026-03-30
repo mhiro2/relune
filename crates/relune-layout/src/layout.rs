@@ -17,7 +17,11 @@ use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
 use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
-use crate::route::{route_edge_with_offset, route_self_loop_with_offset};
+use crate::route::{
+    LABEL_HALF_H, Rect, attachment_sides, detour_around_obstacles,
+    detour_around_obstacles_with_endpoints, estimate_label_half_width, nudge_label,
+    route_edge_column_aware, route_self_loop_with_offset,
+};
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
 /// Layout mode alias shared with `relune-core`.
@@ -34,8 +38,8 @@ const HEADER_FONT_SIZE: f32 = 13.0;
 const COLUMN_FONT_SIZE: f32 = 11.5;
 /// Lower bound factor applied to configured node width.
 const MIN_NODE_WIDTH_FACTOR: f32 = 0.72;
-/// Space reserved for badges and padding in width estimation.
-const NODE_WIDTH_SLACK: f32 = 34.0;
+/// Extra right-side space for the kind label ("TABLE"/"VIEW"/"ENUM") in the header.
+const HEADER_KIND_LABEL_RESERVE: f32 = 48.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -78,6 +82,9 @@ pub struct LayoutConfig {
     /// Automatic compaction settings for large schemas.
     #[serde(default)]
     pub compaction: LayoutCompactionSpec,
+    /// When true, spacing is automatically adjusted based on graph density.
+    #[serde(default)]
+    pub auto_tune_spacing: bool,
 }
 
 impl Default for LayoutConfig {
@@ -97,6 +104,7 @@ impl Default for LayoutConfig {
             mode: LayoutAlgorithm::default(),
             force_iterations: default_force_iterations(),
             compaction: LayoutCompactionSpec::default(),
+            auto_tune_spacing: true,
         }
     }
 }
@@ -151,6 +159,7 @@ impl From<&LayoutSpec> for LayoutConfig {
             direction: spec.direction,
             force_iterations: spec.force_iterations,
             compaction: spec.compaction.clone(),
+            auto_tune_spacing: spec.auto_tune_spacing,
             ..Default::default()
         }
         .validated()
@@ -218,6 +227,52 @@ impl LayoutConfig {
     #[must_use]
     pub const fn should_compact(&self, node_count: usize) -> bool {
         self.compaction.threshold > 0 && node_count > self.compaction.threshold
+    }
+
+    /// Auto-tune spacing based on node count and edge density.
+    ///
+    /// This adjusts `horizontal_spacing` and `vertical_spacing` so that
+    /// small schemas stay roomy, medium schemas stay balanced, and large /
+    /// dense schemas compress proportionally without exceeding screen real-estate.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn auto_tuned(mut self, node_count: usize, edge_count: usize) -> Self {
+        if node_count == 0 {
+            return self;
+        }
+
+        // Density = edges per node.  A linear chain has density ~1, a
+        // fully-connected graph approaches N-1.
+        let density = edge_count as f32 / node_count as f32;
+
+        // --- Node-count factor: reduce spacing as graph grows. ---
+        let count_factor = match node_count {
+            0..=6 => 1.0,
+            7..=15 => 0.9,
+            16..=30 => 0.8,
+            31..=60 => 0.7,
+            _ => 0.6,
+        };
+
+        // --- Density factor: denser graphs need more room for edges. ---
+        let density_factor = if density <= 1.0 {
+            // Sparse: tighten a bit.
+            0.9
+        } else if density <= 2.0 {
+            1.0
+        } else {
+            // Dense: widen to avoid congestion, cap at 1.2×.
+            (density * 0.4).min(1.2)
+        };
+
+        let combined = count_factor * density_factor;
+
+        self.horizontal_spacing =
+            (self.horizontal_spacing * combined).max(self.compaction.min_horizontal_spacing);
+        self.vertical_spacing =
+            (self.vertical_spacing * combined).max(self.compaction.min_vertical_spacing);
+
+        self
     }
 }
 
@@ -385,13 +440,22 @@ pub fn build_layout_from_graph_with_config(
     mut graph: LayoutGraph,
     config: &LayoutConfig,
 ) -> Result<PositionedGraph, LayoutError> {
+    // Step 2a: Auto-tune spacing based on graph density before compaction.
+    let tuned_config = if config.auto_tune_spacing {
+        config
+            .clone()
+            .auto_tuned(graph.nodes.len(), graph.edges.len())
+    } else {
+        config.clone()
+    };
+
     // Step 2b: Compute compacted config based on graph size and apply if needed
-    let compacted = config.compute_compacted_config(graph.nodes.len());
-    let effective_config = if config.should_compact(graph.nodes.len()) {
+    let compacted = tuned_config.compute_compacted_config(graph.nodes.len());
+    let effective_config = if tuned_config.should_compact(graph.nodes.len()) {
         info!(
             "Large schema detected ({} nodes > {} threshold), applying compact mode",
             graph.nodes.len(),
-            config.compaction.threshold
+            tuned_config.compaction.threshold
         );
         LayoutConfig {
             horizontal_spacing: compacted.horizontal_spacing,
@@ -399,10 +463,10 @@ pub fn build_layout_from_graph_with_config(
             node_width: compacted.node_width,
             node_padding: compacted.node_padding,
             show_columns: !compacted.hide_columns,
-            ..config.clone()
+            ..tuned_config
         }
     } else {
-        config.clone()
+        tuned_config
     };
 
     // Step 2c: If compact mode hides columns, strip them from graph nodes
@@ -434,6 +498,9 @@ pub fn build_layout_from_graph_with_config(
     // Step 5: Position groups
     let positioned_groups = position_groups(&graph.groups, &positioned_nodes);
 
+    // Expand canvas bounds so self-loop curves are not clipped.
+    let (width, height) = expand_bounds_for_edges(width, height, &positioned_edges);
+
     info!("Layout complete: {}x{} pixels", width, height);
 
     Ok(PositionedGraph {
@@ -454,7 +521,10 @@ fn assign_coordinates(
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
 ) -> (Vec<PositionedNode>, f32, f32) {
-    let mut positioned_nodes = Vec::new();
+    let n = graph.nodes.len();
+    // Index by graph node index so that positioned_nodes[node_idx] correctly
+    // addresses the corresponding node (needed by resolve_rank_collisions).
+    let mut positioned_slots: Vec<Option<PositionedNode>> = vec![None; n];
 
     let is_horizontal = matches!(
         config.direction,
@@ -485,7 +555,7 @@ fn assign_coordinates(
                 (secondary, primary)
             };
 
-            positioned_nodes.push(build_positioned_node(
+            positioned_slots[node_idx] = Some(build_positioned_node(
                 node,
                 node_x,
                 node_y,
@@ -494,6 +564,10 @@ fn assign_coordinates(
             ));
         }
     }
+
+    // Every graph node must have been assigned a position above.
+    let mut positioned_nodes: Vec<PositionedNode> =
+        positioned_slots.into_iter().map(Option::unwrap).collect();
 
     resolve_rank_collisions(&mut positioned_nodes, ordered_nodes, config, is_horizontal);
     let graph_bounds = compute_graph_bounds(&positioned_nodes, config);
@@ -858,19 +932,29 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
     let header_width = config
         .node_padding
         .mul_add(2.0, estimate_text_width(&node.label, HEADER_FONT_SIZE))
-        + 24.0;
+        + HEADER_KIND_LABEL_RESERVE;
 
     let column_width = node
         .columns
         .iter()
         .map(|column| {
             let text = display_column_text(node.kind, &column.name, &column.data_type);
-            estimate_text_width(&text, COLUMN_FONT_SIZE)
+            let text_px = estimate_text_width(&text, COLUMN_FONT_SIZE);
+            let icon_slots = usize::from(column.is_indexed)
+                + usize::from(column.is_foreign_key)
+                + usize::from(column.is_primary_key);
+            #[allow(clippy::cast_precision_loss)] // Icon counts are tiny layout values.
+            let badge_reserve = if icon_slots > 0 {
+                (icon_slots as f32 - 1.0).mul_add(24.0, 28.0)
+            } else {
+                0.0
+            };
+            text_px + badge_reserve
         })
         .fold(0.0, f32::max);
 
     header_width
-        .max(config.node_padding.mul_add(2.0, column_width) + NODE_WIDTH_SLACK)
+        .max(config.node_padding.mul_add(2.0, column_width) + 10.0)
         .max(minimum_width)
         .ceil()
 }
@@ -979,6 +1063,36 @@ fn compute_graph_bounds(positioned_nodes: &[PositionedNode], config: &LayoutConf
     (max_x + config.origin_x, max_y + config.origin_y)
 }
 
+/// Expand graph bounds so that edge routes (especially self-loop curves and
+/// their control points) are not clipped by the SVG viewport.
+fn expand_bounds_for_edges(width: f32, height: f32, edges: &[PositionedEdge]) -> (f32, f32) {
+    const MARKER_PAD: f32 = 24.0; // room for Crow's Foot markers
+    let mut w = width;
+    let mut h = height;
+    for edge in edges {
+        let r = &edge.route;
+        for &x in &[r.x1, r.x2] {
+            if x + MARKER_PAD > w {
+                w = x + MARKER_PAD;
+            }
+        }
+        for &y in &[r.y1, r.y2] {
+            if y + MARKER_PAD > h {
+                h = y + MARKER_PAD;
+            }
+        }
+        for &(cx, cy) in &r.control_points {
+            if cx + MARKER_PAD > w {
+                w = cx + MARKER_PAD;
+            }
+            if cy + MARKER_PAD > h {
+                h = cy + MARKER_PAD;
+            }
+        }
+    }
+    (w, h)
+}
+
 fn node_pair_spacing(left: NodeSize, right: NodeSize, config: &LayoutConfig) -> f32 {
     let left_radius = left.width.max(left.height) * 0.5;
     let right_radius = right.width.max(right.height) * 0.5;
@@ -1016,7 +1130,36 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
         .sum()
 }
 
+/// Compute the Y offset from node center for a column-aligned attachment point.
+///
+/// Returns 0.0 when columns are empty, hidden, or the target column is not found,
+/// which causes the edge to fall back to center attachment.
+fn column_y_offset_from_center(
+    node: &PositionedNode,
+    edge_columns: &[String],
+    config: &LayoutConfig,
+) -> f32 {
+    if edge_columns.is_empty() || node.columns.is_empty() {
+        return 0.0;
+    }
+    let Some(col_index) = node
+        .columns
+        .iter()
+        .position(|c| edge_columns.contains(&c.name))
+    else {
+        return 0.0;
+    };
+    let center_y = node.height / 2.0;
+    #[allow(clippy::cast_precision_loss)]
+    let col_y = (col_index as f32).mul_add(
+        config.column_height,
+        config.node_padding + config.header_height,
+    ) + config.column_height / 2.0;
+    col_y - center_y
+}
+
 /// Route all edges in the graph.
+#[allow(clippy::too_many_lines)]
 fn route_edges(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
@@ -1026,10 +1169,15 @@ fn route_edges(
         .iter()
         .map(|n| (n.id.as_str(), (n.x, n.y, n.width, n.height)))
         .collect();
+    let node_by_id: std::collections::BTreeMap<&str, &PositionedNode> = positioned_nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n))
+        .collect();
     let edge_counts = edge_lane_counts(graph);
     let mut seen_lanes = std::collections::BTreeMap::new();
 
     let mut edges = Vec::new();
+    let mut placed_labels: Vec<Rect> = Vec::new();
 
     for edge in &graph.edges {
         let lane_key = canonical_edge_pair(&edge.from, &edge.to);
@@ -1040,6 +1188,9 @@ fn route_edges(
         let lane_total = edge_counts.get(&lane_key).copied().unwrap_or(1);
         let from_pos = node_positions.get(edge.from.as_str());
         let to_pos = node_positions.get(edge.to.as_str());
+
+        let mut detour_source_side = None;
+        let mut detour_target_side = None;
 
         let route = if edge.is_self_loop {
             if let Some(&(x, y, w, h)) = from_pos {
@@ -1055,7 +1206,19 @@ fn route_edges(
                 continue;
             }
         } else if let (Some(&(x1, y1, w1, h1)), Some(&(x2, y2, w2, h2))) = (from_pos, to_pos) {
-            route_edge_with_offset(
+            let lane = centered_lane_offset(*lane_index, lane_total);
+            let (source_side, target_side) = attachment_sides(x1, y1, w1, h1, x2, y2, w2, h2);
+            detour_source_side = Some(source_side);
+            detour_target_side = Some(target_side);
+
+            let src_col = node_by_id.get(edge.from.as_str()).map_or(0.0, |n| {
+                column_y_offset_from_center(n, &edge.from_columns, config)
+            });
+            let tgt_col = node_by_id.get(edge.to.as_str()).map_or(0.0, |n| {
+                column_y_offset_from_center(n, &edge.to_columns, config)
+            });
+
+            route_edge_column_aware(
                 x1,
                 y1,
                 w1,
@@ -1065,7 +1228,10 @@ fn route_edges(
                 w2,
                 h2,
                 config.edge_style,
-                centered_lane_offset(*lane_index, lane_total),
+                lane,
+                lane,
+                src_col,
+                tgt_col,
             )
         } else {
             continue;
@@ -1079,7 +1245,60 @@ fn route_edges(
             }
         });
 
-        let (label_x, label_y) = route.label_position;
+        // Build obstacle list from all nodes except the edge's endpoints (for edge detour).
+        let detour_obstacles: Vec<Rect> = positioned_nodes
+            .iter()
+            .filter(|n| n.id != edge.from && n.id != edge.to)
+            .map(|n| Rect {
+                x: n.x,
+                y: n.y,
+                w: n.width,
+                h: n.height,
+            })
+            .collect();
+
+        // Detour edge segments around intermediate nodes (Task 25: obstacle avoidance).
+        let route = match (detour_source_side, detour_target_side) {
+            (Some(source_side), Some(target_side)) => detour_around_obstacles_with_endpoints(
+                &route,
+                &detour_obstacles,
+                Some(source_side),
+                Some(target_side),
+            ),
+            _ => detour_around_obstacles(&route, &detour_obstacles),
+        };
+
+        // Build obstacle list for label nudging: include previously placed labels,
+        // and for self-loop edges also include the source node (which is excluded
+        // from detour obstacles but can occlude the label).
+        let mut label_obstacles: Vec<Rect> = detour_obstacles.clone();
+        label_obstacles.extend_from_slice(&placed_labels);
+        if edge.is_self_loop
+            && let Some(&(x, y, w, h)) = from_pos
+        {
+            label_obstacles.push(Rect { x, y, w, h });
+        }
+
+        // Estimate label half-width from actual text content.
+        let lhw = estimate_label_half_width(&label);
+
+        // Nudge label away from overlapping nodes and prior labels.
+        let (label_x, label_y) = nudge_label(
+            route.label_position,
+            (route.x1, route.y1),
+            (route.x2, route.y2),
+            &label_obstacles,
+            4.0,
+            lhw,
+        );
+
+        // Record this label's bounding box as an obstacle for subsequent edges.
+        placed_labels.push(Rect {
+            x: label_x - lhw,
+            y: label_y - LABEL_HALF_H,
+            w: lhw * 2.0,
+            h: LABEL_HALF_H * 2.0,
+        });
 
         edges.push(PositionedEdge {
             from: edge.from.clone(),
@@ -1120,15 +1339,34 @@ fn edge_lane_counts(graph: &LayoutGraph) -> std::collections::BTreeMap<(String, 
     counts
 }
 
-#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
-fn self_loop_radius_offset(lane_index: usize) -> f32 {
-    lane_index as f32 * 18.0
-}
+/// Base gap between parallel self-loop edges.
+const SELF_LOOP_LANE_GAP: f32 = 18.0;
+/// Base gap between parallel non-loop edges.
+const BASE_LANE_GAP: f32 = 14.0;
+/// Minimum lane gap used when many edges fan out.
+const MIN_LANE_GAP: f32 = 10.0;
+/// Maximum lane gap.
+const MAX_LANE_GAP: f32 = 20.0;
 
 #[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
+fn self_loop_radius_offset(lane_index: usize) -> f32 {
+    lane_index as f32 * SELF_LOOP_LANE_GAP
+}
+
+/// Compute the perpendicular offset for a lane in a group of parallel edges.
+///
+/// For join-heavy schemas the gap narrows gracefully so that a large fan-out
+/// still fits between nodes, while small fan-outs keep a comfortable distance.
+#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
 fn centered_lane_offset(lane_index: usize, lane_total: usize) -> f32 {
+    let gap = if lane_total <= 2 {
+        BASE_LANE_GAP
+    } else {
+        // Shrink gap as more edges share the same node pair, but keep a floor.
+        (BASE_LANE_GAP * 2.0 / (lane_total as f32).sqrt()).clamp(MIN_LANE_GAP, MAX_LANE_GAP)
+    };
     let center = (lane_total.saturating_sub(1)) as f32 * 0.5;
-    (lane_index as f32 - center) * 14.0
+    (lane_index as f32 - center) * gap
 }
 
 /// Calculate positions for groups.
@@ -1751,6 +1989,193 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_auto_tuned_identity_for_empty_graph() {
+        let config = LayoutConfig::default();
+        let tuned = config.clone().auto_tuned(0, 0);
+        assert_eq!(tuned.horizontal_spacing, config.horizontal_spacing);
+        assert_eq!(tuned.vertical_spacing, config.vertical_spacing);
+    }
+
+    #[test]
+    fn test_auto_tuned_shrinks_spacing_for_medium_graph() {
+        let config = LayoutConfig::default();
+        let tuned = config.clone().auto_tuned(20, 20);
+        assert!(
+            tuned.horizontal_spacing < config.horizontal_spacing,
+            "medium graph should have tighter spacing"
+        );
+    }
+
+    #[test]
+    fn test_auto_tuned_widens_for_dense_graph() {
+        let config = LayoutConfig::default();
+        // 5 nodes, 15 edges => density = 3.0 (very dense)
+        let sparse = config.clone().auto_tuned(5, 3);
+        let dense = config.auto_tuned(5, 15);
+        assert!(
+            dense.horizontal_spacing > sparse.horizontal_spacing,
+            "dense graph should have wider spacing than sparse one of same node count"
+        );
+    }
+
+    #[test]
+    fn test_auto_tuned_respects_minimum_spacing() {
+        let config = LayoutConfig::default();
+        let tuned = config.clone().auto_tuned(100, 50);
+        assert!(tuned.horizontal_spacing >= config.compaction.min_horizontal_spacing);
+        assert!(tuned.vertical_spacing >= config.compaction.min_vertical_spacing);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_auto_tune_disabled_preserves_custom_spacing() {
+        let config = LayoutConfig {
+            horizontal_spacing: 500.0,
+            vertical_spacing: 200.0,
+            auto_tune_spacing: false,
+            ..Default::default()
+        };
+
+        // auto_tuned() always mutates; the guard is in build_layout_from_graph_with_config.
+        // Verify the build-path logic inline.
+        let effective = if config.auto_tune_spacing {
+            config.clone().auto_tuned(50, 80)
+        } else {
+            config.clone()
+        };
+        assert_eq!(effective.horizontal_spacing, 500.0);
+        assert_eq!(effective.vertical_spacing, 200.0);
+
+        // Contrast: when enabled, spacing IS changed.
+        let tuned = config.auto_tuned(50, 80);
+        assert_ne!(tuned.horizontal_spacing, 500.0);
+    }
+
+    #[test]
+    fn test_column_y_offset_from_center_basic() {
+        let config = LayoutConfig::default();
+        let layout_node = crate::graph::LayoutNode {
+            id: "t".to_string(),
+            label: "t".to_string(),
+            schema_name: None,
+            table_name: "t".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![
+                crate::graph::LayoutColumn {
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
+                    nullable: false,
+                },
+                crate::graph::LayoutColumn {
+                    name: "user_id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: true,
+                    nullable: false,
+                },
+            ],
+            inbound_count: 0,
+            outbound_count: 0,
+            has_self_loop: false,
+            is_join_table_candidate: false,
+            group_index: None,
+        };
+        let height = estimate_node_height(&layout_node, &config);
+        let node = PositionedNode {
+            id: "t".to_string(),
+            label: "t".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![
+                PositionedColumn {
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: true,
+                    is_foreign_key: false,
+                    is_indexed: false,
+                    nullable: false,
+                },
+                PositionedColumn {
+                    name: "user_id".to_string(),
+                    data_type: "int".to_string(),
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: true,
+                    nullable: false,
+                },
+            ],
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        };
+
+        // user_id is column index 1.
+        let offset = column_y_offset_from_center(&node, &["user_id".to_string()], &config);
+        let expected_col_y = 1.0f32.mul_add(
+            config.column_height,
+            config.node_padding + config.header_height,
+        ) + config.column_height / 2.0;
+        let expected = expected_col_y - node.height / 2.0;
+        assert!(
+            (offset - expected).abs() < 0.01,
+            "got {offset}, expected {expected}"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
+        let config = LayoutConfig::default();
+        let empty_node = PositionedNode {
+            id: "t".to_string(),
+            label: "t".to_string(),
+            kind: NodeKind::Table,
+            columns: vec![],
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 50.0,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        };
+
+        // No columns in node → 0 (center).
+        assert_eq!(
+            column_y_offset_from_center(&empty_node, &["user_id".to_string()], &config),
+            0.0
+        );
+        // Empty edge columns → 0 (center).
+        assert_eq!(column_y_offset_from_center(&empty_node, &[], &config), 0.0);
+
+        let node_with_col = PositionedNode {
+            columns: vec![PositionedColumn {
+                name: "id".to_string(),
+                data_type: "int".to_string(),
+                is_primary_key: true,
+                is_foreign_key: false,
+                is_indexed: false,
+                nullable: false,
+            }],
+            height: 60.0,
+            ..empty_node
+        };
+        // Column not found → 0 (center).
+        assert_eq!(
+            column_y_offset_from_center(&node_with_col, &["nonexistent".to_string()], &config),
+            0.0
+        );
+    }
+
+    #[test]
     fn test_hierarchical_layout_handles_fully_connected_cycles() {
         let schema = make_fully_connected_cycle_schema();
         let layout_graph = LayoutGraphBuilder::new().build(&schema);
@@ -1868,6 +2293,17 @@ mod tests {
     }
 
     #[test]
+    fn test_centered_lane_offset_scales_with_fan_out() {
+        // 2 parallel edges: standard gap
+        let gap_2 = (centered_lane_offset(1, 2) - centered_lane_offset(0, 2)).abs();
+        // 6 parallel edges: gap should be narrower
+        let gap_6 = (centered_lane_offset(1, 6) - centered_lane_offset(0, 6)).abs();
+
+        assert!(gap_6 < gap_2, "gap should shrink for larger fan-out");
+        assert!(gap_6 >= MIN_LANE_GAP, "gap must not drop below minimum");
+    }
+
+    #[test]
     fn test_route_edges_offsets_parallel_foreign_keys() {
         let schema = Schema {
             tables: vec![
@@ -1944,6 +2380,163 @@ mod tests {
         assert!(
             (graph.edges[0].route.x1 - graph.edges[1].route.x1).abs() > f32::EPSILON
                 || (graph.edges[0].route.y1 - graph.edges[1].route.y1).abs() > f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_parallel_edge_labels_do_not_overlap() {
+        // Two FK edges between the same pair of tables — their labels must not overlap.
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "posts".to_string(),
+                    schema_name: None,
+                    name: "posts".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(2),
+                            name: "author_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(3),
+                            name: "editor_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![
+                        ForeignKey {
+                            name: Some("fk_author".to_string()),
+                            from_columns: vec!["author_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_editor".to_string()),
+                            from_columns: vec!["editor_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                    ],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = build_layout(&schema).unwrap();
+        assert_eq!(graph.edges.len(), 2);
+
+        // Check that label bounding boxes do not overlap.
+        let (lx0, ly0) = (graph.edges[0].label_x, graph.edges[0].label_y);
+        let (lx1, ly1) = (graph.edges[1].label_x, graph.edges[1].label_y);
+        let hw0 = estimate_label_half_width(&graph.edges[0].label);
+        let hw1 = estimate_label_half_width(&graph.edges[1].label);
+        let hh = LABEL_HALF_H;
+        let overlaps = (lx0 + hw0 > lx1 - hw1)
+            && (lx0 - hw0 < lx1 + hw1)
+            && (ly0 + hh > ly1 - hh)
+            && (ly0 - hh < ly1 + hh);
+        assert!(
+            !overlaps,
+            "Parallel edge labels overlap: ({lx0},{ly0}) vs ({lx1},{ly1})"
+        );
+    }
+
+    #[test]
+    fn test_self_loop_label_outside_source_node() {
+        // A self-referencing FK: the label must not sit inside the source node.
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "employees".to_string(),
+                schema_name: None,
+                name: "employees".to_string(),
+                columns: vec![
+                    Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    },
+                    Column {
+                        id: ColumnId(2),
+                        name: "manager_id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: true,
+                        is_primary_key: false,
+                        comment: None,
+                    },
+                ],
+                foreign_keys: vec![ForeignKey {
+                    name: Some("fk_manager".to_string()),
+                    from_columns: vec!["manager_id".to_string()],
+                    to_schema: None,
+                    to_table: "employees".to_string(),
+                    to_columns: vec!["id".to_string()],
+                    on_delete: ReferentialAction::NoAction,
+                    on_update: ReferentialAction::NoAction,
+                }],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = build_layout(&schema).unwrap();
+        assert_eq!(graph.edges.len(), 1);
+
+        let edge = &graph.edges[0];
+        assert!(edge.is_self_loop);
+
+        // The node that owns the self-loop.
+        let node = &graph.nodes[0];
+        // Label center must be outside the node bounding box (allowing slight
+        // overlap from the label's extent is OK, but the center should not be
+        // inside the node).
+        let center_inside = edge.label_x >= node.x
+            && edge.label_x <= node.x + node.width
+            && edge.label_y >= node.y
+            && edge.label_y <= node.y + node.height;
+        assert!(
+            !center_inside,
+            "Self-loop label center ({},{}) is inside node ({},{},{},{})",
+            edge.label_x, edge.label_y, node.x, node.y, node.width, node.height
         );
     }
 }

@@ -152,6 +152,11 @@ pub struct LayoutSpec {
     /// Automatic compaction settings for large schemas.
     #[serde(default)]
     pub compaction: LayoutCompactionSpec,
+    /// When true (default), spacing is automatically adjusted based on graph
+    /// density. Set to false to keep `horizontal_spacing` / `vertical_spacing`
+    /// exactly as specified.
+    #[serde(default = "default_auto_tune_spacing")]
+    pub auto_tune_spacing: bool,
 }
 
 /// Layout algorithm for positioning nodes.
@@ -192,6 +197,9 @@ const fn default_compact_node_padding() -> f32 {
 const fn default_hide_columns_threshold_multiplier() -> usize {
     2
 }
+const fn default_auto_tune_spacing() -> bool {
+    true
+}
 
 /// Direction for layout flow.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -218,6 +226,7 @@ impl Default for LayoutSpec {
             vertical_spacing: default_vertical_spacing(),
             force_iterations: default_force_iterations(),
             compaction: LayoutCompactionSpec::default(),
+            auto_tune_spacing: default_auto_tune_spacing(),
         }
     }
 }

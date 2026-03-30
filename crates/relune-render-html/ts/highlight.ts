@@ -449,12 +449,8 @@ function metricCard(label: string, value: string): HTMLDivElement {
       });
     });
 
-    svgRoot.addEventListener('click', (event: Event) => {
-      const target = event.target;
-      if (
-        target === svgRoot ||
-        (target instanceof Element && target.tagName.toLowerCase() === 'svg')
-      ) {
+    svgRoot.addEventListener('click', () => {
+      if (selectedNode !== null) {
         selectedNode = null;
         clearHighlights();
         renderDrawer(null);

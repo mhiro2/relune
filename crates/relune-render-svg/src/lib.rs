@@ -5,7 +5,10 @@
 
 use std::fmt::Write;
 
-use relune_core::{EdgeKind, NodeKind, layout::Cardinality};
+use relune_core::{
+    EdgeKind, NodeKind,
+    layout::{Cardinality, RouteStyle},
+};
 
 pub mod edge;
 pub mod escape;
@@ -115,7 +118,8 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 .edge-particle {{ fill: {glow_particle}; }}
 .edge:hover .edge-glow-path,
 .edge:hover .edge-particles {{ opacity: 0.92; }}
-.edge:hover .edge-path {{ stroke: {glow_color}; }}
+.edge:hover .edge-path,
+.edge:hover .crow-inline {{ stroke: {glow_color}; }}
 .node:hover .table-body {{ stroke-width: 2.1px; }}
 .group-box,
 .group-band,
@@ -146,18 +150,26 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 <filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
 <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="{}"/>
 </filter>
-<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-<path d="M1,1 L7,4 L1,7" fill="none" stroke="{}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+<path d="M1,1 L9,5 L1,9" fill="none" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>
-<marker id="cardinality-one" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<path d="M8 2 L8 12" stroke="{}" stroke-width="1.6" stroke-linecap="round"/>
+<marker id="cardinality-one" markerWidth="18" markerHeight="18" refX="16" refY="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M10 2 L10 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
 </marker>
-<marker id="cardinality-many" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<path d="M2 2 L12 7 M2 7 L12 7 M2 12 L12 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="cardinality-many" markerWidth="18" markerHeight="18" refX="16" refY="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M2 2 L16 9 M2 9 L16 9 M2 16 L16 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>
-<marker id="cardinality-zero-many" markerWidth="20" markerHeight="14" refX="18" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-<circle cx="4" cy="7" r="2.6" fill="none" stroke="{}" stroke-width="1.3"/>
-<path d="M8 2 L18 7 M8 7 L18 7 M8 12 L18 7" stroke="{}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<marker id="cardinality-zero-many" markerWidth="26" markerHeight="18" refX="23" refY="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<circle cx="4" cy="9" r="3.4" fill="none" stroke="context-stroke" stroke-width="1.2" shape-rendering="geometricPrecision"/>
+<path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
+</marker>
+<marker id="cardinality-zero-one" markerWidth="26" markerHeight="18" refX="23" refY="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<circle cx="4" cy="9" r="3.4" fill="none" stroke="context-stroke" stroke-width="1.2" shape-rendering="geometricPrecision"/>
+<path d="M18 2 L18 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
+</marker>
+<marker id="cardinality-one-many" markerWidth="26" markerHeight="18" refX="23" refY="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+<path d="M2 2 L2 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
+<path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>
 </defs>"#,
         colors.canvas_base,
@@ -165,12 +177,7 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
         colors.canvas_dot,
         colors.node_shadow,
         colors.node_shadow,
-        colors.glow_color,
-        colors.arrow_fill,
-        colors.text_secondary,
-        colors.text_secondary,
-        colors.text_secondary,
-        colors.text_secondary
+        colors.glow_color
     );
 }
 
@@ -279,7 +286,7 @@ fn render_node_internal(
         r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
         node.x + 10.0,
         node.y + 8.0,
-        (node.width - 80.0).max(24.0),
+        (node.width - 54.0).max(40.0),
         node.x + 10.0,
         node.y + 21.0,
         colors.text_primary,
@@ -359,11 +366,11 @@ fn render_node_internal(
         let mut icon_x = node.x + node.width - 22.0;
         if column.is_indexed {
             render_idx_indicator(out, icon_x, line_y - 9.0);
-            icon_x -= 16.0;
+            icon_x -= 24.0;
         }
         if column.is_foreign_key {
             render_fk_indicator(out, icon_x, line_y - 9.0);
-            icon_x -= 16.0;
+            icon_x -= 24.0;
         }
         if column.is_primary_key {
             render_pk_indicator(out, icon_x, line_y - 8.5);
@@ -396,6 +403,11 @@ fn render_edge_internal(
     let edge_style = edge_style(edge.kind, colors);
     let path_d = crate::edge::edge_route_svg_path_d(&edge.route, options.curve_offset);
     let uses_crow_markers = edge.kind == EdgeKind::ForeignKey;
+    // Curved FK edges use inline markers drawn along the actual curve,
+    // because SVG <marker> elements follow the tangent and visually diverge
+    // from the visible curve, especially on steep or tight beziers.
+    let use_inline_markers =
+        uses_crow_markers && (edge.is_self_loop || edge.route.style == RouteStyle::Curved);
     let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
 
     let stroke_dasharray = if options.dashed {
@@ -450,32 +462,37 @@ fn render_edge_internal(
 
     // Render the path with CSS class and data attributes
     let glow = colors.glow_color;
+    let marker_attrs = if use_inline_markers {
+        "" // Inline markers are drawn separately below.
+    } else {
+        edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality)
+    };
     match stroke_dasharray {
         Some(stroke_dasharray) => {
             let _ = write!(
                 out,
-                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} stroke-dasharray="{}" pathLength="100"/>"#,
+                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} stroke-dasharray="{}" pathLength="100"/>"#,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
                 options.stroke_width,
-                edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality,),
+                marker_attrs,
                 stroke_dasharray
             );
         }
         None => {
             let _ = write!(
                 out,
-                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round"{} pathLength="100" />"#,
+                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} pathLength="100" />"#,
                 escape_attribute(&path_d),
                 options.stroke_width + 2.0,
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
                 options.stroke_width,
-                edge_marker_attributes(uses_crow_markers, edge.nullable, edge.target_cardinality)
+                marker_attrs,
             );
         }
     }
@@ -487,6 +504,18 @@ fn render_edge_internal(
             r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle>"##
         );
         out.push_str("</g>");
+    }
+
+    // For curved FK edges, draw Crow's Foot symbols as inline SVG
+    // elements positioned along the actual curve path.
+    if use_inline_markers {
+        render_inline_crow_markers(
+            out,
+            &edge.route,
+            edge.nullable,
+            edge.target_cardinality,
+            effective_stroke,
+        );
     }
 
     // Render the label if enabled
@@ -696,6 +725,315 @@ fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Inline Crow's Foot markers for curved FK edges
+// ---------------------------------------------------------------------------
+//
+// SVG `<marker>` elements are oriented along the tangent at the path endpoint.
+// On bezier curves the tangent can diverge quickly from the visible curve —
+// especially on steep or tight curves — making composite markers (circle +
+// crow's foot) appear disconnected.  These helpers draw the same symbols as
+// regular SVG elements positioned along the *actual* curve, eliminating the
+// visual gap.
+
+/// Sample the route at an approximate arc-length `dist` from the **start**.
+/// Returns `(point, unit_tangent)`.
+fn sample_route_from_start(
+    route: &relune_core::layout::EdgeRoute,
+    dist: f32,
+) -> ((f32, f32), (f32, f32)) {
+    use relune_core::layout::RouteStyle;
+    let p0 = (route.x1, route.y1);
+    match route.style {
+        RouteStyle::Curved if route.control_points.len() >= 2 => {
+            let cp1 = route.control_points[0];
+            let cp2 = route.control_points[1];
+            let p3 = (route.x2, route.y2);
+            let t = approx_t_near_start(p0, cp1, dist);
+            (
+                cubic_bezier(t, p0, cp1, cp2, p3),
+                normalize_vec(cubic_bezier_tangent(t, p0, cp1, cp2, p3)),
+            )
+        }
+        _ => {
+            let next = route
+                .control_points
+                .first()
+                .copied()
+                .unwrap_or((route.x2, route.y2));
+            sample_line(p0, next, dist)
+        }
+    }
+}
+
+/// Sample the route at an approximate arc-length `dist` from the **end**.
+/// The returned tangent points *toward* the endpoint.
+fn sample_route_from_end(
+    route: &relune_core::layout::EdgeRoute,
+    dist: f32,
+) -> ((f32, f32), (f32, f32)) {
+    use relune_core::layout::RouteStyle;
+    let p3 = (route.x2, route.y2);
+    match route.style {
+        RouteStyle::Curved if route.control_points.len() >= 2 => {
+            let cp1 = route.control_points[0];
+            let cp2 = route.control_points[1];
+            let p0 = (route.x1, route.y1);
+            let t = 1.0 - approx_t_near_start(p3, cp2, dist);
+            (
+                cubic_bezier(t, p0, cp1, cp2, p3),
+                normalize_vec(cubic_bezier_tangent(t, p0, cp1, cp2, p3)),
+            )
+        }
+        _ => {
+            let prev = route
+                .control_points
+                .last()
+                .copied()
+                .unwrap_or((route.x1, route.y1));
+            let (pt, tang) = sample_line(p3, prev, dist);
+            // Flip tangent so it points toward the endpoint.
+            (pt, (-tang.0, -tang.1))
+        }
+    }
+}
+
+/// Approximate bezier parameter for a given arc-length distance from endpoint
+/// `p` (where the adjacent control point is `cp`).
+fn approx_t_near_start(p: (f32, f32), cp: (f32, f32), dist: f32) -> f32 {
+    let dx = cp.0 - p.0;
+    let dy = cp.1 - p.1;
+    let tangent_mag = dx.hypot(dy) * 3.0;
+    if tangent_mag < 0.001 {
+        0.0
+    } else {
+        (dist / tangent_mag).clamp(0.0, 0.35)
+    }
+}
+
+fn cubic_bezier(
+    t: f32,
+    p0: (f32, f32),
+    p1: (f32, f32),
+    p2: (f32, f32),
+    p3: (f32, f32),
+) -> (f32, f32) {
+    let u = 1.0 - t;
+    let uu = u * u;
+    let tt = t * t;
+    let cubic_coord = |a: f32, b: f32, c: f32, d: f32| {
+        (t * tt).mul_add(
+            d,
+            (3.0 * u * tt).mul_add(c, (3.0 * uu * t).mul_add(b, u * uu * a)),
+        )
+    };
+    (
+        cubic_coord(p0.0, p1.0, p2.0, p3.0),
+        cubic_coord(p0.1, p1.1, p2.1, p3.1),
+    )
+}
+
+fn cubic_bezier_tangent(
+    t: f32,
+    p0: (f32, f32),
+    p1: (f32, f32),
+    p2: (f32, f32),
+    p3: (f32, f32),
+) -> (f32, f32) {
+    let u = 1.0 - t;
+    let uu = u * u;
+    let tt = t * t;
+    let tangent_coord = |a: f32, b: f32, c: f32, d: f32| {
+        3.0 * tt.mul_add(d - c, (2.0 * u * t).mul_add(c - b, uu * (b - a)))
+    };
+    (
+        tangent_coord(p0.0, p1.0, p2.0, p3.0),
+        tangent_coord(p0.1, p1.1, p2.1, p3.1),
+    )
+}
+
+fn normalize_vec(v: (f32, f32)) -> (f32, f32) {
+    let len = v.0.hypot(v.1);
+    if len < 0.001 {
+        (1.0, 0.0)
+    } else {
+        (v.0 / len, v.1 / len)
+    }
+}
+
+fn perp_vec(v: (f32, f32)) -> (f32, f32) {
+    (-v.1, v.0)
+}
+
+/// Sample a point along a straight line at `dist` pixels from `from`.
+fn sample_line(from: (f32, f32), to: (f32, f32), dist: f32) -> ((f32, f32), (f32, f32)) {
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let len = dx.hypot(dy);
+    let unit = if len > 0.001 {
+        (dx / len, dy / len)
+    } else {
+        (1.0, 0.0)
+    };
+    let t = if len > 0.001 { dist / len } else { 0.0 };
+    let t = t.clamp(0.0, 1.0);
+    ((dx.mul_add(t, from.0), dy.mul_add(t, from.1)), unit)
+}
+
+const fn offset_point(point: (f32, f32), direction: (f32, f32), distance: f32) -> (f32, f32) {
+    (
+        direction.0.mul_add(distance, point.0),
+        direction.1.mul_add(distance, point.1),
+    )
+}
+
+// Marker geometry constants (matching the SVG `<marker>` definitions).
+const CROW_PRONG_LEN: f32 = 14.0;
+const CROW_SPREAD: f32 = 7.0;
+const BAR_HALF: f32 = 7.0;
+const CIRCLE_RADIUS: f32 = 3.4;
+/// Distance from endpoint to the secondary symbol in compound markers.
+const COMPOUND_SECONDARY: f32 = 19.0;
+
+/// Render Crow's Foot cardinality symbols for a curved FK edge as inline SVG
+/// elements positioned along the actual curve path.
+#[allow(clippy::too_many_lines)]
+fn render_inline_crow_markers(
+    out: &mut String,
+    route: &relune_core::layout::EdgeRoute,
+    nullable: bool,
+    target_cardinality: Cardinality,
+    marker_color: &str,
+) {
+    let start = (route.x1, route.y1);
+    let end = (route.x2, route.y2);
+
+    // --- Start side (source / child): crow's foot + circle|bar ---
+    {
+        // Crow's foot prongs: base along the curve at CROW_PRONG_LEN, tip at start.
+        let (base, tang) = sample_route_from_start(route, CROW_PRONG_LEN);
+        let prp = perp_vec(tang);
+        let upper = offset_point(base, prp, CROW_SPREAD);
+        let lower = offset_point(base, prp, -CROW_SPREAD);
+        let _ = write!(
+            out,
+            r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision"/>"#,
+            upper.0,
+            upper.1,
+            start.0,
+            start.1,
+            base.0,
+            base.1,
+            start.0,
+            start.1,
+            lower.0,
+            lower.1,
+            start.0,
+            start.1,
+            marker_color,
+        );
+
+        // Secondary symbol behind the crow's foot.
+        if nullable {
+            // Circle (zero indicator).
+            let (c, _) = sample_route_from_start(route, COMPOUND_SECONDARY);
+            let _ = write!(
+                out,
+                r#"<circle class="crow-inline" cx="{:.1}" cy="{:.1}" r="{CIRCLE_RADIUS}" fill="none" stroke="{}" stroke-width="1.2" shape-rendering="geometricPrecision"/>"#,
+                c.0, c.1, marker_color,
+            );
+        } else {
+            // Bar (mandatory indicator).
+            let (c, t) = sample_route_from_start(route, COMPOUND_SECONDARY);
+            let prp = perp_vec(t);
+            let upper = offset_point(c, prp, BAR_HALF);
+            let lower = offset_point(c, prp, -BAR_HALF);
+            let _ = write!(
+                out,
+                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
+                upper.0, upper.1, lower.0, lower.1, marker_color,
+            );
+        }
+    }
+
+    // --- End side (target / parent) ---
+    match target_cardinality {
+        Cardinality::One => {
+            // Single bar.
+            let (c, t) = sample_route_from_end(route, 4.0);
+            let prp = perp_vec(t);
+            let upper = offset_point(c, prp, BAR_HALF);
+            let lower = offset_point(c, prp, -BAR_HALF);
+            let _ = write!(
+                out,
+                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
+                upper.0, upper.1, lower.0, lower.1, marker_color,
+            );
+        }
+        Cardinality::Many => {
+            // Crow's foot converging at endpoint.
+            let (base, tang) = sample_route_from_end(route, CROW_PRONG_LEN);
+            let prp = perp_vec(tang);
+            let upper = offset_point(base, prp, CROW_SPREAD);
+            let lower = offset_point(base, prp, -CROW_SPREAD);
+            let _ = write!(
+                out,
+                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision"/>"#,
+                upper.0,
+                upper.1,
+                end.0,
+                end.1,
+                base.0,
+                base.1,
+                end.0,
+                end.1,
+                lower.0,
+                lower.1,
+                end.0,
+                end.1,
+                marker_color,
+            );
+        }
+        Cardinality::ZeroOrOne => {
+            // Bar near endpoint.
+            let (b, bt) = sample_route_from_end(route, 4.0);
+            let bp = perp_vec(bt);
+            let upper = offset_point(b, bp, BAR_HALF);
+            let lower = offset_point(b, bp, -BAR_HALF);
+            let _ = write!(
+                out,
+                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
+                upper.0, upper.1, lower.0, lower.1, marker_color,
+            );
+            // Circle further back.
+            let (c, _) = sample_route_from_end(route, COMPOUND_SECONDARY);
+            let _ = write!(
+                out,
+                r#"<circle class="crow-inline" cx="{:.1}" cy="{:.1}" r="{CIRCLE_RADIUS}" fill="none" stroke="{}" stroke-width="1.2" shape-rendering="geometricPrecision"/>"#,
+                c.0, c.1, marker_color,
+            );
+        }
+    }
+}
+
+/// Choose Crow's Foot SVG markers for a FK edge.
+///
+/// ## Semantics of each end (Crow's Foot / IE notation)
+///
+/// **marker-start (source / child side — the table that owns the FK column):**
+///   - Crow's foot (three-pronged fork) = "many": each parent can be
+///     referenced by multiple child rows.
+///   - Bar prefix  (`one-many`)  = mandatory participation: the FK column is
+///     NOT NULL, so every child row *must* reference a parent.
+///   - Circle prefix (`zero-many`) = optional participation: the FK column is
+///     nullable, so a child row *may* have no parent.
+///
+/// **marker-end (target / parent side — the referenced table):**
+///   - `one`       = the referenced columns form a unique / PK constraint,
+///     so each FK value resolves to exactly one parent row.
+///   - `zero-one`  = unique but the relationship can be absent (`ZeroOrOne`).
+///   - `many`      = the referenced columns are *not* unique, so multiple
+///     parent rows could match (rare in practice).
 const fn edge_marker_attributes(
     uses_crow_markers: bool,
     nullable: bool,
@@ -703,17 +1041,25 @@ const fn edge_marker_attributes(
 ) -> &'static str {
     if uses_crow_markers {
         match (nullable, target_cardinality) {
+            // Nullable FK (optional participation): circle + crow's foot on source side.
             (true, Cardinality::Many) => {
                 r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-many)""#
             }
-            (true, _) => {
+            (true, Cardinality::One) => {
                 r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-one)""#
             }
-            (false, Cardinality::Many) => {
-                r#" marker-start="url(#cardinality-many)" marker-end="url(#cardinality-many)""#
+            (true, Cardinality::ZeroOrOne) => {
+                r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-zero-one)""#
             }
-            (false, _) => {
-                r#" marker-start="url(#cardinality-many)" marker-end="url(#cardinality-one)""#
+            // Required FK (mandatory participation): bar + crow's foot on source side.
+            (false, Cardinality::Many) => {
+                r#" marker-start="url(#cardinality-one-many)" marker-end="url(#cardinality-many)""#
+            }
+            (false, Cardinality::One) => {
+                r#" marker-start="url(#cardinality-one-many)" marker-end="url(#cardinality-one)""#
+            }
+            (false, Cardinality::ZeroOrOne) => {
+                r#" marker-start="url(#cardinality-one-many)" marker-end="url(#cardinality-zero-one)""#
             }
         }
     } else {
@@ -728,9 +1074,15 @@ fn column_text_width(
     let icon_slots = usize::from(column.is_indexed)
         + usize::from(column.is_foreign_key)
         + usize::from(column.is_primary_key);
-    #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
-    let reserved = (icon_slots as f32).mul_add(16.0, if icon_slots > 0 { 14.0 } else { 0.0 });
-    (node.width - 20.0 - reserved).max(18.0)
+    if icon_slots == 0 {
+        (node.width - 20.0).max(18.0)
+    } else {
+        // Badges start at node.width - 22, spaced 24px apart (left edge to left edge).
+        // Reserve space for all badges plus a small gap before the leftmost one.
+        #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
+        let badge_area = (icon_slots as f32 - 1.0).mul_add(24.0, 28.0);
+        (node.width - 10.0 - badge_area).max(18.0)
+    }
 }
 
 fn estimate_label_width(text: &str) -> f32 {
@@ -1441,14 +1793,17 @@ mod tests {
         assert!(svg.contains("class=\"edge-label\""));
     }
 
-    #[test]
-    fn test_render_many_target_uses_many_marker() {
-        let graph = relune_layout::PositionedGraph {
+    /// Helper to build a single-edge graph for marker tests.
+    fn marker_test_graph(
+        nullable: bool,
+        target_cardinality: Cardinality,
+    ) -> relune_layout::PositionedGraph {
+        relune_layout::PositionedGraph {
             nodes: vec![],
             edges: vec![PositionedEdge {
-                from: "audit_entries".to_string(),
-                to: "users".to_string(),
-                label: "actor_email".to_string(),
+                from: "child".to_string(),
+                to: "parent".to_string(),
+                label: "fk".to_string(),
                 kind: EdgeKind::ForeignKey,
                 route: EdgeRoute {
                     x1: 100.0,
@@ -1460,10 +1815,10 @@ mod tests {
                     label_position: (200.0, 100.0),
                 },
                 is_self_loop: false,
-                nullable: false,
-                target_cardinality: Cardinality::Many,
-                from_columns: vec!["actor_email".to_string()],
-                to_columns: vec!["email".to_string()],
+                nullable,
+                target_cardinality,
+                from_columns: vec!["fk_col".to_string()],
+                to_columns: vec!["id".to_string()],
                 is_collapsed_join: false,
                 collapsed_join_table: None,
                 label_x: 200.0,
@@ -1472,10 +1827,128 @@ mod tests {
             groups: vec![],
             width: 400.0,
             height: 200.0,
-        };
+        }
+    }
 
-        let svg = render_svg(&graph, SvgRenderOptions::default());
+    fn self_loop_marker_test_graph(
+        nullable: bool,
+        target_cardinality: Cardinality,
+    ) -> relune_layout::PositionedGraph {
+        relune_layout::PositionedGraph {
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from: "users".to_string(),
+                to: "users".to_string(),
+                label: "manager_id".to_string(),
+                kind: EdgeKind::ForeignKey,
+                route: EdgeRoute {
+                    x1: 100.0,
+                    y1: 60.0,
+                    x2: 100.0,
+                    y2: 140.0,
+                    control_points: vec![(170.0, 60.0), (170.0, 140.0)],
+                    style: RouteStyle::Curved,
+                    label_position: (170.0, 100.0),
+                },
+                is_self_loop: true,
+                nullable,
+                target_cardinality,
+                from_columns: vec!["manager_id".to_string()],
+                to_columns: vec!["id".to_string()],
+                is_collapsed_join: false,
+                collapsed_join_table: None,
+                label_x: 170.0,
+                label_y: 100.0,
+            }],
+            groups: vec![],
+            width: 260.0,
+            height: 220.0,
+        }
+    }
+
+    #[test]
+    fn test_marker_required_fk_one_target() {
+        let svg = render_svg(
+            &marker_test_graph(false, Cardinality::One),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#cardinality-one-many)\""));
+        assert!(svg.contains("marker-end=\"url(#cardinality-one)\""));
+    }
+
+    #[test]
+    fn test_marker_required_fk_many_target() {
+        let svg = render_svg(
+            &marker_test_graph(false, Cardinality::Many),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#cardinality-one-many)\""));
         assert!(svg.contains("marker-end=\"url(#cardinality-many)\""));
+    }
+
+    #[test]
+    fn test_marker_required_fk_zero_or_one_target() {
+        let svg = render_svg(
+            &marker_test_graph(false, Cardinality::ZeroOrOne),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#cardinality-one-many)\""));
+        assert!(svg.contains("marker-end=\"url(#cardinality-zero-one)\""));
+    }
+
+    #[test]
+    fn test_marker_nullable_fk_one_target() {
+        let svg = render_svg(
+            &marker_test_graph(true, Cardinality::One),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#cardinality-zero-many)\""));
+        assert!(svg.contains("marker-end=\"url(#cardinality-one)\""));
+    }
+
+    #[test]
+    fn test_marker_nullable_fk_many_target() {
+        let svg = render_svg(
+            &marker_test_graph(true, Cardinality::Many),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#cardinality-zero-many)\""));
+        assert!(svg.contains("marker-end=\"url(#cardinality-many)\""));
+    }
+
+    #[test]
+    fn test_marker_nullable_fk_zero_or_one_target() {
+        let svg = render_svg(
+            &marker_test_graph(true, Cardinality::ZeroOrOne),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#cardinality-zero-many)\""));
+        assert!(svg.contains("marker-end=\"url(#cardinality-zero-one)\""));
+    }
+
+    #[test]
+    fn test_marker_defs_inherit_parent_edge_stroke() {
+        let svg = render_svg(
+            &marker_test_graph(false, Cardinality::Many),
+            SvgRenderOptions::default(),
+        );
+        assert!(svg.contains(r#"stroke="context-stroke""#));
+        assert!(svg.contains(r#"shape-rendering="geometricPrecision""#));
+    }
+
+    #[test]
+    fn test_self_loop_inline_markers_use_edge_stroke() {
+        let svg = render_svg(
+            &self_loop_marker_test_graph(false, Cardinality::Many),
+            SvgRenderOptions::default(),
+        );
+        assert!(!svg.contains("marker-start=\"url(#cardinality-one-many)\""));
+        assert!(svg.contains(
+            r##"stroke="#475569" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
+        ));
+        assert!(!svg.contains(
+            r##"stroke="#cbd5e1" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
+        ));
     }
 
     #[test]

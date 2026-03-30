@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
-use relune_core::{RouteStyle, SqlDialect};
+use relune_core::{LayoutDirection, RouteStyle, SqlDialect};
 use serde::{Deserialize, Serialize};
 
 /// Render, inspect, export, lint, and diff database schemas
@@ -151,6 +151,10 @@ pub struct RenderArgs {
     #[arg(long = "edge-style", value_enum)]
     pub edge_style: Option<EdgeStyleArg>,
 
+    /// Layout direction.
+    #[arg(long = "direction", value_enum)]
+    pub direction: Option<DirectionArg>,
+
     // -------------------------------------------------------------------------
     // Other options
     // -------------------------------------------------------------------------
@@ -269,6 +273,32 @@ impl From<EdgeStyleArg> for RouteStyle {
             EdgeStyleArg::Straight => Self::Straight,
             EdgeStyleArg::Orthogonal => Self::Orthogonal,
             EdgeStyleArg::Curved => Self::Curved,
+        }
+    }
+}
+
+/// Layout direction for the graph.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DirectionArg {
+    /// Top to bottom (default).
+    #[default]
+    TopToBottom,
+    /// Left to right.
+    LeftToRight,
+    /// Right to left.
+    RightToLeft,
+    /// Bottom to top.
+    BottomToTop,
+}
+
+impl From<DirectionArg> for LayoutDirection {
+    fn from(value: DirectionArg) -> Self {
+        match value {
+            DirectionArg::TopToBottom => Self::TopToBottom,
+            DirectionArg::LeftToRight => Self::LeftToRight,
+            DirectionArg::RightToLeft => Self::RightToLeft,
+            DirectionArg::BottomToTop => Self::BottomToTop,
         }
     }
 }
@@ -406,6 +436,10 @@ pub struct ExportArgs {
     /// Edge routing style for positioned output.
     #[arg(long = "edge-style", value_enum)]
     pub edge_style: Option<EdgeStyleArg>,
+
+    /// Layout direction for positioned output.
+    #[arg(long = "direction", value_enum)]
+    pub direction: Option<DirectionArg>,
 }
 
 /// Export format.

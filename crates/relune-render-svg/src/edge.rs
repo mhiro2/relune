@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use relune_core::layout::{Cardinality, EdgeRoute, RouteStyle};
+use relune_core::layout::{EdgeRoute, RouteStyle};
 use relune_layout::PositionedEdge;
 
 use crate::theme::ThemeColors;
@@ -68,7 +68,7 @@ pub struct EdgeRenderOptions {
 impl Default for EdgeRenderOptions {
     fn default() -> Self {
         Self {
-            stroke_width: 1.5,
+            stroke_width: 1.2,
             show_labels: true,
             dashed: false,
             curve_offset: 50.0,
@@ -181,15 +181,12 @@ fn render_cardinality_labels(
     theme: &ThemeColors,
     going_right: bool,
 ) {
-    // Source side cardinality (from the FK table's perspective)
-    // If nullable: 0..1 (optional), if not nullable: 1 (required)
-    let source_card = if edge.nullable {
-        Cardinality::ZeroOrOne
-    } else {
-        Cardinality::One
-    };
+    // Source side (FK / child table): always "many" — each parent can be
+    // referenced by multiple child rows.  The nullable flag determines
+    // participation: optional (0..N) vs mandatory (1..N).
+    let source_symbol = if edge.nullable { "0..N" } else { "1..N" };
 
-    let target_card = edge.target_cardinality;
+    let target_symbol = edge.target_cardinality.symbol();
 
     // Source label position (near x1, y1)
     let (source_x, source_y) = if going_right {
@@ -211,22 +208,14 @@ fn render_cardinality_labels(
     let _ = write!(
         out,
         r#"<text class="cardinality-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="600" fill="{}" text-anchor="{}" dominant-baseline="middle">{}</text>"#,
-        source_x,
-        source_y,
-        theme.text_secondary,
-        source_anchor,
-        source_card.symbol()
+        source_x, source_y, theme.text_secondary, source_anchor, source_symbol
     );
 
     // Render target cardinality
     let _ = write!(
         out,
         r#"<text class="cardinality-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="600" fill="{}" text-anchor="{}" dominant-baseline="middle">{}</text>"#,
-        target_x,
-        target_y,
-        theme.text_secondary,
-        target_anchor,
-        target_card.symbol()
+        target_x, target_y, theme.text_secondary, target_anchor, target_symbol
     );
 }
 
@@ -268,7 +257,7 @@ use crate::escape::{escape_attribute, escape_text};
 mod tests {
     use super::*;
     use relune_core::EdgeKind;
-    use relune_core::layout::{EdgeRoute, RouteStyle};
+    use relune_core::layout::{Cardinality, EdgeRoute, RouteStyle};
 
     fn create_test_theme() -> ThemeColors {
         ThemeColors {
@@ -433,11 +422,10 @@ mod tests {
         let mut out = String::new();
         render_edge(&mut out, &edge, &colors, &options);
 
-        // Non-nullable FK should show "1" at source
-        assert!(out.contains(">1</text>"));
+        // Non-nullable FK should show "1..N" at source (mandatory many)
+        assert!(out.contains(">1..N</text>"));
         // Target unique reference should show "1"
-        let one_count = out.matches(">1</text>").count();
-        assert!(one_count >= 2);
+        assert!(out.contains(">1</text>"));
     }
 
     #[test]
@@ -466,8 +454,8 @@ mod tests {
         let mut out = String::new();
         render_edge(&mut out, &edge, &colors, &options);
 
-        // Nullable FK should show "0..1" at source
-        assert!(out.contains(">0..1</text>"));
+        // Nullable FK should show "0..N" at source (optional many)
+        assert!(out.contains(">0..N</text>"));
         // Target unique reference should still show "1"
         assert!(out.contains(">1</text>"));
     }

@@ -69,6 +69,7 @@ pub fn run_render(
     let layout = LayoutSpec {
         algorithm: merged.layout.into(),
         edge_style: merged.edge_style.into(),
+        direction: merged.direction.into(),
         ..Default::default()
     };
 

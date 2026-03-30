@@ -1400,6 +1400,9 @@ fn build_css(
     }}
 
     .canvas {{
+      position: absolute;
+      top: 0;
+      left: 0;
       transform-origin: 0 0;
       will-change: transform;
     }}
@@ -1751,6 +1754,15 @@ mod tests {
         // Should not contain the pan/zoom script
         assert!(!html.contains("function initPanZoom"));
         assert!(!html.contains("viewport.addEventListener"));
+    }
+
+    #[test]
+    fn test_pan_zoom_js_clamps_panning_to_viewport_bounds() {
+        let js = build_pan_zoom_js();
+
+        assert!(js.contains("const clampPan ="));
+        assert!(js.contains("const getAvailableViewport ="));
+        assert!(js.contains("contentX - diagram.x"));
     }
 
     #[test]

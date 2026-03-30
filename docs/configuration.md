@@ -20,6 +20,7 @@ format = "svg"
 theme = "light"
 layout = "force-directed"
 edge_style = "orthogonal"
+direction = "left-to-right"
 group_by = "none"
 focus = "orders"
 depth = 2
@@ -34,6 +35,7 @@ format = "schema-json"
 group_by = "schema"
 layout = "hierarchical"
 edge_style = "curved"
+direction = "top-to-bottom"
 focus = "orders"
 depth = 1
 
@@ -59,13 +61,14 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `theme` | `light`, `dark` |
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
+| `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
 | `group_by` | `none`, `schema`, `prefix` |
 | `focus` | Table name |
 | `depth` | Unsigned integer |
 | `include` / `exclude` | String arrays |
 | `show_legend`, `show_stats` | Booleans; `--stats` on the CLI forces `show_stats` only |
 
-`layout` and `edge_style` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
+`layout`, `edge_style`, and `direction` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
 
 Semantic validation is also applied after merge:
 
@@ -94,6 +97,7 @@ Semantic validation is also applied after merge:
 | `group_by` | `none`, `schema`, `prefix` |
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
+| `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
 | `focus`, `depth` | Same as CLI |
 
 `export.format` can be set in the config file and overridden with `--format`. If neither config nor CLI provides a format, the command fails fast. As with `render`, `export.depth` requires `export.focus`, and focused table names must be non-empty after trimming.
