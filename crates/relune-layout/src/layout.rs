@@ -520,7 +520,10 @@ fn assign_coordinates(
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
 ) -> (Vec<PositionedNode>, f32, f32) {
-    let mut positioned_nodes = Vec::new();
+    let n = graph.nodes.len();
+    // Index by graph node index so that positioned_nodes[node_idx] correctly
+    // addresses the corresponding node (needed by resolve_rank_collisions).
+    let mut positioned_slots: Vec<Option<PositionedNode>> = vec![None; n];
 
     let is_horizontal = matches!(
         config.direction,
@@ -551,7 +554,7 @@ fn assign_coordinates(
                 (secondary, primary)
             };
 
-            positioned_nodes.push(build_positioned_node(
+            positioned_slots[node_idx] = Some(build_positioned_node(
                 node,
                 node_x,
                 node_y,
@@ -560,6 +563,10 @@ fn assign_coordinates(
             ));
         }
     }
+
+    // Every graph node must have been assigned a position above.
+    let mut positioned_nodes: Vec<PositionedNode> =
+        positioned_slots.into_iter().map(Option::unwrap).collect();
 
     resolve_rank_collisions(&mut positioned_nodes, ordered_nodes, config, is_horizontal);
     let graph_bounds = compute_graph_bounds(&positioned_nodes, config);

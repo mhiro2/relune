@@ -5,7 +5,10 @@
 
 use std::fmt::Write;
 
-use relune_core::{EdgeKind, NodeKind, layout::{Cardinality, RouteStyle}};
+use relune_core::{
+    EdgeKind, NodeKind,
+    layout::{Cardinality, RouteStyle},
+};
 
 pub mod edge;
 pub mod escape;
@@ -403,8 +406,8 @@ fn render_edge_internal(
     // Curved FK edges use inline markers drawn along the actual curve,
     // because SVG <marker> elements follow the tangent and visually diverge
     // from the visible curve, especially on steep or tight beziers.
-    let use_inline_markers = uses_crow_markers
-        && (edge.is_self_loop || edge.route.style == RouteStyle::Curved);
+    let use_inline_markers =
+        uses_crow_markers && (edge.is_self_loop || edge.route.style == RouteStyle::Curved);
     let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
 
     let stroke_dasharray = if options.dashed {

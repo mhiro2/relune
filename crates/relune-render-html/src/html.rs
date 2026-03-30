@@ -1757,6 +1757,15 @@ mod tests {
     }
 
     #[test]
+    fn test_pan_zoom_js_clamps_panning_to_viewport_bounds() {
+        let js = build_pan_zoom_js();
+
+        assert!(js.contains("const clampPan ="));
+        assert!(js.contains("const getAvailableViewport ="));
+        assert!(js.contains("contentX - diagram.x"));
+    }
+
+    #[test]
     fn test_css_dark_theme() {
         let css = build_css(Theme::Dark, true, false, false, false, false);
 
