@@ -5,6 +5,7 @@ format = "html"
 theme = "dark"
 layout = "force-directed"
 edge_style = "orthogonal"
+direction = "left-to-right"
 group_by = "schema"
 focus = "users"
 depth = 2
@@ -21,6 +22,7 @@ format = "graph-json"
 group_by = "prefix"
 layout = "hierarchical"
 edge_style = "curved"
+direction = "right-to-left"
 focus = "posts"
 depth = 3
 

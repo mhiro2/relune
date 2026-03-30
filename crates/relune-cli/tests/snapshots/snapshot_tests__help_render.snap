@@ -109,6 +109,15 @@ Options:
           - orthogonal: Axis-aligned orthogonal polyline
           - curved:     Cubic curved edge
 
+      --direction <DIRECTION>
+          Layout direction
+
+          Possible values:
+          - top-to-bottom: Top to bottom (default)
+          - left-to-right: Left to right
+          - right-to-left: Right to left
+          - bottom-to-top: Bottom to top
+
       --stats
           Print render statistics to stderr
 

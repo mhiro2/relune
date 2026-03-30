@@ -1,5 +1,6 @@
 ---
 source: crates/relune-cli/tests/snapshot_tests.rs
+assertion_line: 45
 expression: stdout
 ---
 Export schema JSON, graph JSON, layout JSON, or diagram text (Mermaid / D2 / DOT)
@@ -92,6 +93,15 @@ Options:
           - straight:   Single straight segment between nodes
           - orthogonal: Axis-aligned orthogonal polyline
           - curved:     Cubic curved edge
+
+      --direction <DIRECTION>
+          Layout direction for positioned output
+
+          Possible values:
+          - top-to-bottom: Top to bottom (default)
+          - left-to-right: Left to right
+          - right-to-left: Right to left
+          - bottom-to-top: Bottom to top
 
   -h, --help
           Print help (see a summary with '-h')

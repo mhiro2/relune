@@ -64,6 +64,7 @@ pub fn run_export(
         layout: LayoutSpec {
             algorithm: merged.layout.into(),
             edge_style: merged.edge_style.into(),
+            direction: merged.direction.into(),
             ..Default::default()
         },
         output_path: args.out.clone(),

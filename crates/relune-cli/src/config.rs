@@ -7,6 +7,7 @@
 //! theme = "light" # light, dark
 //! layout = "hierarchical" # hierarchical, force-directed
 //! edge_style = "straight" # straight, orthogonal, curved
+//! direction = "top-to-bottom" # top-to-bottom, left-to-right, right-to-left, bottom-to-top
 //! group_by = "none" # none, schema, prefix
 //! focus = "table_name"
 //! depth = 1
@@ -23,6 +24,7 @@
 //! group_by = "none"
 //! layout = "hierarchical"
 //! edge_style = "straight"
+//! direction = "top-to-bottom"
 //! focus = "table_name"
 //! depth = 1
 //!
@@ -41,7 +43,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
-    DialectArg, DiffFormat, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg, RenderFormat, Theme,
+    DialectArg, DiffFormat, DirectionArg, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg,
+    RenderFormat, Theme,
 };
 
 /// Root configuration structure.
@@ -81,6 +84,9 @@ pub struct RenderConfig {
     /// Edge routing style.
     #[serde(default)]
     pub edge_style: Option<EdgeStyleArg>,
+    /// Layout direction.
+    #[serde(default)]
+    pub direction: Option<DirectionArg>,
     /// Grouping mode.
     #[serde(default)]
     pub group_by: Option<GroupByMode>,
@@ -129,6 +135,9 @@ pub struct ExportConfig {
     /// Edge routing style.
     #[serde(default)]
     pub edge_style: Option<EdgeStyleArg>,
+    /// Layout direction.
+    #[serde(default)]
+    pub direction: Option<DirectionArg>,
     /// Focus table name.
     #[serde(default)]
     pub focus: Option<String>,
@@ -285,6 +294,7 @@ impl ReluneConfig {
                 .edge_style
                 .or(self.render.edge_style)
                 .unwrap_or_default(),
+            direction: args.direction.or(self.render.direction).unwrap_or_default(),
             group_by: args.group_by.or(self.render.group_by),
             focus: args.focus.clone().or_else(|| self.render.focus.clone()),
             depth: args.depth.or(self.render.depth).unwrap_or(1),
@@ -338,6 +348,7 @@ impl ReluneConfig {
                 .edge_style
                 .or(self.export.edge_style)
                 .unwrap_or_default(),
+            direction: args.direction.or(self.export.direction).unwrap_or_default(),
             focus: args.focus.clone().or_else(|| self.export.focus.clone()),
             depth: args.depth.or(self.export.depth).unwrap_or(1),
         })
@@ -437,6 +448,7 @@ pub struct MergedRenderConfig {
     pub theme: Theme,
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
+    pub direction: DirectionArg,
     pub group_by: Option<GroupByMode>,
     pub focus: Option<String>,
     pub depth: u32,
@@ -460,6 +472,7 @@ pub struct MergedExportConfig {
     pub group_by: Option<GroupByMode>,
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
+    pub direction: DirectionArg,
     pub focus: Option<String>,
     pub depth: u32,
 }
@@ -529,6 +542,7 @@ mod tests {
             Some(LayoutAlgorithmArg::ForceDirected)
         );
         assert_eq!(config.render.edge_style, Some(EdgeStyleArg::Orthogonal));
+        assert_eq!(config.render.direction, Some(DirectionArg::LeftToRight));
         assert_eq!(config.render.group_by, Some(GroupByMode::Schema));
         assert_eq!(config.render.focus, Some("users".to_string()));
         assert_eq!(config.render.depth, Some(2));
@@ -550,6 +564,7 @@ mod tests {
         ));
         assert_eq!(config.export.layout, Some(LayoutAlgorithmArg::Hierarchical));
         assert_eq!(config.export.edge_style, Some(EdgeStyleArg::Curved));
+        assert_eq!(config.export.direction, Some(DirectionArg::RightToLeft));
         assert_eq!(config.diff.format, Some(DiffFormat::Json));
         assert_eq!(config.diff.dialect, Some(DialectArg::Postgres));
     }
@@ -641,6 +656,7 @@ mod tests {
             theme: Some(Theme::Light),        // CLI specifies light theme
             layout: Some(LayoutAlgorithmArg::Hierarchical),
             edge_style: Some(EdgeStyleArg::Straight),
+            direction: None,
             stats: true,
             fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
@@ -690,6 +706,7 @@ mod tests {
             theme: None,
             layout: None,
             edge_style: None,
+            direction: None,
             stats: false,
             fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
@@ -733,6 +750,7 @@ mod tests {
             theme: Some(Theme::Dark),             // CLI explicitly specifies dark
             layout: Some(LayoutAlgorithmArg::ForceDirected),
             edge_style: Some(EdgeStyleArg::Orthogonal),
+            direction: None,
             stats: true,
             fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
@@ -828,6 +846,7 @@ mod tests {
             group_by: None,
             layout: None,
             edge_style: None,
+            direction: None,
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -856,6 +875,7 @@ mod tests {
             group_by: None,
             layout: None,
             edge_style: None,
+            direction: None,
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -876,6 +896,7 @@ mod tests {
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
+            direction: DirectionArg::default(),
             group_by: None,
             focus: Some("users".to_string()),
             depth: 2,
@@ -897,6 +918,7 @@ mod tests {
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
+            direction: DirectionArg::default(),
             group_by: None,
             focus: None,
             depth: 2,
@@ -919,6 +941,7 @@ mod tests {
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
+            direction: DirectionArg::default(),
             group_by: None,
             focus: Some("users".to_string()),
             depth: 1,
@@ -945,6 +968,7 @@ mod tests {
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
+            direction: DirectionArg::default(),
             group_by: None,
             focus: Some("users".to_string()),
             depth: 1,
@@ -971,6 +995,7 @@ mod tests {
             group_by: None,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
+            direction: DirectionArg::default(),
             focus: Some("   ".to_string()),
             depth: 1,
         };
@@ -992,6 +1017,7 @@ mod tests {
             group_by: None,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
+            direction: DirectionArg::default(),
             focus: None,
             depth: 2,
         };
@@ -1067,5 +1093,77 @@ mod tests {
         let merged = config.merge_diff_args(&args);
         assert_eq!(merged.format, DiffFormat::Json);
         assert_eq!(merged.dialect, DialectArg::Sqlite);
+    }
+
+    #[test]
+    fn test_merge_render_direction_cli_overrides_toml() {
+        let mut config = ReluneConfig::default();
+        config.render.direction = Some(DirectionArg::LeftToRight);
+
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            stdout: false,
+            focus: None,
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            theme: None,
+            layout: None,
+            edge_style: None,
+            direction: Some(DirectionArg::BottomToTop),
+            stats: false,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_render_args(&args);
+        assert_eq!(merged.direction, DirectionArg::BottomToTop);
+    }
+
+    #[test]
+    fn test_merge_render_direction_falls_back_to_toml() {
+        let mut config = ReluneConfig::default();
+        config.render.direction = Some(DirectionArg::LeftToRight);
+
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            stdout: false,
+            focus: None,
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            theme: None,
+            layout: None,
+            edge_style: None,
+            direction: None,
+            stats: false,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_render_args(&args);
+        assert_eq!(merged.direction, DirectionArg::LeftToRight);
+    }
+
+    #[test]
+    fn test_toml_direction_kebab_case_parses() {
+        let toml = r#"
+[render]
+direction = "left-to-right"
+"#;
+        let config: ReluneConfig = toml::from_str(toml).expect("should parse kebab-case direction");
+        assert_eq!(config.render.direction, Some(DirectionArg::LeftToRight));
     }
 }
