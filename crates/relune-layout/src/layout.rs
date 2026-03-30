@@ -18,8 +18,8 @@ use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRe
 use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
-    Rect, detour_around_obstacles, nudge_label, route_edge_column_aware,
-    route_self_loop_with_offset,
+    LABEL_HALF_H, Rect, detour_around_obstacles, estimate_label_half_width, nudge_label,
+    route_edge_column_aware, route_self_loop_with_offset,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
@@ -1159,6 +1159,7 @@ fn route_edges(
     let mut seen_lanes = std::collections::BTreeMap::new();
 
     let mut edges = Vec::new();
+    let mut placed_labels: Vec<Rect> = Vec::new();
 
     for edge in &graph.edges {
         let lane_key = canonical_edge_pair(&edge.from, &edge.to);
@@ -1220,8 +1221,8 @@ fn route_edges(
             }
         });
 
-        // Build obstacle list from all nodes except the edge's endpoints.
-        let obstacles: Vec<Rect> = positioned_nodes
+        // Build obstacle list from all nodes except the edge's endpoints (for edge detour).
+        let detour_obstacles: Vec<Rect> = positioned_nodes
             .iter()
             .filter(|n| n.id != edge.from && n.id != edge.to)
             .map(|n| Rect {
@@ -1233,16 +1234,39 @@ fn route_edges(
             .collect();
 
         // Detour edge segments around intermediate nodes (Task 25: obstacle avoidance).
-        let route = detour_around_obstacles(&route, &obstacles);
+        let route = detour_around_obstacles(&route, &detour_obstacles);
 
-        // Nudge label away from overlapping nodes (Task 23: label collision avoidance).
+        // Build obstacle list for label nudging: include previously placed labels,
+        // and for self-loop edges also include the source node (which is excluded
+        // from detour obstacles but can occlude the label).
+        let mut label_obstacles: Vec<Rect> = detour_obstacles.clone();
+        label_obstacles.extend_from_slice(&placed_labels);
+        if edge.is_self_loop
+            && let Some(&(x, y, w, h)) = from_pos
+        {
+            label_obstacles.push(Rect { x, y, w, h });
+        }
+
+        // Estimate label half-width from actual text content.
+        let lhw = estimate_label_half_width(&label);
+
+        // Nudge label away from overlapping nodes and prior labels.
         let (label_x, label_y) = nudge_label(
             route.label_position,
             (route.x1, route.y1),
             (route.x2, route.y2),
-            &obstacles,
+            &label_obstacles,
             4.0,
+            lhw,
         );
+
+        // Record this label's bounding box as an obstacle for subsequent edges.
+        placed_labels.push(Rect {
+            x: label_x - lhw,
+            y: label_y - LABEL_HALF_H,
+            w: lhw * 2.0,
+            h: LABEL_HALF_H * 2.0,
+        });
 
         edges.push(PositionedEdge {
             from: edge.from.clone(),
@@ -2324,6 +2348,163 @@ mod tests {
         assert!(
             (graph.edges[0].route.x1 - graph.edges[1].route.x1).abs() > f32::EPSILON
                 || (graph.edges[0].route.y1 - graph.edges[1].route.y1).abs() > f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_parallel_edge_labels_do_not_overlap() {
+        // Two FK edges between the same pair of tables — their labels must not overlap.
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "users".to_string(),
+                    schema_name: None,
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "posts".to_string(),
+                    schema_name: None,
+                    name: "posts".to_string(),
+                    columns: vec![
+                        Column {
+                            id: ColumnId(2),
+                            name: "author_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                        Column {
+                            id: ColumnId(3),
+                            name: "editor_id".to_string(),
+                            data_type: "int".to_string(),
+                            nullable: false,
+                            is_primary_key: false,
+                            comment: None,
+                        },
+                    ],
+                    foreign_keys: vec![
+                        ForeignKey {
+                            name: Some("fk_author".to_string()),
+                            from_columns: vec!["author_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                        ForeignKey {
+                            name: Some("fk_editor".to_string()),
+                            from_columns: vec!["editor_id".to_string()],
+                            to_schema: None,
+                            to_table: "users".to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        },
+                    ],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = build_layout(&schema).unwrap();
+        assert_eq!(graph.edges.len(), 2);
+
+        // Check that label bounding boxes do not overlap.
+        let (lx0, ly0) = (graph.edges[0].label_x, graph.edges[0].label_y);
+        let (lx1, ly1) = (graph.edges[1].label_x, graph.edges[1].label_y);
+        let hw0 = estimate_label_half_width(&graph.edges[0].label);
+        let hw1 = estimate_label_half_width(&graph.edges[1].label);
+        let hh = LABEL_HALF_H;
+        let overlaps = (lx0 + hw0 > lx1 - hw1)
+            && (lx0 - hw0 < lx1 + hw1)
+            && (ly0 + hh > ly1 - hh)
+            && (ly0 - hh < ly1 + hh);
+        assert!(
+            !overlaps,
+            "Parallel edge labels overlap: ({lx0},{ly0}) vs ({lx1},{ly1})"
+        );
+    }
+
+    #[test]
+    fn test_self_loop_label_outside_source_node() {
+        // A self-referencing FK: the label must not sit inside the source node.
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "employees".to_string(),
+                schema_name: None,
+                name: "employees".to_string(),
+                columns: vec![
+                    Column {
+                        id: ColumnId(1),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                    },
+                    Column {
+                        id: ColumnId(2),
+                        name: "manager_id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: true,
+                        is_primary_key: false,
+                        comment: None,
+                    },
+                ],
+                foreign_keys: vec![ForeignKey {
+                    name: Some("fk_manager".to_string()),
+                    from_columns: vec!["manager_id".to_string()],
+                    to_schema: None,
+                    to_table: "employees".to_string(),
+                    to_columns: vec!["id".to_string()],
+                    on_delete: ReferentialAction::NoAction,
+                    on_update: ReferentialAction::NoAction,
+                }],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = build_layout(&schema).unwrap();
+        assert_eq!(graph.edges.len(), 1);
+
+        let edge = &graph.edges[0];
+        assert!(edge.is_self_loop);
+
+        // The node that owns the self-loop.
+        let node = &graph.nodes[0];
+        // Label center must be outside the node bounding box (allowing slight
+        // overlap from the label's extent is OK, but the center should not be
+        // inside the node).
+        let center_inside = edge.label_x >= node.x
+            && edge.label_x <= node.x + node.width
+            && edge.label_y >= node.y
+            && edge.label_y <= node.y + node.height;
+        assert!(
+            !center_inside,
+            "Self-loop label center ({},{}) is inside node ({},{},{},{})",
+            edge.label_x, edge.label_y, node.x, node.y, node.width, node.height
         );
     }
 }

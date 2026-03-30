@@ -10,6 +10,27 @@ use relune_core::layout::{EdgeRoute, RouteStyle};
 /// overlapping it.
 const BORDER_OUTSET: f32 = 2.0;
 
+/// Default half-width of an edge label bounding box (in pixels).
+/// Used as a fallback when no label text is available.
+pub const LABEL_HALF_W: f32 = 40.0;
+/// Estimated half-height of an edge label bounding box (in pixels).
+pub const LABEL_HALF_H: f32 = 10.0;
+
+/// Estimate the half-width of a label bounding box from its text content.
+///
+/// Mirrors the character-width heuristic used by the SVG renderer
+/// (`estimate_label_width` in relune-render-svg) so that the layout engine's
+/// obstacle rectangles match the actual rendered label size.
+#[must_use]
+pub fn estimate_label_half_width(text: &str) -> f32 {
+    let char_width: f32 = text
+        .chars()
+        .map(|ch| if ch.is_ascii() { 6.4 } else { 10.0 })
+        .sum();
+    // The SVG renderer adds 18px padding; half of the total width is the half-extent.
+    (char_width + 18.0) * 0.5
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttachmentSide {
     North,
@@ -607,6 +628,10 @@ pub struct Rect {
 ///
 /// The label is shifted outward along the perpendicular to the edge direction
 /// until it clears all obstacles by at least `margin` pixels.
+///
+/// `label_half_w` controls the estimated half-width of the label bounding box.
+/// Pass [`estimate_label_half_width`] of the label text for an accurate estimate,
+/// or [`LABEL_HALF_W`] as a default.
 #[must_use]
 pub fn nudge_label(
     label: (f32, f32),
@@ -614,10 +639,9 @@ pub fn nudge_label(
     edge_end: (f32, f32),
     obstacles: &[Rect],
     margin: f32,
+    label_half_w: f32,
 ) -> (f32, f32) {
-    // Estimated label bounding box (half-sizes).
-    let label_half_w = 40.0;
-    let label_half_h = 10.0;
+    let label_half_h = LABEL_HALF_H;
 
     let overlaps = |lx: f32, ly: f32| -> bool {
         obstacles.iter().any(|r| {
@@ -1164,7 +1188,14 @@ mod tests {
             w: 100.0,
             h: 50.0,
         }];
-        let result = nudge_label(label, (100.0, 25.0), (200.0, 125.0), &obstacles, 4.0);
+        let result = nudge_label(
+            label,
+            (100.0, 25.0),
+            (200.0, 125.0),
+            &obstacles,
+            4.0,
+            LABEL_HALF_W,
+        );
         assert!((result.0 - label.0).abs() < 0.001);
         assert!((result.1 - label.1).abs() < 0.001);
     }
@@ -1179,7 +1210,14 @@ mod tests {
             w: 100.0,
             h: 50.0,
         }];
-        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &obstacles, 4.0);
+        let result = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &obstacles,
+            4.0,
+            LABEL_HALF_W,
+        );
         // Should have moved away from the obstacle
         assert!((result.0 - label.0).abs() > 0.001 || (result.1 - label.1).abs() > 0.001);
     }
@@ -1187,7 +1225,7 @@ mod tests {
     #[test]
     fn test_nudge_label_empty_obstacles() {
         let label = (50.0, 25.0);
-        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &[], 4.0);
+        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &[], 4.0, LABEL_HALF_W);
         assert!((result.0 - label.0).abs() < 0.001);
         assert!((result.1 - label.1).abs() < 0.001);
     }
