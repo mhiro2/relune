@@ -32,12 +32,16 @@ pub fn estimate_label_half_width(text: &str) -> f32 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AttachmentSide {
+pub(crate) enum AttachmentSide {
     North,
     South,
     East,
     West,
 }
+
+/// Short outward segment length used to preserve endpoint approach direction
+/// when obstacle detours insert extra bends into a route.
+const ENDPOINT_ANCHOR_DISTANCE: f32 = 28.0;
 
 /// Route an edge between two points.
 ///
@@ -428,6 +432,22 @@ fn attachment_points(
     }
 }
 
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn attachment_sides(
+    x1: f32,
+    y1: f32,
+    w1: f32,
+    h1: f32,
+    x2: f32,
+    y2: f32,
+    w2: f32,
+    h2: f32,
+) -> (AttachmentSide, AttachmentSide) {
+    let (_, _, source_side, target_side) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    (source_side, target_side)
+}
+
 /// Calculate the point at t=0.5 on a cubic bezier curve.
 fn calculate_cubic_bezier_midpoint(
     x0: f32,
@@ -690,14 +710,26 @@ pub fn nudge_label(
 /// because modifying Bézier control points would distort the curve shape.
 #[must_use]
 pub fn detour_around_obstacles(route: &EdgeRoute, obstacles: &[Rect]) -> EdgeRoute {
+    detour_around_obstacles_with_endpoints(route, obstacles, None, None)
+}
+
+#[must_use]
+pub(crate) fn detour_around_obstacles_with_endpoints(
+    route: &EdgeRoute,
+    obstacles: &[Rect],
+    source_side: Option<AttachmentSide>,
+    target_side: Option<AttachmentSide>,
+) -> EdgeRoute {
     if obstacles.is_empty() || route.style == RouteStyle::Curved {
         return route.clone();
     }
 
-    let mut points: Vec<(f32, f32)> = Vec::with_capacity(route.control_points.len() + 2);
-    points.push((route.x1, route.y1));
-    points.extend_from_slice(&route.control_points);
-    points.push((route.x2, route.y2));
+    let points = route_points(route);
+    if !route_intersects_obstacles(&points, obstacles) {
+        return route.clone();
+    }
+
+    let points = add_endpoint_anchors(&points, source_side, target_side);
 
     let mut detoured = Vec::with_capacity(points.len() * 2);
     detoured.push(points[0]);
@@ -740,6 +772,51 @@ pub fn detour_around_obstacles(route: &EdgeRoute, obstacles: &[Rect]) -> EdgeRou
         style,
         label_position,
     }
+}
+
+fn route_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
+    let mut points: Vec<(f32, f32)> = Vec::with_capacity(route.control_points.len() + 2);
+    points.push((route.x1, route.y1));
+    points.extend_from_slice(&route.control_points);
+    points.push((route.x2, route.y2));
+    points
+}
+
+fn route_intersects_obstacles(points: &[(f32, f32)], obstacles: &[Rect]) -> bool {
+    points.windows(2).any(|segment| {
+        obstacles
+            .iter()
+            .any(|obstacle| segment_intersects_rect(segment[0], segment[1], obstacle))
+    })
+}
+
+fn add_endpoint_anchors(
+    points: &[(f32, f32)],
+    source_side: Option<AttachmentSide>,
+    target_side: Option<AttachmentSide>,
+) -> Vec<(f32, f32)> {
+    let Some((&start, rest)) = points.split_first() else {
+        return Vec::new();
+    };
+    let Some((&end, middle)) = rest.split_last() else {
+        return vec![start];
+    };
+
+    let mut anchored = Vec::with_capacity(points.len() + 2);
+    anchored.push(start);
+
+    if let Some(side) = source_side {
+        anchored.push(step_from_attachment(start, side, ENDPOINT_ANCHOR_DISTANCE));
+    }
+
+    anchored.extend_from_slice(middle);
+
+    if let Some(side) = target_side {
+        anchored.push(step_from_attachment(end, side, ENDPOINT_ANCHOR_DISTANCE));
+    }
+
+    anchored.push(end);
+    anchored
 }
 
 /// Check whether a line segment from `a` to `b` passes through the interior
@@ -1139,6 +1216,46 @@ mod tests {
         );
         // Upgraded to orthogonal since waypoints were inserted.
         assert_eq!(result.style, RouteStyle::Orthogonal);
+    }
+
+    #[test]
+    fn test_detour_preserves_horizontal_endpoint_approach() {
+        let route = EdgeRoute {
+            x1: 1080.4,
+            y1: 123.0,
+            x2: 373.0,
+            y2: 775.0,
+            control_points: Vec::new(),
+            style: RouteStyle::Straight,
+            label_position: (726.7, 449.0),
+        };
+        let obstacles = vec![Rect {
+            x: 630.2,
+            y: 382.0,
+            w: 315.0,
+            h: 156.0,
+        }];
+
+        let result = detour_around_obstacles_with_endpoints(
+            &route,
+            &obstacles,
+            Some(AttachmentSide::West),
+            Some(AttachmentSide::East),
+        );
+
+        let first = result
+            .control_points
+            .first()
+            .expect("detour should add points");
+        let last = result
+            .control_points
+            .last()
+            .expect("detour should add points");
+
+        assert!((first.1 - route.y1).abs() < 0.001);
+        assert!(first.0 < route.x1);
+        assert!((last.1 - route.y2).abs() < 0.001);
+        assert!(last.0 > route.x2);
     }
 
     #[test]

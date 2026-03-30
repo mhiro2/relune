@@ -18,7 +18,8 @@ use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRe
 use crate::order::order_nodes_within_layers;
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
-    LABEL_HALF_H, Rect, detour_around_obstacles, estimate_label_half_width, nudge_label,
+    LABEL_HALF_H, Rect, attachment_sides, detour_around_obstacles,
+    detour_around_obstacles_with_endpoints, estimate_label_half_width, nudge_label,
     route_edge_column_aware, route_self_loop_with_offset,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
@@ -37,8 +38,8 @@ const HEADER_FONT_SIZE: f32 = 13.0;
 const COLUMN_FONT_SIZE: f32 = 11.5;
 /// Lower bound factor applied to configured node width.
 const MIN_NODE_WIDTH_FACTOR: f32 = 0.72;
-/// Space reserved for badges and padding in width estimation.
-const NODE_WIDTH_SLACK: f32 = 34.0;
+/// Extra right-side space for the kind label ("TABLE"/"VIEW"/"ENUM") in the header.
+const HEADER_KIND_LABEL_RESERVE: f32 = 48.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -931,19 +932,29 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
     let header_width = config
         .node_padding
         .mul_add(2.0, estimate_text_width(&node.label, HEADER_FONT_SIZE))
-        + 24.0;
+        + HEADER_KIND_LABEL_RESERVE;
 
     let column_width = node
         .columns
         .iter()
         .map(|column| {
             let text = display_column_text(node.kind, &column.name, &column.data_type);
-            estimate_text_width(&text, COLUMN_FONT_SIZE)
+            let text_px = estimate_text_width(&text, COLUMN_FONT_SIZE);
+            let icon_slots = usize::from(column.is_indexed)
+                + usize::from(column.is_foreign_key)
+                + usize::from(column.is_primary_key);
+            #[allow(clippy::cast_precision_loss)] // Icon counts are tiny layout values.
+            let badge_reserve = if icon_slots > 0 {
+                (icon_slots as f32 - 1.0).mul_add(24.0, 28.0)
+            } else {
+                0.0
+            };
+            text_px + badge_reserve
         })
         .fold(0.0, f32::max);
 
     header_width
-        .max(config.node_padding.mul_add(2.0, column_width) + NODE_WIDTH_SLACK)
+        .max(config.node_padding.mul_add(2.0, column_width) + 10.0)
         .max(minimum_width)
         .ceil()
 }
@@ -1178,6 +1189,9 @@ fn route_edges(
         let from_pos = node_positions.get(edge.from.as_str());
         let to_pos = node_positions.get(edge.to.as_str());
 
+        let mut detour_source_side = None;
+        let mut detour_target_side = None;
+
         let route = if edge.is_self_loop {
             if let Some(&(x, y, w, h)) = from_pos {
                 route_self_loop_with_offset(
@@ -1193,6 +1207,9 @@ fn route_edges(
             }
         } else if let (Some(&(x1, y1, w1, h1)), Some(&(x2, y2, w2, h2))) = (from_pos, to_pos) {
             let lane = centered_lane_offset(*lane_index, lane_total);
+            let (source_side, target_side) = attachment_sides(x1, y1, w1, h1, x2, y2, w2, h2);
+            detour_source_side = Some(source_side);
+            detour_target_side = Some(target_side);
 
             let src_col = node_by_id.get(edge.from.as_str()).map_or(0.0, |n| {
                 column_y_offset_from_center(n, &edge.from_columns, config)
@@ -1241,7 +1258,15 @@ fn route_edges(
             .collect();
 
         // Detour edge segments around intermediate nodes (Task 25: obstacle avoidance).
-        let route = detour_around_obstacles(&route, &detour_obstacles);
+        let route = match (detour_source_side, detour_target_side) {
+            (Some(source_side), Some(target_side)) => detour_around_obstacles_with_endpoints(
+                &route,
+                &detour_obstacles,
+                Some(source_side),
+                Some(target_side),
+            ),
+            _ => detour_around_obstacles(&route, &detour_obstacles),
+        };
 
         // Build obstacle list for label nudging: include previously placed labels,
         // and for self-loop edges also include the source node (which is excluded

@@ -286,7 +286,7 @@ fn render_node_internal(
         r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
         node.x + 10.0,
         node.y + 8.0,
-        (node.width - 80.0).max(24.0),
+        (node.width - 54.0).max(40.0),
         node.x + 10.0,
         node.y + 21.0,
         colors.text_primary,
@@ -1074,9 +1074,15 @@ fn column_text_width(
     let icon_slots = usize::from(column.is_indexed)
         + usize::from(column.is_foreign_key)
         + usize::from(column.is_primary_key);
-    #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
-    let reserved = (icon_slots as f32).mul_add(24.0, if icon_slots > 0 { 14.0 } else { 0.0 });
-    (node.width - 20.0 - reserved).max(18.0)
+    if icon_slots == 0 {
+        (node.width - 20.0).max(18.0)
+    } else {
+        // Badges start at node.width - 22, spaced 24px apart (left edge to left edge).
+        // Reserve space for all badges plus a small gap before the leftmost one.
+        #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
+        let badge_area = (icon_slots as f32 - 1.0).mul_add(24.0, 28.0);
+        (node.width - 10.0 - badge_area).max(18.0)
+    }
 }
 
 fn estimate_label_width(text: &str) -> f32 {
