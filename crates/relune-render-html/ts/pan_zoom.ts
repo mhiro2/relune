@@ -92,7 +92,13 @@ function parseViewBox(svg: SVGSVGElement): DiagramBounds {
       };
 
       const updateTransform = (): void => {
-        canvasEl.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        const scaledWidth = diagram.width * scale;
+        const scaledHeight = diagram.height * scale;
+        svg.style.width = `${scaledWidth}px`;
+        svg.style.height = `${scaledHeight}px`;
+        canvasEl.style.width = `${scaledWidth}px`;
+        canvasEl.style.height = `${scaledHeight}px`;
+        canvasEl.style.transform = `translate(${panX}px, ${panY}px)`;
         if (zoomLevelEl instanceof HTMLElement) {
           zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
         }

@@ -497,6 +497,9 @@ pub fn build_layout_from_graph_with_config(
     // Step 5: Position groups
     let positioned_groups = position_groups(&graph.groups, &positioned_nodes);
 
+    // Expand canvas bounds so self-loop curves are not clipped.
+    let (width, height) = expand_bounds_for_edges(width, height, &positioned_edges);
+
     info!("Layout complete: {}x{} pixels", width, height);
 
     Ok(PositionedGraph {
@@ -1040,6 +1043,36 @@ fn compute_graph_bounds(positioned_nodes: &[PositionedNode], config: &LayoutConf
         .fold(config.origin_y, f32::max);
 
     (max_x + config.origin_x, max_y + config.origin_y)
+}
+
+/// Expand graph bounds so that edge routes (especially self-loop curves and
+/// their control points) are not clipped by the SVG viewport.
+fn expand_bounds_for_edges(width: f32, height: f32, edges: &[PositionedEdge]) -> (f32, f32) {
+    const MARKER_PAD: f32 = 24.0; // room for Crow's Foot markers
+    let mut w = width;
+    let mut h = height;
+    for edge in edges {
+        let r = &edge.route;
+        for &x in &[r.x1, r.x2] {
+            if x + MARKER_PAD > w {
+                w = x + MARKER_PAD;
+            }
+        }
+        for &y in &[r.y1, r.y2] {
+            if y + MARKER_PAD > h {
+                h = y + MARKER_PAD;
+            }
+        }
+        for &(cx, cy) in &r.control_points {
+            if cx + MARKER_PAD > w {
+                w = cx + MARKER_PAD;
+            }
+            if cy + MARKER_PAD > h {
+                h = cy + MARKER_PAD;
+            }
+        }
+    }
+    (w, h)
 }
 
 fn node_pair_spacing(left: NodeSize, right: NodeSize, config: &LayoutConfig) -> f32 {

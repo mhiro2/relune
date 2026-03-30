@@ -456,8 +456,11 @@ pub(crate) fn route_self_loop_with_offset(
     style: RouteStyle,
     radius_offset: f32,
 ) -> EdgeRoute {
-    // Self-loops go around the node
-    let loop_radius = 20.0 + radius_offset.max(0.0);
+    // Self-loops go around the node.
+    // Use a generous base radius so that Crow's Foot SVG markers (up to 20 px
+    // wide) stay visually attached to the curved path instead of diverging
+    // along the tangent.
+    let loop_radius = 36.0 + radius_offset.max(0.0);
 
     match style {
         RouteStyle::Straight => {
