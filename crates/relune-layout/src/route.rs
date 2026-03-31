@@ -725,8 +725,32 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
     source_side: Option<AttachmentSide>,
     target_side: Option<AttachmentSide>,
 ) -> EdgeRoute {
-    if obstacles.is_empty() || route.style == RouteStyle::Curved {
+    if obstacles.is_empty() {
         return route.clone();
+    }
+
+    // Curved routes: check whether the Bézier actually intersects any obstacle.
+    // If not, keep the curve as-is.  If it does, fall back to orthogonal routing
+    // with obstacle detour so the edge goes cleanly around the node.
+    if route.style == RouteStyle::Curved {
+        if !bezier_intersects_any_obstacle(route, obstacles) {
+            return route.clone();
+        }
+        let fallback = EdgeRoute {
+            x1: route.x1,
+            y1: route.y1,
+            x2: route.x2,
+            y2: route.y2,
+            control_points: Vec::new(),
+            style: RouteStyle::Orthogonal,
+            label_position: route.label_position,
+        };
+        return detour_around_obstacles_with_endpoints(
+            &fallback,
+            obstacles,
+            source_side,
+            target_side,
+        );
     }
 
     let initial_points = route_points(route);
@@ -770,6 +794,9 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
             break;
         }
     }
+
+    // Clean up collinear and backtracking waypoints produced by the detour loop.
+    points = simplify_orthogonal_path(&points);
 
     // Rebuild the route: first and last points are endpoints, middle are control points.
     let new_start = points[0];
@@ -943,6 +970,105 @@ fn compute_detour(start: (f32, f32), end: (f32, f32), obstacle: &Rect) -> Vec<(f
         };
         vec![(detour_x, start.1), (detour_x, end.1)]
     }
+}
+
+/// Simplify an orthogonal path by removing collinear and backtracking points.
+///
+/// Pass 1: remove intermediate points that are collinear with their neighbors
+/// (all three share the same X or same Y coordinate).
+/// Pass 2: remove backtracking — when three consecutive points lie on the same
+/// axis and the direction reverses, the middle point is a stub. Repeat until
+/// stable.
+fn simplify_orthogonal_path(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+
+    // Pass 1: remove collinear intermediate points.
+    let mut result: Vec<(f32, f32)> = Vec::with_capacity(points.len());
+    result.push(points[0]);
+    for i in 1..points.len() - 1 {
+        let prev = *result.last().unwrap();
+        let curr = points[i];
+        let next = points[i + 1];
+        let same_x = (prev.0 - curr.0).abs() < 0.5 && (curr.0 - next.0).abs() < 0.5;
+        let same_y = (prev.1 - curr.1).abs() < 0.5 && (curr.1 - next.1).abs() < 0.5;
+        if same_x || same_y {
+            continue;
+        }
+        result.push(curr);
+    }
+    result.push(*points.last().unwrap());
+
+    // Pass 2: remove backtracking points (iterate until stable).
+    loop {
+        let prev_len = result.len();
+        let mut cleaned: Vec<(f32, f32)> = Vec::with_capacity(result.len());
+        cleaned.push(result[0]);
+
+        let mut i = 1;
+        while i < result.len() - 1 {
+            let a = *cleaned.last().unwrap();
+            let b = result[i];
+            let c = result[i + 1];
+
+            let on_x = (a.0 - b.0).abs() < 0.5 && (b.0 - c.0).abs() < 0.5;
+            let on_y = (a.1 - b.1).abs() < 0.5 && (b.1 - c.1).abs() < 0.5;
+
+            if on_x && (b.1 - a.1) * (c.1 - b.1) < 0.0 {
+                // Vertical backtrack — skip b.
+                i += 1;
+                continue;
+            }
+            if on_y && (b.0 - a.0) * (c.0 - b.0) < 0.0 {
+                // Horizontal backtrack — skip b.
+                i += 1;
+                continue;
+            }
+
+            cleaned.push(b);
+            i += 1;
+        }
+        if i < result.len() {
+            cleaned.push(*result.last().unwrap());
+        }
+
+        result = cleaned;
+        if result.len() == prev_len {
+            break;
+        }
+    }
+
+    result
+}
+
+/// Check whether a cubic Bézier edge route intersects any obstacle rectangle.
+///
+/// The curve is sampled at 16 evenly-spaced points and consecutive samples are
+/// tested as straight segments against each obstacle.
+fn bezier_intersects_any_obstacle(route: &EdgeRoute, obstacles: &[Rect]) -> bool {
+    let (Some(cp1), Some(cp2)) = (
+        route.control_points.first().copied(),
+        route.control_points.get(1).copied(),
+    ) else {
+        return false;
+    };
+
+    let n = 16u32;
+    let mut prev = (route.x1, route.y1);
+    for i in 1..=n {
+        #[allow(clippy::cast_precision_loss)]
+        let t = i as f32 / n as f32;
+        let curr = evaluate_cubic_bezier(t, route.x1, route.y1, cp1, cp2, route.x2, route.y2);
+        if obstacles
+            .iter()
+            .any(|obs| segment_intersects_rect(prev, curr, obs))
+        {
+            return true;
+        }
+        prev = curr;
+    }
+    false
 }
 
 /// Find the midpoint of a polyline (by arc-length).
@@ -1404,7 +1530,7 @@ mod tests {
     }
 
     #[test]
-    fn test_detour_curved_routes_unchanged() {
+    fn test_detour_curved_route_with_obstacle_converts_to_orthogonal() {
         let route = route_edge(
             0.0,
             0.0,
@@ -1416,6 +1542,7 @@ mod tests {
             50.0,
             RouteStyle::Curved,
         );
+        // Place an obstacle directly in the curve's path.
         let obstacles = vec![Rect {
             x: 150.0,
             y: 0.0,
@@ -1423,7 +1550,87 @@ mod tests {
             h: 50.0,
         }];
         let result = detour_around_obstacles(&route, &obstacles);
+        assert_eq!(result.style, RouteStyle::Orthogonal);
+    }
+
+    #[test]
+    fn test_detour_curved_route_without_obstacle_stays_curved() {
+        let route = route_edge(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            300.0,
+            0.0,
+            100.0,
+            50.0,
+            RouteStyle::Curved,
+        );
+        // Obstacle far away — should not affect the curve.
+        let obstacles = vec![Rect {
+            x: 500.0,
+            y: 500.0,
+            w: 50.0,
+            h: 50.0,
+        }];
+        let result = detour_around_obstacles(&route, &obstacles);
+        assert_eq!(result.style, RouteStyle::Curved);
         assert_eq!(result.control_points.len(), route.control_points.len());
+    }
+
+    #[test]
+    fn test_simplify_removes_collinear_points() {
+        let points = vec![(0.0, 0.0), (0.0, 50.0), (0.0, 100.0)];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(result, vec![(0.0, 0.0), (0.0, 100.0)]);
+    }
+
+    #[test]
+    fn test_simplify_removes_backtracking() {
+        // The exact bug: path goes up then reverses down.
+        let points = vec![
+            (377.0, 206.0),
+            (377.0, 188.0),
+            (377.0, 152.0),
+            (377.0, 431.0),
+        ];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(result, vec![(377.0, 206.0), (377.0, 431.0)]);
+    }
+
+    #[test]
+    fn test_simplify_preserves_right_angle_bends() {
+        let points = vec![(0.0, 0.0), (0.0, 50.0), (100.0, 50.0)];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(result, points);
+    }
+
+    #[test]
+    fn test_simplify_full_bug_path() {
+        let points = vec![
+            (2767.0, 105.0),
+            (2739.0, 105.0),
+            (2739.0, 152.0),
+            (2739.0, 188.0),
+            (2739.0, 206.0),
+            (377.0, 206.0),
+            (377.0, 188.0),
+            (377.0, 152.0),
+            (377.0, 431.0),
+            (349.0, 431.0),
+        ];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(
+            result,
+            vec![
+                (2767.0, 105.0),
+                (2739.0, 105.0),
+                (2739.0, 206.0),
+                (377.0, 206.0),
+                (377.0, 431.0),
+                (349.0, 431.0),
+            ]
+        );
     }
 
     #[test]
