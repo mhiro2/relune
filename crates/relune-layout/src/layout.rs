@@ -21,6 +21,7 @@ use crate::route::{
     LABEL_HALF_H, Rect, attachment_sides, detour_around_obstacles,
     detour_around_obstacles_with_endpoints, estimate_label_half_width, nudge_label,
     point_along_route, route_edge_column_aware, route_self_loop_with_offset,
+    sample_route_obstacles,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
@@ -1271,9 +1272,9 @@ fn route_edges(
             _ => detour_around_obstacles(&route, &detour_obstacles),
         };
 
-        // Build obstacle list for label nudging: include previously placed labels
-        // and the edge endpoints themselves because staggered labels can sit
-        // much closer to either node than the midpoint-based placement.
+        // Build obstacle list for label placement: include previously placed
+        // labels and the edge endpoints because staggered labels can sit much
+        // closer to either node than the midpoint-based placement.
         let mut label_obstacles: Vec<Rect> = detour_obstacles.clone();
         label_obstacles.extend_from_slice(&placed_labels);
         if let Some(&(x, y, w, h)) = from_pos {
@@ -1297,25 +1298,16 @@ fn route_edges(
             route.label_position
         };
 
-        // Nudge label away from overlapping nodes and prior labels.
-        let max_offset = lhw.max(MIN_LABEL_NUDGE_OFFSET);
-        let (label_x, label_y) = nudge_label(
-            label_pos,
-            (route.x1, route.y1),
-            (route.x2, route.y2),
-            &label_obstacles,
-            4.0,
-            lhw,
-            max_offset,
-        );
+        let preferred_t = if lane_total > 1 && !edge.is_self_loop {
+            parallel_label_parameter(&edge.from, &edge.to, *lane_index, lane_total)
+        } else {
+            estimate_route_parameter(&route, label_pos)
+        };
+        let (label_x, label_y) =
+            place_label_on_route(&route, preferred_t, &label_obstacles, 4.0, lhw);
 
         // Record this label's bounding box as an obstacle for subsequent edges.
-        placed_labels.push(Rect {
-            x: label_x - lhw,
-            y: label_y - LABEL_HALF_H,
-            w: lhw * 2.0,
-            h: LABEL_HALF_H * 2.0,
-        });
+        placed_labels.push(label_rect(label_x, label_y, lhw));
 
         edges.push(PositionedEdge {
             from: edge.from.clone(),
@@ -1334,6 +1326,8 @@ fn route_edges(
             label_y,
         });
     }
+
+    resolve_edge_label_collisions(&mut edges, positioned_nodes);
 
     edges
 }
@@ -1364,8 +1358,18 @@ const BASE_LANE_GAP: f32 = 14.0;
 const MIN_LANE_GAP: f32 = 10.0;
 /// Maximum lane gap.
 const MAX_LANE_GAP: f32 = 20.0;
-/// Minimum label nudge search distance retained for baseline obstacle clearance.
-const MIN_LABEL_NUDGE_OFFSET: f32 = 96.0;
+/// Half-size of sampled edge-path obstacles used during label collision avoidance.
+const EDGE_ROUTE_OBSTACLE_HALF_SIZE: f32 = 7.0;
+/// Target spacing between sampled edge-path obstacles.
+const EDGE_ROUTE_OBSTACLE_SPACING: f32 = 10.0;
+/// Number of label-relaxation passes after all edge routes are known.
+const EDGE_LABEL_RELAXATION_PASSES: usize = 3;
+/// Labels should stay away from edge endpoints and markers.
+const MIN_LABEL_ROUTE_T: f32 = 0.16;
+/// Candidate stride when sliding labels along their own route.
+const LABEL_ROUTE_T_STEP: f32 = 0.08;
+/// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
+const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
 
 #[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
 fn self_loop_radius_offset(lane_index: usize) -> f32 {
@@ -1392,6 +1396,179 @@ fn centered_lane_offset(lane_index: usize, lane_total: usize) -> f32 {
 fn parallel_label_parameter(from: &str, to: &str, lane_index: usize, lane_total: usize) -> f32 {
     let position = (lane_index + 1) as f32 / (lane_total + 1) as f32;
     if from <= to { position } else { 1.0 - position }
+}
+
+fn label_rect(label_x: f32, label_y: f32, label_half_w: f32) -> Rect {
+    Rect {
+        x: label_x - label_half_w,
+        y: label_y - LABEL_HALF_H,
+        w: label_half_w * 2.0,
+        h: LABEL_HALF_H * 2.0,
+    }
+}
+
+fn rect_overlaps_any(label: Rect, obstacles: &[Rect], margin: f32) -> bool {
+    obstacles.iter().any(|obstacle| {
+        label.x + label.w + margin > obstacle.x
+            && label.x - margin < obstacle.x + obstacle.w
+            && label.y + label.h + margin > obstacle.y
+            && label.y - margin < obstacle.y + obstacle.h
+    })
+}
+
+fn label_candidate_parameters(preferred_t: f32) -> Vec<f32> {
+    let clamped = preferred_t.clamp(MIN_LABEL_ROUTE_T, 1.0 - MIN_LABEL_ROUTE_T);
+    let mut candidates = vec![clamped];
+    let mut delta = LABEL_ROUTE_T_STEP;
+    while clamped - delta >= MIN_LABEL_ROUTE_T || clamped + delta <= 1.0 - MIN_LABEL_ROUTE_T {
+        if clamped - delta >= MIN_LABEL_ROUTE_T {
+            candidates.push(clamped - delta);
+        }
+        if clamped + delta <= 1.0 - MIN_LABEL_ROUTE_T {
+            candidates.push(clamped + delta);
+        }
+        delta += LABEL_ROUTE_T_STEP;
+    }
+    candidates
+}
+
+fn place_label_on_route(
+    route: &EdgeRoute,
+    preferred_t: f32,
+    obstacles: &[Rect],
+    margin: f32,
+    label_half_w: f32,
+) -> (f32, f32) {
+    let candidates = label_candidate_parameters(preferred_t);
+    let mut best = point_along_route(route, candidates[0]);
+    let mut best_overlap_area = f32::MAX;
+
+    for t in candidates {
+        let candidate = point_along_route(route, t);
+        let label = label_rect(candidate.0, candidate.1, label_half_w);
+        if !rect_overlaps_any(label, obstacles, margin) {
+            return candidate;
+        }
+
+        let overlap_area: f32 = obstacles
+            .iter()
+            .map(|obstacle| {
+                let overlap_w =
+                    (label.x + label.w).min(obstacle.x + obstacle.w) - label.x.max(obstacle.x);
+                let overlap_h =
+                    (label.y + label.h).min(obstacle.y + obstacle.h) - label.y.max(obstacle.y);
+                overlap_w.max(0.0) * overlap_h.max(0.0)
+            })
+            .sum();
+        if overlap_area < best_overlap_area {
+            best_overlap_area = overlap_area;
+            best = candidate;
+        }
+    }
+
+    nudge_label(
+        best,
+        (route.x1, route.y1),
+        (route.x2, route.y2),
+        obstacles,
+        margin,
+        label_half_w,
+        LABEL_ROUTE_FALLBACK_MAX_OFFSET.max(label_half_w),
+    )
+}
+
+fn estimate_route_parameter(route: &EdgeRoute, point: (f32, f32)) -> f32 {
+    let samples = 24usize;
+    let mut best_t = 0.5;
+    let mut best_distance = f32::MAX;
+    #[allow(clippy::cast_precision_loss)]
+    for index in 0..=samples {
+        let t = index as f32 / samples as f32;
+        let candidate = point_along_route(route, t);
+        let distance = (candidate.0 - point.0).hypot(candidate.1 - point.1);
+        if distance < best_distance {
+            best_distance = distance;
+            best_t = t;
+        }
+    }
+    best_t
+}
+
+fn resolve_edge_label_collisions(
+    edges: &mut [PositionedEdge],
+    positioned_nodes: &[PositionedNode],
+) {
+    if edges.is_empty() {
+        return;
+    }
+
+    let node_obstacles: Vec<Rect> = positioned_nodes
+        .iter()
+        .map(|node| Rect {
+            x: node.x,
+            y: node.y,
+            w: node.width,
+            h: node.height,
+        })
+        .collect();
+    let route_obstacles: Vec<Vec<Rect>> = edges
+        .iter()
+        .map(|edge| {
+            sample_route_obstacles(
+                &edge.route,
+                EDGE_ROUTE_OBSTACLE_HALF_SIZE,
+                EDGE_ROUTE_OBSTACLE_SPACING,
+            )
+        })
+        .collect();
+
+    for _ in 0..EDGE_LABEL_RELAXATION_PASSES {
+        let mut changed = false;
+
+        for index in 0..edges.len() {
+            let label_half_w = estimate_label_half_width(&edges[index].label);
+            let mut obstacles =
+                Vec::with_capacity(node_obstacles.len() + edges.len().saturating_mul(2));
+            obstacles.extend_from_slice(&node_obstacles);
+
+            for (other_index, other_edge) in edges.iter().enumerate() {
+                if other_index == index {
+                    continue;
+                }
+
+                obstacles.push(label_rect(
+                    other_edge.label_x,
+                    other_edge.label_y,
+                    estimate_label_half_width(&other_edge.label),
+                ));
+                obstacles.extend_from_slice(&route_obstacles[other_index]);
+            }
+
+            let current_t = estimate_route_parameter(
+                &edges[index].route,
+                (edges[index].label_x, edges[index].label_y),
+            );
+            let updated = place_label_on_route(
+                &edges[index].route,
+                current_t,
+                &obstacles,
+                4.0,
+                label_half_w,
+            );
+
+            if (updated.0 - edges[index].label_x).abs() > f32::EPSILON
+                || (updated.1 - edges[index].label_y).abs() > f32::EPSILON
+            {
+                edges[index].label_x = updated.0;
+                edges[index].label_y = updated.1;
+                changed = true;
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
 }
 
 /// Calculate positions for groups.
