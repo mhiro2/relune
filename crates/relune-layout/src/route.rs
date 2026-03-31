@@ -15,6 +15,8 @@ const BORDER_OUTSET: f32 = 2.0;
 pub const LABEL_HALF_W: f32 = 40.0;
 /// Estimated half-height of an edge label bounding box (in pixels).
 pub const LABEL_HALF_H: f32 = 10.0;
+/// Step size used when probing alternate label positions.
+const LABEL_NUDGE_STEP: f32 = 12.0;
 
 /// Estimate the half-width of a label bounding box from its text content.
 ///
@@ -660,6 +662,7 @@ pub fn nudge_label(
     obstacles: &[Rect],
     margin: f32,
     label_half_w: f32,
+    max_offset: f32,
 ) -> (f32, f32) {
     let label_half_h = LABEL_HALF_H;
 
@@ -685,9 +688,11 @@ pub fn nudge_label(
     let ny = dx / len;
 
     // Try shifting in both perpendicular directions with increasing step.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let max_steps = (max_offset / LABEL_NUDGE_STEP).floor() as usize;
     #[allow(clippy::cast_precision_loss)]
-    for step in 1..=8_i32 {
-        let offset = step as f32 * 12.0;
+    for step in 1..=max_steps {
+        let offset = step as f32 * LABEL_NUDGE_STEP;
         let candidate_pos = (label.0 + nx * offset, label.1 + ny * offset);
         if !overlaps(candidate_pos.0, candidate_pos.1) {
             return candidate_pos;
@@ -919,6 +924,99 @@ fn polyline_midpoint(points: &[(f32, f32)]) -> (f32, f32) {
         if accumulated + seg_len >= half && seg_len > 0.0 {
             let t = (half - accumulated) / seg_len;
             return (w[0].0 + dx * t, w[0].1 + dy * t);
+        }
+        accumulated += seg_len;
+    }
+
+    *points.last().unwrap()
+}
+
+/// Compute a point at parameter `t` (0..1) along an edge route.
+///
+/// For straight and orthogonal styles, `t` is interpreted as a fraction of
+/// total arc length.  For curved routes it is the Bézier parameter.
+#[must_use]
+pub fn point_along_route(route: &EdgeRoute, t: f32) -> (f32, f32) {
+    match route.style {
+        RouteStyle::Curved => {
+            let cp1 = route.control_points.first().copied();
+            let cp2 = route.control_points.get(1).copied();
+            if let (Some(c1), Some(c2)) = (cp1, cp2) {
+                evaluate_cubic_bezier(t, route.x1, route.y1, c1, c2, route.x2, route.y2)
+            } else {
+                let one_minus_t = 1.0 - t;
+                (
+                    one_minus_t.mul_add(route.x1, t * route.x2),
+                    one_minus_t.mul_add(route.y1, t * route.y2),
+                )
+            }
+        }
+        RouteStyle::Straight => {
+            let one_minus_t = 1.0 - t;
+            (
+                one_minus_t.mul_add(route.x1, t * route.x2),
+                one_minus_t.mul_add(route.y1, t * route.y2),
+            )
+        }
+        RouteStyle::Orthogonal => {
+            let points = route_points(route);
+            point_along_polyline(&points, t)
+        }
+    }
+}
+
+/// Evaluate a cubic Bézier curve at parameter `t`.
+fn evaluate_cubic_bezier(
+    t: f32,
+    x0: f32,
+    y0: f32,
+    cp1: (f32, f32),
+    cp2: (f32, f32),
+    x1: f32,
+    y1: f32,
+) -> (f32, f32) {
+    let u = 1.0 - t;
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let u2 = u * u;
+    let u3 = u2 * u;
+
+    let x = t3.mul_add(
+        x1,
+        (3.0 * u * t2).mul_add(cp2.0, (3.0 * u2 * t).mul_add(cp1.0, u3 * x0)),
+    );
+    let y = t3.mul_add(
+        y1,
+        (3.0 * u * t2).mul_add(cp2.1, (3.0 * u2 * t).mul_add(cp1.1, u3 * y0)),
+    );
+    (x, y)
+}
+
+/// Compute a point at fraction `t` (0..1) of total arc length along a polyline.
+fn point_along_polyline(points: &[(f32, f32)], t: f32) -> (f32, f32) {
+    if points.len() < 2 {
+        return points.first().copied().unwrap_or((0.0, 0.0));
+    }
+
+    let total_length: f32 = points
+        .windows(2)
+        .map(|w| {
+            let dx = w[1].0 - w[0].0;
+            let dy = w[1].1 - w[0].1;
+            dx.hypot(dy)
+        })
+        .sum();
+
+    let target = total_length * t;
+    let mut accumulated = 0.0;
+
+    for w in points.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dy = w[1].1 - w[0].1;
+        let seg_len = dx.hypot(dy);
+        if accumulated + seg_len >= target && seg_len > 0.0 {
+            let frac = (target - accumulated) / seg_len;
+            return (dx.mul_add(frac, w[0].0), dy.mul_add(frac, w[0].1));
         }
         accumulated += seg_len;
     }
@@ -1312,6 +1410,7 @@ mod tests {
             &obstacles,
             4.0,
             LABEL_HALF_W,
+            96.0,
         );
         assert!((result.0 - label.0).abs() < 0.001);
         assert!((result.1 - label.1).abs() < 0.001);
@@ -1334,6 +1433,7 @@ mod tests {
             &obstacles,
             4.0,
             LABEL_HALF_W,
+            96.0,
         );
         // Should have moved away from the obstacle
         assert!((result.0 - label.0).abs() > 0.001 || (result.1 - label.1).abs() > 0.001);
@@ -1342,9 +1442,50 @@ mod tests {
     #[test]
     fn test_nudge_label_empty_obstacles() {
         let label = (50.0, 25.0);
-        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &[], 4.0, LABEL_HALF_W);
+        let result = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &[],
+            4.0,
+            LABEL_HALF_W,
+            96.0,
+        );
         assert!((result.0 - label.0).abs() < 0.001);
         assert!((result.1 - label.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_nudge_label_respects_max_offset() {
+        let label = (50.0, 25.0);
+        let obstacles = vec![Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        }];
+
+        let limited = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &obstacles,
+            4.0,
+            LABEL_HALF_W,
+            40.0,
+        );
+        assert_eq!(limited, label);
+
+        let expanded = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &obstacles,
+            4.0,
+            LABEL_HALF_W,
+            48.0,
+        );
+        assert_ne!(expanded, label);
     }
 
     #[test]
