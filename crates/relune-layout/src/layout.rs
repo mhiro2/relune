@@ -1155,7 +1155,10 @@ fn column_y_offset_from_center(
         config.column_height,
         config.node_padding + config.header_height,
     ) + config.column_height / 2.0;
-    col_y - center_y
+    let offset = col_y - center_y;
+    // Clamp so the attachment point stays within the node bounds.
+    let max_offset = (center_y - 4.0).max(0.0);
+    offset.clamp(-max_offset, max_offset)
 }
 
 /// Route all edges in the graph.

@@ -729,38 +729,55 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
         return route.clone();
     }
 
-    let points = route_points(route);
-    if !route_intersects_obstacles(&points, obstacles) {
+    let initial_points = route_points(route);
+    if !route_intersects_obstacles(&initial_points, obstacles) {
         return route.clone();
     }
 
-    let points = add_endpoint_anchors(&points, source_side, target_side);
+    let mut points = add_endpoint_anchors(&initial_points, source_side, target_side);
 
-    let mut detoured = Vec::with_capacity(points.len() * 2);
-    detoured.push(points[0]);
+    // Iteratively detour until no segments intersect obstacles (max 4 passes).
+    for _ in 0..4 {
+        let mut detoured = Vec::with_capacity(points.len() * 2);
+        detoured.push(points[0]);
 
-    for i in 0..points.len() - 1 {
-        let seg_start = points[i];
-        let seg_end = points[i + 1];
+        for i in 0..points.len() - 1 {
+            let seg_start = points[i];
+            let seg_end = points[i + 1];
 
-        if let Some(obstacle) = obstacles
-            .iter()
-            .find(|r| segment_intersects_rect(seg_start, seg_end, r))
-        {
-            // Route around the obstacle by going to the nearest side.
-            let waypoints = compute_detour(seg_start, seg_end, obstacle);
-            detoured.extend_from_slice(&waypoints);
+            // Find the nearest intersecting obstacle along this segment.
+            let nearest = obstacles
+                .iter()
+                .filter(|r| segment_intersects_rect(seg_start, seg_end, r))
+                .min_by(|a, b| {
+                    let da = (a.w.mul_add(0.5, a.x) - seg_start.0)
+                        .hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
+                    let db = (b.w.mul_add(0.5, b.x) - seg_start.0)
+                        .hypot(b.h.mul_add(0.5, b.y) - seg_start.1);
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+            if let Some(obstacle) = nearest {
+                let waypoints = compute_detour(seg_start, seg_end, obstacle);
+                detoured.extend_from_slice(&waypoints);
+            }
+            detoured.push(seg_end);
         }
-        detoured.push(seg_end);
+
+        points = detoured;
+
+        if !route_intersects_obstacles(&points, obstacles) {
+            break;
+        }
     }
 
     // Rebuild the route: first and last points are endpoints, middle are control points.
-    let new_start = detoured[0];
-    let new_end = detoured[detoured.len() - 1];
-    let new_control_points: Vec<(f32, f32)> = detoured[1..detoured.len() - 1].to_vec();
+    let new_start = points[0];
+    let new_end = points[points.len() - 1];
+    let new_control_points: Vec<(f32, f32)> = points[1..points.len() - 1].to_vec();
 
     // Recompute label position at the midpoint of the new polyline.
-    let label_position = polyline_midpoint(&detoured);
+    let label_position = polyline_midpoint(&points);
 
     let style = if route.style == RouteStyle::Straight && !new_control_points.is_empty() {
         RouteStyle::Orthogonal
@@ -827,13 +844,14 @@ fn add_endpoint_anchors(
 /// Check whether a line segment from `a` to `b` passes through the interior
 /// of a rectangle (with a small inset margin to ignore edges that merely
 /// touch the boundary).
-#[allow(clippy::suboptimal_flops)]
+///
+/// Uses the Liang-Barsky algorithm for exact analytical intersection.
 fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: &Rect) -> bool {
     let margin = 2.0;
     let rx = r.x + margin;
     let ry = r.y + margin;
-    let rw = (r.w - 2.0 * margin).max(0.0);
-    let rh = (r.h - 2.0 * margin).max(0.0);
+    let rw = 2.0f32.mul_add(-margin, r.w).max(0.0);
+    let rh = 2.0f32.mul_add(-margin, r.h).max(0.0);
 
     // Quick AABB test: if the segment's bounding box doesn't overlap the rect, skip.
     let seg_min_x = a.0.min(b.0);
@@ -844,23 +862,52 @@ fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: &Rect) -> bool {
         return false;
     }
 
-    // Check if the midpoint of the segment lies inside the rect (fast common case).
-    let mx = (a.0 + b.0) * 0.5;
-    let my = (a.1 + b.1) * 0.5;
-    if mx > rx && mx < rx + rw && my > ry && my < ry + rh {
-        return true;
-    }
+    // Liang-Barsky: parameterize segment as P(t) = a + t*(b-a), t in [0,1].
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
 
-    // Cohen–Sutherland style: test a few sample points along the segment.
-    for &t in &[0.25, 0.5, 0.75] {
-        let px = a.0 + (b.0 - a.0) * t;
-        let py = a.1 + (b.1 - a.1) * t;
-        if px > rx && px < rx + rw && py > ry && py < ry + rh {
-            return true;
+    let mut t_enter: f32 = 0.0;
+    let mut t_leave: f32 = 1.0;
+
+    // Clip against each of the 4 rectangle edges.
+    // p = -dx, q = a.x - rx  (left edge)
+    // p =  dx, q = rx+rw - a.x (right edge)
+    // p = -dy, q = a.y - ry  (top edge)
+    // p =  dy, q = ry+rh - a.y (bottom edge)
+    let clips: [(f32, f32); 4] = [
+        (-dx, a.0 - rx),
+        (dx, rx + rw - a.0),
+        (-dy, a.1 - ry),
+        (dy, ry + rh - a.1),
+    ];
+
+    for &(p, q) in &clips {
+        if p.abs() < 1e-9 {
+            // Segment is parallel to this edge.
+            if q < 0.0 {
+                return false; // Outside and parallel — no intersection.
+            }
+            // Otherwise inside this slab — continue checking other edges.
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                // Entering the rectangle from this edge.
+                if t > t_enter {
+                    t_enter = t;
+                }
+            } else {
+                // Leaving the rectangle from this edge.
+                if t < t_leave {
+                    t_leave = t;
+                }
+            }
+            if t_enter > t_leave {
+                return false;
+            }
         }
     }
 
-    false
+    true
 }
 
 /// Compute detour waypoints around a single obstacle rectangle.
