@@ -20,7 +20,7 @@ use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
     LABEL_HALF_H, Rect, attachment_sides, detour_around_obstacles,
     detour_around_obstacles_with_endpoints, estimate_label_half_width, nudge_label,
-    route_edge_column_aware, route_self_loop_with_offset,
+    point_along_route, route_edge_column_aware, route_self_loop_with_offset,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
@@ -1155,7 +1155,10 @@ fn column_y_offset_from_center(
         config.column_height,
         config.node_padding + config.header_height,
     ) + config.column_height / 2.0;
-    col_y - center_y
+    let offset = col_y - center_y;
+    // Clamp so the attachment point stays within the node bounds.
+    let max_offset = (center_y - 4.0).max(0.0);
+    offset.clamp(-max_offset, max_offset)
 }
 
 /// Route all edges in the graph.
@@ -1268,13 +1271,16 @@ fn route_edges(
             _ => detour_around_obstacles(&route, &detour_obstacles),
         };
 
-        // Build obstacle list for label nudging: include previously placed labels,
-        // and for self-loop edges also include the source node (which is excluded
-        // from detour obstacles but can occlude the label).
+        // Build obstacle list for label nudging: include previously placed labels
+        // and the edge endpoints themselves because staggered labels can sit
+        // much closer to either node than the midpoint-based placement.
         let mut label_obstacles: Vec<Rect> = detour_obstacles.clone();
         label_obstacles.extend_from_slice(&placed_labels);
-        if edge.is_self_loop
-            && let Some(&(x, y, w, h)) = from_pos
+        if let Some(&(x, y, w, h)) = from_pos {
+            label_obstacles.push(Rect { x, y, w, h });
+        }
+        if !edge.is_self_loop
+            && let Some(&(x, y, w, h)) = to_pos
         {
             label_obstacles.push(Rect { x, y, w, h });
         }
@@ -1282,14 +1288,25 @@ fn route_edges(
         // Estimate label half-width from actual text content.
         let lhw = estimate_label_half_width(&label);
 
+        // For parallel edges between the same node pair, stagger label
+        // positions along the edge so they don't all sit at the midpoint.
+        let label_pos = if lane_total > 1 && !edge.is_self_loop {
+            let t = parallel_label_parameter(&edge.from, &edge.to, *lane_index, lane_total);
+            point_along_route(&route, t)
+        } else {
+            route.label_position
+        };
+
         // Nudge label away from overlapping nodes and prior labels.
+        let max_offset = lhw.max(MIN_LABEL_NUDGE_OFFSET);
         let (label_x, label_y) = nudge_label(
-            route.label_position,
+            label_pos,
             (route.x1, route.y1),
             (route.x2, route.y2),
             &label_obstacles,
             4.0,
             lhw,
+            max_offset,
         );
 
         // Record this label's bounding box as an obstacle for subsequent edges.
@@ -1347,6 +1364,8 @@ const BASE_LANE_GAP: f32 = 14.0;
 const MIN_LANE_GAP: f32 = 10.0;
 /// Maximum lane gap.
 const MAX_LANE_GAP: f32 = 20.0;
+/// Minimum label nudge search distance retained for baseline obstacle clearance.
+const MIN_LABEL_NUDGE_OFFSET: f32 = 96.0;
 
 #[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
 fn self_loop_radius_offset(lane_index: usize) -> f32 {
@@ -1367,6 +1386,12 @@ fn centered_lane_offset(lane_index: usize, lane_total: usize) -> f32 {
     };
     let center = (lane_total.saturating_sub(1)) as f32 * 0.5;
     (lane_index as f32 - center) * gap
+}
+
+#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
+fn parallel_label_parameter(from: &str, to: &str, lane_index: usize, lane_total: usize) -> f32 {
+    let position = (lane_index + 1) as f32 / (lane_total + 1) as f32;
+    if from <= to { position } else { 1.0 - position }
 }
 
 /// Calculate positions for groups.
@@ -1440,6 +1465,7 @@ fn position_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::{LayoutEdge, LayoutGraph};
     use relune_core::{
         Column, ColumnId, ForeignKey, LayoutCompactionSpec, LayoutSpec, ReferentialAction, Table,
         TableId,
@@ -2301,6 +2327,119 @@ mod tests {
 
         assert!(gap_6 < gap_2, "gap should shrink for larger fan-out");
         assert!(gap_6 >= MIN_LANE_GAP, "gap must not drop below minimum");
+    }
+
+    #[test]
+    fn test_parallel_label_parameter_mirrors_reverse_edges() {
+        let route_forward = EdgeRoute {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 90.0,
+            y2: 0.0,
+            control_points: Vec::new(),
+            style: RouteStyle::Straight,
+            label_position: (45.0, 0.0),
+        };
+        let route_reverse = EdgeRoute {
+            x1: 90.0,
+            y1: 0.0,
+            x2: 0.0,
+            y2: 0.0,
+            control_points: Vec::new(),
+            style: RouteStyle::Straight,
+            label_position: (45.0, 0.0),
+        };
+
+        let forward = point_along_route(&route_forward, parallel_label_parameter("a", "b", 0, 2));
+        let reverse = point_along_route(&route_reverse, parallel_label_parameter("b", "a", 1, 2));
+
+        assert!((forward.0 - 30.0).abs() < 0.001);
+        assert!((reverse.0 - 60.0).abs() < 0.001);
+        assert!((forward.0 - reverse.0).abs() > 0.001);
+    }
+
+    #[test]
+    fn test_parallel_edge_labels_avoid_endpoint_nodes() {
+        let graph = LayoutGraph {
+            nodes: Vec::new(),
+            edges: vec![
+                LayoutEdge {
+                    from: "authors".to_string(),
+                    to: "posts".to_string(),
+                    name: Some("fk_posts_primary_author_identifier".to_string()),
+                    from_columns: vec!["primary_author_id".to_string()],
+                    to_columns: vec!["id".to_string()],
+                    kind: EdgeKind::ForeignKey,
+                    is_self_loop: false,
+                    nullable: false,
+                    target_cardinality: relune_core::layout::Cardinality::One,
+                    is_collapsed_join: false,
+                    collapsed_join_table: None,
+                },
+                LayoutEdge {
+                    from: "authors".to_string(),
+                    to: "posts".to_string(),
+                    name: Some("fk_posts_review_author_identifier".to_string()),
+                    from_columns: vec!["review_author_id".to_string()],
+                    to_columns: vec!["id".to_string()],
+                    kind: EdgeKind::ForeignKey,
+                    is_self_loop: false,
+                    nullable: false,
+                    target_cardinality: relune_core::layout::Cardinality::One,
+                    is_collapsed_join: false,
+                    collapsed_join_table: None,
+                },
+            ],
+            groups: Vec::new(),
+            node_index: std::collections::BTreeMap::new(),
+            reverse_index: std::collections::BTreeMap::new(),
+        };
+        let positioned_nodes = vec![
+            PositionedNode {
+                id: "authors".to_string(),
+                label: "authors".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "posts".to_string(),
+                label: "posts".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 150.0,
+                y: 0.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+        ];
+
+        let edges = route_edges(&graph, &positioned_nodes, &LayoutConfig::default());
+        assert_eq!(edges.len(), 2);
+
+        for edge in &edges {
+            let hw = estimate_label_half_width(&edge.label);
+            for node in &positioned_nodes {
+                let overlaps = edge.label_x + hw > node.x
+                    && edge.label_x - hw < node.x + node.width
+                    && edge.label_y + LABEL_HALF_H > node.y
+                    && edge.label_y - LABEL_HALF_H < node.y + node.height;
+                assert!(
+                    !overlaps,
+                    "Label {} overlaps node {} at ({}, {})",
+                    edge.label, node.id, edge.label_x, edge.label_y
+                );
+            }
+        }
     }
 
     #[test]

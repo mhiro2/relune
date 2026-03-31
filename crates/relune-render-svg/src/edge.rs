@@ -26,11 +26,16 @@ pub(crate) fn edge_route_svg_path_d(route: &EdgeRoute, curve_offset: f32) -> Str
             d
         }
         RouteStyle::Curved => {
-            if route.control_points.len() == 2 {
+            if route.control_points.len() >= 2 {
                 let (c1x, c1y) = route.control_points[0];
                 let (c2x, c2y) = route.control_points[1];
                 format!("M {x1:.1} {y1:.1} C {c1x:.1} {c1y:.1}, {c2x:.1} {c2y:.1}, {x2:.1} {y2:.1}")
+            } else if route.control_points.len() == 1 {
+                // Single control point: quadratic Bezier (promoted to cubic).
+                let (cx, cy) = route.control_points[0];
+                format!("M {x1:.1} {y1:.1} Q {cx:.1} {cy:.1}, {x2:.1} {y2:.1}")
             } else {
+                // No control points: generate from curve_offset heuristic.
                 let mid_x = f32::midpoint(x1, x2);
                 let (cp1_x, cp2_x) = if x2 > x1 {
                     (mid_x.min(x1 + curve_offset), mid_x.max(x2 - curve_offset))

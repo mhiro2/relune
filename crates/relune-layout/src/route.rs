@@ -15,6 +15,8 @@ const BORDER_OUTSET: f32 = 2.0;
 pub const LABEL_HALF_W: f32 = 40.0;
 /// Estimated half-height of an edge label bounding box (in pixels).
 pub const LABEL_HALF_H: f32 = 10.0;
+/// Step size used when probing alternate label positions.
+const LABEL_NUDGE_STEP: f32 = 12.0;
 
 /// Estimate the half-width of a label bounding box from its text content.
 ///
@@ -660,6 +662,7 @@ pub fn nudge_label(
     obstacles: &[Rect],
     margin: f32,
     label_half_w: f32,
+    max_offset: f32,
 ) -> (f32, f32) {
     let label_half_h = LABEL_HALF_H;
 
@@ -685,9 +688,11 @@ pub fn nudge_label(
     let ny = dx / len;
 
     // Try shifting in both perpendicular directions with increasing step.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let max_steps = (max_offset / LABEL_NUDGE_STEP).floor() as usize;
     #[allow(clippy::cast_precision_loss)]
-    for step in 1..=8_i32 {
-        let offset = step as f32 * 12.0;
+    for step in 1..=max_steps {
+        let offset = step as f32 * LABEL_NUDGE_STEP;
         let candidate_pos = (label.0 + nx * offset, label.1 + ny * offset);
         if !overlaps(candidate_pos.0, candidate_pos.1) {
             return candidate_pos;
@@ -720,42 +725,86 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
     source_side: Option<AttachmentSide>,
     target_side: Option<AttachmentSide>,
 ) -> EdgeRoute {
-    if obstacles.is_empty() || route.style == RouteStyle::Curved {
+    if obstacles.is_empty() {
         return route.clone();
     }
 
-    let points = route_points(route);
-    if !route_intersects_obstacles(&points, obstacles) {
-        return route.clone();
-    }
-
-    let points = add_endpoint_anchors(&points, source_side, target_side);
-
-    let mut detoured = Vec::with_capacity(points.len() * 2);
-    detoured.push(points[0]);
-
-    for i in 0..points.len() - 1 {
-        let seg_start = points[i];
-        let seg_end = points[i + 1];
-
-        if let Some(obstacle) = obstacles
-            .iter()
-            .find(|r| segment_intersects_rect(seg_start, seg_end, r))
-        {
-            // Route around the obstacle by going to the nearest side.
-            let waypoints = compute_detour(seg_start, seg_end, obstacle);
-            detoured.extend_from_slice(&waypoints);
+    // Curved routes: check whether the Bézier actually intersects any obstacle.
+    // If not, keep the curve as-is.  If it does, fall back to orthogonal routing
+    // with obstacle detour so the edge goes cleanly around the node.
+    if route.style == RouteStyle::Curved {
+        if !bezier_intersects_any_obstacle(route, obstacles) {
+            return route.clone();
         }
-        detoured.push(seg_end);
+        let fallback = EdgeRoute {
+            x1: route.x1,
+            y1: route.y1,
+            x2: route.x2,
+            y2: route.y2,
+            control_points: Vec::new(),
+            style: RouteStyle::Orthogonal,
+            label_position: route.label_position,
+        };
+        return detour_around_obstacles_with_endpoints(
+            &fallback,
+            obstacles,
+            source_side,
+            target_side,
+        );
     }
+
+    let initial_points = route_points(route);
+    if !route_intersects_obstacles(&initial_points, obstacles) {
+        return route.clone();
+    }
+
+    let mut points = add_endpoint_anchors(&initial_points, source_side, target_side);
+
+    // Iteratively detour until no segments intersect obstacles (max 4 passes).
+    for _ in 0..4 {
+        let mut detoured = Vec::with_capacity(points.len() * 2);
+        detoured.push(points[0]);
+
+        for i in 0..points.len() - 1 {
+            let seg_start = points[i];
+            let seg_end = points[i + 1];
+
+            // Find the nearest intersecting obstacle along this segment.
+            let nearest = obstacles
+                .iter()
+                .filter(|r| segment_intersects_rect(seg_start, seg_end, r))
+                .min_by(|a, b| {
+                    let da = (a.w.mul_add(0.5, a.x) - seg_start.0)
+                        .hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
+                    let db = (b.w.mul_add(0.5, b.x) - seg_start.0)
+                        .hypot(b.h.mul_add(0.5, b.y) - seg_start.1);
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+            if let Some(obstacle) = nearest {
+                let waypoints = compute_detour(seg_start, seg_end, obstacle);
+                detoured.extend_from_slice(&waypoints);
+            }
+            detoured.push(seg_end);
+        }
+
+        points = detoured;
+
+        if !route_intersects_obstacles(&points, obstacles) {
+            break;
+        }
+    }
+
+    // Clean up collinear and backtracking waypoints produced by the detour loop.
+    points = simplify_orthogonal_path(&points);
 
     // Rebuild the route: first and last points are endpoints, middle are control points.
-    let new_start = detoured[0];
-    let new_end = detoured[detoured.len() - 1];
-    let new_control_points: Vec<(f32, f32)> = detoured[1..detoured.len() - 1].to_vec();
+    let new_start = points[0];
+    let new_end = points[points.len() - 1];
+    let new_control_points: Vec<(f32, f32)> = points[1..points.len() - 1].to_vec();
 
     // Recompute label position at the midpoint of the new polyline.
-    let label_position = polyline_midpoint(&detoured);
+    let label_position = polyline_midpoint(&points);
 
     let style = if route.style == RouteStyle::Straight && !new_control_points.is_empty() {
         RouteStyle::Orthogonal
@@ -822,13 +871,14 @@ fn add_endpoint_anchors(
 /// Check whether a line segment from `a` to `b` passes through the interior
 /// of a rectangle (with a small inset margin to ignore edges that merely
 /// touch the boundary).
-#[allow(clippy::suboptimal_flops)]
+///
+/// Uses the Liang-Barsky algorithm for exact analytical intersection.
 fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: &Rect) -> bool {
     let margin = 2.0;
     let rx = r.x + margin;
     let ry = r.y + margin;
-    let rw = (r.w - 2.0 * margin).max(0.0);
-    let rh = (r.h - 2.0 * margin).max(0.0);
+    let rw = 2.0f32.mul_add(-margin, r.w).max(0.0);
+    let rh = 2.0f32.mul_add(-margin, r.h).max(0.0);
 
     // Quick AABB test: if the segment's bounding box doesn't overlap the rect, skip.
     let seg_min_x = a.0.min(b.0);
@@ -839,23 +889,52 @@ fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: &Rect) -> bool {
         return false;
     }
 
-    // Check if the midpoint of the segment lies inside the rect (fast common case).
-    let mx = (a.0 + b.0) * 0.5;
-    let my = (a.1 + b.1) * 0.5;
-    if mx > rx && mx < rx + rw && my > ry && my < ry + rh {
-        return true;
-    }
+    // Liang-Barsky: parameterize segment as P(t) = a + t*(b-a), t in [0,1].
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
 
-    // Cohen–Sutherland style: test a few sample points along the segment.
-    for &t in &[0.25, 0.5, 0.75] {
-        let px = a.0 + (b.0 - a.0) * t;
-        let py = a.1 + (b.1 - a.1) * t;
-        if px > rx && px < rx + rw && py > ry && py < ry + rh {
-            return true;
+    let mut t_enter: f32 = 0.0;
+    let mut t_leave: f32 = 1.0;
+
+    // Clip against each of the 4 rectangle edges.
+    // p = -dx, q = a.x - rx  (left edge)
+    // p =  dx, q = rx+rw - a.x (right edge)
+    // p = -dy, q = a.y - ry  (top edge)
+    // p =  dy, q = ry+rh - a.y (bottom edge)
+    let clips: [(f32, f32); 4] = [
+        (-dx, a.0 - rx),
+        (dx, rx + rw - a.0),
+        (-dy, a.1 - ry),
+        (dy, ry + rh - a.1),
+    ];
+
+    for &(p, q) in &clips {
+        if p.abs() < 1e-9 {
+            // Segment is parallel to this edge.
+            if q < 0.0 {
+                return false; // Outside and parallel — no intersection.
+            }
+            // Otherwise inside this slab — continue checking other edges.
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                // Entering the rectangle from this edge.
+                if t > t_enter {
+                    t_enter = t;
+                }
+            } else {
+                // Leaving the rectangle from this edge.
+                if t < t_leave {
+                    t_leave = t;
+                }
+            }
+            if t_enter > t_leave {
+                return false;
+            }
         }
     }
 
-    false
+    true
 }
 
 /// Compute detour waypoints around a single obstacle rectangle.
@@ -893,6 +972,105 @@ fn compute_detour(start: (f32, f32), end: (f32, f32), obstacle: &Rect) -> Vec<(f
     }
 }
 
+/// Simplify an orthogonal path by removing collinear and backtracking points.
+///
+/// Pass 1: remove intermediate points that are collinear with their neighbors
+/// (all three share the same X or same Y coordinate).
+/// Pass 2: remove backtracking — when three consecutive points lie on the same
+/// axis and the direction reverses, the middle point is a stub. Repeat until
+/// stable.
+fn simplify_orthogonal_path(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+
+    // Pass 1: remove collinear intermediate points.
+    let mut result: Vec<(f32, f32)> = Vec::with_capacity(points.len());
+    result.push(points[0]);
+    for i in 1..points.len() - 1 {
+        let prev = *result.last().unwrap();
+        let curr = points[i];
+        let next = points[i + 1];
+        let same_x = (prev.0 - curr.0).abs() < 0.5 && (curr.0 - next.0).abs() < 0.5;
+        let same_y = (prev.1 - curr.1).abs() < 0.5 && (curr.1 - next.1).abs() < 0.5;
+        if same_x || same_y {
+            continue;
+        }
+        result.push(curr);
+    }
+    result.push(*points.last().unwrap());
+
+    // Pass 2: remove backtracking points (iterate until stable).
+    loop {
+        let prev_len = result.len();
+        let mut cleaned: Vec<(f32, f32)> = Vec::with_capacity(result.len());
+        cleaned.push(result[0]);
+
+        let mut i = 1;
+        while i < result.len() - 1 {
+            let a = *cleaned.last().unwrap();
+            let b = result[i];
+            let c = result[i + 1];
+
+            let on_x = (a.0 - b.0).abs() < 0.5 && (b.0 - c.0).abs() < 0.5;
+            let on_y = (a.1 - b.1).abs() < 0.5 && (b.1 - c.1).abs() < 0.5;
+
+            if on_x && (b.1 - a.1) * (c.1 - b.1) < 0.0 {
+                // Vertical backtrack — skip b.
+                i += 1;
+                continue;
+            }
+            if on_y && (b.0 - a.0) * (c.0 - b.0) < 0.0 {
+                // Horizontal backtrack — skip b.
+                i += 1;
+                continue;
+            }
+
+            cleaned.push(b);
+            i += 1;
+        }
+        if i < result.len() {
+            cleaned.push(*result.last().unwrap());
+        }
+
+        result = cleaned;
+        if result.len() == prev_len {
+            break;
+        }
+    }
+
+    result
+}
+
+/// Check whether a cubic Bézier edge route intersects any obstacle rectangle.
+///
+/// The curve is sampled at 16 evenly-spaced points and consecutive samples are
+/// tested as straight segments against each obstacle.
+fn bezier_intersects_any_obstacle(route: &EdgeRoute, obstacles: &[Rect]) -> bool {
+    let (Some(cp1), Some(cp2)) = (
+        route.control_points.first().copied(),
+        route.control_points.get(1).copied(),
+    ) else {
+        return false;
+    };
+
+    let n = 16u32;
+    let mut prev = (route.x1, route.y1);
+    for i in 1..=n {
+        #[allow(clippy::cast_precision_loss)]
+        let t = i as f32 / n as f32;
+        let curr = evaluate_cubic_bezier(t, route.x1, route.y1, cp1, cp2, route.x2, route.y2);
+        if obstacles
+            .iter()
+            .any(|obs| segment_intersects_rect(prev, curr, obs))
+        {
+            return true;
+        }
+        prev = curr;
+    }
+    false
+}
+
 /// Find the midpoint of a polyline (by arc-length).
 #[allow(clippy::suboptimal_flops)]
 fn polyline_midpoint(points: &[(f32, f32)]) -> (f32, f32) {
@@ -919,6 +1097,99 @@ fn polyline_midpoint(points: &[(f32, f32)]) -> (f32, f32) {
         if accumulated + seg_len >= half && seg_len > 0.0 {
             let t = (half - accumulated) / seg_len;
             return (w[0].0 + dx * t, w[0].1 + dy * t);
+        }
+        accumulated += seg_len;
+    }
+
+    *points.last().unwrap()
+}
+
+/// Compute a point at parameter `t` (0..1) along an edge route.
+///
+/// For straight and orthogonal styles, `t` is interpreted as a fraction of
+/// total arc length.  For curved routes it is the Bézier parameter.
+#[must_use]
+pub fn point_along_route(route: &EdgeRoute, t: f32) -> (f32, f32) {
+    match route.style {
+        RouteStyle::Curved => {
+            let cp1 = route.control_points.first().copied();
+            let cp2 = route.control_points.get(1).copied();
+            if let (Some(c1), Some(c2)) = (cp1, cp2) {
+                evaluate_cubic_bezier(t, route.x1, route.y1, c1, c2, route.x2, route.y2)
+            } else {
+                let one_minus_t = 1.0 - t;
+                (
+                    one_minus_t.mul_add(route.x1, t * route.x2),
+                    one_minus_t.mul_add(route.y1, t * route.y2),
+                )
+            }
+        }
+        RouteStyle::Straight => {
+            let one_minus_t = 1.0 - t;
+            (
+                one_minus_t.mul_add(route.x1, t * route.x2),
+                one_minus_t.mul_add(route.y1, t * route.y2),
+            )
+        }
+        RouteStyle::Orthogonal => {
+            let points = route_points(route);
+            point_along_polyline(&points, t)
+        }
+    }
+}
+
+/// Evaluate a cubic Bézier curve at parameter `t`.
+fn evaluate_cubic_bezier(
+    t: f32,
+    x0: f32,
+    y0: f32,
+    cp1: (f32, f32),
+    cp2: (f32, f32),
+    x1: f32,
+    y1: f32,
+) -> (f32, f32) {
+    let u = 1.0 - t;
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let u2 = u * u;
+    let u3 = u2 * u;
+
+    let x = t3.mul_add(
+        x1,
+        (3.0 * u * t2).mul_add(cp2.0, (3.0 * u2 * t).mul_add(cp1.0, u3 * x0)),
+    );
+    let y = t3.mul_add(
+        y1,
+        (3.0 * u * t2).mul_add(cp2.1, (3.0 * u2 * t).mul_add(cp1.1, u3 * y0)),
+    );
+    (x, y)
+}
+
+/// Compute a point at fraction `t` (0..1) of total arc length along a polyline.
+fn point_along_polyline(points: &[(f32, f32)], t: f32) -> (f32, f32) {
+    if points.len() < 2 {
+        return points.first().copied().unwrap_or((0.0, 0.0));
+    }
+
+    let total_length: f32 = points
+        .windows(2)
+        .map(|w| {
+            let dx = w[1].0 - w[0].0;
+            let dy = w[1].1 - w[0].1;
+            dx.hypot(dy)
+        })
+        .sum();
+
+    let target = total_length * t;
+    let mut accumulated = 0.0;
+
+    for w in points.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dy = w[1].1 - w[0].1;
+        let seg_len = dx.hypot(dy);
+        if accumulated + seg_len >= target && seg_len > 0.0 {
+            let frac = (target - accumulated) / seg_len;
+            return (dx.mul_add(frac, w[0].0), dy.mul_add(frac, w[0].1));
         }
         accumulated += seg_len;
     }
@@ -1259,7 +1530,7 @@ mod tests {
     }
 
     #[test]
-    fn test_detour_curved_routes_unchanged() {
+    fn test_detour_curved_route_with_obstacle_converts_to_orthogonal() {
         let route = route_edge(
             0.0,
             0.0,
@@ -1271,6 +1542,7 @@ mod tests {
             50.0,
             RouteStyle::Curved,
         );
+        // Place an obstacle directly in the curve's path.
         let obstacles = vec![Rect {
             x: 150.0,
             y: 0.0,
@@ -1278,7 +1550,87 @@ mod tests {
             h: 50.0,
         }];
         let result = detour_around_obstacles(&route, &obstacles);
+        assert_eq!(result.style, RouteStyle::Orthogonal);
+    }
+
+    #[test]
+    fn test_detour_curved_route_without_obstacle_stays_curved() {
+        let route = route_edge(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            300.0,
+            0.0,
+            100.0,
+            50.0,
+            RouteStyle::Curved,
+        );
+        // Obstacle far away — should not affect the curve.
+        let obstacles = vec![Rect {
+            x: 500.0,
+            y: 500.0,
+            w: 50.0,
+            h: 50.0,
+        }];
+        let result = detour_around_obstacles(&route, &obstacles);
+        assert_eq!(result.style, RouteStyle::Curved);
         assert_eq!(result.control_points.len(), route.control_points.len());
+    }
+
+    #[test]
+    fn test_simplify_removes_collinear_points() {
+        let points = vec![(0.0, 0.0), (0.0, 50.0), (0.0, 100.0)];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(result, vec![(0.0, 0.0), (0.0, 100.0)]);
+    }
+
+    #[test]
+    fn test_simplify_removes_backtracking() {
+        // The exact bug: path goes up then reverses down.
+        let points = vec![
+            (377.0, 206.0),
+            (377.0, 188.0),
+            (377.0, 152.0),
+            (377.0, 431.0),
+        ];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(result, vec![(377.0, 206.0), (377.0, 431.0)]);
+    }
+
+    #[test]
+    fn test_simplify_preserves_right_angle_bends() {
+        let points = vec![(0.0, 0.0), (0.0, 50.0), (100.0, 50.0)];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(result, points);
+    }
+
+    #[test]
+    fn test_simplify_full_bug_path() {
+        let points = vec![
+            (2767.0, 105.0),
+            (2739.0, 105.0),
+            (2739.0, 152.0),
+            (2739.0, 188.0),
+            (2739.0, 206.0),
+            (377.0, 206.0),
+            (377.0, 188.0),
+            (377.0, 152.0),
+            (377.0, 431.0),
+            (349.0, 431.0),
+        ];
+        let result = simplify_orthogonal_path(&points);
+        assert_eq!(
+            result,
+            vec![
+                (2767.0, 105.0),
+                (2739.0, 105.0),
+                (2739.0, 206.0),
+                (377.0, 206.0),
+                (377.0, 431.0),
+                (349.0, 431.0),
+            ]
+        );
     }
 
     #[test]
@@ -1312,6 +1664,7 @@ mod tests {
             &obstacles,
             4.0,
             LABEL_HALF_W,
+            96.0,
         );
         assert!((result.0 - label.0).abs() < 0.001);
         assert!((result.1 - label.1).abs() < 0.001);
@@ -1334,6 +1687,7 @@ mod tests {
             &obstacles,
             4.0,
             LABEL_HALF_W,
+            96.0,
         );
         // Should have moved away from the obstacle
         assert!((result.0 - label.0).abs() > 0.001 || (result.1 - label.1).abs() > 0.001);
@@ -1342,9 +1696,50 @@ mod tests {
     #[test]
     fn test_nudge_label_empty_obstacles() {
         let label = (50.0, 25.0);
-        let result = nudge_label(label, (0.0, 25.0), (100.0, 25.0), &[], 4.0, LABEL_HALF_W);
+        let result = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &[],
+            4.0,
+            LABEL_HALF_W,
+            96.0,
+        );
         assert!((result.0 - label.0).abs() < 0.001);
         assert!((result.1 - label.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_nudge_label_respects_max_offset() {
+        let label = (50.0, 25.0);
+        let obstacles = vec![Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        }];
+
+        let limited = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &obstacles,
+            4.0,
+            LABEL_HALF_W,
+            40.0,
+        );
+        assert_eq!(limited, label);
+
+        let expanded = nudge_label(
+            label,
+            (0.0, 25.0),
+            (100.0, 25.0),
+            &obstacles,
+            4.0,
+            LABEL_HALF_W,
+            48.0,
+        );
+        assert_ne!(expanded, label);
     }
 
     #[test]
