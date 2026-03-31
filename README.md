@@ -5,66 +5,85 @@
 <h1 align="center">Relune</h1>
 
 <p align="center">
-  <strong>Schema visualization and analysis for developers.</strong><br>
-  Relune renders, inspects, exports, lints, and diffs database schemas from SQL DDL and live database metadata.
+  Understand, visualize, and review database schemas.
+</p>
+
+<p align="center">
+  Relune turns SQL DDL and live database metadata into diagrams, diagnostics, diffs, and exportable schema artifacts for documentation, code review, and automation.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="docs/getting-started.md">Getting started</a> ·
+  <a href="docs/cli-reference.md">CLI reference</a>
+</p>
+
+<p align="center">
+  <a href="../../releases"><img alt="Release" src="https://img.shields.io/github/v/release/mhiro2/relune"></a>
+  <a href="../../actions/workflows/ci.yaml"><img alt="CI" src="https://github.com/mhiro2/relune/actions/workflows/ci.yaml/badge.svg?branch=main"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/mhiro2/relune"></a>
 </p>
 
 ---
 
 ## Why Relune
 
-Relune is not just an ERD viewer.
+Relune goes beyond static ERDs.
 
-It is a schema toolchain for understanding and working with database structure across multiple workflows:
+It helps you work with schema structure across the full lifecycle:
 
-- visualize schemas as SVG or interactive HTML
-- inspect structure from SQL or live databases
-- export diagrams to text-friendly formats for docs and code review
-- lint schema quality issues
-- diff schema changes between versions
-- emit structured JSON for automation and downstream tooling
+- **Visualize** tables, views, relationships, and enums
+- **Inspect** schema shape from SQL or live databases
+- **Export** review-friendly text formats for docs and pull requests
+- **Lint** structural issues and schema quality problems
+- **Diff** schema changes between revisions
+- **Emit JSON** for CI, internal tools, and downstream automation
 
-The goal is to make schemas easier to explore, review, document, and evolve.
+Whether you are documenting a legacy database, reviewing a migration, or exploring a large schema, Relune is built to make database structure easier to understand and communicate.
 
-## Features
+## What it does well
 
 ### Diagram rendering
 
 Generate schema diagrams as:
 
-- **SVG** for static documentation and README assets
-- **HTML** for interactive exploration with pan, zoom, search, and filters
-- render **tables, views, and PostgreSQL enums** with distinct node/edge styles
+- SVG for static documentation, design notes, and README assets
+- HTML for interactive exploration with pan, zoom, search, and filters
 
-SVG/HTML renders now require either `-o/--out` or an explicit `--stdout` opt-in, so interactive terminals do not get flooded with raw markup by accident.
+Relune can render:
 
-### Layout and edge control
+- tables
+- views
+- PostgreSQL enums
 
-Tune readability depending on the shape of your schema:
+### Layout and readability controls
 
-- **Hierarchical** and **force-directed** layouts
-- **Straight**, **orthogonal**, and **curved** edge routing
+Tune diagrams for the shape of your schema:
+
+- hierarchical or force-directed layout
+- straight, orthogonal, or curved edges
 
 ### Focus and filtering
 
-Reduce noise in large schemas:
+Reduce noise in larger schemas:
 
 - focus on a table
 - control traversal depth
 - group by schema or prefix
 - include or exclude selected tables
 
-### Text-based exports
+### Text exports
 
-Produce review-friendly outputs for docs and pull requests:
+Export diagrams to formats that fit docs and code review workflows:
 
-- **Mermaid**
-- **D2**
-- **Graphviz DOT**
+- Mermaid
+- D2
+- Graphviz DOT
 
 ### Inspection and diagnostics
 
-Understand schema shape and detect common issues:
+Understand schema shape and catch common issues:
 
 - schema summaries and structural stats
 - missing primary keys
@@ -72,17 +91,17 @@ Understand schema shape and detect common issues:
 - naming inconsistencies
 - other lint-style diagnostics
 
-### Diff and machine-readable output
+### Diff and automation output
 
-Compare schema revisions and integrate with automation:
+Compare schema revisions and integrate with tooling:
 
 - text diff output
-- JSON output for CI and tooling
-- SVG/HTML visual diff with color-coded overlays
+- JSON output for CI and automation
+- SVG or HTML visual diff with color-coded overlays
 
-### Multiple input sources
+### Flexible input sources
 
-Work from whichever source fits your workflow:
+Use whichever input fits your workflow:
 
 - SQL files
 - inline SQL
@@ -92,46 +111,31 @@ Work from whichever source fits your workflow:
   - MySQL / MariaDB
   - SQLite
 
-### Rust core, portable interfaces
-
-Relune is built in Rust with a reusable core designed for:
-
-- native CLI workflows
-- browser-facing WASM environments
-- future editor and tooling integrations
-
-## Installation
-
-### Homebrew
+## Quick start
 
 ```bash
-brew install --cask mhiro2/tap/relune
-```
-
-### Prebuilt binaries
-
-Download the latest release from the GitHub Releases page and place relune on your PATH.
-
-## Quick Start
-
-```bash
-# Render an SVG
+# Render an SVG diagram from SQL
 relune render --sql schema.sql -o erd.svg
 
-# Interactive HTML viewer
+# Generate an interactive HTML viewer
 relune render --sql schema.sql --format html -o erd.html
 
+# Inspect the schema summary
+relune inspect --sql schema.sql
+```
+
+<details>
+<summary>More examples</summary>
+
+```bash
 # Pipe raw SVG explicitly
 relune render --sql schema.sql --stdout > erd.svg
 
-# Focus on the “orders” table with depth 2
+# Focus on the "orders" table with depth 2
 relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 
 # Use a force-directed layout with orthogonal edges
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o erd-force.svg
-
-# Summarize the schema
-relune inspect --sql schema.sql
 
 # Export as Mermaid
 relune export --sql schema.sql --format mermaid -o erd.mmd
@@ -143,15 +147,37 @@ relune lint --sql schema.sql
 relune diff --before old.sql --after new.sql
 ```
 
-Run `relune --help` or `relune <command> --help` for the full option list.
+</details>
+
+Run `relune --help` for the full command list.
+
+## Installation
+
+### Homebrew
+
+```bash
+brew install --cask mhiro2/tap/relune
+```
+
+### Prebuilt binaries
+
+Download the latest release from GitHub Releases and place `relune` on your `PATH`.
+
+## Common use cases
+
+* **Document an existing database** from raw SQL DDL
+* **Review schema changes** in pull requests with text exports and diffs
+* **Explore large schemas** with focus, traversal depth, and filtering
+* **Generate artifacts** for internal docs and architecture notes
+* **Feed structured schema data** into CI or internal tooling
 
 ## Documentation
 
-| Document | Contents |
-|----------|----------|
+| Document                                   | Contents                                                  |
+| ------------------------------------------ | --------------------------------------------------------- |
 | [Getting started](docs/getting-started.md) | Installation, first commands, live database introspection |
-| [CLI reference](docs/cli-reference.md) | Commands and flags |
-| [Configuration](docs/configuration.md) | `relune.toml` and merge rules |
+| [CLI reference](docs/cli-reference.md)     | Commands and flags                                        |
+| [Configuration](docs/configuration.md)     | `relune.toml` and merge rules                             |
 
 ## License
 
