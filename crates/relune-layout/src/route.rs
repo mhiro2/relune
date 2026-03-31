@@ -17,6 +17,10 @@ pub const LABEL_HALF_W: f32 = 40.0;
 pub const LABEL_HALF_H: f32 = 10.0;
 /// Step size used when probing alternate label positions.
 const LABEL_NUDGE_STEP: f32 = 12.0;
+/// Minimum clearance preserved when rerouting around node obstacles.
+const DETOUR_PADDING: f32 = 12.0;
+/// Extra obstacle inflation used when deciding whether an edge is too close to a node.
+const ROUTE_CLEARANCE: f32 = 14.0;
 
 /// Estimate the half-width of a label bounding box from its text content.
 ///
@@ -772,7 +776,10 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
             // Find the nearest intersecting obstacle along this segment.
             let nearest = obstacles
                 .iter()
-                .filter(|r| segment_intersects_rect(seg_start, seg_end, r))
+                .filter(|r| {
+                    let clearance = inflate_rect(**r, ROUTE_CLEARANCE);
+                    segment_intersects_rect(seg_start, seg_end, &clearance)
+                })
                 .min_by(|a, b| {
                     let da = (a.w.mul_add(0.5, a.x) - seg_start.0)
                         .hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
@@ -782,7 +789,8 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
                 });
 
             if let Some(obstacle) = nearest {
-                let waypoints = compute_detour(seg_start, seg_end, obstacle);
+                let clearance = inflate_rect(*obstacle, ROUTE_CLEARANCE);
+                let waypoints = compute_detour(seg_start, seg_end, &clearance);
                 detoured.extend_from_slice(&waypoints);
             }
             detoured.push(seg_end);
@@ -835,8 +843,18 @@ fn route_intersects_obstacles(points: &[(f32, f32)], obstacles: &[Rect]) -> bool
     points.windows(2).any(|segment| {
         obstacles
             .iter()
-            .any(|obstacle| segment_intersects_rect(segment[0], segment[1], obstacle))
+            .map(|obstacle| inflate_rect(*obstacle, ROUTE_CLEARANCE))
+            .any(|obstacle| segment_intersects_rect(segment[0], segment[1], &obstacle))
     })
+}
+
+fn inflate_rect(rect: Rect, padding: f32) -> Rect {
+    Rect {
+        x: rect.x - padding,
+        y: rect.y - padding,
+        w: padding.mul_add(2.0, rect.w),
+        h: padding.mul_add(2.0, rect.h),
+    }
 }
 
 fn add_endpoint_anchors(
@@ -943,11 +961,30 @@ fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: &Rect) -> bool {
 /// from the segment direction and routes orthogonally around it.
 #[allow(clippy::suboptimal_flops)]
 fn compute_detour(start: (f32, f32), end: (f32, f32), obstacle: &Rect) -> Vec<(f32, f32)> {
-    let padding = 12.0;
     let cx = obstacle.x + obstacle.w * 0.5;
     let cy = obstacle.y + obstacle.h * 0.5;
     let mid_x = (start.0 + end.0) * 0.5;
     let mid_y = (start.1 + end.1) * 0.5;
+    let is_vertical = (start.0 - end.0).abs() < 0.5;
+    let is_horizontal = (start.1 - end.1).abs() < 0.5;
+
+    if is_vertical {
+        let detour_x = if start.0 < cx {
+            obstacle.x - DETOUR_PADDING
+        } else {
+            obstacle.x + obstacle.w + DETOUR_PADDING
+        };
+        return vec![(detour_x, start.1), (detour_x, end.1)];
+    }
+
+    if is_horizontal {
+        let detour_y = if start.1 < cy {
+            obstacle.y - DETOUR_PADDING
+        } else {
+            obstacle.y + obstacle.h + DETOUR_PADDING
+        };
+        return vec![(start.0, detour_y), (end.0, detour_y)];
+    }
 
     // Decide whether to go around the top/bottom or left/right of the obstacle.
     let dx = (mid_x - cx).abs();
@@ -956,19 +993,72 @@ fn compute_detour(start: (f32, f32), end: (f32, f32), obstacle: &Rect) -> Vec<(f
     if dx > dy {
         // Horizontal deviation is larger — route above or below.
         let detour_y = if mid_y < cy {
-            obstacle.y - padding
+            obstacle.y - DETOUR_PADDING
         } else {
-            obstacle.y + obstacle.h + padding
+            obstacle.y + obstacle.h + DETOUR_PADDING
         };
         vec![(start.0, detour_y), (end.0, detour_y)]
     } else {
         // Vertical deviation is larger — route left or right.
         let detour_x = if mid_x < cx {
-            obstacle.x - padding
+            obstacle.x - DETOUR_PADDING
         } else {
-            obstacle.x + obstacle.w + padding
+            obstacle.x + obstacle.w + DETOUR_PADDING
         };
         vec![(detour_x, start.1), (detour_x, end.1)]
+    }
+}
+
+/// Approximate a route with small axis-aligned obstacle samples.
+///
+/// This is primarily used during label placement so labels can avoid other
+/// edge paths without needing exact curve/segment intersection tests.
+#[must_use]
+pub(crate) fn sample_route_obstacles(route: &EdgeRoute, half_size: f32, spacing: f32) -> Vec<Rect> {
+    let safe_spacing = spacing.max(1.0);
+    let route_length = approximate_route_length(route).max(safe_spacing);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let sample_count = (route_length / safe_spacing).ceil() as usize;
+    let sample_count = sample_count.max(1);
+
+    let mut obstacles = Vec::with_capacity(sample_count + 1);
+    #[allow(clippy::cast_precision_loss)]
+    for index in 0..=sample_count {
+        let t = index as f32 / sample_count as f32;
+        let (x, y) = point_along_route(route, t);
+        obstacles.push(Rect {
+            x: x - half_size,
+            y: y - half_size,
+            w: half_size * 2.0,
+            h: half_size * 2.0,
+        });
+    }
+    obstacles
+}
+
+fn approximate_route_length(route: &EdgeRoute) -> f32 {
+    match route.style {
+        RouteStyle::Straight | RouteStyle::Orthogonal => route_points(route)
+            .windows(2)
+            .map(|segment| {
+                let dx = segment[1].0 - segment[0].0;
+                let dy = segment[1].1 - segment[0].1;
+                dx.hypot(dy)
+            })
+            .sum(),
+        RouteStyle::Curved => {
+            let mut total = 0.0;
+            let mut prev = (route.x1, route.y1);
+            let steps = 24usize;
+            #[allow(clippy::cast_precision_loss)]
+            for index in 1..=steps {
+                let t = index as f32 / steps as f32;
+                let next = point_along_route(route, t);
+                total += (next.0 - prev.0).hypot(next.1 - prev.1);
+                prev = next;
+            }
+            total
+        }
     }
 }
 
@@ -1062,7 +1152,8 @@ fn bezier_intersects_any_obstacle(route: &EdgeRoute, obstacles: &[Rect]) -> bool
         let curr = evaluate_cubic_bezier(t, route.x1, route.y1, cp1, cp2, route.x2, route.y2);
         if obstacles
             .iter()
-            .any(|obs| segment_intersects_rect(prev, curr, obs))
+            .map(|obs| inflate_rect(*obs, ROUTE_CLEARANCE))
+            .any(|obs| segment_intersects_rect(prev, curr, &obs))
         {
             return true;
         }
@@ -1527,6 +1618,13 @@ mod tests {
         assert!(first.0 < route.x1);
         assert!((last.1 - route.y2).abs() < 0.001);
         assert!(last.0 > route.x2);
+        assert!(
+            result
+                .control_points
+                .iter()
+                .any(|&(_, y)| y <= obstacles[0].y - DETOUR_PADDING),
+            "detour should keep a visible gap from the obstacle"
+        );
     }
 
     #[test]
