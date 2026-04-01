@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 insta.workspace = true
 relune-core = { path = "../relune-core" }
+relune-layout = { path = "../relune-layout" }
 serde_json.workspace = true
 
 [lints]

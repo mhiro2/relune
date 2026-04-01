@@ -1,0 +1,1398 @@
+---
+source: crates/relune-app/tests/layout_json_regression_matrix.rs
+expression: snapshot
+---
+{
+  "direction": "left_to_right",
+  "fixture": "ecommerce.sql",
+  "styles": {
+    "curved": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              951.2000122070313,
+              577.0
+            ],
+            [
+              951.2000122070313,
+              105.0
+            ],
+            [
+              923.2000122070313,
+              105.0
+            ],
+            [
+              923.2000122070313,
+              30.0
+            ],
+            [
+              951.2000122070313,
+              30.0
+            ],
+            [
+              1154.4000244140625,
+              30.0
+            ],
+            [
+              1154.4000244140625,
+              105.0
+            ]
+          ],
+          "end": [
+            1182.4000244140625,
+            105.0
+          ],
+          "from": "addresses",
+          "from_columns": [
+            "customer_id"
+          ],
+          "is_self_loop": false,
+          "label": "customer_id",
+          "label_x": 852.7999877929688,
+          "label_y": 577.0,
+          "nullable": false,
+          "route_label_position": [
+            951.2000122070313,
+            423.5
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            577.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "customers",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              951.2000122070313,
+              421.0
+            ],
+            [
+              951.2000122070313,
+              535.0
+            ]
+          ],
+          "end": [
+            897.2000122070313,
+            517.0
+          ],
+          "from": "categories",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 1009.7000122070313,
+          "label_y": 478.0,
+          "nullable": true,
+          "route_label_position": [
+            937.7000122070313,
+            478.0
+          ],
+          "source_side": "east",
+          "start": [
+            897.2000122070313,
+            439.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              425.55999755859375,
+              123.0
+            ],
+            [
+              527.6400146484375,
+              105.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            105.0
+          ],
+          "from": "order_items",
+          "from_columns": [
+            "order_id"
+          ],
+          "is_self_loop": false,
+          "label": "order_id",
+          "label_x": 476.6000061035156,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            476.6000061035156,
+            114.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            123.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "orders",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              201.5,
+              260.0
+            ],
+            [
+              327.0,
+              260.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              374.0
+            ],
+            [
+              327.0,
+              374.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              606.0
+            ],
+            [
+              751.7000122070313,
+              606.0
+            ]
+          ],
+          "end": [
+            751.7000122070313,
+            634.0
+          ],
+          "from": "order_items",
+          "from_columns": [
+            "product_id"
+          ],
+          "is_self_loop": false,
+          "label": "product_id",
+          "label_x": 545.5999755859375,
+          "label_y": 374.0,
+          "nullable": false,
+          "route_label_position": [
+            545.5999755859375,
+            374.0
+          ],
+          "source_side": "south",
+          "start": [
+            201.5,
+            232.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "products",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1003.760009765625,
+              123.0
+            ],
+            [
+              1105.8399658203125,
+              105.0
+            ]
+          ],
+          "end": [
+            1182.4000244140625,
+            105.0
+          ],
+          "from": "orders",
+          "from_columns": [
+            "customer_id"
+          ],
+          "is_self_loop": false,
+          "label": "customer_id",
+          "label_x": 1054.800048828125,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            1054.800048828125,
+            114.0
+          ],
+          "source_side": "east",
+          "start": [
+            927.2000122070313,
+            123.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "customers",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              393.3599853515625,
+              377.0
+            ],
+            [
+              513.8400268554688,
+              449.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            449.0
+          ],
+          "from": "product_categories",
+          "from_columns": [
+            "category_id"
+          ],
+          "is_self_loop": false,
+          "label": "category_id",
+          "label_x": 453.6000061035156,
+          "label_y": 413.0,
+          "nullable": false,
+          "route_label_position": [
+            453.6000061035156,
+            413.0
+          ],
+          "source_side": "east",
+          "start": [
+            303.0,
+            377.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              393.3599853515625,
+              359.0
+            ],
+            [
+              513.8400268554688,
+              685.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            685.0
+          ],
+          "from": "product_categories",
+          "from_columns": [
+            "product_id"
+          ],
+          "is_self_loop": false,
+          "label": "product_id",
+          "label_x": 453.6000061035156,
+          "label_y": 522.0,
+          "nullable": false,
+          "route_label_position": [
+            453.6000061035156,
+            522.0
+          ],
+          "source_side": "east",
+          "start": [
+            303.0,
+            359.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "products",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 11,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 246.0,
+          "id": "addresses",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 510.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 156.0,
+          "id": "categories",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 400.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "customers",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1184.4000244140625,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "order_items",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 12,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 264.0,
+          "id": "orders",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 606.2000122070313,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "product_categories",
+          "kind": "Table",
+          "width": 245.0,
+          "x": 56.0,
+          "y": 310.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "products",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 636.0
+        }
+      ],
+      "summary": {
+        "edge_count": 7,
+        "height": 920.0,
+        "node_count": 7,
+        "width": 1531.4000244140625
+      }
+    },
+    "orthogonal": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              951.2000122070313,
+              577.0
+            ],
+            [
+              951.2000122070313,
+              105.0
+            ],
+            [
+              923.2000122070313,
+              105.0
+            ],
+            [
+              923.2000122070313,
+              30.0
+            ],
+            [
+              765.7000122070313,
+              30.0
+            ],
+            [
+              765.7000122070313,
+              105.0
+            ],
+            [
+              951.2000122070313,
+              105.0
+            ],
+            [
+              951.2000122070313,
+              30.0
+            ],
+            [
+              1154.4000244140625,
+              30.0
+            ],
+            [
+              1154.4000244140625,
+              105.0
+            ]
+          ],
+          "end": [
+            1182.4000244140625,
+            105.0
+          ],
+          "from": "addresses",
+          "from_columns": [
+            "customer_id"
+          ],
+          "is_self_loop": false,
+          "label": "customer_id",
+          "label_x": 843.0999755859375,
+          "label_y": 577.0,
+          "nullable": false,
+          "route_label_position": [
+            951.2000122070313,
+            191.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            577.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "customers",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              933.2000122070313,
+              439.0
+            ],
+            [
+              933.2000122070313,
+              517.0
+            ]
+          ],
+          "end": [
+            897.2000122070313,
+            517.0
+          ],
+          "from": "categories",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 1005.2000122070313,
+          "label_y": 478.0,
+          "nullable": true,
+          "route_label_position": [
+            933.2000122070313,
+            478.0
+          ],
+          "source_side": "east",
+          "start": [
+            897.2000122070313,
+            439.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              123.0
+            ],
+            [
+              476.6000061035156,
+              105.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            105.0
+          ],
+          "from": "order_items",
+          "from_columns": [
+            "order_id"
+          ],
+          "is_self_loop": false,
+          "label": "order_id",
+          "label_x": 476.6000061035156,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            476.6000061035156,
+            114.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            123.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "orders",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              201.5,
+              260.0
+            ],
+            [
+              327.0,
+              260.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              433.0
+            ],
+            [
+              327.0,
+              433.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              374.0
+            ],
+            [
+              327.0,
+              374.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              433.0
+            ],
+            [
+              751.7000122070313,
+              433.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              923.2000122070313,
+              374.0
+            ],
+            [
+              923.2000122070313,
+              606.0
+            ],
+            [
+              751.7000122070313,
+              606.0
+            ]
+          ],
+          "end": [
+            751.7000122070313,
+            634.0
+          ],
+          "from": "order_items",
+          "from_columns": [
+            "product_id"
+          ],
+          "is_self_loop": false,
+          "label": "product_id",
+          "label_x": 650.5999755859375,
+          "label_y": 374.0,
+          "nullable": false,
+          "route_label_position": [
+            650.5999755859375,
+            374.0
+          ],
+          "source_side": "south",
+          "start": [
+            201.5,
+            232.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "products",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1054.800048828125,
+              123.0
+            ],
+            [
+              1054.800048828125,
+              105.0
+            ]
+          ],
+          "end": [
+            1182.4000244140625,
+            105.0
+          ],
+          "from": "orders",
+          "from_columns": [
+            "customer_id"
+          ],
+          "is_self_loop": false,
+          "label": "customer_id",
+          "label_x": 1054.800048828125,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            1054.800048828125,
+            114.0
+          ],
+          "source_side": "east",
+          "start": [
+            927.2000122070313,
+            123.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "customers",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              453.6000061035156,
+              377.0
+            ],
+            [
+              453.6000061035156,
+              449.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            449.0
+          ],
+          "from": "product_categories",
+          "from_columns": [
+            "category_id"
+          ],
+          "is_self_loop": false,
+          "label": "category_id",
+          "label_x": 542.0,
+          "label_y": 449.0,
+          "nullable": false,
+          "route_label_position": [
+            453.6000061035156,
+            413.0
+          ],
+          "source_side": "east",
+          "start": [
+            303.0,
+            377.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              453.6000061035156,
+              359.0
+            ],
+            [
+              453.6000061035156,
+              685.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            685.0
+          ],
+          "from": "product_categories",
+          "from_columns": [
+            "product_id"
+          ],
+          "is_self_loop": false,
+          "label": "product_id",
+          "label_x": 453.6000061035156,
+          "label_y": 522.0,
+          "nullable": false,
+          "route_label_position": [
+            453.6000061035156,
+            522.0
+          ],
+          "source_side": "east",
+          "start": [
+            303.0,
+            359.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "products",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 11,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 246.0,
+          "id": "addresses",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 510.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 156.0,
+          "id": "categories",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 400.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "customers",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1184.4000244140625,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "order_items",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 12,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 264.0,
+          "id": "orders",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 606.2000122070313,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "product_categories",
+          "kind": "Table",
+          "width": 245.0,
+          "x": 56.0,
+          "y": 310.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "products",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 636.0
+        }
+      ],
+      "summary": {
+        "edge_count": 7,
+        "height": 920.0,
+        "node_count": 7,
+        "width": 1531.4000244140625
+      }
+    },
+    "straight": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              951.2000122070313,
+              577.0
+            ],
+            [
+              951.2000122070313,
+              105.0
+            ],
+            [
+              923.2000122070313,
+              105.0
+            ],
+            [
+              923.2000122070313,
+              30.0
+            ],
+            [
+              951.2000122070313,
+              30.0
+            ],
+            [
+              1154.4000244140625,
+              30.0
+            ],
+            [
+              1154.4000244140625,
+              105.0
+            ]
+          ],
+          "end": [
+            1182.4000244140625,
+            105.0
+          ],
+          "from": "addresses",
+          "from_columns": [
+            "customer_id"
+          ],
+          "is_self_loop": false,
+          "label": "customer_id",
+          "label_x": 852.7999877929688,
+          "label_y": 577.0,
+          "nullable": false,
+          "route_label_position": [
+            951.2000122070313,
+            423.5
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            577.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "customers",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              951.2000122070313,
+              421.0
+            ],
+            [
+              951.2000122070313,
+              535.0
+            ]
+          ],
+          "end": [
+            897.2000122070313,
+            517.0
+          ],
+          "from": "categories",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 1009.7000122070313,
+          "label_y": 478.0,
+          "nullable": true,
+          "route_label_position": [
+            937.7000122070313,
+            478.0
+          ],
+          "source_side": "east",
+          "start": [
+            897.2000122070313,
+            439.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [],
+          "end": [
+            604.2000122070313,
+            105.0
+          ],
+          "from": "order_items",
+          "from_columns": [
+            "order_id"
+          ],
+          "is_self_loop": false,
+          "label": "order_id",
+          "label_x": 476.6000061035156,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            476.6000061035156,
+            114.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            123.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "orders",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              201.5,
+              260.0
+            ],
+            [
+              327.0,
+              260.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              374.0
+            ],
+            [
+              327.0,
+              374.0
+            ],
+            [
+              327.0,
+              456.0
+            ],
+            [
+              201.5,
+              456.0
+            ],
+            [
+              201.5,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              374.0
+            ],
+            [
+              751.7000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              456.0
+            ],
+            [
+              923.2000122070313,
+              606.0
+            ],
+            [
+              751.7000122070313,
+              606.0
+            ]
+          ],
+          "end": [
+            751.7000122070313,
+            634.0
+          ],
+          "from": "order_items",
+          "from_columns": [
+            "product_id"
+          ],
+          "is_self_loop": false,
+          "label": "product_id",
+          "label_x": 545.5999755859375,
+          "label_y": 374.0,
+          "nullable": false,
+          "route_label_position": [
+            545.5999755859375,
+            374.0
+          ],
+          "source_side": "south",
+          "start": [
+            201.5,
+            232.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "products",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [],
+          "end": [
+            1182.4000244140625,
+            105.0
+          ],
+          "from": "orders",
+          "from_columns": [
+            "customer_id"
+          ],
+          "is_self_loop": false,
+          "label": "customer_id",
+          "label_x": 1054.800048828125,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            1054.800048828125,
+            114.0
+          ],
+          "source_side": "east",
+          "start": [
+            927.2000122070313,
+            123.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "customers",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [],
+          "end": [
+            604.2000122070313,
+            449.0
+          ],
+          "from": "product_categories",
+          "from_columns": [
+            "category_id"
+          ],
+          "is_self_loop": false,
+          "label": "category_id",
+          "label_x": 453.6000061035156,
+          "label_y": 413.0,
+          "nullable": false,
+          "route_label_position": [
+            453.6000061035156,
+            413.0
+          ],
+          "source_side": "east",
+          "start": [
+            303.0,
+            377.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [],
+          "end": [
+            604.2000122070313,
+            685.0
+          ],
+          "from": "product_categories",
+          "from_columns": [
+            "product_id"
+          ],
+          "is_self_loop": false,
+          "label": "product_id",
+          "label_x": 453.6000061035156,
+          "label_y": 522.0,
+          "nullable": false,
+          "route_label_position": [
+            453.6000061035156,
+            522.0
+          ],
+          "source_side": "east",
+          "start": [
+            303.0,
+            359.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "products",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 11,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 246.0,
+          "id": "addresses",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 510.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 156.0,
+          "id": "categories",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 400.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "customers",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1184.4000244140625,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "order_items",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 12,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 264.0,
+          "id": "orders",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 606.2000122070313,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "product_categories",
+          "kind": "Table",
+          "width": 245.0,
+          "x": 56.0,
+          "y": 310.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "products",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 636.0
+        }
+      ],
+      "summary": {
+        "edge_count": 7,
+        "height": 920.0,
+        "node_count": 7,
+        "width": 1531.4000244140625
+      }
+    }
+  }
+}

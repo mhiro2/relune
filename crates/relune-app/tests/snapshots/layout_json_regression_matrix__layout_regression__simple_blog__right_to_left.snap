@@ -1,0 +1,552 @@
+---
+source: crates/relune-app/tests/layout_json_regression_matrix.rs
+expression: snapshot
+---
+{
+  "direction": "right_to_left",
+  "fixture": "simple_blog.sql",
+  "styles": {
+    "curved": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              1168.800048828125,
+              123.0
+            ],
+            [
+              1055.199951171875,
+              105.0
+            ]
+          ],
+          "end": [
+            970.0,
+            105.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "post_id"
+          ],
+          "is_self_loop": false,
+          "label": "post_id",
+          "label_x": 1112.0,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            1112.0,
+            114.0
+          ],
+          "source_side": "west",
+          "start": [
+            1254.0,
+            123.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "posts",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              994.0,
+              141.0
+            ],
+            [
+              994.0,
+              30.0
+            ],
+            [
+              377.0,
+              30.0
+            ],
+            [
+              377.0,
+              105.0
+            ]
+          ],
+          "end": [
+            349.0,
+            105.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 819.5,
+          "label_y": 30.0,
+          "nullable": false,
+          "route_label_position": [
+            819.5,
+            30.0
+          ],
+          "source_side": "west",
+          "start": [
+            1254.0,
+            141.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              547.7999877929688,
+              123.0
+            ],
+            [
+              434.20001220703125,
+              105.0
+            ]
+          ],
+          "end": [
+            349.0,
+            105.0
+          ],
+          "from": "posts",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 491.0,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            491.0,
+            114.0
+          ],
+          "source_side": "west",
+          "start": [
+            633.0,
+            123.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1256.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "posts",
+          "kind": "Table",
+          "width": 333.0,
+          "x": 635.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        }
+      ],
+      "summary": {
+        "edge_count": 3,
+        "height": 286.0,
+        "node_count": 3,
+        "width": 1603.0
+      }
+    },
+    "orthogonal": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              1112.0,
+              123.0
+            ],
+            [
+              1112.0,
+              105.0
+            ]
+          ],
+          "end": [
+            970.0,
+            105.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "post_id"
+          ],
+          "is_self_loop": false,
+          "label": "post_id",
+          "label_x": 1112.0,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            1112.0,
+            114.0
+          ],
+          "source_side": "west",
+          "start": [
+            1254.0,
+            123.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "posts",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1226.0,
+              141.0
+            ],
+            [
+              1226.0,
+              30.0
+            ],
+            [
+              994.0,
+              30.0
+            ],
+            [
+              994.0,
+              141.0
+            ],
+            [
+              801.5,
+              141.0
+            ],
+            [
+              801.5,
+              30.0
+            ],
+            [
+              801.5,
+              30.0
+            ],
+            [
+              801.5,
+              105.0
+            ],
+            [
+              994.0,
+              105.0
+            ],
+            [
+              994.0,
+              30.0
+            ],
+            [
+              377.0,
+              30.0
+            ],
+            [
+              377.0,
+              105.0
+            ]
+          ],
+          "end": [
+            349.0,
+            105.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 1057.0,
+          "label_y": 30.0,
+          "nullable": false,
+          "route_label_position": [
+            865.0,
+            105.0
+          ],
+          "source_side": "west",
+          "start": [
+            1254.0,
+            141.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              491.0,
+              123.0
+            ],
+            [
+              491.0,
+              105.0
+            ]
+          ],
+          "end": [
+            349.0,
+            105.0
+          ],
+          "from": "posts",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 491.0,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            491.0,
+            114.0
+          ],
+          "source_side": "west",
+          "start": [
+            633.0,
+            123.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1256.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "posts",
+          "kind": "Table",
+          "width": 333.0,
+          "x": 635.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        }
+      ],
+      "summary": {
+        "edge_count": 3,
+        "height": 286.0,
+        "node_count": 3,
+        "width": 1603.0
+      }
+    },
+    "straight": {
+      "edges": [
+        {
+          "control_points": [],
+          "end": [
+            970.0,
+            105.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "post_id"
+          ],
+          "is_self_loop": false,
+          "label": "post_id",
+          "label_x": 1112.0,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            1112.0,
+            114.0
+          ],
+          "source_side": "west",
+          "start": [
+            1254.0,
+            123.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "posts",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              994.0,
+              141.0
+            ],
+            [
+              994.0,
+              30.0
+            ],
+            [
+              377.0,
+              30.0
+            ],
+            [
+              377.0,
+              105.0
+            ]
+          ],
+          "end": [
+            349.0,
+            105.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 819.5,
+          "label_y": 30.0,
+          "nullable": false,
+          "route_label_position": [
+            819.5,
+            30.0
+          ],
+          "source_side": "west",
+          "start": [
+            1254.0,
+            141.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [],
+          "end": [
+            349.0,
+            105.0
+          ],
+          "from": "posts",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 491.0,
+          "label_y": 114.0,
+          "nullable": false,
+          "route_label_position": [
+            491.0,
+            114.0
+          ],
+          "source_side": "west",
+          "start": [
+            633.0,
+            123.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1256.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "posts",
+          "kind": "Table",
+          "width": 333.0,
+          "x": 635.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        }
+      ],
+      "summary": {
+        "edge_count": 3,
+        "height": 286.0,
+        "node_count": 3,
+        "width": 1603.0
+      }
+    }
+  }
+}

@@ -2094,6 +2094,7 @@ dependencies = [
  "relune-parser-sql",
  "relune-render-html",
  "relune-render-svg",
+ "relune-testkit",
  "serde",
  "serde_json",
  "thiserror",
@@ -2218,6 +2219,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "relune-core",
+ "relune-layout",
  "serde_json",
 ]
 

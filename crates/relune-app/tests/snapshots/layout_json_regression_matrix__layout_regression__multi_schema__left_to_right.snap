@@ -1,0 +1,274 @@
+---
+source: crates/relune-app/tests/layout_json_regression_matrix.rs
+expression: snapshot
+---
+{
+  "direction": "left_to_right",
+  "fixture": "multi_schema.sql",
+  "styles": {
+    "curved": {
+      "edges": [],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "inventory.products",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 546.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "inventory.stock",
+          "kind": "Table",
+          "width": 324.0,
+          "x": 56.0,
+          "y": 818.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "public.posts",
+          "kind": "Table",
+          "width": 305.0,
+          "x": 56.0,
+          "y": 292.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "public.users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "sales.order_items",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1326.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "sales.orders",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 56.0,
+          "y": 1054.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "sales.shipments",
+          "kind": "Table",
+          "width": 305.0,
+          "x": 56.0,
+          "y": 1580.0
+        }
+      ],
+      "summary": {
+        "edge_count": 0,
+        "height": 1846.0,
+        "node_count": 7,
+        "width": 436.0
+      }
+    },
+    "orthogonal": {
+      "edges": [],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "inventory.products",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 546.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "inventory.stock",
+          "kind": "Table",
+          "width": 324.0,
+          "x": 56.0,
+          "y": 818.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "public.posts",
+          "kind": "Table",
+          "width": 305.0,
+          "x": 56.0,
+          "y": 292.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "public.users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "sales.order_items",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1326.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "sales.orders",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 56.0,
+          "y": 1054.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "sales.shipments",
+          "kind": "Table",
+          "width": 305.0,
+          "x": 56.0,
+          "y": 1580.0
+        }
+      ],
+      "summary": {
+        "edge_count": 0,
+        "height": 1846.0,
+        "node_count": 7,
+        "width": 436.0
+      }
+    },
+    "straight": {
+      "edges": [],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "inventory.products",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 546.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "inventory.stock",
+          "kind": "Table",
+          "width": 324.0,
+          "x": 56.0,
+          "y": 818.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "public.posts",
+          "kind": "Table",
+          "width": 305.0,
+          "x": 56.0,
+          "y": 292.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "public.users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "sales.order_items",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1326.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "sales.orders",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 56.0,
+          "y": 1054.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "sales.shipments",
+          "kind": "Table",
+          "width": 305.0,
+          "x": 56.0,
+          "y": 1580.0
+        }
+      ],
+      "summary": {
+        "edge_count": 0,
+        "height": 1846.0,
+        "node_count": 7,
+        "width": 436.0
+      }
+    }
+  }
+}
