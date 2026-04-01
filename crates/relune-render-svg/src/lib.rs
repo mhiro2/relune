@@ -15,8 +15,6 @@ pub mod escape;
 pub mod geometry;
 pub mod group;
 pub mod legend;
-pub mod node;
-
 mod options;
 mod theme;
 
@@ -24,7 +22,6 @@ pub use edge::{EdgeRenderOptions, render_edge};
 pub use geometry::{Point, Rect, clamp, compute_column_y, compute_node_height, lerp};
 pub use group::render_group;
 pub use legend::render_legend;
-pub use node::{ColumnInfo, NodeRenderOptions, render_node};
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
 
