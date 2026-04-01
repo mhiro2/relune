@@ -44,7 +44,7 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 | `--exclude <TABLE>` | Repeatable denylist |
 | `--theme light\|dark` | Visual theme |
 | `--layout hierarchical\|force-directed` | Layout algorithm |
-| `--edge-style straight\|orthogonal\|curved` | Edge routing style |
+| `--edge-style straight\|orthogonal\|curved` | Edge rendering style |
 
 **Other:** `--stats` (stderr statistics), `--fail-on-warning` (non-zero on warnings).
 

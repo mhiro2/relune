@@ -103,6 +103,21 @@ fn snapshot_value_for_fixture_direction(
     })
 }
 
+fn layout_snapshot_without_route_style(
+    graph: &relune_layout::PositionedGraph,
+) -> serde_json::Value {
+    let mut snapshot = compact_layout_snapshot(graph);
+    if let Some(edges) = snapshot["edges"].as_array_mut() {
+        for edge in edges {
+            let edge = edge
+                .as_object_mut()
+                .expect("compact layout snapshot edge should be an object");
+            edge.remove("style");
+        }
+    }
+    snapshot
+}
+
 fn assert_fixture_direction_snapshots(fixture_name: &str) {
     for (direction, direction_name) in DIRECTIONS {
         let snapshot_name = format!(
@@ -188,6 +203,27 @@ fn layout_parallel_edge_spacing_holds_for_matrix() {
             let graph = export_layout_sql(sql, *direction, *edge_style);
             assert_layout_geometry(&graph);
             assert_directional_layout_invariants(&graph, *direction);
+        }
+    }
+}
+
+#[test]
+fn layout_route_backbone_is_consistent_across_edge_styles() {
+    let fixtures = layout_regression_fixture_names();
+
+    for fixture_name in fixtures {
+        for (direction, _) in DIRECTIONS {
+            let baseline = export_layout_fixture(fixture_name, *direction, RouteStyle::Straight);
+            let baseline = layout_snapshot_without_route_style(&baseline);
+
+            for (edge_style, _) in &EDGE_STYLES[1..] {
+                let candidate = export_layout_fixture(fixture_name, *direction, *edge_style);
+                let candidate = layout_snapshot_without_route_style(&candidate);
+                assert_eq!(
+                    baseline, candidate,
+                    "route backbone changed for fixture {fixture_name} in direction {direction:?} when rendering as {edge_style:?}"
+                );
+            }
         }
     }
 }

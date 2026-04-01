@@ -403,9 +403,9 @@ fn render_edge_internal(
     let edge_style = edge_style(edge.kind, colors);
     let path_d = crate::edge::edge_route_svg_path_d(&edge.route, options.curve_offset);
     let uses_crow_markers = edge.kind == EdgeKind::ForeignKey;
-    // Curved FK edges use inline markers drawn along the actual curve,
-    // because SVG <marker> elements follow the tangent and visually diverge
-    // from the visible curve, especially on steep or tight beziers.
+    // Curved FK edges use inline markers drawn against the rendered backbone,
+    // because SVG <marker> elements follow the endpoint tangent and can look
+    // detached once the visible path is smoothed.
     let use_inline_markers =
         uses_crow_markers && (edge.is_self_loop || edge.route.style == RouteStyle::Curved);
     let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
@@ -730,11 +730,9 @@ fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
 // ---------------------------------------------------------------------------
 //
 // SVG `<marker>` elements are oriented along the tangent at the path endpoint.
-// On bezier curves the tangent can diverge quickly from the visible curve —
-// especially on steep or tight curves — making composite markers (circle +
-// crow's foot) appear disconnected.  These helpers draw the same symbols as
-// regular SVG elements positioned along the *actual* curve, eliminating the
-// visual gap.
+// Once the visible path is smoothed, composite markers (circle + crow's foot)
+// can appear disconnected. These helpers draw the same symbols as regular SVG
+// elements positioned along the rendered backbone instead.
 
 /// Sample the route at an approximate arc-length `dist` from the **start**.
 /// Returns `(point, unit_tangent)`.
@@ -742,28 +740,13 @@ fn sample_route_from_start(
     route: &relune_core::layout::EdgeRoute,
     dist: f32,
 ) -> ((f32, f32), (f32, f32)) {
-    use relune_core::layout::RouteStyle;
     let p0 = (route.x1, route.y1);
-    match route.style {
-        RouteStyle::Curved if route.control_points.len() >= 2 => {
-            let cp1 = route.control_points[0];
-            let cp2 = route.control_points[1];
-            let p3 = (route.x2, route.y2);
-            let t = approx_t_near_start(p0, cp1, dist);
-            (
-                cubic_bezier(t, p0, cp1, cp2, p3),
-                normalize_vec(cubic_bezier_tangent(t, p0, cp1, cp2, p3)),
-            )
-        }
-        _ => {
-            let next = route
-                .control_points
-                .first()
-                .copied()
-                .unwrap_or((route.x2, route.y2));
-            sample_line(p0, next, dist)
-        }
-    }
+    let next = route
+        .control_points
+        .first()
+        .copied()
+        .unwrap_or((route.x2, route.y2));
+    sample_line(p0, next, dist)
 }
 
 /// Sample the route at an approximate arc-length `dist` from the **end**.
@@ -772,93 +755,15 @@ fn sample_route_from_end(
     route: &relune_core::layout::EdgeRoute,
     dist: f32,
 ) -> ((f32, f32), (f32, f32)) {
-    use relune_core::layout::RouteStyle;
     let p3 = (route.x2, route.y2);
-    match route.style {
-        RouteStyle::Curved if route.control_points.len() >= 2 => {
-            let cp1 = route.control_points[0];
-            let cp2 = route.control_points[1];
-            let p0 = (route.x1, route.y1);
-            let t = 1.0 - approx_t_near_start(p3, cp2, dist);
-            (
-                cubic_bezier(t, p0, cp1, cp2, p3),
-                normalize_vec(cubic_bezier_tangent(t, p0, cp1, cp2, p3)),
-            )
-        }
-        _ => {
-            let prev = route
-                .control_points
-                .last()
-                .copied()
-                .unwrap_or((route.x1, route.y1));
-            let (pt, tang) = sample_line(p3, prev, dist);
-            // Flip tangent so it points toward the endpoint.
-            (pt, (-tang.0, -tang.1))
-        }
-    }
-}
-
-/// Approximate bezier parameter for a given arc-length distance from endpoint
-/// `p` (where the adjacent control point is `cp`).
-fn approx_t_near_start(p: (f32, f32), cp: (f32, f32), dist: f32) -> f32 {
-    let dx = cp.0 - p.0;
-    let dy = cp.1 - p.1;
-    let tangent_mag = dx.hypot(dy) * 3.0;
-    if tangent_mag < 0.001 {
-        0.0
-    } else {
-        (dist / tangent_mag).clamp(0.0, 0.35)
-    }
-}
-
-fn cubic_bezier(
-    t: f32,
-    p0: (f32, f32),
-    p1: (f32, f32),
-    p2: (f32, f32),
-    p3: (f32, f32),
-) -> (f32, f32) {
-    let u = 1.0 - t;
-    let uu = u * u;
-    let tt = t * t;
-    let cubic_coord = |a: f32, b: f32, c: f32, d: f32| {
-        (t * tt).mul_add(
-            d,
-            (3.0 * u * tt).mul_add(c, (3.0 * uu * t).mul_add(b, u * uu * a)),
-        )
-    };
-    (
-        cubic_coord(p0.0, p1.0, p2.0, p3.0),
-        cubic_coord(p0.1, p1.1, p2.1, p3.1),
-    )
-}
-
-fn cubic_bezier_tangent(
-    t: f32,
-    p0: (f32, f32),
-    p1: (f32, f32),
-    p2: (f32, f32),
-    p3: (f32, f32),
-) -> (f32, f32) {
-    let u = 1.0 - t;
-    let uu = u * u;
-    let tt = t * t;
-    let tangent_coord = |a: f32, b: f32, c: f32, d: f32| {
-        3.0 * tt.mul_add(d - c, (2.0 * u * t).mul_add(c - b, uu * (b - a)))
-    };
-    (
-        tangent_coord(p0.0, p1.0, p2.0, p3.0),
-        tangent_coord(p0.1, p1.1, p2.1, p3.1),
-    )
-}
-
-fn normalize_vec(v: (f32, f32)) -> (f32, f32) {
-    let len = v.0.hypot(v.1);
-    if len < 0.001 {
-        (1.0, 0.0)
-    } else {
-        (v.0 / len, v.1 / len)
-    }
+    let prev = route
+        .control_points
+        .last()
+        .copied()
+        .unwrap_or((route.x1, route.y1));
+    let (pt, tang) = sample_line(p3, prev, dist);
+    // Flip tangent so it points toward the endpoint.
+    (pt, (-tang.0, -tang.1))
 }
 
 fn perp_vec(v: (f32, f32)) -> (f32, f32) {

@@ -83,11 +83,11 @@ pub(crate) fn route_edge_with_offset(
     style: RouteStyle,
     lane_offset: f32,
 ) -> EdgeRoute {
-    match style {
-        RouteStyle::Straight => route_straight(x1, y1, w1, h1, x2, y2, w2, h2, lane_offset),
-        RouteStyle::Orthogonal => route_orthogonal(x1, y1, w1, h1, x2, y2, w2, h2, lane_offset),
-        RouteStyle::Curved => route_curved(x1, y1, w1, h1, x2, y2, w2, h2, lane_offset),
-    }
+    let ((sx, sy), (tx, ty), source_side, target_side) =
+        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    let source = offset_attachment_point((sx, sy), source_side, lane_offset);
+    let target = offset_attachment_point((tx, ty), target_side, lane_offset);
+    build_backbone_route(source, target, source_side, target_side, style)
 }
 
 /// Route an edge with separate per-endpoint lane offsets and column Y offsets.
@@ -113,50 +113,14 @@ pub(crate) fn route_edge_column_aware(
     source_col_offset: f32,
     target_col_offset: f32,
 ) -> EdgeRoute {
-    match style {
-        RouteStyle::Straight => route_straight_col(
-            x1,
-            y1,
-            w1,
-            h1,
-            x2,
-            y2,
-            w2,
-            h2,
-            source_lane_offset,
-            target_lane_offset,
-            source_col_offset,
-            target_col_offset,
-        ),
-        RouteStyle::Orthogonal => route_orthogonal_col(
-            x1,
-            y1,
-            w1,
-            h1,
-            x2,
-            y2,
-            w2,
-            h2,
-            source_lane_offset,
-            target_lane_offset,
-            source_col_offset,
-            target_col_offset,
-        ),
-        RouteStyle::Curved => route_curved_col(
-            x1,
-            y1,
-            w1,
-            h1,
-            x2,
-            y2,
-            w2,
-            h2,
-            source_lane_offset,
-            target_lane_offset,
-            source_col_offset,
-            target_col_offset,
-        ),
-    }
+    let ((sx, sy), (tx, ty), source_side, target_side) =
+        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
+    let source =
+        apply_endpoint_offsets((sx, sy), source_side, source_lane_offset, source_col_offset);
+    let target =
+        apply_endpoint_offsets((tx, ty), target_side, target_lane_offset, target_col_offset);
+
+    build_backbone_route(source, target, source_side, target_side, style)
 }
 
 /// Apply lane + column offsets to an attachment point.
@@ -178,212 +142,29 @@ fn apply_endpoint_offsets(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn route_straight_col(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-    src_lane: f32,
-    tgt_lane: f32,
-    src_col: f32,
-    tgt_col: f32,
+fn build_backbone_route(
+    source: (f32, f32),
+    target: (f32, f32),
+    source_side: AttachmentSide,
+    target_side: AttachmentSide,
+    style: RouteStyle,
 ) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), ss, ts) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let (sx, sy) = apply_endpoint_offsets((sx, sy), ss, src_lane, src_col);
-    let (tx, ty) = apply_endpoint_offsets((tx, ty), ts, tgt_lane, tgt_col);
+    let (control_points, _) = orthogonal_control_points(source, target, source_side, target_side);
 
-    let label_position = (f32::midpoint(sx, tx), f32::midpoint(sy, ty));
+    let mut points = Vec::with_capacity(control_points.len() + 2);
+    points.push(source);
+    points.extend(control_points);
+    points.push(target);
+    let points = simplify_orthogonal_path(&points);
 
     EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points: Vec::new(),
-        style: RouteStyle::Straight,
-        label_position,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn route_orthogonal_col(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-    src_lane: f32,
-    tgt_lane: f32,
-    src_col: f32,
-    tgt_col: f32,
-) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), ss, ts) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let (sx, sy) = apply_endpoint_offsets((sx, sy), ss, src_lane, src_col);
-    let (tx, ty) = apply_endpoint_offsets((tx, ty), ts, tgt_lane, tgt_col);
-
-    let (control_points, label_position) = orthogonal_control_points((sx, sy), (tx, ty), ss, ts);
-
-    EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points,
-        style: RouteStyle::Orthogonal,
-        label_position,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn route_curved_col(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-    src_lane: f32,
-    tgt_lane: f32,
-    src_col: f32,
-    tgt_col: f32,
-) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), ss, ts) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let (sx, sy) = apply_endpoint_offsets((sx, sy), ss, src_lane, src_col);
-    let (tx, ty) = apply_endpoint_offsets((tx, ty), ts, tgt_lane, tgt_col);
-
-    let offset = if ss.is_horizontal() && ts.is_horizontal() {
-        ((tx - sx).abs() * 0.3).max(24.0)
-    } else if ss.is_vertical() && ts.is_vertical() {
-        ((ty - sy).abs() * 0.3).max(24.0)
-    } else {
-        (((tx - sx).abs() + (ty - sy).abs()) * 0.2).max(28.0)
-    };
-
-    let cp1 = step_from_attachment((sx, sy), ss, offset);
-    let cp2 = step_from_attachment((tx, ty), ts, offset);
-
-    let label_position = calculate_cubic_bezier_midpoint(sx, sy, cp1, cp2, tx, ty);
-
-    EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points: vec![cp1, cp2],
-        style: RouteStyle::Curved,
-        label_position,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn route_straight(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-    lane_offset: f32,
-) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), source_side, target_side) =
-        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let (sx, sy) = offset_attachment_point((sx, sy), source_side, lane_offset);
-    let (tx, ty) = offset_attachment_point((tx, ty), target_side, lane_offset);
-
-    let label_position = (f32::midpoint(sx, tx), f32::midpoint(sy, ty));
-
-    EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points: Vec::new(),
-        style: RouteStyle::Straight,
-        label_position,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn route_orthogonal(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-    lane_offset: f32,
-) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), source_side, target_side) =
-        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let (sx, sy) = offset_attachment_point((sx, sy), source_side, lane_offset);
-    let (tx, ty) = offset_attachment_point((tx, ty), target_side, lane_offset);
-
-    let (control_points, label_position) =
-        orthogonal_control_points((sx, sy), (tx, ty), source_side, target_side);
-
-    EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points,
-        style: RouteStyle::Orthogonal,
-        label_position,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn route_curved(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-    lane_offset: f32,
-) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), source_side, target_side) =
-        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let (sx, sy) = offset_attachment_point((sx, sy), source_side, lane_offset);
-    let (tx, ty) = offset_attachment_point((tx, ty), target_side, lane_offset);
-
-    let offset = if source_side.is_horizontal() && target_side.is_horizontal() {
-        ((tx - sx).abs() * 0.3).max(24.0)
-    } else if source_side.is_vertical() && target_side.is_vertical() {
-        ((ty - sy).abs() * 0.3).max(24.0)
-    } else {
-        (((tx - sx).abs() + (ty - sy).abs()) * 0.2).max(28.0)
-    };
-
-    let cp1 = step_from_attachment((sx, sy), source_side, offset);
-    let cp2 = step_from_attachment((tx, ty), target_side, offset);
-
-    // Label at the midpoint of the cubic bezier curve (t = 0.5)
-    let label_position = calculate_cubic_bezier_midpoint(sx, sy, cp1, cp2, tx, ty);
-
-    EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points: vec![cp1, cp2],
-        style: RouteStyle::Curved,
-        label_position,
+        x1: points[0].0,
+        y1: points[0].1,
+        x2: points[points.len() - 1].0,
+        y2: points[points.len() - 1].1,
+        control_points: points[1..points.len() - 1].to_vec(),
+        style,
+        label_position: polyline_midpoint(&points),
     }
 }
 
@@ -454,40 +235,6 @@ pub(crate) fn attachment_sides(
     (source_side, target_side)
 }
 
-/// Calculate the point at t=0.5 on a cubic bezier curve.
-fn calculate_cubic_bezier_midpoint(
-    x0: f32,
-    y0: f32,
-    cp1: (f32, f32),
-    cp2: (f32, f32),
-    x1: f32,
-    y1: f32,
-) -> (f32, f32) {
-    // Using De Casteljau's algorithm at t = 0.5
-    let t = 0.5;
-    let one_minus_t = 1.0 - t;
-
-    // First level interpolation
-    let q0x = one_minus_t * x0 + t * cp1.0;
-    let q0y = one_minus_t * y0 + t * cp1.1;
-    let q1x = one_minus_t * cp1.0 + t * cp2.0;
-    let q1y = one_minus_t * cp1.1 + t * cp2.1;
-    let q2x = one_minus_t * cp2.0 + t * x1;
-    let q2y = one_minus_t * cp2.1 + t * y1;
-
-    // Second level interpolation
-    let r0x = one_minus_t * q0x + t * q1x;
-    let r0y = one_minus_t * q0y + t * q1y;
-    let r1x = one_minus_t * q1x + t * q2x;
-    let r1y = one_minus_t * q1y + t * q2y;
-
-    // Final point at t = 0.5
-    let x = one_minus_t * r0x + t * r1x;
-    let y = one_minus_t * r0y + t * r1y;
-
-    (x, y)
-}
-
 /// Route a self-loop edge.
 #[must_use]
 pub fn route_self_loop(x: f32, y: f32, w: f32, h: f32, style: RouteStyle) -> EdgeRoute {
@@ -509,57 +256,25 @@ pub(crate) fn route_self_loop_with_offset(
     // along the tangent.
     let loop_radius = 36.0 + radius_offset.max(0.0);
 
-    match style {
-        RouteStyle::Straight => {
-            // Straight lines don't make sense for self-loops, use curved instead
-            route_self_loop_curved(x, y, w, h, loop_radius)
-        }
-        RouteStyle::Orthogonal => route_self_loop_orthogonal(x, y, w, h, loop_radius),
-        RouteStyle::Curved => route_self_loop_curved(x, y, w, h, loop_radius),
-    }
-}
-
-fn route_self_loop_orthogonal(x: f32, y: f32, w: f32, h: f32, radius: f32) -> EdgeRoute {
-    // Start from right edge, go up, right, down, back to right edge
     let sx = x + w;
     let sy = h.mul_add(0.25, y);
     let tx = x + w;
     let ty = h.mul_add(0.75, y);
-
-    // Label position at the middle of the loop (right of the node)
-    let label_position = (sx + radius, f32::midpoint(sy, ty));
+    let points = [
+        (sx, sy),
+        (sx + loop_radius, sy),
+        (sx + loop_radius, ty),
+        (tx, ty),
+    ];
 
     EdgeRoute {
         x1: sx,
         y1: sy,
         x2: tx,
         y2: ty,
-        control_points: vec![(sx + radius, sy), (sx + radius, ty)],
-        style: RouteStyle::Orthogonal,
-        label_position,
-    }
-}
-
-fn route_self_loop_curved(x: f32, y: f32, w: f32, h: f32, radius: f32) -> EdgeRoute {
-    let sx = x + w;
-    let sy = h.mul_add(0.25, y);
-    let tx = x + w;
-    let ty = h.mul_add(0.75, y);
-
-    let cp1 = (radius.mul_add(1.5, sx), radius.mul_add(-0.5, sy));
-    let cp2 = (radius.mul_add(1.5, sx), radius.mul_add(0.5, ty));
-
-    // Label at the midpoint of the cubic bezier curve
-    let label_position = calculate_cubic_bezier_midpoint(sx, sy, cp1, cp2, tx, ty);
-
-    EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
-        control_points: vec![cp1, cp2],
-        style: RouteStyle::Curved,
-        label_position,
+        control_points: points[1..points.len() - 1].to_vec(),
+        style,
+        label_position: polyline_midpoint(&points),
     }
 }
 
@@ -630,10 +345,6 @@ fn orthogonal_control_points(
 impl AttachmentSide {
     const fn is_horizontal(self) -> bool {
         matches!(self, Self::East | Self::West)
-    }
-
-    const fn is_vertical(self) -> bool {
-        matches!(self, Self::North | Self::South)
     }
 }
 
@@ -713,10 +424,9 @@ pub fn nudge_label(
 
 /// Detour an edge route around obstacle rectangles.
 ///
-/// If any segment of the polyline (start → control points → end) passes through
-/// an obstacle, additional waypoints are inserted to route around it.  Only
-/// `Orthogonal` and `Straight` styles are adjusted; curved routes are left as-is
-/// because modifying Bézier control points would distort the curve shape.
+/// If any segment of the backbone polyline (start → control points → end)
+/// passes through an obstacle, additional waypoints are inserted to route
+/// around it.
 #[must_use]
 pub fn detour_around_obstacles(route: &EdgeRoute, obstacles: &[Rect]) -> EdgeRoute {
     detour_around_obstacles_with_endpoints(route, obstacles, None, None)
@@ -731,30 +441,6 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
 ) -> EdgeRoute {
     if obstacles.is_empty() {
         return route.clone();
-    }
-
-    // Curved routes: check whether the Bézier actually intersects any obstacle.
-    // If not, keep the curve as-is.  If it does, fall back to orthogonal routing
-    // with obstacle detour so the edge goes cleanly around the node.
-    if route.style == RouteStyle::Curved {
-        if !bezier_intersects_any_obstacle(route, obstacles) {
-            return route.clone();
-        }
-        let fallback = EdgeRoute {
-            x1: route.x1,
-            y1: route.y1,
-            x2: route.x2,
-            y2: route.y2,
-            control_points: Vec::new(),
-            style: RouteStyle::Orthogonal,
-            label_position: route.label_position,
-        };
-        return detour_around_obstacles_with_endpoints(
-            &fallback,
-            obstacles,
-            source_side,
-            target_side,
-        );
     }
 
     let initial_points = route_points(route);
@@ -814,19 +500,13 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
     // Recompute label position at the midpoint of the new polyline.
     let label_position = polyline_midpoint(&points);
 
-    let style = if route.style == RouteStyle::Straight && !new_control_points.is_empty() {
-        RouteStyle::Orthogonal
-    } else {
-        route.style
-    };
-
     EdgeRoute {
         x1: new_start.0,
         y1: new_start.1,
         x2: new_end.0,
         y2: new_end.1,
         control_points: new_control_points,
-        style,
+        style: route.style,
         label_position,
     }
 }
@@ -1037,29 +717,14 @@ pub(crate) fn sample_route_obstacles(route: &EdgeRoute, half_size: f32, spacing:
 }
 
 fn approximate_route_length(route: &EdgeRoute) -> f32 {
-    match route.style {
-        RouteStyle::Straight | RouteStyle::Orthogonal => route_points(route)
-            .windows(2)
-            .map(|segment| {
-                let dx = segment[1].0 - segment[0].0;
-                let dy = segment[1].1 - segment[0].1;
-                dx.hypot(dy)
-            })
-            .sum(),
-        RouteStyle::Curved => {
-            let mut total = 0.0;
-            let mut prev = (route.x1, route.y1);
-            let steps = 24usize;
-            #[allow(clippy::cast_precision_loss)]
-            for index in 1..=steps {
-                let t = index as f32 / steps as f32;
-                let next = point_along_route(route, t);
-                total += (next.0 - prev.0).hypot(next.1 - prev.1);
-                prev = next;
-            }
-            total
-        }
-    }
+    route_points(route)
+        .windows(2)
+        .map(|segment| {
+            let dx = segment[1].0 - segment[0].0;
+            let dy = segment[1].1 - segment[0].1;
+            dx.hypot(dy)
+        })
+        .sum()
 }
 
 /// Simplify an orthogonal path by removing collinear and backtracking points.
@@ -1132,36 +797,6 @@ fn simplify_orthogonal_path(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
     result
 }
 
-/// Check whether a cubic Bézier edge route intersects any obstacle rectangle.
-///
-/// The curve is sampled at 16 evenly-spaced points and consecutive samples are
-/// tested as straight segments against each obstacle.
-fn bezier_intersects_any_obstacle(route: &EdgeRoute, obstacles: &[Rect]) -> bool {
-    let (Some(cp1), Some(cp2)) = (
-        route.control_points.first().copied(),
-        route.control_points.get(1).copied(),
-    ) else {
-        return false;
-    };
-
-    let n = 16u32;
-    let mut prev = (route.x1, route.y1);
-    for i in 1..=n {
-        #[allow(clippy::cast_precision_loss)]
-        let t = i as f32 / n as f32;
-        let curr = evaluate_cubic_bezier(t, route.x1, route.y1, cp1, cp2, route.x2, route.y2);
-        if obstacles
-            .iter()
-            .map(|obs| inflate_rect(*obs, ROUTE_CLEARANCE))
-            .any(|obs| segment_intersects_rect(prev, curr, &obs))
-        {
-            return true;
-        }
-        prev = curr;
-    }
-    false
-}
-
 /// Find the midpoint of a polyline (by arc-length).
 #[allow(clippy::suboptimal_flops)]
 fn polyline_midpoint(points: &[(f32, f32)]) -> (f32, f32) {
@@ -1197,63 +832,10 @@ fn polyline_midpoint(points: &[(f32, f32)]) -> (f32, f32) {
 
 /// Compute a point at parameter `t` (0..1) along an edge route.
 ///
-/// For straight and orthogonal styles, `t` is interpreted as a fraction of
-/// total arc length.  For curved routes it is the Bézier parameter.
+/// `t` is interpreted as a fraction of the backbone's total arc length.
 #[must_use]
 pub fn point_along_route(route: &EdgeRoute, t: f32) -> (f32, f32) {
-    match route.style {
-        RouteStyle::Curved => {
-            let cp1 = route.control_points.first().copied();
-            let cp2 = route.control_points.get(1).copied();
-            if let (Some(c1), Some(c2)) = (cp1, cp2) {
-                evaluate_cubic_bezier(t, route.x1, route.y1, c1, c2, route.x2, route.y2)
-            } else {
-                let one_minus_t = 1.0 - t;
-                (
-                    one_minus_t.mul_add(route.x1, t * route.x2),
-                    one_minus_t.mul_add(route.y1, t * route.y2),
-                )
-            }
-        }
-        RouteStyle::Straight => {
-            let one_minus_t = 1.0 - t;
-            (
-                one_minus_t.mul_add(route.x1, t * route.x2),
-                one_minus_t.mul_add(route.y1, t * route.y2),
-            )
-        }
-        RouteStyle::Orthogonal => {
-            let points = route_points(route);
-            point_along_polyline(&points, t)
-        }
-    }
-}
-
-/// Evaluate a cubic Bézier curve at parameter `t`.
-fn evaluate_cubic_bezier(
-    t: f32,
-    x0: f32,
-    y0: f32,
-    cp1: (f32, f32),
-    cp2: (f32, f32),
-    x1: f32,
-    y1: f32,
-) -> (f32, f32) {
-    let u = 1.0 - t;
-    let t2 = t * t;
-    let t3 = t2 * t;
-    let u2 = u * u;
-    let u3 = u2 * u;
-
-    let x = t3.mul_add(
-        x1,
-        (3.0 * u * t2).mul_add(cp2.0, (3.0 * u2 * t).mul_add(cp1.0, u3 * x0)),
-    );
-    let y = t3.mul_add(
-        y1,
-        (3.0 * u * t2).mul_add(cp2.1, (3.0 * u2 * t).mul_add(cp1.1, u3 * y0)),
-    );
-    (x, y)
+    point_along_polyline(&route_points(route), t)
 }
 
 /// Compute a point at fraction `t` (0..1) of total arc length along a polyline.
@@ -1308,7 +890,7 @@ mod tests {
         );
 
         assert_eq!(route.style, RouteStyle::Straight);
-        assert!(route.control_points.is_empty());
+        assert_eq!(route.control_points.len(), 2);
         assert_eq!(route.x1, 100.0 + BORDER_OUTSET); // Right edge of source + outset
         assert_eq!(route.x2, 200.0 - BORDER_OUTSET); // Left edge of target - outset
     }
@@ -1353,7 +935,7 @@ mod tests {
     fn test_route_self_loop() {
         let route = route_self_loop(0.0, 0.0, 100.0, 50.0, RouteStyle::Curved);
 
-        assert!(route.control_points.len() >= 2);
+        assert_eq!(route.control_points.len(), 2);
     }
 
     #[test]
@@ -1431,8 +1013,6 @@ mod tests {
 
     #[test]
     fn test_label_position_straight() {
-        // Source at (0, 0) with size (100, 50) -> edge starts at (100, 25)
-        // Target at (200, 100) with size (100, 50) -> edge ends at (200, 125)
         let route = route_edge(
             0.0,
             0.0,
@@ -1445,11 +1025,7 @@ mod tests {
             RouteStyle::Straight,
         );
 
-        // Label should be at midpoint
-        let expected_x = f32::midpoint(100.0, 200.0);
-        let expected_y = f32::midpoint(25.0, 125.0);
-        assert!((route.label_position.0 - expected_x).abs() < 0.001);
-        assert!((route.label_position.1 - expected_y).abs() < 0.001);
+        assert_eq!(route.label_position, (150.0, 75.0));
     }
 
     #[test]
@@ -1468,11 +1044,7 @@ mod tests {
             RouteStyle::Orthogonal,
         );
 
-        // Label should be at the middle vertical segment
-        let mid_x = 100.0 + (200.0 - 100.0) / 2.0;
-        let mid_y = f32::midpoint(25.0, 125.0);
-        assert!((route.label_position.0 - mid_x).abs() < 0.001);
-        assert!((route.label_position.1 - mid_y).abs() < 0.001);
+        assert_eq!(route.label_position, (150.0, 75.0));
     }
 
     #[test]
@@ -1491,21 +1063,14 @@ mod tests {
             RouteStyle::Curved,
         );
 
-        // Label should be at the bezier curve midpoint (t=0.5)
-        // For a cubic bezier, the point at t=0.5 is calculated via De Casteljau's algorithm
-        // The exact position depends on control points, but it should be between start and end
-        assert!(route.label_position.0 > route.x1);
-        assert!(route.label_position.0 < route.x2);
+        assert_eq!(route.label_position, (150.0, 75.0));
     }
 
     #[test]
     fn test_label_position_self_loop_orthogonal() {
         let route = route_self_loop(0.0, 0.0, 100.0, 50.0, RouteStyle::Orthogonal);
 
-        // Self-loop starts and ends on right edge of node at x=100
-        // Label should be to the right of the node
         assert!(route.label_position.0 > 100.0);
-        // Label y should be between the start and end points
         let sy = 50.0 * 0.25; // y + h * 0.25
         let ty = 50.0 * 0.75; // y + h * 0.75
         assert!(route.label_position.1 > sy);
@@ -1516,10 +1081,7 @@ mod tests {
     fn test_label_position_self_loop_curved() {
         let route = route_self_loop(0.0, 0.0, 100.0, 50.0, RouteStyle::Curved);
 
-        // Self-loop starts and ends on right edge of node at x=100
-        // Label should be to the right of the node
         assert!(route.label_position.0 > 100.0);
-        // Label y should be roughly at the vertical center of the node
         let sy = 50.0 * 0.25; // y + h * 0.25
         let ty = 50.0 * 0.75; // y + h * 0.75
         assert!(route.label_position.1 > sy);
@@ -1576,8 +1138,7 @@ mod tests {
             result.control_points.len() > route.control_points.len(),
             "should add detour waypoints"
         );
-        // Upgraded to orthogonal since waypoints were inserted.
-        assert_eq!(result.style, RouteStyle::Orthogonal);
+        assert_eq!(result.style, RouteStyle::Straight);
     }
 
     #[test]
@@ -1628,7 +1189,7 @@ mod tests {
     }
 
     #[test]
-    fn test_detour_curved_route_with_obstacle_converts_to_orthogonal() {
+    fn test_detour_curved_route_with_obstacle_keeps_render_style() {
         let route = route_edge(
             0.0,
             0.0,
@@ -1648,7 +1209,8 @@ mod tests {
             h: 50.0,
         }];
         let result = detour_around_obstacles(&route, &obstacles);
-        assert_eq!(result.style, RouteStyle::Orthogonal);
+        assert_eq!(result.style, RouteStyle::Curved);
+        assert!(result.control_points.len() > route.control_points.len());
     }
 
     #[test]
@@ -1841,36 +1403,45 @@ mod tests {
     }
 
     #[test]
-    fn test_cubic_bezier_midpoint() {
-        // Test the bezier midpoint calculation
-        // For a cubic bezier curve at t=0.5:
-        // B(0.5) = 0.125*P0 + 0.375*P1 + 0.375*P2 + 0.125*P3
-        // With P0=(0,0), P1=(33,0), P2=(66,0), P3=(100,0):
-        // x = 0.125*0 + 0.375*33 + 0.375*66 + 0.125*100 = 49.625
-        let (x, y) =
-            calculate_cubic_bezier_midpoint(0.0, 0.0, (33.0, 0.0), (66.0, 0.0), 100.0, 0.0);
-        assert!((x - 49.625).abs() < 0.001);
-        assert!(y.abs() < 0.001);
-
-        // Test with symmetric control points at exactly 1/3 and 2/3
-        // This should give exactly 50.0
-        let (x, y) = calculate_cubic_bezier_midpoint(
+    fn test_route_geometries_match_across_render_styles() {
+        let straight = route_edge(
             0.0,
             0.0,
-            (100.0 / 3.0, 0.0),
-            (200.0 / 3.0, 0.0),
             100.0,
-            0.0,
+            50.0,
+            200.0,
+            100.0,
+            100.0,
+            50.0,
+            RouteStyle::Straight,
         );
-        assert!((x - 50.0).abs() < 0.001);
-        assert!(y.abs() < 0.001);
+        let orthogonal = route_edge(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            200.0,
+            100.0,
+            100.0,
+            50.0,
+            RouteStyle::Orthogonal,
+        );
+        let curved = route_edge(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            200.0,
+            100.0,
+            100.0,
+            50.0,
+            RouteStyle::Curved,
+        );
 
-        // Test with a curve that goes upward
-        // From (0, 0) to (100, 0) with symmetric control points creating an arc
-        let (x, y) =
-            calculate_cubic_bezier_midpoint(0.0, 0.0, (25.0, 50.0), (75.0, 50.0), 100.0, 0.0);
-        assert!((x - 50.0).abs() < 0.001);
-        assert!(y > 0.0); // The midpoint should be above the baseline
+        assert_eq!(straight.control_points, orthogonal.control_points);
+        assert_eq!(orthogonal.control_points, curved.control_points);
+        assert_eq!(straight.label_position, orthogonal.label_position);
+        assert_eq!(orthogonal.label_position, curved.label_position);
     }
 
     #[test]

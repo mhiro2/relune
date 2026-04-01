@@ -12,11 +12,11 @@ expression: snapshot
           "control_points": [
             [
               201.5,
-              484.0
+              470.0
             ],
             [
               222.5,
-              456.0
+              470.0
             ]
           ],
           "end": [
@@ -29,8 +29,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 217.05599975585938,
-          "label_y": 457.0369873046875,
+          "label_x": 222.5,
+          "label_y": 456.25,
           "nullable": false,
           "route_label_position": [
             212.0,
@@ -90,7 +90,7 @@ expression: snapshot
             201.5,
             508.0
           ],
-          "style": "Orthogonal",
+          "style": "Curved",
           "target_cardinality": "One",
           "target_side": "south",
           "to": "users",
@@ -102,11 +102,11 @@ expression: snapshot
           "control_points": [
             [
               222.5,
-              230.0
+              216.0
             ],
             [
               201.5,
-              202.0
+              216.0
             ]
           ],
           "end": [
@@ -119,8 +119,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 217.05599975585938,
-          "label_y": 228.96299743652344,
+          "label_x": 222.5,
+          "label_y": 229.75,
           "nullable": false,
           "route_label_position": [
             212.0,
@@ -234,18 +234,6 @@ expression: snapshot
             [
               30.0,
               480.0
-            ],
-            [
-              30.0,
-              456.0
-            ],
-            [
-              30.0,
-              456.0
-            ],
-            [
-              30.0,
-              456.0
             ],
             [
               30.0,
@@ -373,7 +361,16 @@ expression: snapshot
     "straight": {
       "edges": [
         {
-          "control_points": [],
+          "control_points": [
+            [
+              201.5,
+              470.0
+            ],
+            [
+              222.5,
+              470.0
+            ]
+          ],
           "end": [
             222.5,
             432.0
@@ -384,8 +381,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 215.5,
-          "label_y": 457.3330078125,
+          "label_x": 222.5,
+          "label_y": 456.25,
           "nullable": false,
           "route_label_position": [
             212.0,
@@ -445,7 +442,7 @@ expression: snapshot
             201.5,
             508.0
           ],
-          "style": "Orthogonal",
+          "style": "Straight",
           "target_cardinality": "One",
           "target_side": "south",
           "to": "users",
@@ -454,7 +451,16 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [],
+          "control_points": [
+            [
+              222.5,
+              216.0
+            ],
+            [
+              201.5,
+              216.0
+            ]
+          ],
           "end": [
             201.5,
             178.0
@@ -465,8 +471,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 215.5,
-          "label_y": 228.66700744628906,
+          "label_x": 222.5,
+          "label_y": 229.75,
           "nullable": false,
           "route_label_position": [
             212.0,

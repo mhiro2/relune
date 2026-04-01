@@ -10,44 +10,102 @@ use crate::theme::ThemeColors;
 /// Builds the SVG `d` attribute for [`EdgeRoute`] from the layout engine.
 #[must_use]
 pub(crate) fn edge_route_svg_path_d(route: &EdgeRoute, curve_offset: f32) -> String {
-    let x1 = route.x1;
-    let y1 = route.y1;
-    let x2 = route.x2;
-    let y2 = route.y2;
+    let points = route_backbone_points(route);
 
     match route.style {
-        RouteStyle::Straight => format!("M {x1:.1} {y1:.1} L {x2:.1} {y2:.1}"),
-        RouteStyle::Orthogonal => {
-            let mut d = format!("M {x1:.1} {y1:.1}");
-            for &(px, py) in &route.control_points {
-                let _ = write!(&mut d, " L {px:.1} {py:.1}");
-            }
-            let _ = write!(&mut d, " L {x2:.1} {y2:.1}");
-            d
+        RouteStyle::Straight if route.control_points.is_empty() => {
+            format!(
+                "M {:.1} {:.1} L {:.1} {:.1}",
+                route.x1, route.y1, route.x2, route.y2
+            )
         }
-        RouteStyle::Curved => {
-            if route.control_points.len() >= 2 {
-                let (c1x, c1y) = route.control_points[0];
-                let (c2x, c2y) = route.control_points[1];
-                format!("M {x1:.1} {y1:.1} C {c1x:.1} {c1y:.1}, {c2x:.1} {c2y:.1}, {x2:.1} {y2:.1}")
-            } else if route.control_points.len() == 1 {
-                // Single control point: quadratic Bezier (promoted to cubic).
-                let (cx, cy) = route.control_points[0];
-                format!("M {x1:.1} {y1:.1} Q {cx:.1} {cy:.1}, {x2:.1} {y2:.1}")
-            } else {
-                // No control points: generate from curve_offset heuristic.
-                let mid_x = f32::midpoint(x1, x2);
-                let (cp1_x, cp2_x) = if x2 > x1 {
-                    (mid_x.min(x1 + curve_offset), mid_x.max(x2 - curve_offset))
-                } else {
-                    (mid_x.max(x1 - curve_offset), mid_x.min(x2 + curve_offset))
-                };
-                format!(
-                    "M {x1:.1} {y1:.1} C {cp1_x:.1} {y1:.1}, {cp2_x:.1} {y2:.1}, {x2:.1} {y2:.1}"
-                )
-            }
-        }
+        RouteStyle::Straight | RouteStyle::Orthogonal => polyline_path_d(&points),
+        RouteStyle::Curved => rounded_backbone_path_d(&points, curve_offset),
     }
+}
+
+fn route_backbone_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
+    let mut points = Vec::with_capacity(route.control_points.len() + 2);
+    points.push((route.x1, route.y1));
+    points.extend(route.control_points.iter().copied());
+    points.push((route.x2, route.y2));
+    points
+}
+
+fn polyline_path_d(points: &[(f32, f32)]) -> String {
+    let Some(&(x, y)) = points.first() else {
+        return String::new();
+    };
+
+    let mut d = format!("M {x:.1} {y:.1}");
+    for &(px, py) in &points[1..] {
+        let _ = write!(&mut d, " L {px:.1} {py:.1}");
+    }
+    d
+}
+
+fn rounded_backbone_path_d(points: &[(f32, f32)], curve_offset: f32) -> String {
+    let Some(&(start_x, start_y)) = points.first() else {
+        return String::new();
+    };
+    if points.len() < 3 {
+        return format!(
+            "M {start_x:.1} {start_y:.1} L {:.1} {:.1}",
+            points[1].0, points[1].1
+        );
+    }
+
+    let mut d = format!("M {start_x:.1} {start_y:.1}");
+    let max_radius = curve_offset.clamp(0.0, 24.0);
+
+    for window in points.windows(3) {
+        let prev = window[0];
+        let curr = window[1];
+        let next = window[2];
+
+        let incoming = segment_length(prev, curr);
+        let outgoing = segment_length(curr, next);
+        let radius = max_radius.min(incoming * 0.5).min(outgoing * 0.5);
+
+        if radius <= 0.0 || is_collinear(prev, curr, next) {
+            let _ = write!(&mut d, " L {:.1} {:.1}", curr.0, curr.1);
+            continue;
+        }
+
+        let before = move_toward(curr, prev, radius);
+        let after = move_toward(curr, next, radius);
+        let _ = write!(
+            &mut d,
+            " L {:.1} {:.1} Q {:.1} {:.1} {:.1} {:.1}",
+            before.0, before.1, curr.0, curr.1, after.0, after.1
+        );
+    }
+
+    let end = points[points.len() - 1];
+    let _ = write!(&mut d, " L {:.1} {:.1}", end.0, end.1);
+    d
+}
+
+fn segment_length(from: (f32, f32), to: (f32, f32)) -> f32 {
+    (to.0 - from.0).hypot(to.1 - from.1)
+}
+
+fn move_toward(from: (f32, f32), to: (f32, f32), distance: f32) -> (f32, f32) {
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let length = dx.hypot(dy);
+    if length <= 0.001 {
+        return from;
+    }
+
+    let ratio = distance / length;
+    (dx.mul_add(ratio, from.0), dy.mul_add(ratio, from.1))
+}
+
+fn is_collinear(prev: (f32, f32), curr: (f32, f32), next: (f32, f32)) -> bool {
+    let same_x = (prev.0 - curr.0).abs() < 0.5 && (curr.0 - next.0).abs() < 0.5;
+    let same_y = (prev.1 - curr.1).abs() < 0.5 && (curr.1 - next.1).abs() < 0.5;
+    same_x || same_y
 }
 
 /// Options for edge rendering.
@@ -658,6 +716,44 @@ mod tests {
         assert!(out.contains("L 150.0 25.0"));
         assert!(out.contains("L 150.0 125.0"));
         assert!(out.contains("L 200.0 125.0"));
+    }
+
+    #[test]
+    fn test_straight_style_keeps_backbone_when_bends_are_required() {
+        let path = edge_route_svg_path_d(
+            &EdgeRoute {
+                x1: 100.0,
+                y1: 25.0,
+                x2: 200.0,
+                y2: 125.0,
+                control_points: vec![(150.0, 25.0), (150.0, 125.0)],
+                style: RouteStyle::Straight,
+                label_position: (150.0, 75.0),
+            },
+            50.0,
+        );
+
+        assert!(path.contains("L 150.0 25.0"));
+        assert!(path.contains("L 150.0 125.0"));
+    }
+
+    #[test]
+    fn test_curved_style_rounds_backbone_corners() {
+        let path = edge_route_svg_path_d(
+            &EdgeRoute {
+                x1: 100.0,
+                y1: 25.0,
+                x2: 200.0,
+                y2: 125.0,
+                control_points: vec![(150.0, 25.0), (150.0, 125.0)],
+                style: RouteStyle::Curved,
+                label_position: (150.0, 75.0),
+            },
+            50.0,
+        );
+
+        assert!(path.contains("Q 150.0 25.0"));
+        assert!(path.contains("Q 150.0 125.0"));
     }
 
     #[test]

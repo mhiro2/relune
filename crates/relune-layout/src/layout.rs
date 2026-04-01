@@ -69,7 +69,7 @@ pub struct LayoutConfig {
     pub node_padding: f32,
     /// Layout direction.
     pub direction: LayoutDirection,
-    /// Edge routing style.
+    /// Edge rendering style.
     pub edge_style: RouteStyle,
     /// Whether to show column details in nodes.
     /// When false, only table names are displayed.

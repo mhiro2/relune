@@ -41,7 +41,7 @@ pub struct WasmRenderRequest {
     /// Layout algorithm: "hierarchical" or "force-directed".
     #[serde(default)]
     pub layout_algorithm: Option<String>,
-    /// Edge routing style: "straight", "orthogonal", or "curved".
+    /// Edge rendering style: "straight", "orthogonal", or "curved".
     #[serde(default)]
     pub edge_style: Option<String>,
     /// Horizontal spacing hint.
@@ -216,7 +216,7 @@ pub struct WasmExportRequest {
     /// Layout algorithm: "hierarchical" or "force-directed".
     #[serde(default)]
     pub layout_algorithm: Option<String>,
-    /// Edge routing style: "straight", "orthogonal", or "curved".
+    /// Edge rendering style: "straight", "orthogonal", or "curved".
     #[serde(default)]
     pub edge_style: Option<String>,
 }

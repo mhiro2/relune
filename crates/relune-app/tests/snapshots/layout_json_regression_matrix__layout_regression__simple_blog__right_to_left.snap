@@ -11,11 +11,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1168.800048828125,
+              1112.0,
               123.0
             ],
             [
-              1055.199951171875,
+              1112.0,
               105.0
             ]
           ],
@@ -52,8 +52,40 @@ expression: snapshot
         {
           "control_points": [
             [
+              1226.0,
+              141.0
+            ],
+            [
+              1226.0,
+              30.0
+            ],
+            [
+              994.0,
+              30.0
+            ],
+            [
               994.0,
               141.0
+            ],
+            [
+              801.5,
+              141.0
+            ],
+            [
+              801.5,
+              30.0
+            ],
+            [
+              801.5,
+              30.0
+            ],
+            [
+              801.5,
+              105.0
+            ],
+            [
+              994.0,
+              105.0
             ],
             [
               994.0,
@@ -78,19 +110,19 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 819.5,
+          "label_x": 1057.0,
           "label_y": 30.0,
           "nullable": false,
           "route_label_position": [
-            819.5,
-            30.0
+            865.0,
+            105.0
           ],
           "source_side": "west",
           "start": [
             1254.0,
             141.0
           ],
-          "style": "Orthogonal",
+          "style": "Curved",
           "target_cardinality": "One",
           "target_side": "east",
           "to": "users",
@@ -101,11 +133,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              547.7999877929688,
+              491.0,
               123.0
             ],
             [
-              434.20001220703125,
+              491.0,
               105.0
             ]
           ],
@@ -393,7 +425,16 @@ expression: snapshot
     "straight": {
       "edges": [
         {
-          "control_points": [],
+          "control_points": [
+            [
+              1112.0,
+              123.0
+            ],
+            [
+              1112.0,
+              105.0
+            ]
+          ],
           "end": [
             970.0,
             105.0
@@ -427,8 +468,40 @@ expression: snapshot
         {
           "control_points": [
             [
+              1226.0,
+              141.0
+            ],
+            [
+              1226.0,
+              30.0
+            ],
+            [
+              994.0,
+              30.0
+            ],
+            [
               994.0,
               141.0
+            ],
+            [
+              801.5,
+              141.0
+            ],
+            [
+              801.5,
+              30.0
+            ],
+            [
+              801.5,
+              30.0
+            ],
+            [
+              801.5,
+              105.0
+            ],
+            [
+              994.0,
+              105.0
             ],
             [
               994.0,
@@ -453,19 +526,19 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 819.5,
+          "label_x": 1057.0,
           "label_y": 30.0,
           "nullable": false,
           "route_label_position": [
-            819.5,
-            30.0
+            865.0,
+            105.0
           ],
           "source_side": "west",
           "start": [
             1254.0,
             141.0
           ],
-          "style": "Orthogonal",
+          "style": "Straight",
           "target_cardinality": "One",
           "target_side": "east",
           "to": "users",
@@ -474,7 +547,16 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [],
+          "control_points": [
+            [
+              491.0,
+              123.0
+            ],
+            [
+              491.0,
+              105.0
+            ]
+          ],
           "end": [
             349.0,
             105.0

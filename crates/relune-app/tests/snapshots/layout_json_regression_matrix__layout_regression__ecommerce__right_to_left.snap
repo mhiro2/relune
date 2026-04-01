@@ -27,7 +27,19 @@ expression: snapshot
               30.0
             ],
             [
-              580.2000122070313,
+              765.7000122070313,
+              30.0
+            ],
+            [
+              765.7000122070313,
+              105.0
+            ],
+            [
+              951.2000122070313,
+              105.0
+            ],
+            [
+              951.2000122070313,
               30.0
             ],
             [
@@ -49,19 +61,19 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 580.2000122070313,
-          "label_y": 423.5,
+          "label_x": 608.2000122070313,
+          "label_y": 33.5,
           "nullable": false,
           "route_label_position": [
-            580.2000122070313,
-            423.5
+            608.2000122070313,
+            33.5
           ],
           "source_side": "west",
           "start": [
             1182.4000244140625,
             577.0
           ],
-          "style": "Orthogonal",
+          "style": "Curved",
           "target_cardinality": "One",
           "target_side": "east",
           "to": "customers",
@@ -72,12 +84,12 @@ expression: snapshot
         {
           "control_points": [
             [
-              979.2000122070313,
-              421.0
+              961.2000122070313,
+              439.0
             ],
             [
-              979.2000122070313,
-              535.0
+              961.2000122070313,
+              517.0
             ]
           ],
           "end": [
@@ -90,11 +102,11 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1001.7000122070313,
+          "label_x": 1009.2000122070313,
           "label_y": 478.0,
           "nullable": true,
           "route_label_position": [
-            965.7000122070313,
+            961.2000122070313,
             478.0
           ],
           "source_side": "east",
@@ -113,11 +125,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1105.8399658203125,
+              1054.800048828125,
               123.0
             ],
             [
-              1003.760009765625,
+              1054.800048828125,
               105.0
             ]
           ],
@@ -171,6 +183,22 @@ expression: snapshot
             ],
             [
               1329.9000244140625,
+              433.0
+            ],
+            [
+              1204.4000244140625,
+              433.0
+            ],
+            [
+              1204.4000244140625,
+              456.0
+            ],
+            [
+              1329.9000244140625,
+              456.0
+            ],
+            [
+              1329.9000244140625,
               374.0
             ],
             [
@@ -216,6 +244,22 @@ expression: snapshot
             [
               951.2000122070313,
               456.0
+            ],
+            [
+              951.2000122070313,
+              433.0
+            ],
+            [
+              779.7000122070313,
+              433.0
+            ],
+            [
+              779.7000122070313,
+              374.0
+            ],
+            [
+              951.2000122070313,
+              374.0
             ],
             [
               951.2000122070313,
@@ -236,11 +280,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 985.7999877929688,
+          "label_x": 880.7999877929688,
           "label_y": 374.0,
           "nullable": false,
           "route_label_position": [
-            985.7999877929688,
+            880.7999877929688,
             374.0
           ],
           "source_side": "south",
@@ -248,7 +292,7 @@ expression: snapshot
             1329.9000244140625,
             232.0
           ],
-          "style": "Orthogonal",
+          "style": "Curved",
           "target_cardinality": "One",
           "target_side": "north",
           "to": "products",
@@ -259,11 +303,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              527.6400146484375,
+              476.6000061035156,
               123.0
             ],
             [
-              425.55999755859375,
+              476.6000061035156,
               105.0
             ]
           ],
@@ -300,11 +344,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1138.0400390625,
+              1077.800048828125,
               377.0
             ],
             [
-              1017.5599975585938,
+              1077.800048828125,
               449.0
             ]
           ],
@@ -318,8 +362,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 1077.800048828125,
-          "label_y": 413.0,
+          "label_x": 1020.5,
+          "label_y": 449.0,
           "nullable": false,
           "route_label_position": [
             1077.800048828125,
@@ -341,11 +385,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1138.0400390625,
+              1077.800048828125,
               359.0
             ],
             [
-              1017.5599975585938,
+              1077.800048828125,
               685.0
             ]
           ],
@@ -991,7 +1035,19 @@ expression: snapshot
               30.0
             ],
             [
-              580.2000122070313,
+              765.7000122070313,
+              30.0
+            ],
+            [
+              765.7000122070313,
+              105.0
+            ],
+            [
+              951.2000122070313,
+              105.0
+            ],
+            [
+              951.2000122070313,
               30.0
             ],
             [
@@ -1013,19 +1069,19 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 580.2000122070313,
-          "label_y": 423.5,
+          "label_x": 608.2000122070313,
+          "label_y": 33.5,
           "nullable": false,
           "route_label_position": [
-            580.2000122070313,
-            423.5
+            608.2000122070313,
+            33.5
           ],
           "source_side": "west",
           "start": [
             1182.4000244140625,
             577.0
           ],
-          "style": "Orthogonal",
+          "style": "Straight",
           "target_cardinality": "One",
           "target_side": "east",
           "to": "customers",
@@ -1036,12 +1092,12 @@ expression: snapshot
         {
           "control_points": [
             [
-              979.2000122070313,
-              421.0
+              961.2000122070313,
+              439.0
             ],
             [
-              979.2000122070313,
-              535.0
+              961.2000122070313,
+              517.0
             ]
           ],
           "end": [
@@ -1054,11 +1110,11 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1001.7000122070313,
+          "label_x": 1009.2000122070313,
           "label_y": 478.0,
           "nullable": true,
           "route_label_position": [
-            965.7000122070313,
+            961.2000122070313,
             478.0
           ],
           "source_side": "east",
@@ -1066,7 +1122,7 @@ expression: snapshot
             925.2000122070313,
             439.0
           ],
-          "style": "Curved",
+          "style": "Straight",
           "target_cardinality": "One",
           "target_side": "east",
           "to": "categories",
@@ -1075,7 +1131,16 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [],
+          "control_points": [
+            [
+              1054.800048828125,
+              123.0
+            ],
+            [
+              1054.800048828125,
+              105.0
+            ]
+          ],
           "end": [
             927.2000122070313,
             105.0
@@ -1126,6 +1191,22 @@ expression: snapshot
             ],
             [
               1329.9000244140625,
+              433.0
+            ],
+            [
+              1204.4000244140625,
+              433.0
+            ],
+            [
+              1204.4000244140625,
+              456.0
+            ],
+            [
+              1329.9000244140625,
+              456.0
+            ],
+            [
+              1329.9000244140625,
               374.0
             ],
             [
@@ -1171,6 +1252,22 @@ expression: snapshot
             [
               951.2000122070313,
               456.0
+            ],
+            [
+              951.2000122070313,
+              433.0
+            ],
+            [
+              779.7000122070313,
+              433.0
+            ],
+            [
+              779.7000122070313,
+              374.0
+            ],
+            [
+              951.2000122070313,
+              374.0
             ],
             [
               951.2000122070313,
@@ -1191,11 +1288,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 985.7999877929688,
+          "label_x": 880.7999877929688,
           "label_y": 374.0,
           "nullable": false,
           "route_label_position": [
-            985.7999877929688,
+            880.7999877929688,
             374.0
           ],
           "source_side": "south",
@@ -1203,7 +1300,7 @@ expression: snapshot
             1329.9000244140625,
             232.0
           ],
-          "style": "Orthogonal",
+          "style": "Straight",
           "target_cardinality": "One",
           "target_side": "north",
           "to": "products",
@@ -1212,7 +1309,16 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [],
+          "control_points": [
+            [
+              476.6000061035156,
+              123.0
+            ],
+            [
+              476.6000061035156,
+              105.0
+            ]
+          ],
           "end": [
             349.0,
             105.0
@@ -1244,7 +1350,16 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [],
+          "control_points": [
+            [
+              1077.800048828125,
+              377.0
+            ],
+            [
+              1077.800048828125,
+              449.0
+            ]
+          ],
           "end": [
             927.2000122070313,
             449.0
@@ -1255,8 +1370,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 1077.800048828125,
-          "label_y": 413.0,
+          "label_x": 1020.5,
+          "label_y": 449.0,
           "nullable": false,
           "route_label_position": [
             1077.800048828125,
@@ -1276,7 +1391,16 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [],
+          "control_points": [
+            [
+              1077.800048828125,
+              359.0
+            ],
+            [
+              1077.800048828125,
+              685.0
+            ]
+          ],
           "end": [
             927.2000122070313,
             685.0
