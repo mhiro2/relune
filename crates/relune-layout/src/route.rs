@@ -45,6 +45,12 @@ pub(crate) enum AttachmentSide {
     West,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChannelAxis {
+    X,
+    Y,
+}
+
 /// Short outward segment length used to preserve endpoint approach direction
 /// when obstacle detours insert extra bends into a route.
 const ENDPOINT_ANCHOR_DISTANCE: f32 = 28.0;
@@ -181,6 +187,42 @@ pub(crate) fn route_edge_with_assigned_ports(
     build_backbone_route(source, target, source_side, target_side, style)
 }
 
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn route_edge_with_simple_channel(
+    x1: f32,
+    y1: f32,
+    w1: f32,
+    h1: f32,
+    x2: f32,
+    y2: f32,
+    w2: f32,
+    h2: f32,
+    style: RouteStyle,
+    source_side: AttachmentSide,
+    target_side: AttachmentSide,
+    source_lane_offset: f32,
+    target_lane_offset: f32,
+    source_col_offset: f32,
+    target_col_offset: f32,
+    channel_axis: ChannelAxis,
+    channel_coordinate: f32,
+) -> EdgeRoute {
+    let source = apply_endpoint_offsets(
+        attachment_point_for_side(x1, y1, w1, h1, source_side),
+        source_side,
+        source_lane_offset,
+        source_col_offset,
+    );
+    let target = apply_endpoint_offsets(
+        attachment_point_for_side(x2, y2, w2, h2, target_side),
+        target_side,
+        target_lane_offset,
+        target_col_offset,
+    );
+    build_simple_channel_route(source, target, style, channel_axis, channel_coordinate)
+}
+
 /// Apply lane + column offsets to an attachment point.
 ///
 /// Lane offset is always applied perpendicular to the attachment side.
@@ -223,6 +265,45 @@ fn build_backbone_route(
         control_points: points[1..points.len() - 1].to_vec(),
         style,
         label_position: polyline_midpoint(&points),
+    }
+}
+
+fn build_simple_channel_route(
+    source: (f32, f32),
+    target: (f32, f32),
+    style: RouteStyle,
+    channel_axis: ChannelAxis,
+    channel_coordinate: f32,
+) -> EdgeRoute {
+    let (source_channel_turn, target_channel_turn, label_position) = match channel_axis {
+        ChannelAxis::X => (
+            (channel_coordinate, source.1),
+            (channel_coordinate, target.1),
+            (channel_coordinate, f32::midpoint(source.1, target.1)),
+        ),
+        ChannelAxis::Y => (
+            (source.0, channel_coordinate),
+            (target.0, channel_coordinate),
+            (f32::midpoint(source.0, target.0), channel_coordinate),
+        ),
+    };
+
+    let points =
+        simplify_orthogonal_path(&[source, source_channel_turn, target_channel_turn, target]);
+    let label_position = if points.len() >= 4 {
+        label_position
+    } else {
+        polyline_midpoint(&points)
+    };
+
+    EdgeRoute {
+        x1: points[0].0,
+        y1: points[0].1,
+        x2: points[points.len() - 1].0,
+        y2: points[points.len() - 1].1,
+        control_points: points[1..points.len() - 1].to_vec(),
+        style,
+        label_position,
     }
 }
 
@@ -1540,5 +1621,31 @@ mod tests {
             "source Y should be bottom + outset, got {}",
             route.y1
         );
+    }
+
+    #[test]
+    fn test_simple_channel_route_places_label_on_channel_midpoint() {
+        let route = route_edge_with_simple_channel(
+            0.0,
+            0.0,
+            100.0,
+            60.0,
+            200.0,
+            200.0,
+            100.0,
+            60.0,
+            RouteStyle::Orthogonal,
+            AttachmentSide::South,
+            AttachmentSide::North,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            ChannelAxis::Y,
+            130.0,
+        );
+
+        assert_eq!(route.control_points, vec![(50.0, 130.0), (250.0, 130.0)]);
+        assert_eq!(route.label_position, (150.0, 130.0));
     }
 }

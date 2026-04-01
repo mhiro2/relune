@@ -19,8 +19,9 @@ use crate::order::order_nodes_within_layers;
 use crate::port::{EdgePortAssignment, assign_edge_ports};
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
-    LABEL_HALF_H, Rect, detour_around_obstacles, detour_around_obstacles_with_endpoints,
-    estimate_label_half_width, nudge_label, point_along_route, route_edge_with_assigned_ports,
+    ChannelAxis, LABEL_HALF_H, Rect, detour_around_obstacles,
+    detour_around_obstacles_with_endpoints, estimate_label_half_width, nudge_label,
+    point_along_route, route_edge_with_assigned_ports, route_edge_with_simple_channel,
     route_self_loop_with_offset, sample_route_obstacles,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
@@ -479,12 +480,14 @@ pub fn build_layout_from_graph_with_config(
 
     // Step 3: Assign coordinates based on layout mode
     let node_sizes = measure_node_sizes(&graph, &effective_config);
+    let mut node_ranks = None;
     let (positioned_nodes, width, height) = match effective_config.mode {
         LayoutAlgorithm::Hierarchical => {
             // Hierarchical layout: assign ranks and order
             let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
             debug!("Assigned {} ranks", ranks.num_ranks);
             let ordered_nodes = order_nodes_within_layers(&graph, &ranks);
+            node_ranks = Some(ranks.node_rank);
             assign_coordinates(&graph, &ordered_nodes, &effective_config, &node_sizes)
         }
         LayoutAlgorithm::ForceDirected => {
@@ -494,7 +497,12 @@ pub fn build_layout_from_graph_with_config(
     };
 
     // Step 4: Route edges
-    let positioned_edges = route_edges(&graph, &positioned_nodes, &effective_config);
+    let positioned_edges = route_edges(
+        &graph,
+        &positioned_nodes,
+        &effective_config,
+        node_ranks.as_deref(),
+    );
 
     // Step 5: Position groups
     let positioned_groups = position_groups(&graph.groups, &positioned_nodes);
@@ -1137,12 +1145,14 @@ fn route_edges(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
     config: &LayoutConfig,
+    node_ranks: Option<&[usize]>,
 ) -> Vec<PositionedEdge> {
     let node_positions: std::collections::BTreeMap<&str, (f32, f32, f32, f32)> = positioned_nodes
         .iter()
         .map(|n| (n.id.as_str(), (n.x, n.y, n.width, n.height)))
         .collect();
     let port_assignments = assign_edge_ports(graph, positioned_nodes, config);
+    let rank_bounds = node_ranks.map(|ranks| rank_axis_bounds(positioned_nodes, ranks, config));
     let edge_counts = edge_lane_counts(graph);
     let mut seen_lanes = std::collections::BTreeMap::new();
 
@@ -1181,23 +1191,55 @@ fn route_edges(
         {
             detour_source_side = Some(assignment.source_side);
             detour_target_side = Some(assignment.target_side);
-            route_edge_with_assigned_ports(
-                x1,
-                y1,
-                w1,
-                h1,
-                x2,
-                y2,
-                w2,
-                h2,
-                config.edge_style,
-                assignment.source_side,
-                assignment.target_side,
-                assignment.source_slot_offset,
-                assignment.target_slot_offset,
-                assignment.source_row_offset,
-                assignment.target_row_offset,
-            )
+            if let Some((channel_axis, channel_coordinate)) = node_ranks.and_then(|ranks| {
+                simple_channel_for_edge(
+                    graph,
+                    edge,
+                    ranks,
+                    rank_bounds.as_deref(),
+                    config.direction,
+                    (x1, y1, w1, h1),
+                    (x2, y2, w2, h2),
+                )
+            }) {
+                route_edge_with_simple_channel(
+                    x1,
+                    y1,
+                    w1,
+                    h1,
+                    x2,
+                    y2,
+                    w2,
+                    h2,
+                    config.edge_style,
+                    assignment.source_side,
+                    assignment.target_side,
+                    assignment.source_slot_offset,
+                    assignment.target_slot_offset,
+                    assignment.source_row_offset,
+                    assignment.target_row_offset,
+                    channel_axis,
+                    channel_coordinate,
+                )
+            } else {
+                route_edge_with_assigned_ports(
+                    x1,
+                    y1,
+                    w1,
+                    h1,
+                    x2,
+                    y2,
+                    w2,
+                    h2,
+                    config.edge_style,
+                    assignment.source_side,
+                    assignment.target_side,
+                    assignment.source_slot_offset,
+                    assignment.target_slot_offset,
+                    assignment.source_row_offset,
+                    assignment.target_row_offset,
+                )
+            }
         } else {
             continue;
         };
@@ -1291,6 +1333,135 @@ fn route_edges(
     resolve_edge_label_collisions(&mut edges, positioned_nodes);
 
     edges
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RankAxisBounds {
+    min: f32,
+    max: f32,
+}
+
+fn rank_axis_bounds(
+    positioned_nodes: &[PositionedNode],
+    node_ranks: &[usize],
+    config: &LayoutConfig,
+) -> Vec<RankAxisBounds> {
+    let rank_count = node_ranks
+        .iter()
+        .copied()
+        .max()
+        .map_or(0usize, |rank| rank + 1);
+    let mut bounds = vec![
+        RankAxisBounds {
+            min: f32::INFINITY,
+            max: f32::NEG_INFINITY,
+        };
+        rank_count
+    ];
+    let use_x_axis = matches!(
+        config.direction,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+    );
+
+    for (node, &rank) in positioned_nodes.iter().zip(node_ranks) {
+        let (min, max) = if use_x_axis {
+            (node.x, node.x + node.width)
+        } else {
+            (node.y, node.y + node.height)
+        };
+        bounds[rank].min = bounds[rank].min.min(min);
+        bounds[rank].max = bounds[rank].max.max(max);
+    }
+
+    bounds
+}
+
+#[allow(clippy::too_many_arguments)]
+fn simple_channel_for_edge(
+    graph: &LayoutGraph,
+    edge: &crate::graph::LayoutEdge,
+    node_ranks: &[usize],
+    rank_bounds: Option<&[RankAxisBounds]>,
+    direction: LayoutDirection,
+    source_rect: (f32, f32, f32, f32),
+    target_rect: (f32, f32, f32, f32),
+) -> Option<(ChannelAxis, f32)> {
+    let source_rank = graph
+        .node_index
+        .get(edge.from.as_str())
+        .and_then(|&index| node_ranks.get(index))
+        .copied()?;
+    let target_rank = graph
+        .node_index
+        .get(edge.to.as_str())
+        .and_then(|&index| node_ranks.get(index))
+        .copied()?;
+    let same_rank = source_rank == target_rank;
+
+    match direction {
+        LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
+            if same_rank {
+                Some((
+                    ChannelAxis::X,
+                    same_rank_x_channel(source_rect, target_rect),
+                ))
+            } else {
+                inter_rank_channel(source_rank, target_rank, rank_bounds?)
+                    .map(|coord| (ChannelAxis::Y, coord))
+            }
+        }
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft => {
+            if same_rank {
+                Some((
+                    ChannelAxis::Y,
+                    same_rank_y_channel(source_rect, target_rect),
+                ))
+            } else {
+                inter_rank_channel(source_rank, target_rank, rank_bounds?)
+                    .map(|coord| (ChannelAxis::X, coord))
+            }
+        }
+    }
+}
+
+fn inter_rank_channel(
+    source_rank: usize,
+    target_rank: usize,
+    rank_bounds: &[RankAxisBounds],
+) -> Option<f32> {
+    let source = *rank_bounds.get(source_rank)?;
+    let target = *rank_bounds.get(target_rank)?;
+    if source.min <= target.min {
+        Some(f32::midpoint(source.max, target.min))
+    } else {
+        Some(f32::midpoint(source.min, target.max))
+    }
+}
+
+fn same_rank_x_channel(
+    source_rect: (f32, f32, f32, f32),
+    target_rect: (f32, f32, f32, f32),
+) -> f32 {
+    let source_center = source_rect.0 + source_rect.2 / 2.0;
+    let target_center = target_rect.0 + target_rect.2 / 2.0;
+    if source_center <= target_center {
+        f32::midpoint(source_rect.0 + source_rect.2, target_rect.0)
+    } else {
+        f32::midpoint(source_rect.0, target_rect.0 + target_rect.2)
+    }
+}
+
+fn same_rank_y_channel(
+    source_rect: (f32, f32, f32, f32),
+    target_rect: (f32, f32, f32, f32),
+) -> f32 {
+    let source_center = source_rect.1 + source_rect.3 / 2.0;
+    let target_center = target_rect.1 + target_rect.3 / 2.0;
+    if source_center <= target_center {
+        f32::midpoint(source_rect.1 + source_rect.3, target_rect.1)
+    } else {
+        f32::midpoint(source_rect.1, target_rect.1 + target_rect.3)
+    }
 }
 
 fn canonical_edge_pair(from: &str, to: &str) -> (String, String) {
@@ -1649,6 +1820,32 @@ mod tests {
             ],
             views: vec![],
             enums: vec![],
+        }
+    }
+
+    fn single_edge_graph(from: &str, to: &str) -> LayoutGraph {
+        let mut node_index = std::collections::BTreeMap::new();
+        node_index.insert(from.to_string(), 0usize);
+        node_index.insert(to.to_string(), 1usize);
+
+        LayoutGraph {
+            nodes: Vec::new(),
+            edges: vec![LayoutEdge {
+                from: from.to_string(),
+                to: to.to_string(),
+                name: Some("fk".to_string()),
+                from_columns: Vec::new(),
+                to_columns: Vec::new(),
+                kind: EdgeKind::ForeignKey,
+                is_self_loop: false,
+                nullable: false,
+                target_cardinality: relune_core::layout::Cardinality::One,
+                is_collapsed_join: false,
+                collapsed_join_table: None,
+            }],
+            groups: Vec::new(),
+            node_index,
+            reverse_index: std::collections::BTreeMap::new(),
         }
     }
 
@@ -2522,7 +2719,7 @@ mod tests {
             },
         ];
 
-        let edges = route_edges(&graph, &positioned_nodes, &LayoutConfig::default());
+        let edges = route_edges(&graph, &positioned_nodes, &LayoutConfig::default(), None);
         assert_eq!(edges.len(), 2);
 
         for edge in &edges {
@@ -2776,5 +2973,87 @@ mod tests {
             "Self-loop label center ({},{}) is inside node ({},{},{},{})",
             edge.label_x, edge.label_y, node.x, node.y, node.width, node.height
         );
+    }
+
+    #[test]
+    fn test_route_edges_use_inter_rank_channel_for_hierarchical_flow() {
+        let graph = single_edge_graph("authors", "posts");
+        let positioned_nodes = vec![
+            PositionedNode {
+                id: "authors".to_string(),
+                label: "authors".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "posts".to_string(),
+                label: "posts".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 200.0,
+                y: 200.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+        ];
+        let config = LayoutConfig::default();
+
+        let edges = route_edges(&graph, &positioned_nodes, &config, Some(&[0, 1]));
+        let edge = edges.first().expect("edge");
+
+        assert_eq!(edge.route.control_points.len(), 2);
+        assert!((edge.route.control_points[0].1 - 140.0).abs() < 0.001);
+        assert!((edge.route.control_points[1].1 - 140.0).abs() < 0.001);
+        assert!((edge.route.label_position.1 - 140.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_route_edges_use_separate_same_rank_channel_rule() {
+        let graph = single_edge_graph("authors", "posts");
+        let positioned_nodes = vec![
+            PositionedNode {
+                id: "authors".to_string(),
+                label: "authors".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "posts".to_string(),
+                label: "posts".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 220.0,
+                y: 120.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+        ];
+        let config = LayoutConfig::default();
+
+        let edges = route_edges(&graph, &positioned_nodes, &config, Some(&[0, 0]));
+        let edge = edges.first().expect("edge");
+        let turn = edge.route.control_points.first().expect("turn");
+
+        assert!((turn.0 - 160.0).abs() < 0.001);
     }
 }
