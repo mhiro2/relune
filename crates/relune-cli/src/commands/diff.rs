@@ -5,8 +5,8 @@ use anyhow::Context;
 use super::input::DiffInputSelection;
 use crate::cli::{ColorWhen, DiffArgs, DiffFormat};
 use crate::config::ReluneConfig;
-use crate::error::{CliError, CliResult};
-use crate::output::{DiagnosticPrinter, OutputWriter, print_success};
+use crate::error::CliResult;
+use crate::output::{check_diagnostics, print_success, write_output};
 use relune_app::{DiffRequest, diff, format_diff_text};
 
 /// Run the diff command.
@@ -42,16 +42,7 @@ pub fn run_diff(
     // Execute diff
     let mut result = diff(request).context("Failed to compute schema diff")?;
 
-    // Print diagnostics
-    let diag_printer = DiagnosticPrinter::new(color);
-    diag_printer.print_all(&result.diagnostics);
-
-    // Check for errors
-    if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        return Err(CliError::general(anyhow::anyhow!(
-            "Errors were encountered during diff computation"
-        )));
-    }
+    check_diagnostics(&result.diagnostics, color, false)?;
 
     // Format output
     let rendered = result.rendered.take();
@@ -61,12 +52,7 @@ pub fn run_diff(
             .context("Failed to serialize diff to JSON")?,
         DiffFormat::Svg | DiffFormat::Html => rendered.unwrap_or_default(),
     };
-
-    // Write output
-    let mut writer =
-        OutputWriter::new(args.out.as_deref(), color).context("Failed to create output writer")?;
-    writer.write(&content).context("Failed to write output")?;
-    writer.finish().context("Failed to finalize output")?;
+    write_output(&content, args.out.as_deref(), color)?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {

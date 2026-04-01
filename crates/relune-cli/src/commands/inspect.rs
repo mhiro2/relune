@@ -5,8 +5,8 @@ use anyhow::Context;
 use super::input::InputSelection;
 use crate::cli::{ColorWhen, InspectArgs, InspectFormat};
 use crate::config::ReluneConfig;
-use crate::error::{CliError, CliResult};
-use crate::output::{DiagnosticPrinter, OutputWriter};
+use crate::error::CliResult;
+use crate::output::{check_diagnostics, write_output};
 use relune_app::{InspectFormat as AppInspectFormat, InspectRequest, format_inspect_text, inspect};
 
 /// Run the inspect command.
@@ -30,28 +30,16 @@ pub fn run_inspect(args: &InspectArgs, color: ColorWhen, config: &ReluneConfig) 
     // Execute inspect
     let result = inspect(request).context("Failed to inspect schema")?;
 
-    // Print diagnostics
-    let diag_printer = DiagnosticPrinter::new(color);
-    diag_printer.print_all(&result.diagnostics);
+    check_diagnostics(&result.diagnostics, color, false)?;
 
-    // Check for errors
-    if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        return Err(CliError::general(anyhow::anyhow!(
-            "Errors were encountered during inspection"
-        )));
-    }
-
-    // Format output using merged config
+    // Format and write output (always to stdout for inspect)
     let output = match merged.format {
         InspectFormat::Json => {
             serde_json::to_string_pretty(&result).context("Failed to serialize result to JSON")?
         }
         InspectFormat::Text => format_inspect_text(&result),
     };
-
-    // Write output (always to stdout for inspect)
-    let mut writer = OutputWriter::new(None, color).context("Failed to create output writer")?;
-    writer.write(&output).context("Failed to write output")?;
+    write_output(&output, None, color)?;
 
     Ok(())
 }

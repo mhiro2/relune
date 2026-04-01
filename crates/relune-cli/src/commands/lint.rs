@@ -6,7 +6,7 @@ use super::input::InputSelection;
 use crate::cli::{ColorWhen, LintArgs, LintFormat, LintSeverity};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
-use crate::output::{DiagnosticPrinter, OutputWriter};
+use crate::output::{check_diagnostics, write_output};
 use relune_app::{LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
 use relune_core::Severity;
 
@@ -40,28 +40,16 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Cli
     // Execute lint
     let result = lint(request).context("Failed to lint schema")?;
 
-    // Print diagnostics
-    let diag_printer = DiagnosticPrinter::new(color);
-    diag_printer.print_all(&result.diagnostics);
+    check_diagnostics(&result.diagnostics, color, false)?;
 
-    // Check for errors
-    if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        return Err(CliError::general(anyhow::anyhow!(
-            "Errors were encountered during linting"
-        )));
-    }
-
-    // Format output
+    // Format and write output (always to stdout for lint)
     let output = match merged.format {
         LintFormat::Json => {
             serde_json::to_string_pretty(&result).context("Failed to serialize result to JSON")?
         }
         LintFormat::Text => format_lint_text(&result),
     };
-
-    // Write output (always to stdout for lint)
-    let mut writer = OutputWriter::new(None, color).context("Failed to create output writer")?;
-    writer.write(&output).context("Failed to write output")?;
+    write_output(&output, None, color)?;
 
     // Check if we should exit with non-zero code based on --deny
     if result.has_failures(fail_on) {

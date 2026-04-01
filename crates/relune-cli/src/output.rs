@@ -188,6 +188,47 @@ pub fn print_stats(stats: &relune_app::RenderStats) {
     );
 }
 
+/// Print diagnostics, fail on errors, and optionally fail on warnings.
+///
+/// This is the shared post-execution diagnostics pipeline used by every CLI
+/// command.  It prints all diagnostics, then checks for errors (always) and
+/// warnings (when `fail_on_warning` is `true`).
+pub fn check_diagnostics(
+    diagnostics: &[Diagnostic],
+    color: ColorWhen,
+    fail_on_warning: bool,
+) -> crate::error::CliResult<()> {
+    let printer = DiagnosticPrinter::new(color);
+    printer.print_all(diagnostics);
+
+    if fail_on_warning && DiagnosticPrinter::has_warnings(diagnostics) {
+        return Err(crate::error::CliError::warning(anyhow::anyhow!(
+            "Warnings were emitted and --fail-on-warning is set"
+        )));
+    }
+    if DiagnosticPrinter::has_errors(diagnostics) {
+        return Err(crate::error::CliError::general(anyhow::anyhow!(
+            "Errors were encountered during processing"
+        )));
+    }
+    Ok(())
+}
+
+/// Write string content to an output destination and finalise the writer.
+pub fn write_output(
+    content: &str,
+    out_path: Option<&Path>,
+    color: ColorWhen,
+) -> crate::error::CliResult<()> {
+    use anyhow::Context;
+
+    let mut writer =
+        OutputWriter::new(out_path, color).context("Failed to create output writer")?;
+    writer.write(content).context("Failed to write output")?;
+    writer.finish().context("Failed to finalize output")?;
+    Ok(())
+}
+
 /// Print a success message to stderr.
 pub fn print_success(message: &str, color: ColorWhen) {
     let use_colors = match color {

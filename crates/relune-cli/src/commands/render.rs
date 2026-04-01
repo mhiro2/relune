@@ -8,7 +8,7 @@ use super::input::InputSelection;
 use crate::cli::{ColorWhen, GroupByMode, RenderArgs, RenderFormat, Theme};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
-use crate::output::{DiagnosticPrinter, OutputWriter, print_stats, print_success};
+use crate::output::{check_diagnostics, print_stats, print_success, write_output};
 use crate::png;
 use relune_app::{
     FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, OutputFormat, RenderOptions,
@@ -95,39 +95,21 @@ pub fn run_render(
     // Execute render
     let result = render(request).context("Failed to render schema")?;
 
-    // Print diagnostics
-    let diag_printer = DiagnosticPrinter::new(color);
-    diag_printer.print_all(&result.diagnostics);
+    check_diagnostics(&result.diagnostics, color, args.fail_on_warning)?;
 
-    // Check for fail-on-warning
-    if args.fail_on_warning && DiagnosticPrinter::has_warnings(&result.diagnostics) {
-        return Err(CliError::warning(anyhow::anyhow!(
-            "Warnings were emitted and --fail-on-warning is set"
-        )));
-    }
-
-    // Check for errors
-    if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        return Err(CliError::general(anyhow::anyhow!(
-            "Errors were encountered during rendering"
-        )));
-    }
-
-    // Write output
-    let mut writer =
-        OutputWriter::new(args.out.as_deref(), color).context("Failed to create output writer")?;
+    // Write output (PNG needs byte-level writer for rasterized data)
     if is_png {
         let png_data =
             png::svg_to_png(&result.content).context("Failed to rasterize SVG to PNG")?;
+        let mut writer = crate::output::OutputWriter::new(args.out.as_deref(), color)
+            .context("Failed to create output writer")?;
         writer
             .write_bytes(&png_data)
             .context("Failed to write PNG output")?;
+        writer.finish().context("Failed to finalize output")?;
     } else {
-        writer
-            .write(&result.content)
-            .context("Failed to write output")?;
+        write_output(&result.content, args.out.as_deref(), color)?;
     }
-    writer.finish().context("Failed to finalize output")?;
 
     // Print stats if requested (from merged config)
     if merged.show_stats {
