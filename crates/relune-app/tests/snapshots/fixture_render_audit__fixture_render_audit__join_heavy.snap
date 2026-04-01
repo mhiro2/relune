@@ -12,11 +12,11 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 0,
+      "count_over_1_8x": 2,
       "worst_examples": [
-        "task_dependencies[depends_on_task_id] -> tasks[id] (1.06x)",
-        "task_dependencies[task_id] -> tasks[id] (1.06x)",
-        "activities[actor_id] -> users[id] (1.00x)"
+        "projects[tenant_id] -> tenants[id] (1.89x)",
+        "tasks[assignee_id] -> users[id] (1.83x)",
+        "tasks[reporter_id] -> users[id] (1.76x)"
       ]
     },
     "parallel_groups": {
@@ -39,23 +39,23 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 26,
+      "count_under_24px": 2,
       "worst_examples": [
-        "activities[actor_id] -> users[id] (0.0px)",
-        "activities[tenant_id] -> tenants[id] (0.0px)",
-        "attachments[tenant_id] -> tenants[id] (0.0px)"
+        "role_permissions[permission_id] -> permissions[id] (16.0px)",
+        "task_watchers[task_id] -> tasks[id] (16.0px)",
+        "project_integrations[project_id] -> projects[id] (24.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 529809,
+      "bytes": 531279,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 210411,
+      "bytes": 211881,
       "edge_groups": 320,
       "node_groups": 23
     }

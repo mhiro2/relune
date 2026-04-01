@@ -9,6 +9,7 @@ rust-version.workspace = true
 insta.workspace = true
 relune-core = { path = "../relune-core" }
 relune-layout = { path = "../relune-layout" }
+relune-render-svg = { path = "../relune-render-svg" }
 serde_json.workspace = true
 
 [lints]

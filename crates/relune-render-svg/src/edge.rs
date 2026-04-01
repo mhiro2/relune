@@ -32,6 +32,20 @@ fn route_backbone_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
     points
 }
 
+/// Approximates the visible route as a polyline after style-specific rendering.
+#[must_use]
+pub fn rendered_path_points(
+    route: &EdgeRoute,
+    curve_offset: f32,
+    curve_samples: u32,
+) -> Vec<(f32, f32)> {
+    let points = route_backbone_points(route);
+    match route.style {
+        RouteStyle::Curved => rounded_backbone_points(&points, curve_offset, curve_samples),
+        RouteStyle::Straight | RouteStyle::Orthogonal => points,
+    }
+}
+
 fn polyline_path_d(points: &[(f32, f32)]) -> String {
     let Some(&(x, y)) = points.first() else {
         return String::new();
@@ -86,6 +100,50 @@ fn rounded_backbone_path_d(points: &[(f32, f32)], curve_offset: f32) -> String {
     d
 }
 
+fn rounded_backbone_points(
+    points: &[(f32, f32)],
+    curve_offset: f32,
+    curve_samples: u32,
+) -> Vec<(f32, f32)> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    let sample_count = curve_samples.max(1);
+    let mut rendered = vec![points[0]];
+    let max_radius = curve_offset.clamp(0.0, 24.0);
+
+    for window in points.windows(3) {
+        let prev = window[0];
+        let curr = window[1];
+        let next = window[2];
+
+        let incoming = segment_length(prev, curr);
+        let outgoing = segment_length(curr, next);
+        let radius = max_radius.min(incoming * 0.5).min(outgoing * 0.5);
+
+        if radius <= 0.0 || is_collinear(prev, curr, next) {
+            push_if_distinct(&mut rendered, curr);
+            continue;
+        }
+
+        let before = move_toward(curr, prev, radius);
+        let after = move_toward(curr, next, radius);
+        push_if_distinct(&mut rendered, before);
+        for index in 1..=sample_count {
+            #[allow(clippy::cast_precision_loss)]
+            let t = index as f32 / sample_count as f32;
+            push_if_distinct(
+                &mut rendered,
+                quadratic_bezier_point(before, curr, after, t),
+            );
+        }
+    }
+
+    push_if_distinct(&mut rendered, points[points.len() - 1]);
+    rendered
+}
+
 fn segment_length(from: (f32, f32), to: (f32, f32)) -> f32 {
     (to.0 - from.0).hypot(to.1 - from.1)
 }
@@ -106,6 +164,38 @@ fn is_collinear(prev: (f32, f32), curr: (f32, f32), next: (f32, f32)) -> bool {
     let same_x = (prev.0 - curr.0).abs() < 0.5 && (curr.0 - next.0).abs() < 0.5;
     let same_y = (prev.1 - curr.1).abs() < 0.5 && (curr.1 - next.1).abs() < 0.5;
     same_x || same_y
+}
+
+fn quadratic_bezier_point(
+    start: (f32, f32),
+    control: (f32, f32),
+    end: (f32, f32),
+    t: f32,
+) -> (f32, f32) {
+    let one_minus_t = 1.0 - t;
+    let start_weight = one_minus_t * one_minus_t;
+    let control_weight = 2.0 * one_minus_t * t;
+    let end_weight = t * t;
+
+    (
+        end_weight.mul_add(
+            end.0,
+            (start_weight * start.0) + (control_weight * control.0),
+        ),
+        end_weight.mul_add(
+            end.1,
+            (start_weight * start.1) + (control_weight * control.1),
+        ),
+    )
+}
+
+fn push_if_distinct(points: &mut Vec<(f32, f32)>, point: (f32, f32)) {
+    let is_distinct = points
+        .last()
+        .is_none_or(|last| (last.0 - point.0).abs() > 0.001 || (last.1 - point.1).abs() > 0.001);
+    if is_distinct {
+        points.push(point);
+    }
 }
 
 /// Options for edge rendering.
@@ -381,6 +471,7 @@ mod tests {
             collapsed_join_table: None,
             label_x: f32::midpoint(x1, x2),
             label_y: f32::midpoint(y1, y2),
+            routing_debug: None,
         }
     }
 
@@ -699,6 +790,7 @@ mod tests {
             collapsed_join_table: None,
             label_x: 150.0,
             label_y: 75.0,
+            routing_debug: None,
         };
 
         let colors = create_test_theme();
@@ -754,6 +846,32 @@ mod tests {
 
         assert!(path.contains("Q 150.0 25.0"));
         assert!(path.contains("Q 150.0 125.0"));
+    }
+
+    #[test]
+    fn test_rendered_path_points_follow_curved_corner_geometry() {
+        let points = rendered_path_points(
+            &EdgeRoute {
+                x1: 100.0,
+                y1: 25.0,
+                x2: 200.0,
+                y2: 125.0,
+                control_points: vec![(150.0, 25.0), (150.0, 125.0)],
+                style: RouteStyle::Curved,
+                label_position: (150.0, 75.0),
+            },
+            50.0,
+            8,
+        );
+
+        assert_eq!(points.first().copied(), Some((100.0, 25.0)));
+        assert_eq!(points.last().copied(), Some((200.0, 125.0)));
+        assert!(points.iter().any(|point| point.1 > 25.0 && point.0 < 150.0));
+        assert!(
+            points
+                .iter()
+                .any(|point| point.0 > 150.0 && point.1 < 125.0)
+        );
     }
 
     #[test]

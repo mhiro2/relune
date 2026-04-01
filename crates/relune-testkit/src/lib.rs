@@ -10,8 +10,9 @@ use relune_core::{
     Column, ColumnId, Enum, ForeignKey, Index, LayoutDirection, ReferentialAction, Schema, Table,
     TableId, View,
 };
-use relune_layout::route::{LABEL_HALF_H, point_along_route};
+use relune_layout::route::LABEL_HALF_H;
 use relune_layout::{PositionedEdge, PositionedGraph, PositionedNode};
+use relune_render_svg::{EdgeRenderOptions, edge::rendered_path_points};
 
 /// Normalizes SVG content by trimming whitespace and removing empty lines.
 pub fn normalize_svg(svg: &str) -> String {
@@ -73,6 +74,7 @@ const ROUTE_INTERSECTION_SAMPLES: u32 = 96;
 const MONOTONICITY_SAMPLES: u32 = 48;
 const MONOTONICITY_TOLERANCE: f32 = 6.0;
 const SIDE_POLICY_MARGIN: f32 = 24.0;
+const RENDERED_CURVE_SAMPLES: u32 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointSide {
@@ -595,13 +597,12 @@ fn assert_route_stays_outside_node(edge: &PositionedEdge, node: &PositionedNode,
 }
 
 fn sampled_route_points(route: &relune_core::EdgeRoute, samples: u32) -> Vec<(f32, f32)> {
-    (1..samples)
-        .map(|index| {
-            #[allow(clippy::cast_precision_loss)]
-            let t = index as f32 / samples as f32;
-            point_along_route(route, t)
-        })
-        .collect()
+    let rendered_points = rendered_path_points(
+        route,
+        EdgeRenderOptions::default().curve_offset,
+        RENDERED_CURVE_SAMPLES,
+    );
+    sample_polyline_points(&rendered_points, samples)
 }
 
 fn point_inside_node(point: (f32, f32), node: &PositionedNode) -> bool {
@@ -609,6 +610,60 @@ fn point_inside_node(point: (f32, f32), node: &PositionedNode) -> bool {
         && point.0 < node.x + node.width - 0.5
         && point.1 > node.y + 0.5
         && point.1 < node.y + node.height - 0.5
+}
+
+fn sample_polyline_points(points: &[(f32, f32)], samples: u32) -> Vec<(f32, f32)> {
+    if points.len() <= 1 {
+        return points.to_vec();
+    }
+
+    let sample_count = samples.max(2);
+    let total_length = polyline_length(points);
+    if total_length <= f32::EPSILON {
+        return vec![points[0]; sample_count as usize];
+    }
+
+    let mut sampled_points = Vec::with_capacity(sample_count.saturating_sub(1) as usize);
+    let mut segment_index = 0usize;
+    let mut traveled = 0.0f32;
+
+    for index in 1..sample_count {
+        #[allow(clippy::cast_precision_loss)]
+        let target = total_length * index as f32 / sample_count as f32;
+        while segment_index + 1 < points.len() {
+            let start = points[segment_index];
+            let end = points[segment_index + 1];
+            let segment_length = (end.0 - start.0).hypot(end.1 - start.1);
+            if traveled + segment_length >= target || segment_index + 2 == points.len() {
+                let offset = (target - traveled).clamp(0.0, segment_length);
+                let ratio = if segment_length <= f32::EPSILON {
+                    0.0
+                } else {
+                    offset / segment_length
+                };
+                sampled_points.push((
+                    (end.0 - start.0).mul_add(ratio, start.0),
+                    (end.1 - start.1).mul_add(ratio, start.1),
+                ));
+                break;
+            }
+            traveled += segment_length;
+            segment_index += 1;
+        }
+    }
+
+    sampled_points
+}
+
+fn polyline_length(points: &[(f32, f32)]) -> f32 {
+    points
+        .windows(2)
+        .map(|segment| {
+            let dx = segment[1].0 - segment[0].0;
+            let dy = segment[1].1 - segment[0].1;
+            dx.hypot(dy)
+        })
+        .sum()
 }
 
 fn assert_side_policy(

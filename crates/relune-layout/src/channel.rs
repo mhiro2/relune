@@ -220,4 +220,33 @@ mod tests {
             Ordering::Less
         );
     }
+
+    #[test]
+    fn candidate_score_uses_stable_order_as_final_tie_break() {
+        let weights = ChannelCostWeights {
+            clearance_penalty: 1,
+            total_length: 1,
+            bend_penalty: 1,
+            center_deviation: 1,
+            congestion_penalty: 1,
+        };
+        let earlier = ChannelCandidateScore {
+            hard_constraint_violations: 0,
+            clearance_penalty: 4,
+            total_length: 100,
+            bend_count: 2,
+            center_deviation: 12,
+            congestion_penalty: 3,
+            stable_order: 1,
+        };
+        let later = ChannelCandidateScore {
+            stable_order: 2,
+            ..earlier
+        };
+
+        assert_eq!(
+            compare_channel_candidate_scores(earlier, later, weights),
+            Ordering::Less
+        );
+    }
 }

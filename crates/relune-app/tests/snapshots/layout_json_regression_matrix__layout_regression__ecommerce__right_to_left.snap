@@ -153,11 +153,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "product_id",
           "label_x": 1030.800048828125,
-          "label_y": 290.8500061035156,
+          "label_y": 323.5669860839844,
           "nullable": false,
           "route_label_position": [
             1030.800048828125,
-            413.0
+            389.0
           ],
           "source_side": "west",
           "start": [
@@ -239,7 +239,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             1078.800048828125,
-            409.5
+            410.5
           ],
           "source_side": "west",
           "start": [
@@ -280,7 +280,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             1054.800048828125,
-            529.0
+            506.0
           ],
           "source_side": "west",
           "start": [
@@ -529,11 +529,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "product_id",
           "label_x": 1030.800048828125,
-          "label_y": 290.8500061035156,
+          "label_y": 323.5669860839844,
           "nullable": false,
           "route_label_position": [
             1030.800048828125,
-            413.0
+            389.0
           ],
           "source_side": "west",
           "start": [
@@ -615,7 +615,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             1078.800048828125,
-            409.5
+            410.5
           ],
           "source_side": "west",
           "start": [
@@ -656,7 +656,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             1054.800048828125,
-            529.0
+            506.0
           ],
           "source_side": "west",
           "start": [
@@ -905,11 +905,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "product_id",
           "label_x": 1030.800048828125,
-          "label_y": 290.8500061035156,
+          "label_y": 323.5669860839844,
           "nullable": false,
           "route_label_position": [
             1030.800048828125,
-            413.0
+            389.0
           ],
           "source_side": "west",
           "start": [
@@ -991,7 +991,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             1078.800048828125,
-            409.5
+            410.5
           ],
           "source_side": "west",
           "start": [
@@ -1032,7 +1032,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             1054.800048828125,
-            529.0
+            506.0
           ],
           "source_side": "west",
           "start": [

@@ -11,11 +11,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1338.0,
+              403.0,
               2568.0
             ],
             [
-              1338.0,
+              403.0,
+              2724.0
+            ],
+            [
+              2273.0,
+              2724.0
+            ],
+            [
+              2273.0,
               155.0
             ]
           ],
@@ -29,12 +37,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1338.0,
-          "label_y": 2445.25,
+          "label_x": 2273.0,
+          "label_y": 2452.5,
           "nullable": false,
           "route_label_position": [
-            1338.0,
-            1361.5
+            2273.0,
+            2452.5
           ],
           "source_side": "east",
           "start": [
@@ -52,11 +60,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               2600.0
             ],
             [
-              1055.5,
+              403.0,
+              2724.0
+            ],
+            [
+              1708.0,
+              2724.0
+            ],
+            [
+              1708.0,
               150.0
             ]
           ],
@@ -70,12 +86,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "actor_id",
-          "label_x": 1055.5,
-          "label_y": 2326.75,
+          "label_x": 1760.487060546875,
+          "label_y": 2518.488037109375,
           "nullable": true,
           "route_label_position": [
-            1055.5,
-            1375.0
+            1708.0,
+            2151.5
           ],
           "source_side": "east",
           "start": [
@@ -93,11 +109,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1314.0,
+              403.0,
               1934.0
             ],
             [
-              1314.0,
+              403.0,
+              2126.0
+            ],
+            [
+              2273.0,
+              2126.0
+            ],
+            [
+              2273.0,
               135.0
             ]
           ],
@@ -111,12 +135,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1281.4520263671875,
-          "label_y": 676.8040161132813,
+          "label_x": 2223.5,
+          "label_y": 2126.0,
           "nullable": false,
           "route_label_position": [
-            1314.0,
-            1034.5
+            2223.5,
+            2126.0
           ],
           "source_side": "east",
           "start": [
@@ -134,11 +158,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1031.5,
+              403.0,
               1966.0
             ],
             [
-              1031.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               130.0
             ]
           ],
@@ -152,12 +184,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "uploader_id",
-          "label_x": 885.8330078125,
-          "label_y": 1966.0,
+          "label_x": 345.5199890136719,
+          "label_y": 1122.3900146484375,
           "nullable": false,
           "route_label_position": [
-            1031.5,
-            1048.0
+            403.0,
+            311.5
           ],
           "source_side": "east",
           "start": [
@@ -193,8 +225,8 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 395.0,
-          "label_y": 1703.75,
+          "label_x": 455.0,
+          "label_y": 1659.5,
           "nullable": true,
           "route_label_position": [
             383.0,
@@ -216,11 +248,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1362.0,
+              403.0,
               1644.0
             ],
             [
-              1362.0,
+              403.0,
+              1818.0
+            ],
+            [
+              2273.0,
+              1818.0
+            ],
+            [
+              2273.0,
               125.0
             ]
           ],
@@ -234,12 +274,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1216.25,
-          "label_y": 1644.0,
+          "label_x": 2083.5,
+          "label_y": 1818.0,
           "nullable": false,
           "route_label_position": [
-            1362.0,
-            884.5
+            2083.5,
+            1818.0
           ],
           "source_side": "east",
           "start": [
@@ -257,11 +297,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1079.5,
+              403.0,
               1676.0
             ],
             [
-              1079.5,
+              403.0,
+              1818.0
+            ],
+            [
+              1708.0,
+              1818.0
+            ],
+            [
+              1708.0,
               120.0
             ]
           ],
@@ -275,12 +323,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "author_id",
-          "label_x": 883.9840087890625,
-          "label_y": 1715.8919677734375,
+          "label_x": 1761.781005859375,
+          "label_y": 1754.3709716796875,
           "nullable": false,
           "route_label_position": [
-            1079.5,
-            898.0
+            1708.0,
+            1706.5
           ],
           "source_side": "east",
           "start": [
@@ -316,8 +364,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_type_id",
-          "label_x": 1128.8330078125,
-          "label_y": 413.0,
+          "label_x": 1061.0,
+          "label_y": 461.5,
           "nullable": false,
           "route_label_position": [
             1061.0,
@@ -339,11 +387,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1617.0,
+              961.0,
               478.0
             ],
             [
-              1617.0,
+              961.0,
+              652.0
+            ],
+            [
+              2273.0,
+              652.0
+            ],
+            [
+              2273.0,
               85.0
             ]
           ],
@@ -357,12 +413,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1517.343994140625,
-          "label_y": 466.468994140625,
+          "label_x": 1813.5,
+          "label_y": 652.0,
           "nullable": false,
           "route_label_position": [
-            1617.0,
-            281.5
+            1813.5,
+            652.0
           ],
           "source_side": "east",
           "start": [
@@ -380,11 +436,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1338.0,
+              403.0,
               2242.0
             ],
             [
-              1338.0,
+              403.0,
+              -16.0
+            ],
+            [
+              2273.0,
+              -16.0
+            ],
+            [
+              2273.0,
               145.0
             ]
           ],
@@ -398,12 +462,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1390.7259521484375,
-          "label_y": 2268.280029296875,
+          "label_x": 350.27398681640625,
+          "label_y": 790.6370239257813,
           "nullable": false,
           "route_label_position": [
-            1338.0,
-            1193.5
+            403.0,
+            111.5
           ],
           "source_side": "east",
           "start": [
@@ -421,11 +485,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               2274.0
             ],
             [
-              1055.5,
+              403.0,
+              2452.0
+            ],
+            [
+              1708.0,
+              2452.0
+            ],
+            [
+              1708.0,
               140.0
             ]
           ],
@@ -439,12 +511,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 935.5,
-          "label_y": 2274.0,
+          "label_x": 1462.6669921875,
+          "label_y": 2452.0,
           "nullable": false,
           "route_label_position": [
-            1055.5,
-            1207.0
+            1708.0,
+            2051.5
           ],
           "source_side": "east",
           "start": [
@@ -480,12 +552,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_id",
-          "label_x": 440.6669921875,
+          "label_x": 469.8330078125,
           "label_y": 512.0,
           "nullable": false,
           "route_label_position": [
-            503.0,
-            489.5
+            499.0,
+            512.0
           ],
           "source_side": "east",
           "start": [
@@ -503,11 +575,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              782.0,
+              403.0,
               480.0
             ],
             [
-              782.0,
+              403.0,
+              32.0
+            ],
+            [
+              1161.0,
+              32.0
+            ],
+            [
+              1161.0,
               98.0
             ]
           ],
@@ -521,12 +601,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 777.1430053710938,
-          "label_y": 356.4020080566406,
+          "label_x": 403.0,
+          "label_y": 214.75,
           "nullable": false,
           "route_label_position": [
-            782.0,
-            289.0
+            564.5,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -544,11 +624,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              830.0,
+              403.0,
               1226.0
             ],
             [
-              830.0,
+              403.0,
+              1328.0
+            ],
+            [
+              1161.0,
+              1328.0
+            ],
+            [
+              1161.0,
               112.0
             ]
           ],
@@ -562,12 +650,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 830.0,
-          "label_y": 656.0830078125,
+          "label_x": 775.5,
+          "label_y": 1328.0,
           "nullable": false,
           "route_label_position": [
-            830.0,
-            669.0
+            1161.0,
+            1171.0
           ],
           "source_side": "east",
           "start": [
@@ -603,12 +691,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 393.0,
-          "label_y": 1258.0,
+          "label_x": 568.8319702148438,
+          "label_y": 1192.197021484375,
           "nullable": false,
           "route_label_position": [
             479.0,
-            1231.0
+            1228.0
           ],
           "source_side": "east",
           "start": [
@@ -626,11 +714,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              830.0,
+              403.0,
               2836.0
             ],
             [
-              830.0,
+              403.0,
+              2906.0
+            ],
+            [
+              1161.0,
+              2906.0
+            ],
+            [
+              1161.0,
               126.0
             ]
           ],
@@ -644,12 +740,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 830.0,
-          "label_y": 1822.3330078125,
+          "label_x": 1161.0,
+          "label_y": 1930.0,
           "nullable": false,
           "route_label_position": [
-            830.0,
-            1481.0
+            1161.0,
+            1930.0
           ],
           "source_side": "east",
           "start": [
@@ -667,11 +763,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1007.5,
+              403.0,
               2840.0
             ],
             [
-              1007.5,
+              403.0,
+              2906.0
+            ],
+            [
+              1708.0,
+              2906.0
+            ],
+            [
+              1708.0,
               160.0
             ]
           ],
@@ -685,12 +789,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1007.5,
-          "label_y": 2124.8330078125,
+          "label_x": 1700.6669921875,
+          "label_y": 2906.0,
           "nullable": false,
           "route_label_position": [
-            1007.5,
-            1500.0
+            1708.0,
+            2218.5
           ],
           "source_side": "east",
           "start": [
@@ -708,11 +812,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1890.5,
+              1508.0,
               116.0
             ],
             [
-              1890.5,
+              1508.0,
+              308.0
+            ],
+            [
+              2273.0,
+              308.0
+            ],
+            [
+              2273.0,
               65.0
             ]
           ],
@@ -726,12 +838,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2080.5048828125,
-          "label_y": 41.047000885009766,
+          "label_x": 1916.0,
+          "label_y": 308.0,
           "nullable": false,
           "route_label_position": [
-            1890.5,
-            90.5
+            1916.0,
+            308.0
           ],
           "source_side": "east",
           "start": [
@@ -767,8 +879,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "created_by",
-          "label_x": 1555.3330078125,
-          "label_y": 238.0,
+          "label_x": 1608.0,
+          "label_y": 144.0,
           "nullable": true,
           "route_label_position": [
             1608.0,
@@ -812,8 +924,8 @@ expression: snapshot
           "label_y": 930.0,
           "nullable": false,
           "route_label_position": [
-            527.0,
-            961.5
+            504.5,
+            930.0
           ],
           "source_side": "east",
           "start": [
@@ -854,7 +966,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             503.0,
-            831.0
+            861.0
           ],
           "source_side": "east",
           "start": [
@@ -872,11 +984,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1593.0,
+              961.0,
               775.0
             ],
             [
-              1593.0,
+              961.0,
+              888.0
+            ],
+            [
+              2273.0,
+              888.0
+            ],
+            [
+              2273.0,
               95.0
             ]
           ],
@@ -890,12 +1010,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1437.75,
-          "label_y": 775.0,
+          "label_x": 1951.5,
+          "label_y": 888.0,
           "nullable": false,
           "route_label_position": [
-            1593.0,
-            435.0
+            1951.5,
+            888.0
           ],
           "source_side": "east",
           "start": [
@@ -913,11 +1033,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1641.0,
+              961.0,
               1447.0
             ],
             [
-              1641.0,
+              961.0,
+              1542.0
+            ],
+            [
+              2273.0,
+              1542.0
+            ],
+            [
+              2273.0,
               115.0
             ]
           ],
@@ -931,12 +1059,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1641.0,
-          "label_y": 810.5,
+          "label_x": 2036.0830078125,
+          "label_y": 1542.0,
           "nullable": false,
           "route_label_position": [
-            1641.0,
-            781.0
+            2273.0,
+            1537.5
           ],
           "source_side": "east",
           "start": [
@@ -972,12 +1100,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "depends_on_task_id",
-          "label_x": 418.0880126953125,
-          "label_y": 165.76699829101563,
+          "label_x": 577.0,
+          "label_y": 98.0,
           "nullable": false,
           "route_label_position": [
-            455.0,
-            114.0
+            473.0,
+            98.0
           ],
           "source_side": "east",
           "start": [
@@ -1013,12 +1141,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 398.0,
-          "label_y": 98.0,
+          "label_x": 567.1510009765625,
+          "label_y": 72.01499938964844,
           "nullable": false,
           "route_label_position": [
-            551.0,
-            91.0
+            496.0,
+            98.0
           ],
           "source_side": "east",
           "start": [
@@ -1055,11 +1183,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tag_id",
           "label_x": 479.0,
-          "label_y": 1147.75,
+          "label_y": 1176.5,
           "nullable": false,
           "route_label_position": [
             479.0,
-            1261.5
+            1234.0
           ],
           "source_side": "east",
           "start": [
@@ -1096,11 +1224,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "task_id",
           "label_x": 527.0,
-          "label_y": 615.7080078125,
+          "label_y": 669.5,
           "nullable": false,
           "route_label_position": [
             527.0,
-            594.0
+            669.5
           ],
           "source_side": "east",
           "start": [
@@ -1136,8 +1264,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 465.70098876953125,
-          "label_y": 70.83599853515625,
+          "label_x": 452.3330078125,
+          "label_y": 312.0,
           "nullable": false,
           "route_label_position": [
             503.0,
@@ -1159,11 +1287,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1103.5,
+              403.0,
               316.0
             ],
             [
-              1103.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               80.0
             ]
           ],
@@ -1177,12 +1313,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 964.094970703125,
-          "label_y": 256.8869934082031,
+          "label_x": 1354.1199951171875,
+          "label_y": 32.0,
           "nullable": false,
           "route_label_position": [
-            1103.5,
-            198.0
+            937.5,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -1218,12 +1354,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 1038.093017578125,
-          "label_y": 60.99100112915039,
+          "label_x": 1037.0,
+          "label_y": 104.5,
           "nullable": false,
           "route_label_position": [
             1037.0,
-            123.0
+            104.5
           ],
           "source_side": "east",
           "start": [
@@ -1241,11 +1377,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1617.0,
+              961.0,
               102.0
             ],
             [
-              1617.0,
+              961.0,
+              -64.0
+            ],
+            [
+              2273.0,
+              -64.0
+            ],
+            [
+              2273.0,
               75.0
             ]
           ],
@@ -1259,12 +1403,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2064.155029296875,
-          "label_y": 15.01200008392334,
+          "label_x": 1598.0,
+          "label_y": -64.0,
           "nullable": false,
           "route_label_position": [
-            1617.0,
-            88.5
+            1598.0,
+            -64.0
           ],
           "source_side": "east",
           "start": [
@@ -1282,11 +1426,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1334.5,
+              938.0,
               152.0
             ],
             [
-              1334.5,
+              938.0,
+              8.0
+            ],
+            [
+              1720.0,
+              8.0
+            ],
+            [
+              1720.0,
               60.0
             ]
           ],
@@ -1300,12 +1452,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assignee_id",
-          "label_x": 1544.72900390625,
-          "label_y": 48.07699966430664,
+          "label_x": 1371.4759521484375,
+          "label_y": -39.69300079345703,
           "nullable": true,
           "route_label_position": [
-            1334.5,
-            106.0
+            1283.0,
+            8.0
           ],
           "source_side": "east",
           "start": [
@@ -1323,11 +1475,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1310.5,
+              938.0,
               184.0
             ],
             [
-              1310.5,
+              938.0,
+              8.0
+            ],
+            [
+              1720.0,
+              8.0
+            ],
+            [
+              1720.0,
               70.0
             ]
           ],
@@ -1341,12 +1501,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "reporter_id",
-          "label_x": 1193.5,
-          "label_y": 184.0,
+          "label_x": 1550.0169677734375,
+          "label_y": -39.53200149536133,
           "nullable": true,
           "route_label_position": [
-            1310.5,
-            127.0
+            1272.0,
+            8.0
           ],
           "source_side": "east",
           "start": [
@@ -1382,12 +1542,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 455.0,
-          "label_y": 1298.5,
+          "label_x": 462.72601318359375,
+          "label_y": 1458.9840087890625,
           "nullable": false,
           "route_label_position": [
             455.0,
-            1329.0
+            1298.5
           ],
           "source_side": "east",
           "start": [
@@ -1405,11 +1565,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1031.5,
+              403.0,
               1444.0
             ],
             [
-              1031.5,
+              403.0,
+              1528.0
+            ],
+            [
+              1708.0,
+              1528.0
+            ],
+            [
+              1708.0,
               110.0
             ]
           ],
@@ -1423,12 +1591,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 959.7340087890625,
-          "label_y": 1495.9830322265625,
+          "label_x": 748.635986328125,
+          "label_y": 1536.6639404296875,
           "nullable": false,
           "route_label_position": [
-            1031.5,
-            777.0
+            1705.0,
+            1528.0
           ],
           "source_side": "east",
           "start": [
@@ -1446,11 +1614,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1569.0,
+              961.0,
               1229.0
             ],
             [
-              1569.0,
+              961.0,
+              1324.0
+            ],
+            [
+              2273.0,
+              1324.0
+            ],
+            [
+              2273.0,
               105.0
             ]
           ],
@@ -1464,12 +1640,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1569.0,
-          "label_y": 1041.0,
+          "label_x": 2173.5,
+          "label_y": 1324.0,
           "nullable": false,
           "route_label_position": [
-            1569.0,
-            667.0
+            2173.5,
+            1324.0
           ],
           "source_side": "east",
           "start": [
@@ -1505,12 +1681,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "role_id",
-          "label_x": 462.91400146484375,
-          "label_y": 727.1749877929688,
+          "label_x": 474.2640075683594,
+          "label_y": 739.166015625,
           "nullable": false,
           "route_label_position": [
-            551.0,
-            744.5830078125
+            497.9169921875,
+            739.166015625
           ],
           "source_side": "east",
           "start": [
@@ -1528,11 +1704,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1079.5,
+              403.0,
               759.0
             ],
             [
-              1079.5,
+              403.0,
+              -16.0
+            ],
+            [
+              1708.0,
+              -16.0
+            ],
+            [
+              1708.0,
               100.0
             ]
           ],
@@ -1546,12 +1730,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assigned_by",
-          "label_x": 1079.5,
-          "label_y": 633.75,
+          "label_x": 421.52099609375,
+          "label_y": -37.6510009765625,
           "nullable": true,
           "route_label_position": [
-            1079.5,
-            429.5
+            715.5,
+            -16.0
           ],
           "source_side": "east",
           "start": [
@@ -1569,11 +1753,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               688.833984375
             ],
             [
-              1055.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               90.0
             ]
           ],
@@ -1587,12 +1779,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 685.4719848632813,
-          "label_y": 688.833984375,
+          "label_x": 403.0,
+          "label_y": 387.02801513671875,
           "nullable": false,
           "route_label_position": [
-            1055.5,
-            389.4169921875
+            745.5830078125,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -1628,8 +1820,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2229.20703125,
-          "label_y": 43.41400146484375,
+          "label_x": 2173.0,
+          "label_y": 89.0,
           "nullable": false,
           "route_label_position": [
             2173.0,
@@ -1916,11 +2108,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1338.0,
+              403.0,
               2568.0
             ],
             [
-              1338.0,
+              403.0,
+              2724.0
+            ],
+            [
+              2273.0,
+              2724.0
+            ],
+            [
+              2273.0,
               155.0
             ]
           ],
@@ -1934,12 +2134,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1338.0,
-          "label_y": 2445.25,
+          "label_x": 2273.0,
+          "label_y": 2452.5,
           "nullable": false,
           "route_label_position": [
-            1338.0,
-            1361.5
+            2273.0,
+            2452.5
           ],
           "source_side": "east",
           "start": [
@@ -1957,11 +2157,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               2600.0
             ],
             [
-              1055.5,
+              403.0,
+              2724.0
+            ],
+            [
+              1708.0,
+              2724.0
+            ],
+            [
+              1708.0,
               150.0
             ]
           ],
@@ -1975,12 +2183,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "actor_id",
-          "label_x": 1055.5,
-          "label_y": 2326.75,
+          "label_x": 1760.487060546875,
+          "label_y": 2518.488037109375,
           "nullable": true,
           "route_label_position": [
-            1055.5,
-            1375.0
+            1708.0,
+            2151.5
           ],
           "source_side": "east",
           "start": [
@@ -1998,11 +2206,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1314.0,
+              403.0,
               1934.0
             ],
             [
-              1314.0,
+              403.0,
+              2126.0
+            ],
+            [
+              2273.0,
+              2126.0
+            ],
+            [
+              2273.0,
               135.0
             ]
           ],
@@ -2016,12 +2232,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1281.4520263671875,
-          "label_y": 676.8040161132813,
+          "label_x": 2223.5,
+          "label_y": 2126.0,
           "nullable": false,
           "route_label_position": [
-            1314.0,
-            1034.5
+            2223.5,
+            2126.0
           ],
           "source_side": "east",
           "start": [
@@ -2039,11 +2255,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1031.5,
+              403.0,
               1966.0
             ],
             [
-              1031.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               130.0
             ]
           ],
@@ -2057,12 +2281,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "uploader_id",
-          "label_x": 885.8330078125,
-          "label_y": 1966.0,
+          "label_x": 345.5199890136719,
+          "label_y": 1122.3900146484375,
           "nullable": false,
           "route_label_position": [
-            1031.5,
-            1048.0
+            403.0,
+            311.5
           ],
           "source_side": "east",
           "start": [
@@ -2098,8 +2322,8 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 395.0,
-          "label_y": 1703.75,
+          "label_x": 455.0,
+          "label_y": 1659.5,
           "nullable": true,
           "route_label_position": [
             383.0,
@@ -2121,11 +2345,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1362.0,
+              403.0,
               1644.0
             ],
             [
-              1362.0,
+              403.0,
+              1818.0
+            ],
+            [
+              2273.0,
+              1818.0
+            ],
+            [
+              2273.0,
               125.0
             ]
           ],
@@ -2139,12 +2371,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1216.25,
-          "label_y": 1644.0,
+          "label_x": 2083.5,
+          "label_y": 1818.0,
           "nullable": false,
           "route_label_position": [
-            1362.0,
-            884.5
+            2083.5,
+            1818.0
           ],
           "source_side": "east",
           "start": [
@@ -2162,11 +2394,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1079.5,
+              403.0,
               1676.0
             ],
             [
-              1079.5,
+              403.0,
+              1818.0
+            ],
+            [
+              1708.0,
+              1818.0
+            ],
+            [
+              1708.0,
               120.0
             ]
           ],
@@ -2180,12 +2420,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "author_id",
-          "label_x": 883.9840087890625,
-          "label_y": 1715.8919677734375,
+          "label_x": 1761.781005859375,
+          "label_y": 1754.3709716796875,
           "nullable": false,
           "route_label_position": [
-            1079.5,
-            898.0
+            1708.0,
+            1706.5
           ],
           "source_side": "east",
           "start": [
@@ -2221,8 +2461,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_type_id",
-          "label_x": 1128.8330078125,
-          "label_y": 413.0,
+          "label_x": 1061.0,
+          "label_y": 461.5,
           "nullable": false,
           "route_label_position": [
             1061.0,
@@ -2244,11 +2484,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1617.0,
+              961.0,
               478.0
             ],
             [
-              1617.0,
+              961.0,
+              652.0
+            ],
+            [
+              2273.0,
+              652.0
+            ],
+            [
+              2273.0,
               85.0
             ]
           ],
@@ -2262,12 +2510,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1517.343994140625,
-          "label_y": 466.468994140625,
+          "label_x": 1813.5,
+          "label_y": 652.0,
           "nullable": false,
           "route_label_position": [
-            1617.0,
-            281.5
+            1813.5,
+            652.0
           ],
           "source_side": "east",
           "start": [
@@ -2285,11 +2533,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1338.0,
+              403.0,
               2242.0
             ],
             [
-              1338.0,
+              403.0,
+              -16.0
+            ],
+            [
+              2273.0,
+              -16.0
+            ],
+            [
+              2273.0,
               145.0
             ]
           ],
@@ -2303,12 +2559,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1390.7259521484375,
-          "label_y": 2268.280029296875,
+          "label_x": 350.27398681640625,
+          "label_y": 790.6370239257813,
           "nullable": false,
           "route_label_position": [
-            1338.0,
-            1193.5
+            403.0,
+            111.5
           ],
           "source_side": "east",
           "start": [
@@ -2326,11 +2582,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               2274.0
             ],
             [
-              1055.5,
+              403.0,
+              2452.0
+            ],
+            [
+              1708.0,
+              2452.0
+            ],
+            [
+              1708.0,
               140.0
             ]
           ],
@@ -2344,12 +2608,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 935.5,
-          "label_y": 2274.0,
+          "label_x": 1462.6669921875,
+          "label_y": 2452.0,
           "nullable": false,
           "route_label_position": [
-            1055.5,
-            1207.0
+            1708.0,
+            2051.5
           ],
           "source_side": "east",
           "start": [
@@ -2385,12 +2649,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_id",
-          "label_x": 440.6669921875,
+          "label_x": 469.8330078125,
           "label_y": 512.0,
           "nullable": false,
           "route_label_position": [
-            503.0,
-            489.5
+            499.0,
+            512.0
           ],
           "source_side": "east",
           "start": [
@@ -2408,11 +2672,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              782.0,
+              403.0,
               480.0
             ],
             [
-              782.0,
+              403.0,
+              32.0
+            ],
+            [
+              1161.0,
+              32.0
+            ],
+            [
+              1161.0,
               98.0
             ]
           ],
@@ -2426,12 +2698,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 777.1430053710938,
-          "label_y": 356.4020080566406,
+          "label_x": 403.0,
+          "label_y": 214.75,
           "nullable": false,
           "route_label_position": [
-            782.0,
-            289.0
+            564.5,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -2449,11 +2721,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              830.0,
+              403.0,
               1226.0
             ],
             [
-              830.0,
+              403.0,
+              1328.0
+            ],
+            [
+              1161.0,
+              1328.0
+            ],
+            [
+              1161.0,
               112.0
             ]
           ],
@@ -2467,12 +2747,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 830.0,
-          "label_y": 656.0830078125,
+          "label_x": 775.5,
+          "label_y": 1328.0,
           "nullable": false,
           "route_label_position": [
-            830.0,
-            669.0
+            1161.0,
+            1171.0
           ],
           "source_side": "east",
           "start": [
@@ -2508,12 +2788,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 393.0,
-          "label_y": 1258.0,
+          "label_x": 568.8319702148438,
+          "label_y": 1192.197021484375,
           "nullable": false,
           "route_label_position": [
             479.0,
-            1231.0
+            1228.0
           ],
           "source_side": "east",
           "start": [
@@ -2531,11 +2811,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              830.0,
+              403.0,
               2836.0
             ],
             [
-              830.0,
+              403.0,
+              2906.0
+            ],
+            [
+              1161.0,
+              2906.0
+            ],
+            [
+              1161.0,
               126.0
             ]
           ],
@@ -2549,12 +2837,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 830.0,
-          "label_y": 1822.3330078125,
+          "label_x": 1161.0,
+          "label_y": 1930.0,
           "nullable": false,
           "route_label_position": [
-            830.0,
-            1481.0
+            1161.0,
+            1930.0
           ],
           "source_side": "east",
           "start": [
@@ -2572,11 +2860,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1007.5,
+              403.0,
               2840.0
             ],
             [
-              1007.5,
+              403.0,
+              2906.0
+            ],
+            [
+              1708.0,
+              2906.0
+            ],
+            [
+              1708.0,
               160.0
             ]
           ],
@@ -2590,12 +2886,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1007.5,
-          "label_y": 2124.8330078125,
+          "label_x": 1700.6669921875,
+          "label_y": 2906.0,
           "nullable": false,
           "route_label_position": [
-            1007.5,
-            1500.0
+            1708.0,
+            2218.5
           ],
           "source_side": "east",
           "start": [
@@ -2613,11 +2909,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1890.5,
+              1508.0,
               116.0
             ],
             [
-              1890.5,
+              1508.0,
+              308.0
+            ],
+            [
+              2273.0,
+              308.0
+            ],
+            [
+              2273.0,
               65.0
             ]
           ],
@@ -2631,12 +2935,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2080.5048828125,
-          "label_y": 41.047000885009766,
+          "label_x": 1916.0,
+          "label_y": 308.0,
           "nullable": false,
           "route_label_position": [
-            1890.5,
-            90.5
+            1916.0,
+            308.0
           ],
           "source_side": "east",
           "start": [
@@ -2672,8 +2976,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "created_by",
-          "label_x": 1555.3330078125,
-          "label_y": 238.0,
+          "label_x": 1608.0,
+          "label_y": 144.0,
           "nullable": true,
           "route_label_position": [
             1608.0,
@@ -2717,8 +3021,8 @@ expression: snapshot
           "label_y": 930.0,
           "nullable": false,
           "route_label_position": [
-            527.0,
-            961.5
+            504.5,
+            930.0
           ],
           "source_side": "east",
           "start": [
@@ -2759,7 +3063,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             503.0,
-            831.0
+            861.0
           ],
           "source_side": "east",
           "start": [
@@ -2777,11 +3081,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1593.0,
+              961.0,
               775.0
             ],
             [
-              1593.0,
+              961.0,
+              888.0
+            ],
+            [
+              2273.0,
+              888.0
+            ],
+            [
+              2273.0,
               95.0
             ]
           ],
@@ -2795,12 +3107,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1437.75,
-          "label_y": 775.0,
+          "label_x": 1951.5,
+          "label_y": 888.0,
           "nullable": false,
           "route_label_position": [
-            1593.0,
-            435.0
+            1951.5,
+            888.0
           ],
           "source_side": "east",
           "start": [
@@ -2818,11 +3130,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1641.0,
+              961.0,
               1447.0
             ],
             [
-              1641.0,
+              961.0,
+              1542.0
+            ],
+            [
+              2273.0,
+              1542.0
+            ],
+            [
+              2273.0,
               115.0
             ]
           ],
@@ -2836,12 +3156,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1641.0,
-          "label_y": 810.5,
+          "label_x": 2036.0830078125,
+          "label_y": 1542.0,
           "nullable": false,
           "route_label_position": [
-            1641.0,
-            781.0
+            2273.0,
+            1537.5
           ],
           "source_side": "east",
           "start": [
@@ -2877,12 +3197,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "depends_on_task_id",
-          "label_x": 418.0880126953125,
-          "label_y": 165.76699829101563,
+          "label_x": 577.0,
+          "label_y": 98.0,
           "nullable": false,
           "route_label_position": [
-            455.0,
-            114.0
+            473.0,
+            98.0
           ],
           "source_side": "east",
           "start": [
@@ -2918,12 +3238,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 398.0,
-          "label_y": 98.0,
+          "label_x": 567.1510009765625,
+          "label_y": 72.01499938964844,
           "nullable": false,
           "route_label_position": [
-            551.0,
-            91.0
+            496.0,
+            98.0
           ],
           "source_side": "east",
           "start": [
@@ -2960,11 +3280,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tag_id",
           "label_x": 479.0,
-          "label_y": 1147.75,
+          "label_y": 1176.5,
           "nullable": false,
           "route_label_position": [
             479.0,
-            1261.5
+            1234.0
           ],
           "source_side": "east",
           "start": [
@@ -3001,11 +3321,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "task_id",
           "label_x": 527.0,
-          "label_y": 615.7080078125,
+          "label_y": 669.5,
           "nullable": false,
           "route_label_position": [
             527.0,
-            594.0
+            669.5
           ],
           "source_side": "east",
           "start": [
@@ -3041,8 +3361,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 465.70098876953125,
-          "label_y": 70.83599853515625,
+          "label_x": 452.3330078125,
+          "label_y": 312.0,
           "nullable": false,
           "route_label_position": [
             503.0,
@@ -3064,11 +3384,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1103.5,
+              403.0,
               316.0
             ],
             [
-              1103.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               80.0
             ]
           ],
@@ -3082,12 +3410,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 964.094970703125,
-          "label_y": 256.8869934082031,
+          "label_x": 1354.1199951171875,
+          "label_y": 32.0,
           "nullable": false,
           "route_label_position": [
-            1103.5,
-            198.0
+            937.5,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -3123,12 +3451,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 1038.093017578125,
-          "label_y": 60.99100112915039,
+          "label_x": 1037.0,
+          "label_y": 104.5,
           "nullable": false,
           "route_label_position": [
             1037.0,
-            123.0
+            104.5
           ],
           "source_side": "east",
           "start": [
@@ -3146,11 +3474,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1617.0,
+              961.0,
               102.0
             ],
             [
-              1617.0,
+              961.0,
+              -64.0
+            ],
+            [
+              2273.0,
+              -64.0
+            ],
+            [
+              2273.0,
               75.0
             ]
           ],
@@ -3164,12 +3500,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2064.155029296875,
-          "label_y": 15.01200008392334,
+          "label_x": 1598.0,
+          "label_y": -64.0,
           "nullable": false,
           "route_label_position": [
-            1617.0,
-            88.5
+            1598.0,
+            -64.0
           ],
           "source_side": "east",
           "start": [
@@ -3187,11 +3523,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1334.5,
+              938.0,
               152.0
             ],
             [
-              1334.5,
+              938.0,
+              8.0
+            ],
+            [
+              1720.0,
+              8.0
+            ],
+            [
+              1720.0,
               60.0
             ]
           ],
@@ -3205,12 +3549,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assignee_id",
-          "label_x": 1544.72900390625,
-          "label_y": 48.07699966430664,
+          "label_x": 1371.4759521484375,
+          "label_y": -39.69300079345703,
           "nullable": true,
           "route_label_position": [
-            1334.5,
-            106.0
+            1283.0,
+            8.0
           ],
           "source_side": "east",
           "start": [
@@ -3228,11 +3572,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1310.5,
+              938.0,
               184.0
             ],
             [
-              1310.5,
+              938.0,
+              8.0
+            ],
+            [
+              1720.0,
+              8.0
+            ],
+            [
+              1720.0,
               70.0
             ]
           ],
@@ -3246,12 +3598,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "reporter_id",
-          "label_x": 1193.5,
-          "label_y": 184.0,
+          "label_x": 1550.0169677734375,
+          "label_y": -39.53200149536133,
           "nullable": true,
           "route_label_position": [
-            1310.5,
-            127.0
+            1272.0,
+            8.0
           ],
           "source_side": "east",
           "start": [
@@ -3287,12 +3639,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 455.0,
-          "label_y": 1298.5,
+          "label_x": 462.72601318359375,
+          "label_y": 1458.9840087890625,
           "nullable": false,
           "route_label_position": [
             455.0,
-            1329.0
+            1298.5
           ],
           "source_side": "east",
           "start": [
@@ -3310,11 +3662,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1031.5,
+              403.0,
               1444.0
             ],
             [
-              1031.5,
+              403.0,
+              1528.0
+            ],
+            [
+              1708.0,
+              1528.0
+            ],
+            [
+              1708.0,
               110.0
             ]
           ],
@@ -3328,12 +3688,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 959.7340087890625,
-          "label_y": 1495.9830322265625,
+          "label_x": 748.635986328125,
+          "label_y": 1536.6639404296875,
           "nullable": false,
           "route_label_position": [
-            1031.5,
-            777.0
+            1705.0,
+            1528.0
           ],
           "source_side": "east",
           "start": [
@@ -3351,11 +3711,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1569.0,
+              961.0,
               1229.0
             ],
             [
-              1569.0,
+              961.0,
+              1324.0
+            ],
+            [
+              2273.0,
+              1324.0
+            ],
+            [
+              2273.0,
               105.0
             ]
           ],
@@ -3369,12 +3737,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1569.0,
-          "label_y": 1041.0,
+          "label_x": 2173.5,
+          "label_y": 1324.0,
           "nullable": false,
           "route_label_position": [
-            1569.0,
-            667.0
+            2173.5,
+            1324.0
           ],
           "source_side": "east",
           "start": [
@@ -3410,12 +3778,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "role_id",
-          "label_x": 462.91400146484375,
-          "label_y": 727.1749877929688,
+          "label_x": 474.2640075683594,
+          "label_y": 739.166015625,
           "nullable": false,
           "route_label_position": [
-            551.0,
-            744.5830078125
+            497.9169921875,
+            739.166015625
           ],
           "source_side": "east",
           "start": [
@@ -3433,11 +3801,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1079.5,
+              403.0,
               759.0
             ],
             [
-              1079.5,
+              403.0,
+              -16.0
+            ],
+            [
+              1708.0,
+              -16.0
+            ],
+            [
+              1708.0,
               100.0
             ]
           ],
@@ -3451,12 +3827,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assigned_by",
-          "label_x": 1079.5,
-          "label_y": 633.75,
+          "label_x": 421.52099609375,
+          "label_y": -37.6510009765625,
           "nullable": true,
           "route_label_position": [
-            1079.5,
-            429.5
+            715.5,
+            -16.0
           ],
           "source_side": "east",
           "start": [
@@ -3474,11 +3850,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               688.833984375
             ],
             [
-              1055.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               90.0
             ]
           ],
@@ -3492,12 +3876,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 685.4719848632813,
-          "label_y": 688.833984375,
+          "label_x": 403.0,
+          "label_y": 387.02801513671875,
           "nullable": false,
           "route_label_position": [
-            1055.5,
-            389.4169921875
+            745.5830078125,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -3533,8 +3917,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2229.20703125,
-          "label_y": 43.41400146484375,
+          "label_x": 2173.0,
+          "label_y": 89.0,
           "nullable": false,
           "route_label_position": [
             2173.0,
@@ -3821,11 +4205,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1338.0,
+              403.0,
               2568.0
             ],
             [
-              1338.0,
+              403.0,
+              2724.0
+            ],
+            [
+              2273.0,
+              2724.0
+            ],
+            [
+              2273.0,
               155.0
             ]
           ],
@@ -3839,12 +4231,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1338.0,
-          "label_y": 2445.25,
+          "label_x": 2273.0,
+          "label_y": 2452.5,
           "nullable": false,
           "route_label_position": [
-            1338.0,
-            1361.5
+            2273.0,
+            2452.5
           ],
           "source_side": "east",
           "start": [
@@ -3862,11 +4254,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               2600.0
             ],
             [
-              1055.5,
+              403.0,
+              2724.0
+            ],
+            [
+              1708.0,
+              2724.0
+            ],
+            [
+              1708.0,
               150.0
             ]
           ],
@@ -3880,12 +4280,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "actor_id",
-          "label_x": 1055.5,
-          "label_y": 2326.75,
+          "label_x": 1760.487060546875,
+          "label_y": 2518.488037109375,
           "nullable": true,
           "route_label_position": [
-            1055.5,
-            1375.0
+            1708.0,
+            2151.5
           ],
           "source_side": "east",
           "start": [
@@ -3903,11 +4303,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1314.0,
+              403.0,
               1934.0
             ],
             [
-              1314.0,
+              403.0,
+              2126.0
+            ],
+            [
+              2273.0,
+              2126.0
+            ],
+            [
+              2273.0,
               135.0
             ]
           ],
@@ -3921,12 +4329,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1281.4520263671875,
-          "label_y": 676.8040161132813,
+          "label_x": 2223.5,
+          "label_y": 2126.0,
           "nullable": false,
           "route_label_position": [
-            1314.0,
-            1034.5
+            2223.5,
+            2126.0
           ],
           "source_side": "east",
           "start": [
@@ -3944,11 +4352,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1031.5,
+              403.0,
               1966.0
             ],
             [
-              1031.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               130.0
             ]
           ],
@@ -3962,12 +4378,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "uploader_id",
-          "label_x": 885.8330078125,
-          "label_y": 1966.0,
+          "label_x": 345.5199890136719,
+          "label_y": 1122.3900146484375,
           "nullable": false,
           "route_label_position": [
-            1031.5,
-            1048.0
+            403.0,
+            311.5
           ],
           "source_side": "east",
           "start": [
@@ -4003,8 +4419,8 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 395.0,
-          "label_y": 1703.75,
+          "label_x": 455.0,
+          "label_y": 1659.5,
           "nullable": true,
           "route_label_position": [
             383.0,
@@ -4026,11 +4442,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1362.0,
+              403.0,
               1644.0
             ],
             [
-              1362.0,
+              403.0,
+              1818.0
+            ],
+            [
+              2273.0,
+              1818.0
+            ],
+            [
+              2273.0,
               125.0
             ]
           ],
@@ -4044,12 +4468,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1216.25,
-          "label_y": 1644.0,
+          "label_x": 2083.5,
+          "label_y": 1818.0,
           "nullable": false,
           "route_label_position": [
-            1362.0,
-            884.5
+            2083.5,
+            1818.0
           ],
           "source_side": "east",
           "start": [
@@ -4067,11 +4491,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1079.5,
+              403.0,
               1676.0
             ],
             [
-              1079.5,
+              403.0,
+              1818.0
+            ],
+            [
+              1708.0,
+              1818.0
+            ],
+            [
+              1708.0,
               120.0
             ]
           ],
@@ -4085,12 +4517,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "author_id",
-          "label_x": 883.9840087890625,
-          "label_y": 1715.8919677734375,
+          "label_x": 1761.781005859375,
+          "label_y": 1754.3709716796875,
           "nullable": false,
           "route_label_position": [
-            1079.5,
-            898.0
+            1708.0,
+            1706.5
           ],
           "source_side": "east",
           "start": [
@@ -4126,8 +4558,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_type_id",
-          "label_x": 1128.8330078125,
-          "label_y": 413.0,
+          "label_x": 1061.0,
+          "label_y": 461.5,
           "nullable": false,
           "route_label_position": [
             1061.0,
@@ -4149,11 +4581,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1617.0,
+              961.0,
               478.0
             ],
             [
-              1617.0,
+              961.0,
+              652.0
+            ],
+            [
+              2273.0,
+              652.0
+            ],
+            [
+              2273.0,
               85.0
             ]
           ],
@@ -4167,12 +4607,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1517.343994140625,
-          "label_y": 466.468994140625,
+          "label_x": 1813.5,
+          "label_y": 652.0,
           "nullable": false,
           "route_label_position": [
-            1617.0,
-            281.5
+            1813.5,
+            652.0
           ],
           "source_side": "east",
           "start": [
@@ -4190,11 +4630,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1338.0,
+              403.0,
               2242.0
             ],
             [
-              1338.0,
+              403.0,
+              -16.0
+            ],
+            [
+              2273.0,
+              -16.0
+            ],
+            [
+              2273.0,
               145.0
             ]
           ],
@@ -4208,12 +4656,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1390.7259521484375,
-          "label_y": 2268.280029296875,
+          "label_x": 350.27398681640625,
+          "label_y": 790.6370239257813,
           "nullable": false,
           "route_label_position": [
-            1338.0,
-            1193.5
+            403.0,
+            111.5
           ],
           "source_side": "east",
           "start": [
@@ -4231,11 +4679,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               2274.0
             ],
             [
-              1055.5,
+              403.0,
+              2452.0
+            ],
+            [
+              1708.0,
+              2452.0
+            ],
+            [
+              1708.0,
               140.0
             ]
           ],
@@ -4249,12 +4705,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 935.5,
-          "label_y": 2274.0,
+          "label_x": 1462.6669921875,
+          "label_y": 2452.0,
           "nullable": false,
           "route_label_position": [
-            1055.5,
-            1207.0
+            1708.0,
+            2051.5
           ],
           "source_side": "east",
           "start": [
@@ -4290,12 +4746,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_id",
-          "label_x": 440.6669921875,
+          "label_x": 469.8330078125,
           "label_y": 512.0,
           "nullable": false,
           "route_label_position": [
-            503.0,
-            489.5
+            499.0,
+            512.0
           ],
           "source_side": "east",
           "start": [
@@ -4313,11 +4769,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              782.0,
+              403.0,
               480.0
             ],
             [
-              782.0,
+              403.0,
+              32.0
+            ],
+            [
+              1161.0,
+              32.0
+            ],
+            [
+              1161.0,
               98.0
             ]
           ],
@@ -4331,12 +4795,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 777.1430053710938,
-          "label_y": 356.4020080566406,
+          "label_x": 403.0,
+          "label_y": 214.75,
           "nullable": false,
           "route_label_position": [
-            782.0,
-            289.0
+            564.5,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -4354,11 +4818,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              830.0,
+              403.0,
               1226.0
             ],
             [
-              830.0,
+              403.0,
+              1328.0
+            ],
+            [
+              1161.0,
+              1328.0
+            ],
+            [
+              1161.0,
               112.0
             ]
           ],
@@ -4372,12 +4844,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 830.0,
-          "label_y": 656.0830078125,
+          "label_x": 775.5,
+          "label_y": 1328.0,
           "nullable": false,
           "route_label_position": [
-            830.0,
-            669.0
+            1161.0,
+            1171.0
           ],
           "source_side": "east",
           "start": [
@@ -4413,12 +4885,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 393.0,
-          "label_y": 1258.0,
+          "label_x": 568.8319702148438,
+          "label_y": 1192.197021484375,
           "nullable": false,
           "route_label_position": [
             479.0,
-            1231.0
+            1228.0
           ],
           "source_side": "east",
           "start": [
@@ -4436,11 +4908,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              830.0,
+              403.0,
               2836.0
             ],
             [
-              830.0,
+              403.0,
+              2906.0
+            ],
+            [
+              1161.0,
+              2906.0
+            ],
+            [
+              1161.0,
               126.0
             ]
           ],
@@ -4454,12 +4934,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 830.0,
-          "label_y": 1822.3330078125,
+          "label_x": 1161.0,
+          "label_y": 1930.0,
           "nullable": false,
           "route_label_position": [
-            830.0,
-            1481.0
+            1161.0,
+            1930.0
           ],
           "source_side": "east",
           "start": [
@@ -4477,11 +4957,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1007.5,
+              403.0,
               2840.0
             ],
             [
-              1007.5,
+              403.0,
+              2906.0
+            ],
+            [
+              1708.0,
+              2906.0
+            ],
+            [
+              1708.0,
               160.0
             ]
           ],
@@ -4495,12 +4983,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1007.5,
-          "label_y": 2124.8330078125,
+          "label_x": 1700.6669921875,
+          "label_y": 2906.0,
           "nullable": false,
           "route_label_position": [
-            1007.5,
-            1500.0
+            1708.0,
+            2218.5
           ],
           "source_side": "east",
           "start": [
@@ -4518,11 +5006,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1890.5,
+              1508.0,
               116.0
             ],
             [
-              1890.5,
+              1508.0,
+              308.0
+            ],
+            [
+              2273.0,
+              308.0
+            ],
+            [
+              2273.0,
               65.0
             ]
           ],
@@ -4536,12 +5032,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2080.5048828125,
-          "label_y": 41.047000885009766,
+          "label_x": 1916.0,
+          "label_y": 308.0,
           "nullable": false,
           "route_label_position": [
-            1890.5,
-            90.5
+            1916.0,
+            308.0
           ],
           "source_side": "east",
           "start": [
@@ -4577,8 +5073,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "created_by",
-          "label_x": 1555.3330078125,
-          "label_y": 238.0,
+          "label_x": 1608.0,
+          "label_y": 144.0,
           "nullable": true,
           "route_label_position": [
             1608.0,
@@ -4622,8 +5118,8 @@ expression: snapshot
           "label_y": 930.0,
           "nullable": false,
           "route_label_position": [
-            527.0,
-            961.5
+            504.5,
+            930.0
           ],
           "source_side": "east",
           "start": [
@@ -4664,7 +5160,7 @@ expression: snapshot
           "nullable": false,
           "route_label_position": [
             503.0,
-            831.0
+            861.0
           ],
           "source_side": "east",
           "start": [
@@ -4682,11 +5178,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1593.0,
+              961.0,
               775.0
             ],
             [
-              1593.0,
+              961.0,
+              888.0
+            ],
+            [
+              2273.0,
+              888.0
+            ],
+            [
+              2273.0,
               95.0
             ]
           ],
@@ -4700,12 +5204,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1437.75,
-          "label_y": 775.0,
+          "label_x": 1951.5,
+          "label_y": 888.0,
           "nullable": false,
           "route_label_position": [
-            1593.0,
-            435.0
+            1951.5,
+            888.0
           ],
           "source_side": "east",
           "start": [
@@ -4723,11 +5227,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1641.0,
+              961.0,
               1447.0
             ],
             [
-              1641.0,
+              961.0,
+              1542.0
+            ],
+            [
+              2273.0,
+              1542.0
+            ],
+            [
+              2273.0,
               115.0
             ]
           ],
@@ -4741,12 +5253,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1641.0,
-          "label_y": 810.5,
+          "label_x": 2036.0830078125,
+          "label_y": 1542.0,
           "nullable": false,
           "route_label_position": [
-            1641.0,
-            781.0
+            2273.0,
+            1537.5
           ],
           "source_side": "east",
           "start": [
@@ -4782,12 +5294,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "depends_on_task_id",
-          "label_x": 418.0880126953125,
-          "label_y": 165.76699829101563,
+          "label_x": 577.0,
+          "label_y": 98.0,
           "nullable": false,
           "route_label_position": [
-            455.0,
-            114.0
+            473.0,
+            98.0
           ],
           "source_side": "east",
           "start": [
@@ -4823,12 +5335,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 398.0,
-          "label_y": 98.0,
+          "label_x": 567.1510009765625,
+          "label_y": 72.01499938964844,
           "nullable": false,
           "route_label_position": [
-            551.0,
-            91.0
+            496.0,
+            98.0
           ],
           "source_side": "east",
           "start": [
@@ -4865,11 +5377,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tag_id",
           "label_x": 479.0,
-          "label_y": 1147.75,
+          "label_y": 1176.5,
           "nullable": false,
           "route_label_position": [
             479.0,
-            1261.5
+            1234.0
           ],
           "source_side": "east",
           "start": [
@@ -4906,11 +5418,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "task_id",
           "label_x": 527.0,
-          "label_y": 615.7080078125,
+          "label_y": 669.5,
           "nullable": false,
           "route_label_position": [
             527.0,
-            594.0
+            669.5
           ],
           "source_side": "east",
           "start": [
@@ -4946,8 +5458,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 465.70098876953125,
-          "label_y": 70.83599853515625,
+          "label_x": 452.3330078125,
+          "label_y": 312.0,
           "nullable": false,
           "route_label_position": [
             503.0,
@@ -4969,11 +5481,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1103.5,
+              403.0,
               316.0
             ],
             [
-              1103.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               80.0
             ]
           ],
@@ -4987,12 +5507,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 964.094970703125,
-          "label_y": 256.8869934082031,
+          "label_x": 1354.1199951171875,
+          "label_y": 32.0,
           "nullable": false,
           "route_label_position": [
-            1103.5,
-            198.0
+            937.5,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -5028,12 +5548,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "project_id",
-          "label_x": 1038.093017578125,
-          "label_y": 60.99100112915039,
+          "label_x": 1037.0,
+          "label_y": 104.5,
           "nullable": false,
           "route_label_position": [
             1037.0,
-            123.0
+            104.5
           ],
           "source_side": "east",
           "start": [
@@ -5051,11 +5571,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1617.0,
+              961.0,
               102.0
             ],
             [
-              1617.0,
+              961.0,
+              -64.0
+            ],
+            [
+              2273.0,
+              -64.0
+            ],
+            [
+              2273.0,
               75.0
             ]
           ],
@@ -5069,12 +5597,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2064.155029296875,
-          "label_y": 15.01200008392334,
+          "label_x": 1598.0,
+          "label_y": -64.0,
           "nullable": false,
           "route_label_position": [
-            1617.0,
-            88.5
+            1598.0,
+            -64.0
           ],
           "source_side": "east",
           "start": [
@@ -5092,11 +5620,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1334.5,
+              938.0,
               152.0
             ],
             [
-              1334.5,
+              938.0,
+              8.0
+            ],
+            [
+              1720.0,
+              8.0
+            ],
+            [
+              1720.0,
               60.0
             ]
           ],
@@ -5110,12 +5646,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assignee_id",
-          "label_x": 1544.72900390625,
-          "label_y": 48.07699966430664,
+          "label_x": 1371.4759521484375,
+          "label_y": -39.69300079345703,
           "nullable": true,
           "route_label_position": [
-            1334.5,
-            106.0
+            1283.0,
+            8.0
           ],
           "source_side": "east",
           "start": [
@@ -5133,11 +5669,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1310.5,
+              938.0,
               184.0
             ],
             [
-              1310.5,
+              938.0,
+              8.0
+            ],
+            [
+              1720.0,
+              8.0
+            ],
+            [
+              1720.0,
               70.0
             ]
           ],
@@ -5151,12 +5695,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "reporter_id",
-          "label_x": 1193.5,
-          "label_y": 184.0,
+          "label_x": 1550.0169677734375,
+          "label_y": -39.53200149536133,
           "nullable": true,
           "route_label_position": [
-            1310.5,
-            127.0
+            1272.0,
+            8.0
           ],
           "source_side": "east",
           "start": [
@@ -5192,12 +5736,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 455.0,
-          "label_y": 1298.5,
+          "label_x": 462.72601318359375,
+          "label_y": 1458.9840087890625,
           "nullable": false,
           "route_label_position": [
             455.0,
-            1329.0
+            1298.5
           ],
           "source_side": "east",
           "start": [
@@ -5215,11 +5759,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1031.5,
+              403.0,
               1444.0
             ],
             [
-              1031.5,
+              403.0,
+              1528.0
+            ],
+            [
+              1708.0,
+              1528.0
+            ],
+            [
+              1708.0,
               110.0
             ]
           ],
@@ -5233,12 +5785,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 959.7340087890625,
-          "label_y": 1495.9830322265625,
+          "label_x": 748.635986328125,
+          "label_y": 1536.6639404296875,
           "nullable": false,
           "route_label_position": [
-            1031.5,
-            777.0
+            1705.0,
+            1528.0
           ],
           "source_side": "east",
           "start": [
@@ -5256,11 +5808,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1569.0,
+              961.0,
               1229.0
             ],
             [
-              1569.0,
+              961.0,
+              1324.0
+            ],
+            [
+              2273.0,
+              1324.0
+            ],
+            [
+              2273.0,
               105.0
             ]
           ],
@@ -5274,12 +5834,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 1569.0,
-          "label_y": 1041.0,
+          "label_x": 2173.5,
+          "label_y": 1324.0,
           "nullable": false,
           "route_label_position": [
-            1569.0,
-            667.0
+            2173.5,
+            1324.0
           ],
           "source_side": "east",
           "start": [
@@ -5315,12 +5875,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "role_id",
-          "label_x": 462.91400146484375,
-          "label_y": 727.1749877929688,
+          "label_x": 474.2640075683594,
+          "label_y": 739.166015625,
           "nullable": false,
           "route_label_position": [
-            551.0,
-            744.5830078125
+            497.9169921875,
+            739.166015625
           ],
           "source_side": "east",
           "start": [
@@ -5338,11 +5898,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1079.5,
+              403.0,
               759.0
             ],
             [
-              1079.5,
+              403.0,
+              -16.0
+            ],
+            [
+              1708.0,
+              -16.0
+            ],
+            [
+              1708.0,
               100.0
             ]
           ],
@@ -5356,12 +5924,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assigned_by",
-          "label_x": 1079.5,
-          "label_y": 633.75,
+          "label_x": 421.52099609375,
+          "label_y": -37.6510009765625,
           "nullable": true,
           "route_label_position": [
-            1079.5,
-            429.5
+            715.5,
+            -16.0
           ],
           "source_side": "east",
           "start": [
@@ -5379,11 +5947,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              1055.5,
+              403.0,
               688.833984375
             ],
             [
-              1055.5,
+              403.0,
+              32.0
+            ],
+            [
+              1708.0,
+              32.0
+            ],
+            [
+              1708.0,
               90.0
             ]
           ],
@@ -5397,12 +5973,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 685.4719848632813,
-          "label_y": 688.833984375,
+          "label_x": 403.0,
+          "label_y": 387.02801513671875,
           "nullable": false,
           "route_label_position": [
-            1055.5,
-            389.4169921875
+            745.5830078125,
+            32.0
           ],
           "source_side": "east",
           "start": [
@@ -5438,8 +6014,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 2229.20703125,
-          "label_y": 43.41400146484375,
+          "label_x": 2173.0,
+          "label_y": 89.0,
           "nullable": false,
           "route_label_position": [
             2173.0,

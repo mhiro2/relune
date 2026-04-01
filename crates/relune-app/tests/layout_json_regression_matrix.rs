@@ -244,3 +244,75 @@ fn layout_self_loop_geometry_holds_for_matrix() {
         }
     }
 }
+
+#[test]
+fn layout_geometry_holds_for_top_to_bottom_fixture_matrix() {
+    for fixture_name in layout_regression_fixture_names() {
+        for (edge_style, _) in EDGE_STYLES {
+            let graph =
+                export_layout_fixture(fixture_name, LayoutDirection::TopToBottom, *edge_style);
+            assert_layout_geometry(&graph);
+        }
+    }
+}
+
+#[test]
+fn layout_directional_invariants_hold_for_same_rank_and_reverse_cases() {
+    let sql = r"
+        CREATE TABLE accounts (
+            id SERIAL PRIMARY KEY
+        );
+        CREATE TABLE projects (
+            id SERIAL PRIMARY KEY,
+            owner_id INTEGER REFERENCES accounts(id)
+        );
+        CREATE TABLE audits (
+            id SERIAL PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id),
+            account_id INTEGER REFERENCES accounts(id)
+        );
+    ";
+
+    for (direction, _) in &DIRECTIONS[..2] {
+        for (edge_style, _) in EDGE_STYLES {
+            let graph = export_layout_sql(sql, *direction, *edge_style);
+            assert_layout_geometry(&graph);
+            assert_directional_layout_invariants(&graph, *direction);
+        }
+    }
+}
+
+#[test]
+fn layout_json_exports_include_routing_debug_metadata() {
+    let graph = export_layout_fixture(
+        "join_heavy.sql",
+        LayoutDirection::TopToBottom,
+        RouteStyle::Orthogonal,
+    );
+
+    assert_eq!(
+        graph
+            .routing_debug
+            .as_ref()
+            .expect("graph routing debug should be present")
+            .non_self_loop_detour_activations,
+        0
+    );
+    assert!(
+        graph
+            .edges
+            .iter()
+            .all(|edge| edge.routing_debug.as_ref().is_some_and(|debug| {
+                if edge.is_self_loop {
+                    debug.self_loop_radius_offset.is_some()
+                } else {
+                    debug.source_side.is_some()
+                        && debug.target_side.is_some()
+                        && debug.source_slot_index.is_some()
+                        && debug.source_slot_count.is_some()
+                        && debug.target_slot_index.is_some()
+                        && debug.target_slot_count.is_some()
+                }
+            }))
+    );
+}

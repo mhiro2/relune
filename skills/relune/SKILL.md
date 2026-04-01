@@ -142,12 +142,12 @@ relune export --sql schema.sql --format mermaid --focus orders --depth 2 -o orde
 |--------|-------------|
 | `schema-json` | Normalized schema as JSON |
 | `graph-json` | Graph representation (nodes/edges) as JSON |
-| `layout-json` | Positioned graph with coordinates as JSON |
+| `layout-json` | Positioned graph with coordinates and `routing_debug` metadata |
 | `mermaid` | Mermaid `erDiagram` -- renders in GitHub/GitLab Markdown |
 | `d2` | D2 diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--layout`, `--edge-style`, `--direction`, `--focus`, `--depth`, `--group-by` for positioned exports.
+Supports `--layout`, `--edge-style`, `--direction`, `--focus`, `--depth`, `--group-by` for positioned exports. `layout-json` includes graph-level detour counts plus per-edge side, slot, and channel metadata, which makes route diffs easier to audit alongside SVG/HTML output.
 
 ### lint
 

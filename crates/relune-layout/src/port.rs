@@ -30,7 +30,11 @@ pub(crate) struct RegularPortAssignment {
     pub source_side: AttachmentSide,
     pub target_side: AttachmentSide,
     pub source_slot_offset: f32,
+    pub source_slot_index: usize,
+    pub source_slot_count: usize,
     pub target_slot_offset: f32,
+    pub target_slot_index: usize,
+    pub target_slot_count: usize,
     pub source_row_offset: f32,
     pub target_row_offset: f32,
 }
@@ -94,7 +98,11 @@ pub(crate) fn assign_edge_ports(
             source_side,
             target_side,
             source_slot_offset: 0.0,
+            source_slot_index: 0,
+            source_slot_count: 1,
             target_slot_offset: 0.0,
+            target_slot_index: 0,
+            target_slot_count: 1,
             source_row_offset,
             target_row_offset,
         }));
@@ -148,8 +156,12 @@ pub(crate) fn assign_edge_ports(
             };
             if candidate.is_source {
                 assignment.source_slot_offset = slot_offset;
+                assignment.source_slot_index = slot_index;
+                assignment.source_slot_count = slot_total;
             } else {
                 assignment.target_slot_offset = slot_offset;
+                assignment.target_slot_index = slot_index;
+                assignment.target_slot_count = slot_total;
             }
         }
     }

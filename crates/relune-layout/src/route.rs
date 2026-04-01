@@ -189,6 +189,7 @@ pub(crate) fn route_edge_with_assigned_ports(
 
 #[must_use]
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(test), allow(dead_code))] // The simple channel helper remains covered by route unit tests.
 pub(crate) fn route_edge_with_simple_channel(
     x1: f32,
     y1: f32,
@@ -268,6 +269,7 @@ fn build_backbone_route(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // Only exercised through the test-only helper above.
 fn build_simple_channel_route(
     source: (f32, f32),
     target: (f32, f32),

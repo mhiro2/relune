@@ -9,7 +9,10 @@ use std::process::Output;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use relune_testkit::{config_fixture_path, normalize_workspace_paths, sql_fixture_path};
+use relune_testkit::{
+    compact_layout_snapshot, config_fixture_path, normalize_workspace_paths, parse_layout_json,
+    sql_fixture_path,
+};
 
 fn relune() -> Command {
     Command::cargo_bin("relune").expect("Failed to find relune binary")
@@ -499,6 +502,33 @@ mod export_tests {
             serde_json::from_str(&stdout).expect("Output should be valid JSON");
 
         assert_eq!(parsed["edges"][0]["route"]["style"], "orthogonal");
+    }
+
+    #[test]
+    fn export_layout_json_fixture_regression_snapshot() {
+        let mut cmd = relune();
+        let output = cmd
+            .arg("export")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("layout-json")
+            .arg("--direction")
+            .arg("left-to-right")
+            .arg("--edge-style")
+            .arg("curved")
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let graph = parse_layout_json(&stdout);
+
+        assert!(graph.routing_debug.is_some());
+        assert!(graph.edges.iter().all(|edge| edge.routing_debug.is_some()));
+        insta::assert_json_snapshot!(
+            "export_layout_json__simple_blog__left_to_right__curved",
+            compact_layout_snapshot(&graph)
+        );
     }
 
     #[test]

@@ -1077,6 +1077,7 @@ mod tests {
             groups: vec![],
             width: 800.0,
             height: 600.0,
+            routing_debug: None,
         }
     }
 
@@ -1117,10 +1118,12 @@ mod tests {
             groups: vec![],
             width: 432.0,
             height: 206.0,
+            routing_debug: None,
         }
     }
 
     /// Helper function to create a test `PositionedGraph` with multiple nodes and edges
+    #[allow(clippy::too_many_lines)] // Test fixture keeps the end-to-end render assertions readable.
     fn multi_node_graph() -> relune_layout::PositionedGraph {
         relune_layout::PositionedGraph {
             nodes: vec![
@@ -1216,10 +1219,12 @@ mod tests {
                 collapsed_join_table: None,
                 label_x: 186.0,
                 label_y: 194.5,
+                routing_debug: None,
             }],
             groups: vec![],
             width: 432.0,
             height: 398.0,
+            routing_debug: None,
         }
     }
 
@@ -1370,6 +1375,7 @@ mod tests {
                     collapsed_join_table: None,
                     label_x: 356.0,
                     label_y: 94.0,
+                    routing_debug: None,
                 },
                 PositionedEdge {
                     from: "users".to_string(),
@@ -1394,11 +1400,13 @@ mod tests {
                     collapsed_join_table: None,
                     label_x: 356.0,
                     label_y: 187.5,
+                    routing_debug: None,
                 },
             ],
             groups: vec![],
             width: 712.0,
             height: 366.0,
+            routing_debug: None,
         };
 
         let svg = render_svg(&graph, SvgRenderOptions::default());
@@ -1498,10 +1506,12 @@ mod tests {
                 collapsed_join_table: None,
                 label_x: 358.0,
                 label_y: 100.0,
+                routing_debug: None,
             }],
             groups: vec![],
             width: 500.0,
             height: 200.0,
+            routing_debug: None,
         };
 
         let svg = render_svg(&graph, SvgRenderOptions::default());
@@ -1547,6 +1557,7 @@ mod tests {
             groups: vec![],
             width: 400.0,
             height: 180.0,
+            routing_debug: None,
         };
 
         let svg = render_svg(
@@ -1628,6 +1639,7 @@ mod tests {
             groups: vec![],
             width: 432.0,
             height: 170.0,
+            routing_debug: None,
         };
 
         let svg = render_svg(&graph, SvgRenderOptions::default());
@@ -1683,10 +1695,12 @@ mod tests {
                 collapsed_join_table: None,
                 label_x: 200.0,
                 label_y: 100.0,
+                routing_debug: None,
             }],
             groups: vec![],
             width: 400.0,
             height: 200.0,
+            routing_debug: None,
         };
 
         let svg = render_svg(&graph, SvgRenderOptions::default());
@@ -1728,10 +1742,12 @@ mod tests {
                 collapsed_join_table: None,
                 label_x: 200.0,
                 label_y: 100.0,
+                routing_debug: None,
             }],
             groups: vec![],
             width: 400.0,
             height: 200.0,
+            routing_debug: None,
         }
     }
 
@@ -1764,10 +1780,12 @@ mod tests {
                 collapsed_join_table: None,
                 label_x: 170.0,
                 label_y: 100.0,
+                routing_debug: None,
             }],
             groups: vec![],
             width: 260.0,
             height: 220.0,
+            routing_debug: None,
         }
     }
 
@@ -1992,6 +2010,7 @@ mod tests {
                 collapsed_join_table: None,
                 label_x: 186.0,
                 label_y: 190.0,
+                routing_debug: None,
             }],
             groups: vec![PositionedGroup {
                 id: "user_domain".to_string(),
@@ -2003,6 +2022,7 @@ mod tests {
             }],
             width: 432.0,
             height: 398.0,
+            routing_debug: None,
         }
     }
 
@@ -2033,6 +2053,7 @@ mod tests {
             groups: vec![],
             width: 432.0,
             height: 188.0,
+            routing_debug: None,
         }
     }
 
@@ -2184,6 +2205,7 @@ mod tests {
             }],
             width: 400.0,
             height: 200.0,
+            routing_debug: None,
         };
 
         let svg = render_svg(&graph, SvgRenderOptions::default());
