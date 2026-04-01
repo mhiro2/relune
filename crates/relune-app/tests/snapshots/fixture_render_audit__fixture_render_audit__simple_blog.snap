@@ -12,10 +12,10 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 1,
+      "count_over_1_8x": 0,
       "worst_examples": [
-        "comments[user_id] -> users[id] (2.00x)",
         "comments[post_id] -> posts[id] (1.00x)",
+        "comments[user_id] -> users[id] (1.00x)",
         "posts[user_id] -> users[id] (1.00x)"
       ]
     },
@@ -33,9 +33,9 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
       "examples": []
     },
     "tight_clearance": {
-      "count_under_24px": 0,
+      "count_under_24px": 1,
       "worst_examples": [
-        "comments[user_id] -> users[id] (26.0px)",
+        "comments[user_id] -> users[id] (0.0px)",
         "comments[post_id] -> posts[id] (256.0px)",
         "posts[user_id] -> users[id] (256.0px)"
       ]
@@ -43,13 +43,13 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 317644,
+      "bytes": 317538,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 23744,
+      "bytes": 23638,
       "edge_groups": 24,
       "node_groups": 3
     }

@@ -29,8 +29,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 222.5,
-          "label_y": 249.5,
+          "label_x": 246.10299682617188,
+          "label_y": 237.65199279785156,
           "nullable": false,
           "route_label_position": [
             215.5,
@@ -50,24 +50,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              194.5,
-              224.0
-            ],
-            [
-              30.0,
-              224.0
-            ],
-            [
-              30.0,
-              498.0
-            ],
-            [
-              194.5,
-              498.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             194.5,
             526.0
@@ -78,11 +61,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 30.0,
-          "label_y": 251.16700744628906,
+          "label_x": 158.5,
+          "label_y": 471.0,
           "nullable": false,
           "route_label_position": [
-            30.0,
+            194.5,
             361.0
           ],
           "source_side": "south",
@@ -119,8 +102,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 222.5,
-          "label_y": 472.5,
+          "label_x": 246.10299682617188,
+          "label_y": 491.8479919433594,
           "nullable": false,
           "route_label_position": [
             215.5,
@@ -205,8 +188,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 222.5,
-          "label_y": 249.5,
+          "label_x": 246.10299682617188,
+          "label_y": 237.65199279785156,
           "nullable": false,
           "route_label_position": [
             215.5,
@@ -226,24 +209,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              194.5,
-              224.0
-            ],
-            [
-              30.0,
-              224.0
-            ],
-            [
-              30.0,
-              498.0
-            ],
-            [
-              194.5,
-              498.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             194.5,
             526.0
@@ -254,11 +220,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 30.0,
-          "label_y": 251.16700744628906,
+          "label_x": 158.5,
+          "label_y": 471.0,
           "nullable": false,
           "route_label_position": [
-            30.0,
+            194.5,
             361.0
           ],
           "source_side": "south",
@@ -295,8 +261,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 222.5,
-          "label_y": 472.5,
+          "label_x": 246.10299682617188,
+          "label_y": 491.8479919433594,
           "nullable": false,
           "route_label_position": [
             215.5,
@@ -381,8 +347,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 222.5,
-          "label_y": 249.5,
+          "label_x": 246.10299682617188,
+          "label_y": 237.65199279785156,
           "nullable": false,
           "route_label_position": [
             215.5,
@@ -402,24 +368,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              194.5,
-              224.0
-            ],
-            [
-              30.0,
-              224.0
-            ],
-            [
-              30.0,
-              498.0
-            ],
-            [
-              194.5,
-              498.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             194.5,
             526.0
@@ -430,11 +379,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 30.0,
-          "label_y": 251.16700744628906,
+          "label_x": 158.5,
+          "label_y": 471.0,
           "nullable": false,
           "route_label_position": [
-            30.0,
+            194.5,
             361.0
           ],
           "source_side": "south",
@@ -471,8 +420,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 222.5,
-          "label_y": 472.5,
+          "label_x": 246.10299682617188,
+          "label_y": 491.8479919433594,
           "nullable": false,
           "route_label_position": [
             215.5,

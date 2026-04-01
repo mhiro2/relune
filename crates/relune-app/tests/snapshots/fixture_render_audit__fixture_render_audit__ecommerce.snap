@@ -12,9 +12,9 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 1,
+      "count_over_1_8x": 0,
       "worst_examples": [
-        "addresses[customer_id] -> customers[id] (2.13x)",
+        "addresses[customer_id] -> customers[id] (1.00x)",
         "order_items[order_id] -> orders[id] (1.00x)",
         "order_items[product_id] -> products[id] (1.00x)"
       ]
@@ -35,23 +35,23 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 1,
+      "count_under_24px": 2,
       "worst_examples": [
         "addresses[customer_id] -> customers[id] (0.0px)",
-        "order_items[product_id] -> products[id] (40.0px)",
+        "order_items[product_id] -> products[id] (16.0px)",
         "product_categories[product_id] -> products[id] (40.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 363250,
+      "bytes": 362794,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 62644,
+      "bytes": 62188,
       "edge_groups": 56,
       "node_groups": 7
     }

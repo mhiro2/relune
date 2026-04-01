@@ -107,8 +107,10 @@ The same numbers are encoded in `crates/relune-layout/src/channel.rs`.
 
 ## Detour retirement rule
 
-`detour_around_obstacles` stays as a fallback until obstacle-aware channel
-selection lands. After Phase 4a:
+`detour_around_obstacles` started as a fallback until obstacle-aware channel
+selection landed. The implementation now keeps detour out of the default
+non-self-loop path, while preserving self-loop handling and an explicit debug
+fallback via `RELUNE_ENABLE_DETOUR_FALLBACK`. After Phase 4a:
 
 1. Measure detour activation for every non-self-loop edge across the fixture
    audit test set.

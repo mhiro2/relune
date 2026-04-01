@@ -12,11 +12,11 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 1,
+      "count_over_1_8x": 0,
       "worst_examples": [
-        "cycle_a[cycle_c_id] -> cycle_c[id] (1.89x)",
-        "organizations_ref[owner_user_id] -> users[id] (1.63x)",
-        "cycle_b[cycle_a_id] -> cycle_a[id] (1.00x)"
+        "cycle_a[cycle_c_id] -> cycle_c[id] (1.00x)",
+        "cycle_b[cycle_a_id] -> cycle_a[id] (1.00x)",
+        "cycle_c[cycle_b_id] -> cycle_b[id] (1.00x)"
       ]
     },
     "parallel_groups": {
@@ -31,7 +31,7 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
       "examples": [
         "cycle_b[cycle_a_id] -> cycle_a[id] (rank 1 -> 0, bends 2)",
         "cycle_c[cycle_b_id] -> cycle_b[id] (rank 2 -> 1, bends 2)",
-        "organizations_ref[owner_user_id] -> users[id] (rank 2 -> 0, bends 10)"
+        "organizations_ref[owner_user_id] -> users[id] (rank 2 -> 0, bends 2)"
       ]
     },
     "same_rank_edges": {
@@ -43,23 +43,23 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 2,
+      "count_under_24px": 4,
       "worst_examples": [
         "cycle_a[cycle_c_id] -> cycle_c[id] (0.0px)",
         "organizations_ref[owner_user_id] -> users[id] (0.0px)",
-        "cycle_b[cycle_a_id] -> cycle_a[id] (40.0px)"
+        "cycle_b[cycle_a_id] -> cycle_a[id] (16.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 389247,
+      "bytes": 388688,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 85998,
+      "bytes": 85439,
       "edge_groups": 96,
       "node_groups": 12
     }

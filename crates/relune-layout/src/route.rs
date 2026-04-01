@@ -45,7 +45,7 @@ pub(crate) enum AttachmentSide {
     West,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ChannelAxis {
     X,
     Y,
@@ -626,7 +626,9 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
     }
 }
 
-fn route_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
+/// Returns the full route polyline including endpoints.
+#[must_use]
+pub(crate) fn route_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
     let mut points: Vec<(f32, f32)> = Vec::with_capacity(route.control_points.len() + 2);
     points.push((route.x1, route.y1));
     points.extend_from_slice(&route.control_points);
@@ -831,7 +833,9 @@ pub(crate) fn sample_route_obstacles(route: &EdgeRoute, half_size: f32, spacing:
     obstacles
 }
 
-fn approximate_route_length(route: &EdgeRoute) -> f32 {
+/// Returns the total polyline length of the routed edge.
+#[must_use]
+pub(crate) fn approximate_route_length(route: &EdgeRoute) -> f32 {
     route_points(route)
         .windows(2)
         .map(|segment| {
