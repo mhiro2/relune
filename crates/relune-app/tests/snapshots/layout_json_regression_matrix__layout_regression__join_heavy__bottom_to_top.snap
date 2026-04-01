@@ -1,0 +1,5821 @@
+---
+source: crates/relune-app/tests/layout_json_regression_matrix.rs
+expression: snapshot
+---
+{
+  "direction": "bottom_to_top",
+  "fixture": "join_heavy.sql",
+  "styles": {
+    "curved": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              6107.5,
+              795.0
+            ],
+            [
+              251.5,
+              795.0
+            ]
+          ],
+          "end": [
+            251.5,
+            250.0
+          ],
+          "from": "activities",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 5494.833984375,
+          "label_y": 795.0,
+          "nullable": false,
+          "route_label_position": [
+            3179.5,
+            795.0
+          ],
+          "source_side": "north",
+          "start": [
+            6107.5,
+            1340.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6121.5,
+              940.0
+            ],
+            [
+              255.5,
+              940.0
+            ]
+          ],
+          "end": [
+            255.5,
+            540.0
+          ],
+          "from": "activities",
+          "from_columns": [
+            "actor_id"
+          ],
+          "is_self_loop": false,
+          "label": "actor_id",
+          "label_x": 5410.5,
+          "label_y": 940.0,
+          "nullable": true,
+          "route_label_position": [
+            3188.5,
+            940.0
+          ],
+          "source_side": "north",
+          "start": [
+            6121.5,
+            1340.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4999.5,
+              777.0
+            ],
+            [
+              231.5,
+              777.0
+            ]
+          ],
+          "end": [
+            231.5,
+            250.0
+          ],
+          "from": "attachments",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 4563.93701171875,
+          "label_y": 741.8489990234375,
+          "nullable": false,
+          "route_label_position": [
+            2615.5,
+            777.0
+          ],
+          "source_side": "north",
+          "start": [
+            4999.5,
+            1304.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5013.5,
+              922.0
+            ],
+            [
+              235.5,
+              922.0
+            ]
+          ],
+          "end": [
+            235.5,
+            540.0
+          ],
+          "from": "attachments",
+          "from_columns": [
+            "uploader_id"
+          ],
+          "is_self_loop": false,
+          "label": "uploader_id",
+          "label_x": 2574.763916015625,
+          "label_y": 886.4520263671875,
+          "nullable": false,
+          "route_label_position": [
+            2624.5,
+            922.0
+          ],
+          "source_side": "north",
+          "start": [
+            5013.5,
+            1304.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4641.0,
+              1376.5
+            ],
+            [
+              4641.0,
+              1481.5
+            ]
+          ],
+          "end": [
+            4605.0,
+            1481.5
+          ],
+          "from": "comments",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 4653.0,
+          "label_y": 1429.0,
+          "nullable": true,
+          "route_label_position": [
+            4641.0,
+            1429.0
+          ],
+          "source_side": "east",
+          "start": [
+            4605.0,
+            1376.5
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "comments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4452.5,
+              786.0
+            ],
+            [
+              221.5,
+              786.0
+            ]
+          ],
+          "end": [
+            221.5,
+            250.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 1850.887939453125,
+          "label_y": 820.89697265625,
+          "nullable": false,
+          "route_label_position": [
+            2337.0,
+            786.0
+          ],
+          "source_side": "north",
+          "start": [
+            4452.5,
+            1322.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4466.5,
+              931.0
+            ],
+            [
+              225.5,
+              931.0
+            ]
+          ],
+          "end": [
+            225.5,
+            540.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "author_id"
+          ],
+          "is_self_loop": false,
+          "label": "author_id",
+          "label_x": 2354.7041015625,
+          "label_y": 883.7960205078125,
+          "nullable": false,
+          "route_label_position": [
+            2346.0,
+            931.0
+          ],
+          "source_side": "north",
+          "start": [
+            4466.5,
+            1322.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              761.0,
+              886.0
+            ],
+            [
+              706.0,
+              886.0
+            ]
+          ],
+          "end": [
+            706.0,
+            848.0
+          ],
+          "from": "integrations",
+          "from_columns": [
+            "integration_type_id"
+          ],
+          "is_self_loop": false,
+          "label": "integration_type_id",
+          "label_x": 828.489990234375,
+          "label_y": 860.9609985351563,
+          "nullable": false,
+          "route_label_position": [
+            761.0,
+            894.5
+          ],
+          "source_side": "north",
+          "start": [
+            761.0,
+            996.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "integration_types",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              747.0,
+              623.0
+            ],
+            [
+              181.5,
+              623.0
+            ]
+          ],
+          "end": [
+            181.5,
+            250.0
+          ],
+          "from": "integrations",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 464.25,
+          "label_y": 623.0,
+          "nullable": false,
+          "route_label_position": [
+            464.25,
+            623.0
+          ],
+          "source_side": "north",
+          "start": [
+            747.0,
+            996.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5546.5,
+              768.0
+            ],
+            [
+              241.5,
+              768.0
+            ]
+          ],
+          "end": [
+            241.5,
+            250.0
+          ],
+          "from": "notifications",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 5012.26708984375,
+          "label_y": 744.4450073242188,
+          "nullable": false,
+          "route_label_position": [
+            2894.0,
+            768.0
+          ],
+          "source_side": "north",
+          "start": [
+            5546.5,
+            1286.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5560.5,
+              913.0
+            ],
+            [
+              245.5,
+              913.0
+            ]
+          ],
+          "end": [
+            245.5,
+            540.0
+          ],
+          "from": "notifications",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 4381.17919921875,
+          "label_y": 889.2329711914063,
+          "nullable": false,
+          "route_label_position": [
+            2903.0,
+            913.0
+          ],
+          "source_side": "north",
+          "start": [
+            5560.5,
+            1286.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1318.0,
+              1248.0
+            ],
+            [
+              754.0,
+              1248.0
+            ]
+          ],
+          "end": [
+            754.0,
+            1210.0
+          ],
+          "from": "project_integrations",
+          "from_columns": [
+            "integration_id"
+          ],
+          "is_self_loop": false,
+          "label": "integration_id",
+          "label_x": 1090.0,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            1090.0,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            1318.0,
+            1394.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "integrations",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1304.0,
+              1121.0
+            ],
+            [
+              194.5,
+              1121.0
+            ]
+          ],
+          "end": [
+            194.5,
+            848.0
+          ],
+          "from": "project_integrations",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 1035.7640380859375,
+          "label_y": 1099.4659423828125,
+          "nullable": false,
+          "route_label_position": [
+            749.25,
+            1121.0
+          ],
+          "source_side": "north",
+          "start": [
+            1304.0,
+            1394.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3372.5,
+              1130.0
+            ],
+            [
+              208.5,
+              1130.0
+            ]
+          ],
+          "end": [
+            208.5,
+            848.0
+          ],
+          "from": "project_teams",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 2105.37890625,
+          "label_y": 1106.3719482421875,
+          "nullable": false,
+          "route_label_position": [
+            1790.5,
+            1130.0
+          ],
+          "source_side": "north",
+          "start": [
+            3372.5,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3386.5,
+              1224.0
+            ],
+            [
+              2290.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            2290.5,
+            1210.0
+          ],
+          "from": "project_teams",
+          "from_columns": [
+            "team_id"
+          ],
+          "is_self_loop": false,
+          "label": "team_id",
+          "label_x": 2925.5,
+          "label_y": 1224.0,
+          "nullable": false,
+          "route_label_position": [
+            2925.5,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            3386.5,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6682.5,
+              1139.0
+            ],
+            [
+              222.5,
+              1139.0
+            ]
+          ],
+          "end": [
+            222.5,
+            848.0
+          ],
+          "from": "project_watchers",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 3452.5,
+          "label_y": 1139.0,
+          "nullable": false,
+          "route_label_position": [
+            3452.5,
+            1139.0
+          ],
+          "source_side": "north",
+          "start": [
+            6682.5,
+            1430.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6696.5,
+              985.0
+            ],
+            [
+              265.5,
+              985.0
+            ]
+          ],
+          "end": [
+            265.5,
+            540.0
+          ],
+          "from": "project_watchers",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 4091.083984375,
+          "label_y": 985.0,
+          "nullable": false,
+          "route_label_position": [
+            3481.0,
+            985.0
+          ],
+          "source_side": "north",
+          "start": [
+            6696.5,
+            1430.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              433.0
+            ],
+            [
+              151.5,
+              433.0
+            ]
+          ],
+          "end": [
+            151.5,
+            250.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 151.5,
+          "label_y": 318.1669921875,
+          "nullable": false,
+          "route_label_position": [
+            173.0,
+            433.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            616.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              578.0
+            ],
+            [
+              155.5,
+              578.0
+            ]
+          ],
+          "end": [
+            155.5,
+            540.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "created_by"
+          ],
+          "is_self_loop": false,
+          "label": "created_by",
+          "label_x": 106.28500366210938,
+          "label_y": 601.6259765625,
+          "nullable": true,
+          "route_label_position": [
+            182.0,
+            578.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            616.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2390.5,
+              1272.0
+            ],
+            [
+              1802.0,
+              1272.0
+            ]
+          ],
+          "end": [
+            1802.0,
+            1210.0
+          ],
+          "from": "role_permissions",
+          "from_columns": [
+            "permission_id"
+          ],
+          "is_self_loop": false,
+          "label": "permission_id",
+          "label_x": 2153.25,
+          "label_y": 1272.0,
+          "nullable": false,
+          "route_label_position": [
+            2153.25,
+            1272.0
+          ],
+          "source_side": "north",
+          "start": [
+            2390.5,
+            1448.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "permissions",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2376.5,
+              1248.0
+            ],
+            [
+              1313.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            1313.5,
+            1210.0
+          ],
+          "from": "role_permissions",
+          "from_columns": [
+            "role_id"
+          ],
+          "is_self_loop": false,
+          "label": "role_id",
+          "label_x": 1926.0,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            1926.0,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            2376.5,
+            1448.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "roles",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1306.5,
+              650.0
+            ],
+            [
+              191.5,
+              650.0
+            ]
+          ],
+          "end": [
+            191.5,
+            250.0
+          ],
+          "from": "roles",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 1306.5,
+          "label_y": 730.8330078125,
+          "nullable": false,
+          "route_label_position": [
+            749.0,
+            650.0
+          ],
+          "source_side": "north",
+          "start": [
+            1306.5,
+            1050.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2844.5,
+              659.0
+            ],
+            [
+              211.5,
+              659.0
+            ]
+          ],
+          "end": [
+            211.5,
+            250.0
+          ],
+          "from": "tags",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 2390.75,
+          "label_y": 659.0,
+          "nullable": false,
+          "route_label_position": [
+            1528.0,
+            659.0
+          ],
+          "source_side": "north",
+          "start": [
+            2844.5,
+            1068.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1224.0
+            ],
+            [
+              194.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            194.5,
+            1210.0
+          ],
+          "from": "task_dependencies",
+          "from_columns": [
+            "depends_on_task_id"
+          ],
+          "is_self_loop": false,
+          "label": "depends_on_task_id",
+          "label_x": 285.29901123046875,
+          "label_y": 1298.1920166015625,
+          "nullable": false,
+          "route_label_position": [
+            201.5,
+            1304.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1224.0
+            ],
+            [
+              180.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            180.5,
+            1210.0
+          ],
+          "from": "task_dependencies",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 249.38499450683594,
+          "label_y": 1339.0150146484375,
+          "nullable": false,
+          "route_label_position": [
+            201.5,
+            1304.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2884.0,
+              1248.0
+            ],
+            [
+              2844.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            2844.5,
+            1210.0
+          ],
+          "from": "task_tags",
+          "from_columns": [
+            "tag_id"
+          ],
+          "is_self_loop": false,
+          "label": "tag_id",
+          "label_x": 2919.513916015625,
+          "label_y": 1302.4310302734375,
+          "nullable": false,
+          "route_label_position": [
+            2884.0,
+            1309.25
+          ],
+          "source_side": "north",
+          "start": [
+            2884.0,
+            1448.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tags",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2870.0,
+              1224.0
+            ],
+            [
+              222.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            222.5,
+            1210.0
+          ],
+          "from": "task_tags",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 2132.1669921875,
+          "label_y": 1224.0,
+          "nullable": false,
+          "route_label_position": [
+            1651.25,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            2870.0,
+            1448.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              755.5,
+              1272.0
+            ],
+            [
+              208.5,
+              1272.0
+            ]
+          ],
+          "end": [
+            208.5,
+            1210.0
+          ],
+          "from": "task_watchers",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 530.0,
+          "label_y": 1272.0,
+          "nullable": false,
+          "route_label_position": [
+            530.0,
+            1272.0
+          ],
+          "source_side": "north",
+          "start": [
+            755.5,
+            1430.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              769.5,
+              985.0
+            ],
+            [
+              185.5,
+              985.0
+            ]
+          ],
+          "end": [
+            185.5,
+            540.0
+          ],
+          "from": "task_watchers",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 769.5,
+          "label_y": 1061.5,
+          "nullable": false,
+          "route_label_position": [
+            477.5,
+            985.0
+          ],
+          "source_side": "north",
+          "start": [
+            769.5,
+            1430.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              862.0
+            ],
+            [
+              180.5,
+              862.0
+            ]
+          ],
+          "end": [
+            180.5,
+            848.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 121.89299774169922,
+          "label_y": 872.8699951171875,
+          "nullable": false,
+          "route_label_position": [
+            194.5,
+            879.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            924.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              180.5,
+              587.0
+            ],
+            [
+              161.5,
+              587.0
+            ]
+          ],
+          "end": [
+            161.5,
+            250.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 161.5,
+          "label_y": 481.0,
+          "nullable": false,
+          "route_label_position": [
+            171.0,
+            587.0
+          ],
+          "source_side": "north",
+          "start": [
+            180.5,
+            924.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              732.0
+            ],
+            [
+              165.5,
+              732.0
+            ]
+          ],
+          "end": [
+            165.5,
+            540.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "assignee_id"
+          ],
+          "is_self_loop": false,
+          "label": "assignee_id",
+          "label_x": 165.5,
+          "label_y": 682.3330078125,
+          "nullable": true,
+          "route_label_position": [
+            187.0,
+            732.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            924.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              222.5,
+              732.0
+            ],
+            [
+              175.5,
+              732.0
+            ]
+          ],
+          "end": [
+            175.5,
+            540.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "reporter_id"
+          ],
+          "is_self_loop": false,
+          "label": "reporter_id",
+          "label_x": 175.5,
+          "label_y": 719.5830078125,
+          "nullable": true,
+          "route_label_position": [
+            199.0,
+            732.0
+          ],
+          "source_side": "north",
+          "start": [
+            222.5,
+            924.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3923.0,
+              1248.0
+            ],
+            [
+              2304.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            2304.5,
+            1210.0
+          ],
+          "from": "team_members",
+          "from_columns": [
+            "team_id"
+          ],
+          "is_self_loop": false,
+          "label": "team_id",
+          "label_x": 3176.75,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            3176.75,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            3923.0,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3909.0,
+              976.0
+            ],
+            [
+              215.5,
+              976.0
+            ]
+          ],
+          "end": [
+            215.5,
+            540.0
+          ],
+          "from": "team_members",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 2419.218017578125,
+          "label_y": 1011.0369873046875,
+          "nullable": false,
+          "route_label_position": [
+            2062.25,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            3909.0,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2297.5,
+              659.0
+            ],
+            [
+              201.5,
+              659.0
+            ]
+          ],
+          "end": [
+            201.5,
+            250.0
+          ],
+          "from": "teams",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 2229.55908203125,
+          "label_y": 636.6420288085938,
+          "nullable": false,
+          "route_label_position": [
+            1249.5,
+            659.0
+          ],
+          "source_side": "north",
+          "start": [
+            2297.5,
+            1068.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1865.166015625,
+              1224.0
+            ],
+            [
+              1299.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            1299.5,
+            1210.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "role_id"
+          ],
+          "is_self_loop": false,
+          "label": "role_id",
+          "label_x": 1709.4859619140625,
+          "label_y": 1269.2039794921875,
+          "nullable": false,
+          "route_label_position": [
+            1669.3330078125,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            1865.166015625,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "roles",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1849.0,
+              976.0
+            ],
+            [
+              205.5,
+              976.0
+            ]
+          ],
+          "end": [
+            205.5,
+            540.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "assigned_by"
+          ],
+          "is_self_loop": false,
+          "label": "assigned_by",
+          "label_x": 1893.9739990234375,
+          "label_y": 891.197021484375,
+          "nullable": true,
+          "route_label_position": [
+            1027.25,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            1849.0,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1832.833984375,
+              976.0
+            ],
+            [
+              195.5,
+              976.0
+            ]
+          ],
+          "end": [
+            195.5,
+            540.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 954.7379760742188,
+          "label_y": 891.2670288085938,
+          "nullable": false,
+          "route_label_position": [
+            1014.1669921875,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            1832.833984375,
+            1412.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              210.5,
+              288.0
+            ],
+            [
+              171.5,
+              288.0
+            ]
+          ],
+          "end": [
+            171.5,
+            250.0
+          ],
+          "from": "users",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 171.5,
+          "label_y": 269.1669921875,
+          "nullable": false,
+          "route_label_position": [
+            191.0,
+            288.0
+          ],
+          "source_side": "north",
+          "start": [
+            210.5,
+            326.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "activities",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 5955.0,
+          "y": 1342.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "attachments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 4861.0,
+          "y": 1306.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 210.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 4314.0,
+          "y": 1324.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "integration_types",
+          "kind": "Table",
+          "width": 206.0,
+          "x": 603.0,
+          "y": 690.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "integrations",
+          "kind": "Table",
+          "width": 302.0,
+          "x": 603.0,
+          "y": 998.0
+        },
+        {
+          "column_count": 11,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 246.0,
+          "id": "notifications",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 5408.0,
+          "y": 1288.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "permissions",
+          "kind": "Table",
+          "width": 188.0,
+          "x": 1708.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "project_integrations",
+          "kind": "Table",
+          "width": 266.0,
+          "x": 1178.0,
+          "y": 1396.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "project_teams",
+          "kind": "Table",
+          "width": 277.0,
+          "x": 3241.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 3,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 102.0,
+          "id": "project_watchers",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 6530.0,
+          "y": 1432.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "projects",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 618.0
+        },
+        {
+          "column_count": 2,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 84.0,
+          "id": "role_permissions",
+          "kind": "Table",
+          "width": 259.0,
+          "x": 2254.0,
+          "y": 1450.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "roles",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1161.0,
+          "y": 1052.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "tags",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 2699.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "task_dependencies",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 2,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 84.0,
+          "id": "task_tags",
+          "kind": "Table",
+          "width": 216.0,
+          "x": 2769.0,
+          "y": 1450.0
+        },
+        {
+          "column_count": 3,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 102.0,
+          "id": "task_watchers",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 603.0,
+          "y": 1432.0
+        },
+        {
+          "column_count": 13,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 282.0,
+          "id": "tasks",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 926.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "team_members",
+          "kind": "Table",
+          "width": 284.0,
+          "x": 3774.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "teams",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 2152.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "tenants",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "user_roles",
+          "kind": "Table",
+          "width": 298.0,
+          "x": 1700.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 309.0,
+          "x": 56.0,
+          "y": 328.0
+        }
+      ],
+      "summary": {
+        "edge_count": 40,
+        "height": 1590.0,
+        "node_count": 23,
+        "width": 6905.0
+      }
+    },
+    "orthogonal": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              6107.5,
+              795.0
+            ],
+            [
+              251.5,
+              795.0
+            ]
+          ],
+          "end": [
+            251.5,
+            250.0
+          ],
+          "from": "activities",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 5494.833984375,
+          "label_y": 795.0,
+          "nullable": false,
+          "route_label_position": [
+            3179.5,
+            795.0
+          ],
+          "source_side": "north",
+          "start": [
+            6107.5,
+            1340.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6121.5,
+              940.0
+            ],
+            [
+              255.5,
+              940.0
+            ]
+          ],
+          "end": [
+            255.5,
+            540.0
+          ],
+          "from": "activities",
+          "from_columns": [
+            "actor_id"
+          ],
+          "is_self_loop": false,
+          "label": "actor_id",
+          "label_x": 5410.5,
+          "label_y": 940.0,
+          "nullable": true,
+          "route_label_position": [
+            3188.5,
+            940.0
+          ],
+          "source_side": "north",
+          "start": [
+            6121.5,
+            1340.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4999.5,
+              777.0
+            ],
+            [
+              231.5,
+              777.0
+            ]
+          ],
+          "end": [
+            231.5,
+            250.0
+          ],
+          "from": "attachments",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 4563.93701171875,
+          "label_y": 741.8489990234375,
+          "nullable": false,
+          "route_label_position": [
+            2615.5,
+            777.0
+          ],
+          "source_side": "north",
+          "start": [
+            4999.5,
+            1304.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5013.5,
+              922.0
+            ],
+            [
+              235.5,
+              922.0
+            ]
+          ],
+          "end": [
+            235.5,
+            540.0
+          ],
+          "from": "attachments",
+          "from_columns": [
+            "uploader_id"
+          ],
+          "is_self_loop": false,
+          "label": "uploader_id",
+          "label_x": 2574.763916015625,
+          "label_y": 886.4520263671875,
+          "nullable": false,
+          "route_label_position": [
+            2624.5,
+            922.0
+          ],
+          "source_side": "north",
+          "start": [
+            5013.5,
+            1304.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4641.0,
+              1376.5
+            ],
+            [
+              4641.0,
+              1481.5
+            ]
+          ],
+          "end": [
+            4605.0,
+            1481.5
+          ],
+          "from": "comments",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 4653.0,
+          "label_y": 1429.0,
+          "nullable": true,
+          "route_label_position": [
+            4641.0,
+            1429.0
+          ],
+          "source_side": "east",
+          "start": [
+            4605.0,
+            1376.5
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "comments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4452.5,
+              786.0
+            ],
+            [
+              221.5,
+              786.0
+            ]
+          ],
+          "end": [
+            221.5,
+            250.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 1850.887939453125,
+          "label_y": 820.89697265625,
+          "nullable": false,
+          "route_label_position": [
+            2337.0,
+            786.0
+          ],
+          "source_side": "north",
+          "start": [
+            4452.5,
+            1322.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4466.5,
+              931.0
+            ],
+            [
+              225.5,
+              931.0
+            ]
+          ],
+          "end": [
+            225.5,
+            540.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "author_id"
+          ],
+          "is_self_loop": false,
+          "label": "author_id",
+          "label_x": 2354.7041015625,
+          "label_y": 883.7960205078125,
+          "nullable": false,
+          "route_label_position": [
+            2346.0,
+            931.0
+          ],
+          "source_side": "north",
+          "start": [
+            4466.5,
+            1322.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              761.0,
+              886.0
+            ],
+            [
+              706.0,
+              886.0
+            ]
+          ],
+          "end": [
+            706.0,
+            848.0
+          ],
+          "from": "integrations",
+          "from_columns": [
+            "integration_type_id"
+          ],
+          "is_self_loop": false,
+          "label": "integration_type_id",
+          "label_x": 828.489990234375,
+          "label_y": 860.9609985351563,
+          "nullable": false,
+          "route_label_position": [
+            761.0,
+            894.5
+          ],
+          "source_side": "north",
+          "start": [
+            761.0,
+            996.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "integration_types",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              747.0,
+              623.0
+            ],
+            [
+              181.5,
+              623.0
+            ]
+          ],
+          "end": [
+            181.5,
+            250.0
+          ],
+          "from": "integrations",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 464.25,
+          "label_y": 623.0,
+          "nullable": false,
+          "route_label_position": [
+            464.25,
+            623.0
+          ],
+          "source_side": "north",
+          "start": [
+            747.0,
+            996.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5546.5,
+              768.0
+            ],
+            [
+              241.5,
+              768.0
+            ]
+          ],
+          "end": [
+            241.5,
+            250.0
+          ],
+          "from": "notifications",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 5012.26708984375,
+          "label_y": 744.4450073242188,
+          "nullable": false,
+          "route_label_position": [
+            2894.0,
+            768.0
+          ],
+          "source_side": "north",
+          "start": [
+            5546.5,
+            1286.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5560.5,
+              913.0
+            ],
+            [
+              245.5,
+              913.0
+            ]
+          ],
+          "end": [
+            245.5,
+            540.0
+          ],
+          "from": "notifications",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 4381.17919921875,
+          "label_y": 889.2329711914063,
+          "nullable": false,
+          "route_label_position": [
+            2903.0,
+            913.0
+          ],
+          "source_side": "north",
+          "start": [
+            5560.5,
+            1286.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1318.0,
+              1248.0
+            ],
+            [
+              754.0,
+              1248.0
+            ]
+          ],
+          "end": [
+            754.0,
+            1210.0
+          ],
+          "from": "project_integrations",
+          "from_columns": [
+            "integration_id"
+          ],
+          "is_self_loop": false,
+          "label": "integration_id",
+          "label_x": 1090.0,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            1090.0,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            1318.0,
+            1394.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "integrations",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1304.0,
+              1121.0
+            ],
+            [
+              194.5,
+              1121.0
+            ]
+          ],
+          "end": [
+            194.5,
+            848.0
+          ],
+          "from": "project_integrations",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 1035.7640380859375,
+          "label_y": 1099.4659423828125,
+          "nullable": false,
+          "route_label_position": [
+            749.25,
+            1121.0
+          ],
+          "source_side": "north",
+          "start": [
+            1304.0,
+            1394.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3372.5,
+              1130.0
+            ],
+            [
+              208.5,
+              1130.0
+            ]
+          ],
+          "end": [
+            208.5,
+            848.0
+          ],
+          "from": "project_teams",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 2105.37890625,
+          "label_y": 1106.3719482421875,
+          "nullable": false,
+          "route_label_position": [
+            1790.5,
+            1130.0
+          ],
+          "source_side": "north",
+          "start": [
+            3372.5,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3386.5,
+              1224.0
+            ],
+            [
+              2290.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            2290.5,
+            1210.0
+          ],
+          "from": "project_teams",
+          "from_columns": [
+            "team_id"
+          ],
+          "is_self_loop": false,
+          "label": "team_id",
+          "label_x": 2925.5,
+          "label_y": 1224.0,
+          "nullable": false,
+          "route_label_position": [
+            2925.5,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            3386.5,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6682.5,
+              1139.0
+            ],
+            [
+              222.5,
+              1139.0
+            ]
+          ],
+          "end": [
+            222.5,
+            848.0
+          ],
+          "from": "project_watchers",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 3452.5,
+          "label_y": 1139.0,
+          "nullable": false,
+          "route_label_position": [
+            3452.5,
+            1139.0
+          ],
+          "source_side": "north",
+          "start": [
+            6682.5,
+            1430.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6696.5,
+              985.0
+            ],
+            [
+              265.5,
+              985.0
+            ]
+          ],
+          "end": [
+            265.5,
+            540.0
+          ],
+          "from": "project_watchers",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 4091.083984375,
+          "label_y": 985.0,
+          "nullable": false,
+          "route_label_position": [
+            3481.0,
+            985.0
+          ],
+          "source_side": "north",
+          "start": [
+            6696.5,
+            1430.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              433.0
+            ],
+            [
+              151.5,
+              433.0
+            ]
+          ],
+          "end": [
+            151.5,
+            250.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 151.5,
+          "label_y": 318.1669921875,
+          "nullable": false,
+          "route_label_position": [
+            173.0,
+            433.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            616.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              578.0
+            ],
+            [
+              155.5,
+              578.0
+            ]
+          ],
+          "end": [
+            155.5,
+            540.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "created_by"
+          ],
+          "is_self_loop": false,
+          "label": "created_by",
+          "label_x": 106.28500366210938,
+          "label_y": 601.6259765625,
+          "nullable": true,
+          "route_label_position": [
+            182.0,
+            578.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            616.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2390.5,
+              1272.0
+            ],
+            [
+              1802.0,
+              1272.0
+            ]
+          ],
+          "end": [
+            1802.0,
+            1210.0
+          ],
+          "from": "role_permissions",
+          "from_columns": [
+            "permission_id"
+          ],
+          "is_self_loop": false,
+          "label": "permission_id",
+          "label_x": 2153.25,
+          "label_y": 1272.0,
+          "nullable": false,
+          "route_label_position": [
+            2153.25,
+            1272.0
+          ],
+          "source_side": "north",
+          "start": [
+            2390.5,
+            1448.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "permissions",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2376.5,
+              1248.0
+            ],
+            [
+              1313.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            1313.5,
+            1210.0
+          ],
+          "from": "role_permissions",
+          "from_columns": [
+            "role_id"
+          ],
+          "is_self_loop": false,
+          "label": "role_id",
+          "label_x": 1926.0,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            1926.0,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            2376.5,
+            1448.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "roles",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1306.5,
+              650.0
+            ],
+            [
+              191.5,
+              650.0
+            ]
+          ],
+          "end": [
+            191.5,
+            250.0
+          ],
+          "from": "roles",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 1306.5,
+          "label_y": 730.8330078125,
+          "nullable": false,
+          "route_label_position": [
+            749.0,
+            650.0
+          ],
+          "source_side": "north",
+          "start": [
+            1306.5,
+            1050.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2844.5,
+              659.0
+            ],
+            [
+              211.5,
+              659.0
+            ]
+          ],
+          "end": [
+            211.5,
+            250.0
+          ],
+          "from": "tags",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 2390.75,
+          "label_y": 659.0,
+          "nullable": false,
+          "route_label_position": [
+            1528.0,
+            659.0
+          ],
+          "source_side": "north",
+          "start": [
+            2844.5,
+            1068.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1224.0
+            ],
+            [
+              194.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            194.5,
+            1210.0
+          ],
+          "from": "task_dependencies",
+          "from_columns": [
+            "depends_on_task_id"
+          ],
+          "is_self_loop": false,
+          "label": "depends_on_task_id",
+          "label_x": 285.29901123046875,
+          "label_y": 1298.1920166015625,
+          "nullable": false,
+          "route_label_position": [
+            201.5,
+            1304.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1224.0
+            ],
+            [
+              180.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            180.5,
+            1210.0
+          ],
+          "from": "task_dependencies",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 249.38499450683594,
+          "label_y": 1339.0150146484375,
+          "nullable": false,
+          "route_label_position": [
+            201.5,
+            1304.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2884.0,
+              1248.0
+            ],
+            [
+              2844.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            2844.5,
+            1210.0
+          ],
+          "from": "task_tags",
+          "from_columns": [
+            "tag_id"
+          ],
+          "is_self_loop": false,
+          "label": "tag_id",
+          "label_x": 2919.513916015625,
+          "label_y": 1302.4310302734375,
+          "nullable": false,
+          "route_label_position": [
+            2884.0,
+            1309.25
+          ],
+          "source_side": "north",
+          "start": [
+            2884.0,
+            1448.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tags",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2870.0,
+              1224.0
+            ],
+            [
+              222.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            222.5,
+            1210.0
+          ],
+          "from": "task_tags",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 2132.1669921875,
+          "label_y": 1224.0,
+          "nullable": false,
+          "route_label_position": [
+            1651.25,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            2870.0,
+            1448.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              755.5,
+              1272.0
+            ],
+            [
+              208.5,
+              1272.0
+            ]
+          ],
+          "end": [
+            208.5,
+            1210.0
+          ],
+          "from": "task_watchers",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 530.0,
+          "label_y": 1272.0,
+          "nullable": false,
+          "route_label_position": [
+            530.0,
+            1272.0
+          ],
+          "source_side": "north",
+          "start": [
+            755.5,
+            1430.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              769.5,
+              985.0
+            ],
+            [
+              185.5,
+              985.0
+            ]
+          ],
+          "end": [
+            185.5,
+            540.0
+          ],
+          "from": "task_watchers",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 769.5,
+          "label_y": 1061.5,
+          "nullable": false,
+          "route_label_position": [
+            477.5,
+            985.0
+          ],
+          "source_side": "north",
+          "start": [
+            769.5,
+            1430.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              862.0
+            ],
+            [
+              180.5,
+              862.0
+            ]
+          ],
+          "end": [
+            180.5,
+            848.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 121.89299774169922,
+          "label_y": 872.8699951171875,
+          "nullable": false,
+          "route_label_position": [
+            194.5,
+            879.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            924.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              180.5,
+              587.0
+            ],
+            [
+              161.5,
+              587.0
+            ]
+          ],
+          "end": [
+            161.5,
+            250.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 161.5,
+          "label_y": 481.0,
+          "nullable": false,
+          "route_label_position": [
+            171.0,
+            587.0
+          ],
+          "source_side": "north",
+          "start": [
+            180.5,
+            924.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              732.0
+            ],
+            [
+              165.5,
+              732.0
+            ]
+          ],
+          "end": [
+            165.5,
+            540.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "assignee_id"
+          ],
+          "is_self_loop": false,
+          "label": "assignee_id",
+          "label_x": 165.5,
+          "label_y": 682.3330078125,
+          "nullable": true,
+          "route_label_position": [
+            187.0,
+            732.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            924.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              222.5,
+              732.0
+            ],
+            [
+              175.5,
+              732.0
+            ]
+          ],
+          "end": [
+            175.5,
+            540.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "reporter_id"
+          ],
+          "is_self_loop": false,
+          "label": "reporter_id",
+          "label_x": 175.5,
+          "label_y": 719.5830078125,
+          "nullable": true,
+          "route_label_position": [
+            199.0,
+            732.0
+          ],
+          "source_side": "north",
+          "start": [
+            222.5,
+            924.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3923.0,
+              1248.0
+            ],
+            [
+              2304.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            2304.5,
+            1210.0
+          ],
+          "from": "team_members",
+          "from_columns": [
+            "team_id"
+          ],
+          "is_self_loop": false,
+          "label": "team_id",
+          "label_x": 3176.75,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            3176.75,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            3923.0,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3909.0,
+              976.0
+            ],
+            [
+              215.5,
+              976.0
+            ]
+          ],
+          "end": [
+            215.5,
+            540.0
+          ],
+          "from": "team_members",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 2419.218017578125,
+          "label_y": 1011.0369873046875,
+          "nullable": false,
+          "route_label_position": [
+            2062.25,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            3909.0,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2297.5,
+              659.0
+            ],
+            [
+              201.5,
+              659.0
+            ]
+          ],
+          "end": [
+            201.5,
+            250.0
+          ],
+          "from": "teams",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 2229.55908203125,
+          "label_y": 636.6420288085938,
+          "nullable": false,
+          "route_label_position": [
+            1249.5,
+            659.0
+          ],
+          "source_side": "north",
+          "start": [
+            2297.5,
+            1068.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1865.166015625,
+              1224.0
+            ],
+            [
+              1299.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            1299.5,
+            1210.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "role_id"
+          ],
+          "is_self_loop": false,
+          "label": "role_id",
+          "label_x": 1709.4859619140625,
+          "label_y": 1269.2039794921875,
+          "nullable": false,
+          "route_label_position": [
+            1669.3330078125,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            1865.166015625,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "roles",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1849.0,
+              976.0
+            ],
+            [
+              205.5,
+              976.0
+            ]
+          ],
+          "end": [
+            205.5,
+            540.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "assigned_by"
+          ],
+          "is_self_loop": false,
+          "label": "assigned_by",
+          "label_x": 1893.9739990234375,
+          "label_y": 891.197021484375,
+          "nullable": true,
+          "route_label_position": [
+            1027.25,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            1849.0,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1832.833984375,
+              976.0
+            ],
+            [
+              195.5,
+              976.0
+            ]
+          ],
+          "end": [
+            195.5,
+            540.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 954.7379760742188,
+          "label_y": 891.2670288085938,
+          "nullable": false,
+          "route_label_position": [
+            1014.1669921875,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            1832.833984375,
+            1412.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              210.5,
+              288.0
+            ],
+            [
+              171.5,
+              288.0
+            ]
+          ],
+          "end": [
+            171.5,
+            250.0
+          ],
+          "from": "users",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 171.5,
+          "label_y": 269.1669921875,
+          "nullable": false,
+          "route_label_position": [
+            191.0,
+            288.0
+          ],
+          "source_side": "north",
+          "start": [
+            210.5,
+            326.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "activities",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 5955.0,
+          "y": 1342.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "attachments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 4861.0,
+          "y": 1306.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 210.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 4314.0,
+          "y": 1324.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "integration_types",
+          "kind": "Table",
+          "width": 206.0,
+          "x": 603.0,
+          "y": 690.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "integrations",
+          "kind": "Table",
+          "width": 302.0,
+          "x": 603.0,
+          "y": 998.0
+        },
+        {
+          "column_count": 11,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 246.0,
+          "id": "notifications",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 5408.0,
+          "y": 1288.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "permissions",
+          "kind": "Table",
+          "width": 188.0,
+          "x": 1708.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "project_integrations",
+          "kind": "Table",
+          "width": 266.0,
+          "x": 1178.0,
+          "y": 1396.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "project_teams",
+          "kind": "Table",
+          "width": 277.0,
+          "x": 3241.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 3,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 102.0,
+          "id": "project_watchers",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 6530.0,
+          "y": 1432.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "projects",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 618.0
+        },
+        {
+          "column_count": 2,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 84.0,
+          "id": "role_permissions",
+          "kind": "Table",
+          "width": 259.0,
+          "x": 2254.0,
+          "y": 1450.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "roles",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1161.0,
+          "y": 1052.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "tags",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 2699.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "task_dependencies",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 2,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 84.0,
+          "id": "task_tags",
+          "kind": "Table",
+          "width": 216.0,
+          "x": 2769.0,
+          "y": 1450.0
+        },
+        {
+          "column_count": 3,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 102.0,
+          "id": "task_watchers",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 603.0,
+          "y": 1432.0
+        },
+        {
+          "column_count": 13,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 282.0,
+          "id": "tasks",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 926.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "team_members",
+          "kind": "Table",
+          "width": 284.0,
+          "x": 3774.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "teams",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 2152.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "tenants",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "user_roles",
+          "kind": "Table",
+          "width": 298.0,
+          "x": 1700.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 309.0,
+          "x": 56.0,
+          "y": 328.0
+        }
+      ],
+      "summary": {
+        "edge_count": 40,
+        "height": 1590.0,
+        "node_count": 23,
+        "width": 6905.0
+      }
+    },
+    "straight": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              6107.5,
+              795.0
+            ],
+            [
+              251.5,
+              795.0
+            ]
+          ],
+          "end": [
+            251.5,
+            250.0
+          ],
+          "from": "activities",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 5494.833984375,
+          "label_y": 795.0,
+          "nullable": false,
+          "route_label_position": [
+            3179.5,
+            795.0
+          ],
+          "source_side": "north",
+          "start": [
+            6107.5,
+            1340.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6121.5,
+              940.0
+            ],
+            [
+              255.5,
+              940.0
+            ]
+          ],
+          "end": [
+            255.5,
+            540.0
+          ],
+          "from": "activities",
+          "from_columns": [
+            "actor_id"
+          ],
+          "is_self_loop": false,
+          "label": "actor_id",
+          "label_x": 5410.5,
+          "label_y": 940.0,
+          "nullable": true,
+          "route_label_position": [
+            3188.5,
+            940.0
+          ],
+          "source_side": "north",
+          "start": [
+            6121.5,
+            1340.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4999.5,
+              777.0
+            ],
+            [
+              231.5,
+              777.0
+            ]
+          ],
+          "end": [
+            231.5,
+            250.0
+          ],
+          "from": "attachments",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 4563.93701171875,
+          "label_y": 741.8489990234375,
+          "nullable": false,
+          "route_label_position": [
+            2615.5,
+            777.0
+          ],
+          "source_side": "north",
+          "start": [
+            4999.5,
+            1304.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5013.5,
+              922.0
+            ],
+            [
+              235.5,
+              922.0
+            ]
+          ],
+          "end": [
+            235.5,
+            540.0
+          ],
+          "from": "attachments",
+          "from_columns": [
+            "uploader_id"
+          ],
+          "is_self_loop": false,
+          "label": "uploader_id",
+          "label_x": 2574.763916015625,
+          "label_y": 886.4520263671875,
+          "nullable": false,
+          "route_label_position": [
+            2624.5,
+            922.0
+          ],
+          "source_side": "north",
+          "start": [
+            5013.5,
+            1304.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4641.0,
+              1376.5
+            ],
+            [
+              4641.0,
+              1481.5
+            ]
+          ],
+          "end": [
+            4605.0,
+            1481.5
+          ],
+          "from": "comments",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 4653.0,
+          "label_y": 1429.0,
+          "nullable": true,
+          "route_label_position": [
+            4641.0,
+            1429.0
+          ],
+          "source_side": "east",
+          "start": [
+            4605.0,
+            1376.5
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "comments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4452.5,
+              786.0
+            ],
+            [
+              221.5,
+              786.0
+            ]
+          ],
+          "end": [
+            221.5,
+            250.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 1850.887939453125,
+          "label_y": 820.89697265625,
+          "nullable": false,
+          "route_label_position": [
+            2337.0,
+            786.0
+          ],
+          "source_side": "north",
+          "start": [
+            4452.5,
+            1322.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              4466.5,
+              931.0
+            ],
+            [
+              225.5,
+              931.0
+            ]
+          ],
+          "end": [
+            225.5,
+            540.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "author_id"
+          ],
+          "is_self_loop": false,
+          "label": "author_id",
+          "label_x": 2354.7041015625,
+          "label_y": 883.7960205078125,
+          "nullable": false,
+          "route_label_position": [
+            2346.0,
+            931.0
+          ],
+          "source_side": "north",
+          "start": [
+            4466.5,
+            1322.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              761.0,
+              886.0
+            ],
+            [
+              706.0,
+              886.0
+            ]
+          ],
+          "end": [
+            706.0,
+            848.0
+          ],
+          "from": "integrations",
+          "from_columns": [
+            "integration_type_id"
+          ],
+          "is_self_loop": false,
+          "label": "integration_type_id",
+          "label_x": 828.489990234375,
+          "label_y": 860.9609985351563,
+          "nullable": false,
+          "route_label_position": [
+            761.0,
+            894.5
+          ],
+          "source_side": "north",
+          "start": [
+            761.0,
+            996.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "integration_types",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              747.0,
+              623.0
+            ],
+            [
+              181.5,
+              623.0
+            ]
+          ],
+          "end": [
+            181.5,
+            250.0
+          ],
+          "from": "integrations",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 464.25,
+          "label_y": 623.0,
+          "nullable": false,
+          "route_label_position": [
+            464.25,
+            623.0
+          ],
+          "source_side": "north",
+          "start": [
+            747.0,
+            996.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5546.5,
+              768.0
+            ],
+            [
+              241.5,
+              768.0
+            ]
+          ],
+          "end": [
+            241.5,
+            250.0
+          ],
+          "from": "notifications",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 5012.26708984375,
+          "label_y": 744.4450073242188,
+          "nullable": false,
+          "route_label_position": [
+            2894.0,
+            768.0
+          ],
+          "source_side": "north",
+          "start": [
+            5546.5,
+            1286.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              5560.5,
+              913.0
+            ],
+            [
+              245.5,
+              913.0
+            ]
+          ],
+          "end": [
+            245.5,
+            540.0
+          ],
+          "from": "notifications",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 4381.17919921875,
+          "label_y": 889.2329711914063,
+          "nullable": false,
+          "route_label_position": [
+            2903.0,
+            913.0
+          ],
+          "source_side": "north",
+          "start": [
+            5560.5,
+            1286.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1318.0,
+              1248.0
+            ],
+            [
+              754.0,
+              1248.0
+            ]
+          ],
+          "end": [
+            754.0,
+            1210.0
+          ],
+          "from": "project_integrations",
+          "from_columns": [
+            "integration_id"
+          ],
+          "is_self_loop": false,
+          "label": "integration_id",
+          "label_x": 1090.0,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            1090.0,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            1318.0,
+            1394.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "integrations",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1304.0,
+              1121.0
+            ],
+            [
+              194.5,
+              1121.0
+            ]
+          ],
+          "end": [
+            194.5,
+            848.0
+          ],
+          "from": "project_integrations",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 1035.7640380859375,
+          "label_y": 1099.4659423828125,
+          "nullable": false,
+          "route_label_position": [
+            749.25,
+            1121.0
+          ],
+          "source_side": "north",
+          "start": [
+            1304.0,
+            1394.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3372.5,
+              1130.0
+            ],
+            [
+              208.5,
+              1130.0
+            ]
+          ],
+          "end": [
+            208.5,
+            848.0
+          ],
+          "from": "project_teams",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 2105.37890625,
+          "label_y": 1106.3719482421875,
+          "nullable": false,
+          "route_label_position": [
+            1790.5,
+            1130.0
+          ],
+          "source_side": "north",
+          "start": [
+            3372.5,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3386.5,
+              1224.0
+            ],
+            [
+              2290.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            2290.5,
+            1210.0
+          ],
+          "from": "project_teams",
+          "from_columns": [
+            "team_id"
+          ],
+          "is_self_loop": false,
+          "label": "team_id",
+          "label_x": 2925.5,
+          "label_y": 1224.0,
+          "nullable": false,
+          "route_label_position": [
+            2925.5,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            3386.5,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6682.5,
+              1139.0
+            ],
+            [
+              222.5,
+              1139.0
+            ]
+          ],
+          "end": [
+            222.5,
+            848.0
+          ],
+          "from": "project_watchers",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 3452.5,
+          "label_y": 1139.0,
+          "nullable": false,
+          "route_label_position": [
+            3452.5,
+            1139.0
+          ],
+          "source_side": "north",
+          "start": [
+            6682.5,
+            1430.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              6696.5,
+              985.0
+            ],
+            [
+              265.5,
+              985.0
+            ]
+          ],
+          "end": [
+            265.5,
+            540.0
+          ],
+          "from": "project_watchers",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 4091.083984375,
+          "label_y": 985.0,
+          "nullable": false,
+          "route_label_position": [
+            3481.0,
+            985.0
+          ],
+          "source_side": "north",
+          "start": [
+            6696.5,
+            1430.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              433.0
+            ],
+            [
+              151.5,
+              433.0
+            ]
+          ],
+          "end": [
+            151.5,
+            250.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 151.5,
+          "label_y": 318.1669921875,
+          "nullable": false,
+          "route_label_position": [
+            173.0,
+            433.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            616.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              578.0
+            ],
+            [
+              155.5,
+              578.0
+            ]
+          ],
+          "end": [
+            155.5,
+            540.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "created_by"
+          ],
+          "is_self_loop": false,
+          "label": "created_by",
+          "label_x": 106.28500366210938,
+          "label_y": 601.6259765625,
+          "nullable": true,
+          "route_label_position": [
+            182.0,
+            578.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            616.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2390.5,
+              1272.0
+            ],
+            [
+              1802.0,
+              1272.0
+            ]
+          ],
+          "end": [
+            1802.0,
+            1210.0
+          ],
+          "from": "role_permissions",
+          "from_columns": [
+            "permission_id"
+          ],
+          "is_self_loop": false,
+          "label": "permission_id",
+          "label_x": 2153.25,
+          "label_y": 1272.0,
+          "nullable": false,
+          "route_label_position": [
+            2153.25,
+            1272.0
+          ],
+          "source_side": "north",
+          "start": [
+            2390.5,
+            1448.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "permissions",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2376.5,
+              1248.0
+            ],
+            [
+              1313.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            1313.5,
+            1210.0
+          ],
+          "from": "role_permissions",
+          "from_columns": [
+            "role_id"
+          ],
+          "is_self_loop": false,
+          "label": "role_id",
+          "label_x": 1926.0,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            1926.0,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            2376.5,
+            1448.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "roles",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1306.5,
+              650.0
+            ],
+            [
+              191.5,
+              650.0
+            ]
+          ],
+          "end": [
+            191.5,
+            250.0
+          ],
+          "from": "roles",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 1306.5,
+          "label_y": 730.8330078125,
+          "nullable": false,
+          "route_label_position": [
+            749.0,
+            650.0
+          ],
+          "source_side": "north",
+          "start": [
+            1306.5,
+            1050.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2844.5,
+              659.0
+            ],
+            [
+              211.5,
+              659.0
+            ]
+          ],
+          "end": [
+            211.5,
+            250.0
+          ],
+          "from": "tags",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 2390.75,
+          "label_y": 659.0,
+          "nullable": false,
+          "route_label_position": [
+            1528.0,
+            659.0
+          ],
+          "source_side": "north",
+          "start": [
+            2844.5,
+            1068.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1224.0
+            ],
+            [
+              194.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            194.5,
+            1210.0
+          ],
+          "from": "task_dependencies",
+          "from_columns": [
+            "depends_on_task_id"
+          ],
+          "is_self_loop": false,
+          "label": "depends_on_task_id",
+          "label_x": 285.29901123046875,
+          "label_y": 1298.1920166015625,
+          "nullable": false,
+          "route_label_position": [
+            201.5,
+            1304.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1398.0
+            ],
+            [
+              201.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1248.0
+            ],
+            [
+              187.5,
+              1224.0
+            ],
+            [
+              180.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            180.5,
+            1210.0
+          ],
+          "from": "task_dependencies",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 249.38499450683594,
+          "label_y": 1339.0150146484375,
+          "nullable": false,
+          "route_label_position": [
+            201.5,
+            1304.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2884.0,
+              1248.0
+            ],
+            [
+              2844.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            2844.5,
+            1210.0
+          ],
+          "from": "task_tags",
+          "from_columns": [
+            "tag_id"
+          ],
+          "is_self_loop": false,
+          "label": "tag_id",
+          "label_x": 2919.513916015625,
+          "label_y": 1302.4310302734375,
+          "nullable": false,
+          "route_label_position": [
+            2884.0,
+            1309.25
+          ],
+          "source_side": "north",
+          "start": [
+            2884.0,
+            1448.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tags",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2870.0,
+              1224.0
+            ],
+            [
+              222.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            222.5,
+            1210.0
+          ],
+          "from": "task_tags",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 2132.1669921875,
+          "label_y": 1224.0,
+          "nullable": false,
+          "route_label_position": [
+            1651.25,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            2870.0,
+            1448.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              755.5,
+              1272.0
+            ],
+            [
+              208.5,
+              1272.0
+            ]
+          ],
+          "end": [
+            208.5,
+            1210.0
+          ],
+          "from": "task_watchers",
+          "from_columns": [
+            "task_id"
+          ],
+          "is_self_loop": false,
+          "label": "task_id",
+          "label_x": 530.0,
+          "label_y": 1272.0,
+          "nullable": false,
+          "route_label_position": [
+            530.0,
+            1272.0
+          ],
+          "source_side": "north",
+          "start": [
+            755.5,
+            1430.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tasks",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              769.5,
+              985.0
+            ],
+            [
+              185.5,
+              985.0
+            ]
+          ],
+          "end": [
+            185.5,
+            540.0
+          ],
+          "from": "task_watchers",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 769.5,
+          "label_y": 1061.5,
+          "nullable": false,
+          "route_label_position": [
+            477.5,
+            985.0
+          ],
+          "source_side": "north",
+          "start": [
+            769.5,
+            1430.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              862.0
+            ],
+            [
+              180.5,
+              862.0
+            ]
+          ],
+          "end": [
+            180.5,
+            848.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "project_id"
+          ],
+          "is_self_loop": false,
+          "label": "project_id",
+          "label_x": 121.89299774169922,
+          "label_y": 872.8699951171875,
+          "nullable": false,
+          "route_label_position": [
+            194.5,
+            879.0
+          ],
+          "source_side": "north",
+          "start": [
+            194.5,
+            924.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              180.5,
+              587.0
+            ],
+            [
+              161.5,
+              587.0
+            ]
+          ],
+          "end": [
+            161.5,
+            250.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 161.5,
+          "label_y": 481.0,
+          "nullable": false,
+          "route_label_position": [
+            171.0,
+            587.0
+          ],
+          "source_side": "north",
+          "start": [
+            180.5,
+            924.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              208.5,
+              732.0
+            ],
+            [
+              165.5,
+              732.0
+            ]
+          ],
+          "end": [
+            165.5,
+            540.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "assignee_id"
+          ],
+          "is_self_loop": false,
+          "label": "assignee_id",
+          "label_x": 165.5,
+          "label_y": 682.3330078125,
+          "nullable": true,
+          "route_label_position": [
+            187.0,
+            732.0
+          ],
+          "source_side": "north",
+          "start": [
+            208.5,
+            924.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              222.5,
+              732.0
+            ],
+            [
+              175.5,
+              732.0
+            ]
+          ],
+          "end": [
+            175.5,
+            540.0
+          ],
+          "from": "tasks",
+          "from_columns": [
+            "reporter_id"
+          ],
+          "is_self_loop": false,
+          "label": "reporter_id",
+          "label_x": 175.5,
+          "label_y": 719.5830078125,
+          "nullable": true,
+          "route_label_position": [
+            199.0,
+            732.0
+          ],
+          "source_side": "north",
+          "start": [
+            222.5,
+            924.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3923.0,
+              1248.0
+            ],
+            [
+              2304.5,
+              1248.0
+            ]
+          ],
+          "end": [
+            2304.5,
+            1210.0
+          ],
+          "from": "team_members",
+          "from_columns": [
+            "team_id"
+          ],
+          "is_self_loop": false,
+          "label": "team_id",
+          "label_x": 3176.75,
+          "label_y": 1248.0,
+          "nullable": false,
+          "route_label_position": [
+            3176.75,
+            1248.0
+          ],
+          "source_side": "north",
+          "start": [
+            3923.0,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              3909.0,
+              976.0
+            ],
+            [
+              215.5,
+              976.0
+            ]
+          ],
+          "end": [
+            215.5,
+            540.0
+          ],
+          "from": "team_members",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 2419.218017578125,
+          "label_y": 1011.0369873046875,
+          "nullable": false,
+          "route_label_position": [
+            2062.25,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            3909.0,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              2297.5,
+              659.0
+            ],
+            [
+              201.5,
+              659.0
+            ]
+          ],
+          "end": [
+            201.5,
+            250.0
+          ],
+          "from": "teams",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 2229.55908203125,
+          "label_y": 636.6420288085938,
+          "nullable": false,
+          "route_label_position": [
+            1249.5,
+            659.0
+          ],
+          "source_side": "north",
+          "start": [
+            2297.5,
+            1068.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1865.166015625,
+              1224.0
+            ],
+            [
+              1299.5,
+              1224.0
+            ]
+          ],
+          "end": [
+            1299.5,
+            1210.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "role_id"
+          ],
+          "is_self_loop": false,
+          "label": "role_id",
+          "label_x": 1709.4859619140625,
+          "label_y": 1269.2039794921875,
+          "nullable": false,
+          "route_label_position": [
+            1669.3330078125,
+            1224.0
+          ],
+          "source_side": "north",
+          "start": [
+            1865.166015625,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "roles",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1849.0,
+              976.0
+            ],
+            [
+              205.5,
+              976.0
+            ]
+          ],
+          "end": [
+            205.5,
+            540.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "assigned_by"
+          ],
+          "is_self_loop": false,
+          "label": "assigned_by",
+          "label_x": 1893.9739990234375,
+          "label_y": 891.197021484375,
+          "nullable": true,
+          "route_label_position": [
+            1027.25,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            1849.0,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1832.833984375,
+              976.0
+            ],
+            [
+              195.5,
+              976.0
+            ]
+          ],
+          "end": [
+            195.5,
+            540.0
+          ],
+          "from": "user_roles",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 954.7379760742188,
+          "label_y": 891.2670288085938,
+          "nullable": false,
+          "route_label_position": [
+            1014.1669921875,
+            976.0
+          ],
+          "source_side": "north",
+          "start": [
+            1832.833984375,
+            1412.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              210.5,
+              288.0
+            ],
+            [
+              171.5,
+              288.0
+            ]
+          ],
+          "end": [
+            171.5,
+            250.0
+          ],
+          "from": "users",
+          "from_columns": [
+            "tenant_id"
+          ],
+          "is_self_loop": false,
+          "label": "tenant_id",
+          "label_x": 171.5,
+          "label_y": 269.1669921875,
+          "nullable": false,
+          "route_label_position": [
+            191.0,
+            288.0
+          ],
+          "source_side": "north",
+          "start": [
+            210.5,
+            326.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "south",
+          "to": "tenants",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "activities",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 5955.0,
+          "y": 1342.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "attachments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 4861.0,
+          "y": 1306.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 210.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 4314.0,
+          "y": 1324.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "integration_types",
+          "kind": "Table",
+          "width": 206.0,
+          "x": 603.0,
+          "y": 690.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "integrations",
+          "kind": "Table",
+          "width": 302.0,
+          "x": 603.0,
+          "y": 998.0
+        },
+        {
+          "column_count": 11,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 246.0,
+          "id": "notifications",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 5408.0,
+          "y": 1288.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "permissions",
+          "kind": "Table",
+          "width": 188.0,
+          "x": 1708.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "project_integrations",
+          "kind": "Table",
+          "width": 266.0,
+          "x": 1178.0,
+          "y": 1396.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "project_teams",
+          "kind": "Table",
+          "width": 277.0,
+          "x": 3241.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 3,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 102.0,
+          "id": "project_watchers",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 6530.0,
+          "y": 1432.0
+        },
+        {
+          "column_count": 10,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 228.0,
+          "id": "projects",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 618.0
+        },
+        {
+          "column_count": 2,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 84.0,
+          "id": "role_permissions",
+          "kind": "Table",
+          "width": 259.0,
+          "x": 2254.0,
+          "y": 1450.0
+        },
+        {
+          "column_count": 6,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 156.0,
+          "id": "roles",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1161.0,
+          "y": 1052.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "tags",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 2699.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "task_dependencies",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 2,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 84.0,
+          "id": "task_tags",
+          "kind": "Table",
+          "width": 216.0,
+          "x": 2769.0,
+          "y": 1450.0
+        },
+        {
+          "column_count": 3,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 102.0,
+          "id": "task_watchers",
+          "kind": "Table",
+          "width": 319.0,
+          "x": 603.0,
+          "y": 1432.0
+        },
+        {
+          "column_count": 13,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 282.0,
+          "id": "tasks",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 926.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "team_members",
+          "kind": "Table",
+          "width": 284.0,
+          "x": 3774.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "teams",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 2152.0,
+          "y": 1070.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 192.0,
+          "id": "tenants",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "user_roles",
+          "kind": "Table",
+          "width": 298.0,
+          "x": 1700.0,
+          "y": 1414.0
+        },
+        {
+          "column_count": 9,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 210.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 309.0,
+          "x": 56.0,
+          "y": 328.0
+        }
+      ],
+      "summary": {
+        "edge_count": 40,
+        "height": 1590.0,
+        "node_count": 23,
+        "width": 6905.0
+      }
+    }
+  }
+}

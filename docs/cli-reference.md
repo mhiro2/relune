@@ -44,7 +44,8 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 | `--exclude <TABLE>` | Repeatable denylist |
 | `--theme light\|dark` | Visual theme |
 | `--layout hierarchical\|force-directed` | Layout algorithm |
-| `--edge-style straight\|orthogonal\|curved` | Edge routing style |
+| `--direction top-to-bottom\|left-to-right\|right-to-left\|bottom-to-top` | Primary flow direction |
+| `--edge-style straight\|orthogonal\|curved` | Edge rendering style |
 
 **Other:** `--stats` (stderr statistics), `--fail-on-warning` (non-zero on warnings).
 
@@ -96,12 +97,14 @@ Emit normalized JSON or diagram text. **`--format` is required.**
 |--------|-------------|
 | `schema-json` | Normalized schema as JSON |
 | `graph-json` | Graph representation (nodes/edges) as JSON |
-| `layout-json` | Positioned graph with coordinates as JSON |
+| `layout-json` | Positioned graph with coordinates plus `routing_debug` metadata |
 | `mermaid` | Mermaid `erDiagram` — renders in GitHub/GitLab Markdown |
 | `d2` | [D2](https://d2lang.com/) diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--focus`, `--depth`, `--group-by`, `--layout`, and `--edge-style` like `render` for positioned exports. `export` applies the same `focus`/`depth` validation rule as `render`, so `--depth` requires `--focus`.
+Supports `--focus`, `--depth`, `--group-by`, `--layout`, `--direction`, and `--edge-style` like `render` for positioned exports. `export` applies the same `focus`/`depth` validation rule as `render`, so `--depth` requires `--focus`.
+
+`layout-json` includes graph-level `routing_debug.non_self_loop_detour_activations` and per-edge `routing_debug` fields for source/target side policy, slot indices, slot counts, row offsets, and selected channel coordinates.
 
 ```bash
 relune export --sql schema.sql --format schema-json -o schema.json
@@ -111,6 +114,14 @@ relune export --sql schema.sql --format layout-json --layout force-directed --ed
 relune export --sql schema.sql --format mermaid -o erd.mmd
 relune export --sql schema.sql --format d2 -o erd.d2
 relune export --sql schema.sql --format dot -o erd.dot
+```
+
+Routing debug comparison workflow:
+
+```bash
+relune export --sql schema.sql --format layout-json > layout.json
+relune render --sql schema.sql --format svg -o erd.svg
+relune render --sql schema.sql --format html -o erd.html
 ```
 
 ---

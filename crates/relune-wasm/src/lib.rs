@@ -60,7 +60,7 @@ pub fn init() {
 /// - `groupBy`: Grouping strategy - "none", "schema", "prefix" (default: "none")
 /// - `layoutDirection`: Layout direction - "top-to-bottom", "left-to-right", etc.
 /// - `layoutAlgorithm`: Layout algorithm - "hierarchical" or "force-directed"
-/// - `edgeStyle`: Edge routing style - "straight", "orthogonal", or "curved"
+/// - `edgeStyle`: Edge rendering style - "straight", "orthogonal", or "curved"
 /// - `horizontalSpacing`: Horizontal spacing hint (default: 320)
 /// - `verticalSpacing`: Vertical spacing hint (default: 80)
 ///
@@ -134,7 +134,7 @@ pub fn inspect_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 /// - `excludeTables`: Tables to exclude (glob patterns)
 /// - `groupBy`: Grouping strategy - "none", "schema", "prefix" (default: "none")
 /// - `layoutAlgorithm`: Layout algorithm - "hierarchical" or "force-directed"
-/// - `edgeStyle`: Edge routing style - "straight", "orthogonal", or "curved"
+/// - `edgeStyle`: Edge rendering style - "straight", "orthogonal", or "curved"
 ///
 /// Returns a JSON result object with:
 /// - `content`: The exported JSON string

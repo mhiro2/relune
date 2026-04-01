@@ -1,0 +1,67 @@
+---
+source: crates/relune-app/tests/fixture_render_audit.rs
+expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
+---
+{
+  "fixture": "cyclic_fk.sql",
+  "layout": {
+    "edge_count": 12,
+    "height": 758.0,
+    "node_count": 12,
+    "width": 3640.199951171875
+  },
+  "patterns": {
+    "long_detours": {
+      "count_over_1_8x": 0,
+      "worst_examples": [
+        "cycle_a[cycle_c_id] -> cycle_c[id] (1.40x)",
+        "organizations_ref[owner_user_id] -> users[id] (1.25x)",
+        "cycle_b[cycle_a_id] -> cycle_a[id] (1.00x)"
+      ]
+    },
+    "parallel_groups": {
+      "count": 1,
+      "examples": [
+        "departments <-> projects (2)"
+      ],
+      "max_size": 2
+    },
+    "reverse_edges": {
+      "count": 4,
+      "examples": [
+        "cycle_b[cycle_a_id] -> cycle_a[id] (rank 1 -> 0, bends 2)",
+        "cycle_c[cycle_b_id] -> cycle_b[id] (rank 2 -> 1, bends 2)",
+        "organizations_ref[owner_user_id] -> users[id] (rank 2 -> 0, bends 4)"
+      ]
+    },
+    "same_rank_edges": {
+      "count": 4,
+      "examples": [
+        "categories[parent_id] -> categories[id] (rank 0 -> 0, bends 2)",
+        "employees[manager_id] -> employees[id] (rank 0 -> 0, bends 2)",
+        "organizations[parent_org_id] -> organizations[id] (rank 0 -> 0, bends 2)"
+      ]
+    },
+    "tight_clearance": {
+      "count_under_24px": 2,
+      "worst_examples": [
+        "cycle_b[cycle_a_id] -> cycle_a[id] (16.0px)",
+        "users[default_team_id] -> teams[id] (16.0px)",
+        "cycle_a[cycle_c_id] -> cycle_c[id] (24.0px)"
+      ]
+    }
+  },
+  "surfaces": {
+    "html": {
+      "bytes": 388801,
+      "contains_embedded_svg": true,
+      "contains_metadata": true,
+      "contains_viewport": true
+    },
+    "svg": {
+      "bytes": 85552,
+      "edge_groups": 96,
+      "node_groups": 12
+    }
+  }
+}

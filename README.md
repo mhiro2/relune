@@ -62,6 +62,7 @@ Relune can render:
 Tune diagrams for the shape of your schema:
 
 - hierarchical or force-directed layout
+- top-to-bottom, left-to-right, right-to-left, or bottom-to-top flow
 - straight, orthogonal, or curved edges
 
 ### Focus and filtering
@@ -97,6 +98,7 @@ Compare schema revisions and integrate with tooling:
 
 - text diff output
 - JSON output for CI and automation
+- `layout-json` with routing debug metadata for edge-side, slot, and channel inspection
 - SVG or HTML visual diff with color-coded overlays
 
 ### Flexible input sources

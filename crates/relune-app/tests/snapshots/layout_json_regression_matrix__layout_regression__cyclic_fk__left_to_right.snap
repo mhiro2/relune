@@ -1,0 +1,1966 @@
+---
+source: crates/relune-app/tests/layout_json_regression_matrix.rs
+expression: snapshot
+---
+{
+  "direction": "left_to_right",
+  "fixture": "cyclic_fk.sql",
+  "styles": {
+    "curved": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              383.0,
+              576.0
+            ],
+            [
+              383.0,
+              672.0
+            ]
+          ],
+          "end": [
+            347.0,
+            672.0
+          ],
+          "from": "categories",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 383.0,
+          "label_y": 610.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            624.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            576.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              375.0,
+              420.0
+            ],
+            [
+              375.0,
+              32.0
+            ],
+            [
+              1128.4000244140625,
+              32.0
+            ],
+            [
+              1128.4000244140625,
+              112.0
+            ]
+          ],
+          "end": [
+            1154.4000244140625,
+            112.0
+          ],
+          "from": "cycle_a",
+          "from_columns": [
+            "cycle_c_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_c_id",
+          "label_x": 597.7000122070313,
+          "label_y": 32.0,
+          "nullable": true,
+          "route_label_position": [
+            597.7000122070313,
+            32.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            420.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "cycle_c",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              500.6000061035156,
+              141.0
+            ],
+            [
+              500.6000061035156,
+              370.0
+            ]
+          ],
+          "end": [
+            349.0,
+            370.0
+          ],
+          "from": "cycle_b",
+          "from_columns": [
+            "cycle_a_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_a_id",
+          "label_x": 500.6000061035156,
+          "label_y": 279.5,
+          "nullable": true,
+          "route_label_position": [
+            500.6000061035156,
+            279.5
+          ],
+          "source_side": "west",
+          "start": [
+            604.2000122070313,
+            141.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "cycle_a",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1002.7999877929688,
+              134.0
+            ],
+            [
+              1002.7999877929688,
+              105.0
+            ]
+          ],
+          "end": [
+            899.2000122070313,
+            105.0
+          ],
+          "from": "cycle_c",
+          "from_columns": [
+            "cycle_b_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_b_id",
+          "label_x": 1012.2999877929688,
+          "label_y": 134.0,
+          "nullable": true,
+          "route_label_position": [
+            1012.2999877929688,
+            134.0
+          ],
+          "source_side": "west",
+          "start": [
+            1154.4000244140625,
+            134.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "cycle_b",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              1328.0
+            ],
+            [
+              476.6000061035156,
+              498.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            498.0
+          ],
+          "from": "departments",
+          "from_columns": [
+            "lead_project_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_departments_lead_project",
+          "label_x": 476.6000061035156,
+          "label_y": 1184.300048828125,
+          "nullable": true,
+          "route_label_position": [
+            476.6000061035156,
+            913.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            1328.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              315.0,
+              104.0
+            ],
+            [
+              315.0,
+              200.0
+            ]
+          ],
+          "end": [
+            279.0,
+            200.0
+          ],
+          "from": "employees",
+          "from_columns": [
+            "manager_id"
+          ],
+          "is_self_loop": true,
+          "label": "manager_id",
+          "label_x": 315.0,
+          "label_y": 152.0,
+          "nullable": true,
+          "route_label_position": [
+            315.0,
+            152.0
+          ],
+          "source_side": "east",
+          "start": [
+            279.0,
+            104.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "employees",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1128.4000244140625,
+              348.0
+            ],
+            [
+              1128.4000244140625,
+              232.0
+            ],
+            [
+              375.0,
+              232.0
+            ],
+            [
+              375.0,
+              842.0
+            ]
+          ],
+          "end": [
+            349.0,
+            842.0
+          ],
+          "from": "organizations_ref",
+          "from_columns": [
+            "owner_user_id"
+          ],
+          "is_self_loop": false,
+          "label": "owner_user_id",
+          "label_x": 632.3170166015625,
+          "label_y": 232.0,
+          "nullable": false,
+          "route_label_position": [
+            504.70001220703125,
+            232.0
+          ],
+          "source_side": "west",
+          "start": [
+            1154.4000244140625,
+            348.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              383.0,
+              1052.5
+            ],
+            [
+              383.0,
+              1121.5
+            ]
+          ],
+          "end": [
+            347.0,
+            1121.5
+          ],
+          "from": "organizations",
+          "from_columns": [
+            "parent_org_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_org_id",
+          "label_x": 407.0,
+          "label_y": 1087.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            1087.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            1052.5
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "organizations",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              548.0
+            ],
+            [
+              476.6000061035156,
+              1278.0
+            ]
+          ],
+          "end": [
+            349.0,
+            1278.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "department_id"
+          ],
+          "is_self_loop": false,
+          "label": "department_id",
+          "label_x": 408.63299560546875,
+          "label_y": 971.3400268554688,
+          "nullable": false,
+          "route_label_position": [
+            476.6000061035156,
+            913.0
+          ],
+          "source_side": "west",
+          "start": [
+            604.2000122070313,
+            548.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "departments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1026.800048828125,
+              341.0
+            ],
+            [
+              1026.800048828125,
+              298.0
+            ]
+          ],
+          "end": [
+            1154.4000244140625,
+            298.0
+          ],
+          "from": "teams",
+          "from_columns": [
+            "organization_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_teams_organization",
+          "label_x": 1026.800048828125,
+          "label_y": 319.5,
+          "nullable": false,
+          "route_label_position": [
+            1026.800048828125,
+            319.5
+          ],
+          "source_side": "east",
+          "start": [
+            899.2000122070313,
+            341.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "organizations_ref",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              383.0,
+              1497.5
+            ],
+            [
+              383.0,
+              1584.5
+            ]
+          ],
+          "end": [
+            347.0,
+            1584.5
+          ],
+          "from": "threaded_comments",
+          "from_columns": [
+            "parent_comment_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_comment_id",
+          "label_x": 419.0,
+          "label_y": 1541.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            1541.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            1497.5
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "threaded_comments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              452.6000061035156,
+              910.0
+            ],
+            [
+              452.6000061035156,
+              305.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            305.0
+          ],
+          "from": "users",
+          "from_columns": [
+            "default_team_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_users_default_team",
+          "label_x": 463.6570129394531,
+          "label_y": 444.7969970703125,
+          "nullable": true,
+          "route_label_position": [
+            452.6000061035156,
+            583.5
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            910.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 192.0,
+          "id": "categories",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 528.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_a",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 328.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_b",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_c",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1156.4000244140625,
+          "y": 56.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "departments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1236.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 192.0,
+          "id": "employees",
+          "kind": "Table",
+          "width": 223.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 138.0,
+          "id": "organizations",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1018.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "organizations_ref",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1156.4000244140625,
+          "y": 256.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "projects",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 456.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "teams",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 256.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 174.0,
+          "id": "threaded_comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1454.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 800.0
+        }
+      ],
+      "summary": {
+        "edge_count": 12,
+        "height": 1684.0,
+        "node_count": 12,
+        "width": 1503.4000244140625
+      }
+    },
+    "orthogonal": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              383.0,
+              576.0
+            ],
+            [
+              383.0,
+              672.0
+            ]
+          ],
+          "end": [
+            347.0,
+            672.0
+          ],
+          "from": "categories",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 383.0,
+          "label_y": 610.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            624.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            576.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              375.0,
+              420.0
+            ],
+            [
+              375.0,
+              32.0
+            ],
+            [
+              1128.4000244140625,
+              32.0
+            ],
+            [
+              1128.4000244140625,
+              112.0
+            ]
+          ],
+          "end": [
+            1154.4000244140625,
+            112.0
+          ],
+          "from": "cycle_a",
+          "from_columns": [
+            "cycle_c_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_c_id",
+          "label_x": 597.7000122070313,
+          "label_y": 32.0,
+          "nullable": true,
+          "route_label_position": [
+            597.7000122070313,
+            32.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            420.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "cycle_c",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              500.6000061035156,
+              141.0
+            ],
+            [
+              500.6000061035156,
+              370.0
+            ]
+          ],
+          "end": [
+            349.0,
+            370.0
+          ],
+          "from": "cycle_b",
+          "from_columns": [
+            "cycle_a_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_a_id",
+          "label_x": 500.6000061035156,
+          "label_y": 279.5,
+          "nullable": true,
+          "route_label_position": [
+            500.6000061035156,
+            279.5
+          ],
+          "source_side": "west",
+          "start": [
+            604.2000122070313,
+            141.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "cycle_a",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1002.7999877929688,
+              134.0
+            ],
+            [
+              1002.7999877929688,
+              105.0
+            ]
+          ],
+          "end": [
+            899.2000122070313,
+            105.0
+          ],
+          "from": "cycle_c",
+          "from_columns": [
+            "cycle_b_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_b_id",
+          "label_x": 1012.2999877929688,
+          "label_y": 134.0,
+          "nullable": true,
+          "route_label_position": [
+            1012.2999877929688,
+            134.0
+          ],
+          "source_side": "west",
+          "start": [
+            1154.4000244140625,
+            134.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "cycle_b",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              1328.0
+            ],
+            [
+              476.6000061035156,
+              498.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            498.0
+          ],
+          "from": "departments",
+          "from_columns": [
+            "lead_project_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_departments_lead_project",
+          "label_x": 476.6000061035156,
+          "label_y": 1184.300048828125,
+          "nullable": true,
+          "route_label_position": [
+            476.6000061035156,
+            913.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            1328.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              315.0,
+              104.0
+            ],
+            [
+              315.0,
+              200.0
+            ]
+          ],
+          "end": [
+            279.0,
+            200.0
+          ],
+          "from": "employees",
+          "from_columns": [
+            "manager_id"
+          ],
+          "is_self_loop": true,
+          "label": "manager_id",
+          "label_x": 315.0,
+          "label_y": 152.0,
+          "nullable": true,
+          "route_label_position": [
+            315.0,
+            152.0
+          ],
+          "source_side": "east",
+          "start": [
+            279.0,
+            104.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "employees",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1128.4000244140625,
+              348.0
+            ],
+            [
+              1128.4000244140625,
+              232.0
+            ],
+            [
+              375.0,
+              232.0
+            ],
+            [
+              375.0,
+              842.0
+            ]
+          ],
+          "end": [
+            349.0,
+            842.0
+          ],
+          "from": "organizations_ref",
+          "from_columns": [
+            "owner_user_id"
+          ],
+          "is_self_loop": false,
+          "label": "owner_user_id",
+          "label_x": 632.3170166015625,
+          "label_y": 232.0,
+          "nullable": false,
+          "route_label_position": [
+            504.70001220703125,
+            232.0
+          ],
+          "source_side": "west",
+          "start": [
+            1154.4000244140625,
+            348.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              383.0,
+              1052.5
+            ],
+            [
+              383.0,
+              1121.5
+            ]
+          ],
+          "end": [
+            347.0,
+            1121.5
+          ],
+          "from": "organizations",
+          "from_columns": [
+            "parent_org_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_org_id",
+          "label_x": 407.0,
+          "label_y": 1087.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            1087.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            1052.5
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "organizations",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              548.0
+            ],
+            [
+              476.6000061035156,
+              1278.0
+            ]
+          ],
+          "end": [
+            349.0,
+            1278.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "department_id"
+          ],
+          "is_self_loop": false,
+          "label": "department_id",
+          "label_x": 408.63299560546875,
+          "label_y": 971.3400268554688,
+          "nullable": false,
+          "route_label_position": [
+            476.6000061035156,
+            913.0
+          ],
+          "source_side": "west",
+          "start": [
+            604.2000122070313,
+            548.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "departments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1026.800048828125,
+              341.0
+            ],
+            [
+              1026.800048828125,
+              298.0
+            ]
+          ],
+          "end": [
+            1154.4000244140625,
+            298.0
+          ],
+          "from": "teams",
+          "from_columns": [
+            "organization_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_teams_organization",
+          "label_x": 1026.800048828125,
+          "label_y": 319.5,
+          "nullable": false,
+          "route_label_position": [
+            1026.800048828125,
+            319.5
+          ],
+          "source_side": "east",
+          "start": [
+            899.2000122070313,
+            341.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "organizations_ref",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              383.0,
+              1497.5
+            ],
+            [
+              383.0,
+              1584.5
+            ]
+          ],
+          "end": [
+            347.0,
+            1584.5
+          ],
+          "from": "threaded_comments",
+          "from_columns": [
+            "parent_comment_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_comment_id",
+          "label_x": 419.0,
+          "label_y": 1541.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            1541.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            1497.5
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "threaded_comments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              452.6000061035156,
+              910.0
+            ],
+            [
+              452.6000061035156,
+              305.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            305.0
+          ],
+          "from": "users",
+          "from_columns": [
+            "default_team_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_users_default_team",
+          "label_x": 463.6570129394531,
+          "label_y": 444.7969970703125,
+          "nullable": true,
+          "route_label_position": [
+            452.6000061035156,
+            583.5
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            910.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 192.0,
+          "id": "categories",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 528.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_a",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 328.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_b",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_c",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1156.4000244140625,
+          "y": 56.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "departments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1236.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 192.0,
+          "id": "employees",
+          "kind": "Table",
+          "width": 223.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 138.0,
+          "id": "organizations",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1018.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "organizations_ref",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1156.4000244140625,
+          "y": 256.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "projects",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 456.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "teams",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 256.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 174.0,
+          "id": "threaded_comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1454.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 800.0
+        }
+      ],
+      "summary": {
+        "edge_count": 12,
+        "height": 1684.0,
+        "node_count": 12,
+        "width": 1503.4000244140625
+      }
+    },
+    "straight": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              383.0,
+              576.0
+            ],
+            [
+              383.0,
+              672.0
+            ]
+          ],
+          "end": [
+            347.0,
+            672.0
+          ],
+          "from": "categories",
+          "from_columns": [
+            "parent_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_id",
+          "label_x": 383.0,
+          "label_y": 610.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            624.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            576.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "categories",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              375.0,
+              420.0
+            ],
+            [
+              375.0,
+              32.0
+            ],
+            [
+              1128.4000244140625,
+              32.0
+            ],
+            [
+              1128.4000244140625,
+              112.0
+            ]
+          ],
+          "end": [
+            1154.4000244140625,
+            112.0
+          ],
+          "from": "cycle_a",
+          "from_columns": [
+            "cycle_c_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_c_id",
+          "label_x": 597.7000122070313,
+          "label_y": 32.0,
+          "nullable": true,
+          "route_label_position": [
+            597.7000122070313,
+            32.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            420.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "cycle_c",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              500.6000061035156,
+              141.0
+            ],
+            [
+              500.6000061035156,
+              370.0
+            ]
+          ],
+          "end": [
+            349.0,
+            370.0
+          ],
+          "from": "cycle_b",
+          "from_columns": [
+            "cycle_a_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_a_id",
+          "label_x": 500.6000061035156,
+          "label_y": 279.5,
+          "nullable": true,
+          "route_label_position": [
+            500.6000061035156,
+            279.5
+          ],
+          "source_side": "west",
+          "start": [
+            604.2000122070313,
+            141.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "cycle_a",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1002.7999877929688,
+              134.0
+            ],
+            [
+              1002.7999877929688,
+              105.0
+            ]
+          ],
+          "end": [
+            899.2000122070313,
+            105.0
+          ],
+          "from": "cycle_c",
+          "from_columns": [
+            "cycle_b_id"
+          ],
+          "is_self_loop": false,
+          "label": "cycle_b_id",
+          "label_x": 1012.2999877929688,
+          "label_y": 134.0,
+          "nullable": true,
+          "route_label_position": [
+            1012.2999877929688,
+            134.0
+          ],
+          "source_side": "west",
+          "start": [
+            1154.4000244140625,
+            134.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "cycle_b",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              1328.0
+            ],
+            [
+              476.6000061035156,
+              498.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            498.0
+          ],
+          "from": "departments",
+          "from_columns": [
+            "lead_project_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_departments_lead_project",
+          "label_x": 476.6000061035156,
+          "label_y": 1184.300048828125,
+          "nullable": true,
+          "route_label_position": [
+            476.6000061035156,
+            913.0
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            1328.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "projects",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              315.0,
+              104.0
+            ],
+            [
+              315.0,
+              200.0
+            ]
+          ],
+          "end": [
+            279.0,
+            200.0
+          ],
+          "from": "employees",
+          "from_columns": [
+            "manager_id"
+          ],
+          "is_self_loop": true,
+          "label": "manager_id",
+          "label_x": 315.0,
+          "label_y": 152.0,
+          "nullable": true,
+          "route_label_position": [
+            315.0,
+            152.0
+          ],
+          "source_side": "east",
+          "start": [
+            279.0,
+            104.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "employees",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1128.4000244140625,
+              348.0
+            ],
+            [
+              1128.4000244140625,
+              232.0
+            ],
+            [
+              375.0,
+              232.0
+            ],
+            [
+              375.0,
+              842.0
+            ]
+          ],
+          "end": [
+            349.0,
+            842.0
+          ],
+          "from": "organizations_ref",
+          "from_columns": [
+            "owner_user_id"
+          ],
+          "is_self_loop": false,
+          "label": "owner_user_id",
+          "label_x": 632.3170166015625,
+          "label_y": 232.0,
+          "nullable": false,
+          "route_label_position": [
+            504.70001220703125,
+            232.0
+          ],
+          "source_side": "west",
+          "start": [
+            1154.4000244140625,
+            348.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              383.0,
+              1052.5
+            ],
+            [
+              383.0,
+              1121.5
+            ]
+          ],
+          "end": [
+            347.0,
+            1121.5
+          ],
+          "from": "organizations",
+          "from_columns": [
+            "parent_org_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_org_id",
+          "label_x": 407.0,
+          "label_y": 1087.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            1087.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            1052.5
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "organizations",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              476.6000061035156,
+              548.0
+            ],
+            [
+              476.6000061035156,
+              1278.0
+            ]
+          ],
+          "end": [
+            349.0,
+            1278.0
+          ],
+          "from": "projects",
+          "from_columns": [
+            "department_id"
+          ],
+          "is_self_loop": false,
+          "label": "department_id",
+          "label_x": 408.63299560546875,
+          "label_y": 971.3400268554688,
+          "nullable": false,
+          "route_label_position": [
+            476.6000061035156,
+            913.0
+          ],
+          "source_side": "west",
+          "start": [
+            604.2000122070313,
+            548.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "departments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              1026.800048828125,
+              341.0
+            ],
+            [
+              1026.800048828125,
+              298.0
+            ]
+          ],
+          "end": [
+            1154.4000244140625,
+            298.0
+          ],
+          "from": "teams",
+          "from_columns": [
+            "organization_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_teams_organization",
+          "label_x": 1026.800048828125,
+          "label_y": 319.5,
+          "nullable": false,
+          "route_label_position": [
+            1026.800048828125,
+            319.5
+          ],
+          "source_side": "east",
+          "start": [
+            899.2000122070313,
+            341.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "organizations_ref",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              383.0,
+              1497.5
+            ],
+            [
+              383.0,
+              1584.5
+            ]
+          ],
+          "end": [
+            347.0,
+            1584.5
+          ],
+          "from": "threaded_comments",
+          "from_columns": [
+            "parent_comment_id"
+          ],
+          "is_self_loop": true,
+          "label": "parent_comment_id",
+          "label_x": 419.0,
+          "label_y": 1541.0,
+          "nullable": true,
+          "route_label_position": [
+            383.0,
+            1541.0
+          ],
+          "source_side": "east",
+          "start": [
+            347.0,
+            1497.5
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "east",
+          "to": "threaded_comments",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              452.6000061035156,
+              910.0
+            ],
+            [
+              452.6000061035156,
+              305.0
+            ]
+          ],
+          "end": [
+            604.2000122070313,
+            305.0
+          ],
+          "from": "users",
+          "from_columns": [
+            "default_team_id"
+          ],
+          "is_self_loop": false,
+          "label": "fk_users_default_team",
+          "label_x": 463.6570129394531,
+          "label_y": 444.7969970703125,
+          "nullable": true,
+          "route_label_position": [
+            452.6000061035156,
+            583.5
+          ],
+          "source_side": "east",
+          "start": [
+            349.0,
+            910.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "west",
+          "to": "teams",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 192.0,
+          "id": "categories",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 528.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_a",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 328.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_b",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 56.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "cycle_c",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1156.4000244140625,
+          "y": 56.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "departments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1236.0
+        },
+        {
+          "column_count": 8,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 192.0,
+          "id": "employees",
+          "kind": "Table",
+          "width": 223.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 138.0,
+          "id": "organizations",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1018.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "organizations_ref",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 1156.4000244140625,
+          "y": 256.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "projects",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 456.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "teams",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 606.2000122070313,
+          "y": 256.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": true,
+          "height": 174.0,
+          "id": "threaded_comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 1454.0
+        },
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 800.0
+        }
+      ],
+      "summary": {
+        "edge_count": 12,
+        "height": 1684.0,
+        "node_count": 12,
+        "width": 1503.4000244140625
+      }
+    }
+  }
+}

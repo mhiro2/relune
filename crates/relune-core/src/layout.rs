@@ -25,16 +25,16 @@ impl Cardinality {
     }
 }
 
-/// Visual routing style for edges in a positioned graph.
+/// Visual edge rendering style for a positioned graph.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RouteStyle {
-    /// Single straight segment between attachment points.
+    /// Prefer a single segment when the routed backbone has no bends.
     #[default]
     Straight,
-    /// Polyline with axis-aligned segments; bend coordinates live in [`EdgeRoute::control_points`].
+    /// Render the routed backbone as an axis-aligned polyline.
     Orthogonal,
-    /// Cubic Bézier; exactly two control points in [`EdgeRoute::control_points`] (P1, P2).
+    /// Render the routed backbone as a smoothed path.
     Curved,
 }
 
@@ -49,10 +49,9 @@ pub struct EdgeRoute {
     pub x2: f32,
     /// End Y (second attachment point).
     pub y2: f32,
-    /// For [`RouteStyle::Orthogonal`], intermediate polyline vertices between the endpoints.
-    /// For [`RouteStyle::Curved`], cubic Bézier control points (two points).
+    /// Intermediate bend points on the canonical routed backbone between the endpoints.
     pub control_points: Vec<(f32, f32)>,
-    /// Routing style used to interpret `control_points`.
+    /// Visual style hint used by renderers when turning the backbone into a path.
     pub style: RouteStyle,
     /// Suggested position for the edge label.
     pub label_position: (f32, f32),

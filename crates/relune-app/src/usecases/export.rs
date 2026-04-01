@@ -216,6 +216,37 @@ mod tests {
     }
 
     #[test]
+    fn test_export_layout_json_includes_routing_debug_metadata() {
+        let sql = r"
+            CREATE TABLE users (
+                id INT PRIMARY KEY
+            );
+            CREATE TABLE posts (
+                id INT PRIMARY KEY,
+                author_id INT REFERENCES users(id),
+                reviewer_id INT REFERENCES users(id)
+            );
+        ";
+
+        let request = ExportRequest::from_sql(sql).with_format(ExportFormat::LayoutJson);
+
+        let result = export(request).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+
+        assert_eq!(
+            parsed["routing_debug"]["non_self_loop_detour_activations"],
+            0
+        );
+        let edge_debug = &parsed["edges"][0]["routing_debug"];
+        assert!(edge_debug["source_side"].is_string());
+        assert!(edge_debug["target_side"].is_string());
+        assert!(edge_debug["source_slot_index"].is_number());
+        assert!(edge_debug["source_slot_count"].is_number());
+        assert!(edge_debug["target_slot_index"].is_number());
+        assert!(edge_debug["target_slot_count"].is_number());
+    }
+
+    #[test]
     fn test_export_mermaid_d2_dot() {
         let sql = r"
             CREATE TABLE users (id INT PRIMARY KEY);

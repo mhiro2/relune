@@ -137,7 +137,7 @@ pub struct LayoutSpec {
     /// Layout direction.
     #[serde(default)]
     pub direction: LayoutDirection,
-    /// Edge routing style.
+    /// Edge rendering style.
     #[serde(default)]
     pub edge_style: RouteStyle,
     /// Horizontal spacing hint.

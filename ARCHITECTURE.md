@@ -202,11 +202,17 @@ Diagnostics are a first-class stream: parse errors, recoverable warnings, unsupp
 
 ## 10. Layout
 
-`relune-layout` owns graph layout, overlay annotations, and text diagram exports (Mermaid, D2, DOT). It currently provides hierarchical and force-directed node placement plus straight, orthogonal, and curved edge routing. Separating it from `relune-core` keeps a clear boundary between the semantic graph and geometry, and allows targeted benchmarks.
+`relune-layout` owns graph layout, overlay annotations, and text diagram exports (Mermaid, D2, DOT). It provides hierarchical and force-directed node placement plus a canonical orthogonal edge backbone that renderers can display as straight, orthogonal, or curved paths. Separating it from `relune-core` keeps a clear boundary between the semantic graph and geometry, and allows targeted benchmarks.
 
-Phases: build layout graph → grouping/focus → layout algorithm → coordinates → **auto-tune spacing** → edge routing → **obstacle avoidance** → **label collision avoidance** → bounds. Handles cycles, join tables, views, enum references, and multi-schema namespacing.
+Phases: build layout graph → grouping/focus → layout algorithm → coordinates → **auto-tune spacing** → **global port assignment** → **obstacle-aware channel selection** → **parallel edge bundling** → **self-loop detour handling** → **label collision avoidance** → bounds. Handles cycles, join tables, views, enum references, and multi-schema namespacing.
 
-**Quality passes** — After edge routing, two post-processing passes improve readability: (1) `detour_around_obstacles` reroutes Straight/Orthogonal edge segments that cross through intermediate nodes; (2) `nudge_label` shifts edge labels away from overlapping nodes. Additionally, `auto_tuned` adjusts horizontal/vertical spacing based on node count and edge density before coordinate assignment, and `centered_lane_offset` scales the gap between parallel edges sharing the same node pair for join-heavy schemas.
+**Routing model** — Layout returns one canonical orthogonal backbone per edge. Hierarchical routing uses `port -> stub -> channel -> stub -> port`, then scores inter-rank, same-rank, and reverse-flow channel candidates in a deterministic greedy edge order. Candidate scoring combines hard obstacle constraints with weighted soft costs for clearance, route length, bend count, center deviation, and channel congestion. After route selection, nearby parallel edges on the same channel may share a bundled trunk for readability. Renderers own the final visual style (`straight`, `orthogonal`, `curved`) so route topology does not depend on the selected edge style.
+
+**Quality passes** — After backbone routing, `nudge_label` shifts edge labels away from overlapping nodes. `detour_around_obstacles` is no longer part of the non-self-loop path and is only used for self-loop handling, while routing keeps a detour activation count for any non-self-loop edge whose final backbone still intersects padded obstacles. Additionally, `auto_tuned` adjusts horizontal/vertical spacing based on node count and edge density before coordinate assignment, and port slot offsets keep parallel edges stable on each node side. `layout-json` exposes this routing state through graph-level and per-edge `routing_debug` metadata so fixture diffs can explain side policy, slot assignment, and selected channel coordinates directly.
+
+Fixture-level routing regressions are audited in
+`crates/relune-app/tests/fixture_render_audit.rs`, which snapshots `layout-json`
+and rendered outputs across the main SQL fixtures.
 
 **Overlay** (`overlay` module) — A `DiagramOverlay` attaches annotations (lint warnings, diff status, etc.) to nodes and edges by stable ID, without modifying the positioned graph itself. Renderers accept an optional overlay and apply visual cues (badges, border colors, tooltips) when present. When no overlay is provided the diagram renders normally.
 

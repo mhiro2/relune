@@ -1,0 +1,538 @@
+---
+source: crates/relune-app/tests/layout_json_regression_matrix.rs
+expression: snapshot
+---
+{
+  "direction": "top_to_bottom",
+  "fixture": "simple_blog.sql",
+  "styles": {
+    "curved": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              208.5,
+              234.0
+            ],
+            [
+              222.5,
+              234.0
+            ]
+          ],
+          "end": [
+            222.5,
+            272.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "post_id"
+          ],
+          "is_self_loop": false,
+          "label": "post_id",
+          "label_x": 222.5,
+          "label_y": 249.5,
+          "nullable": false,
+          "route_label_position": [
+            215.5,
+            234.0
+          ],
+          "source_side": "south",
+          "start": [
+            208.5,
+            196.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "posts",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              222.0
+            ],
+            [
+              32.0,
+              222.0
+            ],
+            [
+              32.0,
+              500.0
+            ],
+            [
+              194.5,
+              500.0
+            ]
+          ],
+          "end": [
+            194.5,
+            526.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 32.0,
+          "label_y": 251.83299255371094,
+          "nullable": false,
+          "route_label_position": [
+            32.0,
+            361.0
+          ],
+          "source_side": "south",
+          "start": [
+            194.5,
+            196.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              222.5,
+              488.0
+            ],
+            [
+              208.5,
+              488.0
+            ]
+          ],
+          "end": [
+            208.5,
+            526.0
+          ],
+          "from": "posts",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 222.5,
+          "label_y": 472.5,
+          "nullable": false,
+          "route_label_position": [
+            215.5,
+            488.0
+          ],
+          "source_side": "south",
+          "start": [
+            222.5,
+            450.0
+          ],
+          "style": "Curved",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "posts",
+          "kind": "Table",
+          "width": 333.0,
+          "x": 56.0,
+          "y": 274.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 528.0
+        }
+      ],
+      "summary": {
+        "edge_count": 3,
+        "height": 704.0,
+        "node_count": 3,
+        "width": 445.0
+      }
+    },
+    "orthogonal": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              208.5,
+              234.0
+            ],
+            [
+              222.5,
+              234.0
+            ]
+          ],
+          "end": [
+            222.5,
+            272.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "post_id"
+          ],
+          "is_self_loop": false,
+          "label": "post_id",
+          "label_x": 222.5,
+          "label_y": 249.5,
+          "nullable": false,
+          "route_label_position": [
+            215.5,
+            234.0
+          ],
+          "source_side": "south",
+          "start": [
+            208.5,
+            196.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "posts",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              222.0
+            ],
+            [
+              32.0,
+              222.0
+            ],
+            [
+              32.0,
+              500.0
+            ],
+            [
+              194.5,
+              500.0
+            ]
+          ],
+          "end": [
+            194.5,
+            526.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 32.0,
+          "label_y": 251.83299255371094,
+          "nullable": false,
+          "route_label_position": [
+            32.0,
+            361.0
+          ],
+          "source_side": "south",
+          "start": [
+            194.5,
+            196.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              222.5,
+              488.0
+            ],
+            [
+              208.5,
+              488.0
+            ]
+          ],
+          "end": [
+            208.5,
+            526.0
+          ],
+          "from": "posts",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 222.5,
+          "label_y": 472.5,
+          "nullable": false,
+          "route_label_position": [
+            215.5,
+            488.0
+          ],
+          "source_side": "south",
+          "start": [
+            222.5,
+            450.0
+          ],
+          "style": "Orthogonal",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "posts",
+          "kind": "Table",
+          "width": 333.0,
+          "x": 56.0,
+          "y": 274.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 528.0
+        }
+      ],
+      "summary": {
+        "edge_count": 3,
+        "height": 704.0,
+        "node_count": 3,
+        "width": 445.0
+      }
+    },
+    "straight": {
+      "edges": [
+        {
+          "control_points": [
+            [
+              208.5,
+              234.0
+            ],
+            [
+              222.5,
+              234.0
+            ]
+          ],
+          "end": [
+            222.5,
+            272.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "post_id"
+          ],
+          "is_self_loop": false,
+          "label": "post_id",
+          "label_x": 222.5,
+          "label_y": 249.5,
+          "nullable": false,
+          "route_label_position": [
+            215.5,
+            234.0
+          ],
+          "source_side": "south",
+          "start": [
+            208.5,
+            196.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "posts",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              194.5,
+              222.0
+            ],
+            [
+              32.0,
+              222.0
+            ],
+            [
+              32.0,
+              500.0
+            ],
+            [
+              194.5,
+              500.0
+            ]
+          ],
+          "end": [
+            194.5,
+            526.0
+          ],
+          "from": "comments",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 32.0,
+          "label_y": 251.83299255371094,
+          "nullable": false,
+          "route_label_position": [
+            32.0,
+            361.0
+          ],
+          "source_side": "south",
+          "start": [
+            194.5,
+            196.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        },
+        {
+          "control_points": [
+            [
+              222.5,
+              488.0
+            ],
+            [
+              208.5,
+              488.0
+            ]
+          ],
+          "end": [
+            208.5,
+            526.0
+          ],
+          "from": "posts",
+          "from_columns": [
+            "user_id"
+          ],
+          "is_self_loop": false,
+          "label": "user_id",
+          "label_x": 222.5,
+          "label_y": 472.5,
+          "nullable": false,
+          "route_label_position": [
+            215.5,
+            488.0
+          ],
+          "source_side": "south",
+          "start": [
+            222.5,
+            450.0
+          ],
+          "style": "Straight",
+          "target_cardinality": "One",
+          "target_side": "north",
+          "to": "users",
+          "to_columns": [
+            "id"
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "column_count": 5,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 138.0,
+          "id": "comments",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 56.0
+        },
+        {
+          "column_count": 7,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 174.0,
+          "id": "posts",
+          "kind": "Table",
+          "width": 333.0,
+          "x": 56.0,
+          "y": 274.0
+        },
+        {
+          "column_count": 4,
+          "group_index": null,
+          "has_self_loop": false,
+          "height": 120.0,
+          "id": "users",
+          "kind": "Table",
+          "width": 291.0,
+          "x": 56.0,
+          "y": 528.0
+        }
+      ],
+      "summary": {
+        "edge_count": 3,
+        "height": 704.0,
+        "node_count": 3,
+        "width": 445.0
+      }
+    }
+  }
+}
