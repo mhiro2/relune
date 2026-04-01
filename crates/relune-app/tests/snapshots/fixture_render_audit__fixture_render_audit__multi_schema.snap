@@ -1,0 +1,49 @@
+---
+source: crates/relune-app/tests/fixture_render_audit.rs
+expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
+---
+{
+  "fixture": "multi_schema.sql",
+  "layout": {
+    "edge_count": 0,
+    "height": 322.0,
+    "node_count": 7,
+    "width": 3793.199951171875
+  },
+  "patterns": {
+    "long_detours": {
+      "count_over_1_8x": 0,
+      "worst_examples": []
+    },
+    "parallel_groups": {
+      "count": 0,
+      "examples": [],
+      "max_size": 0
+    },
+    "reverse_edges": {
+      "count": 0,
+      "examples": []
+    },
+    "same_rank_edges": {
+      "count": 0,
+      "examples": []
+    },
+    "tight_clearance": {
+      "count_under_24px": 0,
+      "worst_examples": []
+    }
+  },
+  "surfaces": {
+    "html": {
+      "bytes": 347467,
+      "contains_embedded_svg": true,
+      "contains_metadata": true,
+      "contains_viewport": true
+    },
+    "svg": {
+      "bytes": 47754,
+      "edge_groups": 0,
+      "node_groups": 7
+    }
+  }
+}

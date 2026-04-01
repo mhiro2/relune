@@ -4,6 +4,7 @@
 //! It takes a normalized `Schema` from `relune-core` and produces a positioned graph
 //! suitable for rendering.
 
+pub mod channel;
 pub mod diagram_export;
 pub mod focus;
 pub mod graph;
@@ -14,6 +15,10 @@ pub mod port;
 pub mod rank;
 pub mod route;
 
+pub use channel::{
+    ChannelCandidateClass, ChannelCandidateScore, ChannelCostWeights,
+    compare_channel_candidate_scores,
+};
 pub use diagram_export::{layout_graph_to_d2, layout_graph_to_dot, layout_graph_to_mermaid};
 pub use focus::{FocusError, FocusExtractor};
 pub use graph::{

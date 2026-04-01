@@ -1,0 +1,59 @@
+---
+source: crates/relune-app/tests/fixture_render_audit.rs
+expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
+---
+{
+  "fixture": "ecommerce.sql",
+  "layout": {
+    "edge_count": 7,
+    "height": 956.0,
+    "node_count": 7,
+    "width": 1531.4000244140625
+  },
+  "patterns": {
+    "long_detours": {
+      "count_over_1_8x": 1,
+      "worst_examples": [
+        "addresses[customer_id] -> customers[id] (2.13x)",
+        "order_items[order_id] -> orders[id] (1.00x)",
+        "order_items[product_id] -> products[id] (1.00x)"
+      ]
+    },
+    "parallel_groups": {
+      "count": 0,
+      "examples": [],
+      "max_size": 0
+    },
+    "reverse_edges": {
+      "count": 0,
+      "examples": []
+    },
+    "same_rank_edges": {
+      "count": 1,
+      "examples": [
+        "categories[parent_id] -> categories[id] (rank 1 -> 1, bends 2)"
+      ]
+    },
+    "tight_clearance": {
+      "count_under_24px": 1,
+      "worst_examples": [
+        "addresses[customer_id] -> customers[id] (0.0px)",
+        "order_items[product_id] -> products[id] (40.0px)",
+        "product_categories[product_id] -> products[id] (40.0px)"
+      ]
+    }
+  },
+  "surfaces": {
+    "html": {
+      "bytes": 363250,
+      "contains_embedded_svg": true,
+      "contains_metadata": true,
+      "contains_viewport": true
+    },
+    "svg": {
+      "bytes": 62644,
+      "edge_groups": 56,
+      "node_groups": 7
+    }
+  }
+}

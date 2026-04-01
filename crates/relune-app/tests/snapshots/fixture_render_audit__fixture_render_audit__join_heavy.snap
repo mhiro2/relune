@@ -1,0 +1,63 @@
+---
+source: crates/relune-app/tests/fixture_render_audit.rs
+expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
+---
+{
+  "fixture": "join_heavy.sql",
+  "layout": {
+    "edge_count": 40,
+    "height": 1590.0,
+    "node_count": 23,
+    "width": 6905.0
+  },
+  "patterns": {
+    "long_detours": {
+      "count_over_1_8x": 4,
+      "worst_examples": [
+        "tasks[assignee_id] -> users[id] (4.94x)",
+        "tasks[reporter_id] -> users[id] (4.86x)",
+        "projects[tenant_id] -> tenants[id] (3.80x)"
+      ]
+    },
+    "parallel_groups": {
+      "count": 3,
+      "examples": [
+        "task_dependencies <-> tasks (2)",
+        "tasks <-> users (2)",
+        "user_roles <-> users (2)"
+      ],
+      "max_size": 2
+    },
+    "reverse_edges": {
+      "count": 0,
+      "examples": []
+    },
+    "same_rank_edges": {
+      "count": 1,
+      "examples": [
+        "comments[parent_id] -> comments[id] (rank 0 -> 0, bends 2)"
+      ]
+    },
+    "tight_clearance": {
+      "count_under_24px": 12,
+      "worst_examples": [
+        "activities[tenant_id] -> tenants[id] (0.0px)",
+        "attachments[tenant_id] -> tenants[id] (0.0px)",
+        "comments[tenant_id] -> tenants[id] (0.0px)"
+      ]
+    }
+  },
+  "surfaces": {
+    "html": {
+      "bytes": 534210,
+      "contains_embedded_svg": true,
+      "contains_metadata": true,
+      "contains_viewport": true
+    },
+    "svg": {
+      "bytes": 214812,
+      "edge_groups": 320,
+      "node_groups": 23
+    }
+  }
+}
