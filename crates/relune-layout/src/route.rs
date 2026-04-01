@@ -37,7 +37,7 @@ pub fn estimate_label_half_width(text: &str) -> f32 {
     (char_width + 18.0) * 0.5
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum AttachmentSide {
     North,
     South,
@@ -83,11 +83,24 @@ pub(crate) fn route_edge_with_offset(
     style: RouteStyle,
     lane_offset: f32,
 ) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), source_side, target_side) =
-        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let source = offset_attachment_point((sx, sy), source_side, lane_offset);
-    let target = offset_attachment_point((tx, ty), target_side, lane_offset);
-    build_backbone_route(source, target, source_side, target_side, style)
+    let (source_side, target_side) = attachment_sides(x1, y1, w1, h1, x2, y2, w2, h2);
+    route_edge_with_assigned_ports(
+        x1,
+        y1,
+        w1,
+        h1,
+        x2,
+        y2,
+        w2,
+        h2,
+        style,
+        source_side,
+        target_side,
+        lane_offset,
+        lane_offset,
+        0.0,
+        0.0,
+    )
 }
 
 /// Route an edge with separate per-endpoint lane offsets and column Y offsets.
@@ -97,6 +110,7 @@ pub(crate) fn route_edge_with_offset(
 /// applied for East/West (horizontal) attachments; for North/South they are
 /// ignored because column alignment is not meaningful in that direction.
 #[must_use]
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn route_edge_column_aware(
     x1: f32,
@@ -113,13 +127,57 @@ pub(crate) fn route_edge_column_aware(
     source_col_offset: f32,
     target_col_offset: f32,
 ) -> EdgeRoute {
-    let ((sx, sy), (tx, ty), source_side, target_side) =
-        attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    let source =
-        apply_endpoint_offsets((sx, sy), source_side, source_lane_offset, source_col_offset);
-    let target =
-        apply_endpoint_offsets((tx, ty), target_side, target_lane_offset, target_col_offset);
+    let (source_side, target_side) = attachment_sides(x1, y1, w1, h1, x2, y2, w2, h2);
+    route_edge_with_assigned_ports(
+        x1,
+        y1,
+        w1,
+        h1,
+        x2,
+        y2,
+        w2,
+        h2,
+        style,
+        source_side,
+        target_side,
+        source_lane_offset,
+        target_lane_offset,
+        source_col_offset,
+        target_col_offset,
+    )
+}
 
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn route_edge_with_assigned_ports(
+    x1: f32,
+    y1: f32,
+    w1: f32,
+    h1: f32,
+    x2: f32,
+    y2: f32,
+    w2: f32,
+    h2: f32,
+    style: RouteStyle,
+    source_side: AttachmentSide,
+    target_side: AttachmentSide,
+    source_lane_offset: f32,
+    target_lane_offset: f32,
+    source_col_offset: f32,
+    target_col_offset: f32,
+) -> EdgeRoute {
+    let source = apply_endpoint_offsets(
+        attachment_point_for_side(x1, y1, w1, h1, source_side),
+        source_side,
+        source_lane_offset,
+        source_col_offset,
+    );
+    let target = apply_endpoint_offsets(
+        attachment_point_for_side(x2, y2, w2, h2, target_side),
+        target_side,
+        target_lane_offset,
+        target_col_offset,
+    );
     build_backbone_route(source, target, source_side, target_side, style)
 }
 
@@ -168,57 +226,6 @@ fn build_backbone_route(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn attachment_points(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
-) -> ((f32, f32), (f32, f32), AttachmentSide, AttachmentSide) {
-    let source_center_x = x1 + w1 / 2.0;
-    let source_center_y = y1 + h1 / 2.0;
-    let target_center_x = x2 + w2 / 2.0;
-    let target_center_y = y2 + h2 / 2.0;
-    let dx = target_center_x - source_center_x;
-    let dy = target_center_y - source_center_y;
-
-    if dx.abs() >= dy.abs() {
-        if dx >= 0.0 {
-            (
-                (x1 + w1 + BORDER_OUTSET, source_center_y),
-                (x2 - BORDER_OUTSET, target_center_y),
-                AttachmentSide::East,
-                AttachmentSide::West,
-            )
-        } else {
-            (
-                (x1 - BORDER_OUTSET, source_center_y),
-                (x2 + w2 + BORDER_OUTSET, target_center_y),
-                AttachmentSide::West,
-                AttachmentSide::East,
-            )
-        }
-    } else if dy >= 0.0 {
-        (
-            (source_center_x, y1 + h1 + BORDER_OUTSET),
-            (target_center_x, y2 - BORDER_OUTSET),
-            AttachmentSide::South,
-            AttachmentSide::North,
-        )
-    } else {
-        (
-            (source_center_x, y1 - BORDER_OUTSET),
-            (target_center_x, y2 + h2 + BORDER_OUTSET),
-            AttachmentSide::North,
-            AttachmentSide::South,
-        )
-    }
-}
-
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn attachment_sides(
@@ -231,8 +238,35 @@ pub(crate) fn attachment_sides(
     w2: f32,
     h2: f32,
 ) -> (AttachmentSide, AttachmentSide) {
-    let (_, _, source_side, target_side) = attachment_points(x1, y1, w1, h1, x2, y2, w2, h2);
-    (source_side, target_side)
+    let source_center_x = x1 + w1 / 2.0;
+    let source_center_y = y1 + h1 / 2.0;
+    let target_center_x = x2 + w2 / 2.0;
+    let target_center_y = y2 + h2 / 2.0;
+    let dx = target_center_x - source_center_x;
+    let dy = target_center_y - source_center_y;
+
+    if dx.abs() >= dy.abs() {
+        if dx >= 0.0 {
+            (AttachmentSide::East, AttachmentSide::West)
+        } else {
+            (AttachmentSide::West, AttachmentSide::East)
+        }
+    } else if dy >= 0.0 {
+        (AttachmentSide::South, AttachmentSide::North)
+    } else {
+        (AttachmentSide::North, AttachmentSide::South)
+    }
+}
+
+fn attachment_point_for_side(x: f32, y: f32, w: f32, h: f32, side: AttachmentSide) -> (f32, f32) {
+    let center_x = x + w / 2.0;
+    let center_y = y + h / 2.0;
+    match side {
+        AttachmentSide::North => (center_x, y - BORDER_OUTSET),
+        AttachmentSide::South => (center_x, y + h + BORDER_OUTSET),
+        AttachmentSide::East => (x + w + BORDER_OUTSET, center_y),
+        AttachmentSide::West => (x - BORDER_OUTSET, center_y),
+    }
 }
 
 /// Route a self-loop edge.

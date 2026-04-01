@@ -10,6 +10,7 @@ pub mod graph;
 pub mod layout;
 pub mod order;
 pub mod overlay;
+pub mod port;
 pub mod rank;
 pub mod route;
 

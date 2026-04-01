@@ -16,12 +16,12 @@ use relune_core::{
 use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
 use crate::order::order_nodes_within_layers;
+use crate::port::{EdgePortAssignment, assign_edge_ports};
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
-    LABEL_HALF_H, Rect, attachment_sides, detour_around_obstacles,
-    detour_around_obstacles_with_endpoints, estimate_label_half_width, nudge_label,
-    point_along_route, route_edge_column_aware, route_self_loop_with_offset,
-    sample_route_obstacles,
+    LABEL_HALF_H, Rect, detour_around_obstacles, detour_around_obstacles_with_endpoints,
+    estimate_label_half_width, nudge_label, point_along_route, route_edge_with_assigned_ports,
+    route_self_loop_with_offset, sample_route_obstacles,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
@@ -1131,37 +1131,6 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
         .sum()
 }
 
-/// Compute the Y offset from node center for a column-aligned attachment point.
-///
-/// Returns 0.0 when columns are empty, hidden, or the target column is not found,
-/// which causes the edge to fall back to center attachment.
-fn column_y_offset_from_center(
-    node: &PositionedNode,
-    edge_columns: &[String],
-    config: &LayoutConfig,
-) -> f32 {
-    if edge_columns.is_empty() || node.columns.is_empty() {
-        return 0.0;
-    }
-    let Some(col_index) = node
-        .columns
-        .iter()
-        .position(|c| edge_columns.contains(&c.name))
-    else {
-        return 0.0;
-    };
-    let center_y = node.height / 2.0;
-    #[allow(clippy::cast_precision_loss)]
-    let col_y = (col_index as f32).mul_add(
-        config.column_height,
-        config.node_padding + config.header_height,
-    ) + config.column_height / 2.0;
-    let offset = col_y - center_y;
-    // Clamp so the attachment point stays within the node bounds.
-    let max_offset = (center_y - 4.0).max(0.0);
-    offset.clamp(-max_offset, max_offset)
-}
-
 /// Route all edges in the graph.
 #[allow(clippy::too_many_lines)]
 fn route_edges(
@@ -1173,17 +1142,14 @@ fn route_edges(
         .iter()
         .map(|n| (n.id.as_str(), (n.x, n.y, n.width, n.height)))
         .collect();
-    let node_by_id: std::collections::BTreeMap<&str, &PositionedNode> = positioned_nodes
-        .iter()
-        .map(|n| (n.id.as_str(), n))
-        .collect();
+    let port_assignments = assign_edge_ports(graph, positioned_nodes, config);
     let edge_counts = edge_lane_counts(graph);
     let mut seen_lanes = std::collections::BTreeMap::new();
 
     let mut edges = Vec::new();
     let mut placed_labels: Vec<Rect> = Vec::new();
 
-    for edge in &graph.edges {
+    for (edge_index, edge) in graph.edges.iter().enumerate() {
         let lane_key = canonical_edge_pair(&edge.from, &edge.to);
         let lane_index = seen_lanes
             .entry(lane_key.clone())
@@ -1196,33 +1162,26 @@ fn route_edges(
         let mut detour_source_side = None;
         let mut detour_target_side = None;
 
-        let route = if edge.is_self_loop {
+        let Some(port_assignment) = port_assignments.get(edge_index).and_then(Option::as_ref)
+        else {
+            continue;
+        };
+
+        let route = if let EdgePortAssignment::SelfLoop(assignment) = port_assignment {
             if let Some(&(x, y, w, h)) = from_pos {
-                route_self_loop_with_offset(
-                    x,
-                    y,
-                    w,
-                    h,
-                    config.edge_style,
-                    self_loop_radius_offset(*lane_index),
-                )
+                route_self_loop_with_offset(x, y, w, h, config.edge_style, assignment.radius_offset)
             } else {
                 continue;
             }
-        } else if let (Some(&(x1, y1, w1, h1)), Some(&(x2, y2, w2, h2))) = (from_pos, to_pos) {
-            let lane = centered_lane_offset(*lane_index, lane_total);
-            let (source_side, target_side) = attachment_sides(x1, y1, w1, h1, x2, y2, w2, h2);
-            detour_source_side = Some(source_side);
-            detour_target_side = Some(target_side);
-
-            let src_col = node_by_id.get(edge.from.as_str()).map_or(0.0, |n| {
-                column_y_offset_from_center(n, &edge.from_columns, config)
-            });
-            let tgt_col = node_by_id.get(edge.to.as_str()).map_or(0.0, |n| {
-                column_y_offset_from_center(n, &edge.to_columns, config)
-            });
-
-            route_edge_column_aware(
+        } else if let (
+            EdgePortAssignment::Regular(assignment),
+            Some(&(x1, y1, w1, h1)),
+            Some(&(x2, y2, w2, h2)),
+        ) = (port_assignment, from_pos, to_pos)
+        {
+            detour_source_side = Some(assignment.source_side);
+            detour_target_side = Some(assignment.target_side);
+            route_edge_with_assigned_ports(
                 x1,
                 y1,
                 w1,
@@ -1232,10 +1191,12 @@ fn route_edges(
                 w2,
                 h2,
                 config.edge_style,
-                lane,
-                lane,
-                src_col,
-                tgt_col,
+                assignment.source_side,
+                assignment.target_side,
+                assignment.source_slot_offset,
+                assignment.target_slot_offset,
+                assignment.source_row_offset,
+                assignment.target_row_offset,
             )
         } else {
             continue;
@@ -1350,14 +1311,6 @@ fn edge_lane_counts(graph: &LayoutGraph) -> std::collections::BTreeMap<(String, 
     counts
 }
 
-/// Base gap between parallel self-loop edges.
-const SELF_LOOP_LANE_GAP: f32 = 18.0;
-/// Base gap between parallel non-loop edges.
-const BASE_LANE_GAP: f32 = 14.0;
-/// Minimum lane gap used when many edges fan out.
-const MIN_LANE_GAP: f32 = 10.0;
-/// Maximum lane gap.
-const MAX_LANE_GAP: f32 = 20.0;
 /// Half-size of sampled edge-path obstacles used during label collision avoidance.
 const EDGE_ROUTE_OBSTACLE_HALF_SIZE: f32 = 7.0;
 /// Target spacing between sampled edge-path obstacles.
@@ -1370,27 +1323,6 @@ const MIN_LABEL_ROUTE_T: f32 = 0.16;
 const LABEL_ROUTE_T_STEP: f32 = 0.08;
 /// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
 const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
-
-#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
-fn self_loop_radius_offset(lane_index: usize) -> f32 {
-    lane_index as f32 * SELF_LOOP_LANE_GAP
-}
-
-/// Compute the perpendicular offset for a lane in a group of parallel edges.
-///
-/// For join-heavy schemas the gap narrows gracefully so that a large fan-out
-/// still fits between nodes, while small fan-outs keep a comfortable distance.
-#[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
-fn centered_lane_offset(lane_index: usize, lane_total: usize) -> f32 {
-    let gap = if lane_total <= 2 {
-        BASE_LANE_GAP
-    } else {
-        // Shrink gap as more edges share the same node pair, but keep a floor.
-        (BASE_LANE_GAP * 2.0 / (lane_total as f32).sqrt()).clamp(MIN_LANE_GAP, MAX_LANE_GAP)
-    };
-    let center = (lane_total.saturating_sub(1)) as f32 * 0.5;
-    (lane_index as f32 - center) * gap
-}
 
 #[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
 fn parallel_label_parameter(from: &str, to: &str, lane_index: usize, lane_total: usize) -> f32 {
@@ -1643,6 +1575,7 @@ fn position_groups(
 mod tests {
     use super::*;
     use crate::graph::{LayoutEdge, LayoutGraph};
+    use crate::port::column_y_offset_from_center;
     use relune_core::{
         Column, ColumnId, ForeignKey, LayoutCompactionSpec, LayoutSpec, ReferentialAction, Table,
         TableId,
@@ -2493,17 +2426,6 @@ mod tests {
         let cjk = estimate_text_width("利用者", COLUMN_FONT_SIZE);
 
         assert!(cjk > ascii);
-    }
-
-    #[test]
-    fn test_centered_lane_offset_scales_with_fan_out() {
-        // 2 parallel edges: standard gap
-        let gap_2 = (centered_lane_offset(1, 2) - centered_lane_offset(0, 2)).abs();
-        // 6 parallel edges: gap should be narrower
-        let gap_6 = (centered_lane_offset(1, 6) - centered_lane_offset(0, 6)).abs();
-
-        assert!(gap_6 < gap_2, "gap should shrink for larger fan-out");
-        assert!(gap_6 >= MIN_LANE_GAP, "gap must not drop below minimum");
     }
 
     #[test]
