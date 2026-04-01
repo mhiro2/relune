@@ -404,7 +404,11 @@ fn offset_attachment_point(
     }
 }
 
-fn step_from_attachment(point: (f32, f32), side: AttachmentSide, distance: f32) -> (f32, f32) {
+pub(crate) fn step_from_attachment(
+    point: (f32, f32),
+    side: AttachmentSide,
+    distance: f32,
+) -> (f32, f32) {
     match side {
         AttachmentSide::East => (point.0 + distance, point.1),
         AttachmentSide::West => (point.0 - distance, point.1),
@@ -634,6 +638,23 @@ pub(crate) fn route_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
     points.extend_from_slice(&route.control_points);
     points.push((route.x2, route.y2));
     points
+}
+
+#[must_use]
+pub(crate) fn rebuild_route_from_points(points: &[(f32, f32)], style: RouteStyle) -> EdgeRoute {
+    let points = simplify_orthogonal_path(points);
+    let start = points.first().copied().unwrap_or((0.0, 0.0));
+    let end = points.last().copied().unwrap_or(start);
+
+    EdgeRoute {
+        x1: start.0,
+        y1: start.1,
+        x2: end.0,
+        y2: end.1,
+        control_points: points[1..points.len().saturating_sub(1)].to_vec(),
+        style,
+        label_position: polyline_midpoint(&points),
+    }
 }
 
 fn route_intersects_obstacles(points: &[(f32, f32)], obstacles: &[Rect]) -> bool {

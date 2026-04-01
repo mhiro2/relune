@@ -14,9 +14,9 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
     "long_detours": {
       "count_over_1_8x": 0,
       "worst_examples": [
-        "activities[actor_id] -> users[id] (1.00x)",
-        "activities[tenant_id] -> tenants[id] (1.00x)",
-        "attachments[tenant_id] -> tenants[id] (1.00x)"
+        "task_dependencies[depends_on_task_id] -> tasks[id] (1.06x)",
+        "task_dependencies[task_id] -> tasks[id] (1.06x)",
+        "activities[actor_id] -> users[id] (1.00x)"
       ]
     },
     "parallel_groups": {
@@ -49,13 +49,13 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 529586,
+      "bytes": 529809,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 210188,
+      "bytes": 210411,
       "edge_groups": 320,
       "node_groups": 23
     }

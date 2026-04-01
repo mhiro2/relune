@@ -955,11 +955,27 @@ expression: snapshot
           "control_points": [
             [
               208.5,
-              318.0
+              192.0
+            ],
+            [
+              201.5,
+              192.0
+            ],
+            [
+              201.5,
+              342.0
+            ],
+            [
+              187.5,
+              342.0
+            ],
+            [
+              187.5,
+              366.0
             ],
             [
               194.5,
-              318.0
+              366.0
             ]
           ],
           "end": [
@@ -972,12 +988,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "depends_on_task_id",
-          "label_x": 280.3280029296875,
-          "label_y": 282.697998046875,
+          "label_x": 117.70099639892578,
+          "label_y": 270.6090087890625,
           "nullable": false,
           "route_label_position": [
             201.5,
-            318.0
+            286.0
           ],
           "source_side": "south",
           "start": [
@@ -996,6 +1012,22 @@ expression: snapshot
           "control_points": [
             [
               194.5,
+              192.0
+            ],
+            [
+              201.5,
+              192.0
+            ],
+            [
+              201.5,
+              342.0
+            ],
+            [
+              187.5,
+              342.0
+            ],
+            [
+              187.5,
               366.0
             ],
             [
@@ -1013,12 +1045,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 158.58599853515625,
-          "label_y": 256.510986328125,
+          "label_x": 153.61500549316406,
+          "label_y": 225.18099975585938,
           "nullable": false,
           "route_label_position": [
-            187.5,
-            366.0
+            201.5,
+            286.0
           ],
           "source_side": "south",
           "start": [
@@ -2860,11 +2892,27 @@ expression: snapshot
           "control_points": [
             [
               208.5,
-              318.0
+              192.0
+            ],
+            [
+              201.5,
+              192.0
+            ],
+            [
+              201.5,
+              342.0
+            ],
+            [
+              187.5,
+              342.0
+            ],
+            [
+              187.5,
+              366.0
             ],
             [
               194.5,
-              318.0
+              366.0
             ]
           ],
           "end": [
@@ -2877,12 +2925,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "depends_on_task_id",
-          "label_x": 280.3280029296875,
-          "label_y": 282.697998046875,
+          "label_x": 117.70099639892578,
+          "label_y": 270.6090087890625,
           "nullable": false,
           "route_label_position": [
             201.5,
-            318.0
+            286.0
           ],
           "source_side": "south",
           "start": [
@@ -2901,6 +2949,22 @@ expression: snapshot
           "control_points": [
             [
               194.5,
+              192.0
+            ],
+            [
+              201.5,
+              192.0
+            ],
+            [
+              201.5,
+              342.0
+            ],
+            [
+              187.5,
+              342.0
+            ],
+            [
+              187.5,
               366.0
             ],
             [
@@ -2918,12 +2982,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 158.58599853515625,
-          "label_y": 256.510986328125,
+          "label_x": 153.61500549316406,
+          "label_y": 225.18099975585938,
           "nullable": false,
           "route_label_position": [
-            187.5,
-            366.0
+            201.5,
+            286.0
           ],
           "source_side": "south",
           "start": [
@@ -4765,11 +4829,27 @@ expression: snapshot
           "control_points": [
             [
               208.5,
-              318.0
+              192.0
+            ],
+            [
+              201.5,
+              192.0
+            ],
+            [
+              201.5,
+              342.0
+            ],
+            [
+              187.5,
+              342.0
+            ],
+            [
+              187.5,
+              366.0
             ],
             [
               194.5,
-              318.0
+              366.0
             ]
           ],
           "end": [
@@ -4782,12 +4862,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "depends_on_task_id",
-          "label_x": 280.3280029296875,
-          "label_y": 282.697998046875,
+          "label_x": 117.70099639892578,
+          "label_y": 270.6090087890625,
           "nullable": false,
           "route_label_position": [
             201.5,
-            318.0
+            286.0
           ],
           "source_side": "south",
           "start": [
@@ -4806,6 +4886,22 @@ expression: snapshot
           "control_points": [
             [
               194.5,
+              192.0
+            ],
+            [
+              201.5,
+              192.0
+            ],
+            [
+              201.5,
+              342.0
+            ],
+            [
+              187.5,
+              342.0
+            ],
+            [
+              187.5,
               366.0
             ],
             [
@@ -4823,12 +4919,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "task_id",
-          "label_x": 158.58599853515625,
-          "label_y": 256.510986328125,
+          "label_x": 153.61500549316406,
+          "label_y": 225.18099975585938,
           "nullable": false,
           "route_label_position": [
-            187.5,
-            366.0
+            201.5,
+            286.0
           ],
           "source_side": "south",
           "start": [

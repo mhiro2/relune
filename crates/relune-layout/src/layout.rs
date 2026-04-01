@@ -27,8 +27,9 @@ use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
     AttachmentSide, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
     detour_around_obstacles, detour_around_obstacles_with_endpoints, estimate_label_half_width,
-    nudge_label, point_along_route, route_edge_with_assigned_ports, route_edge_with_simple_channel,
-    route_points, route_self_loop_with_offset, sample_route_obstacles,
+    nudge_label, point_along_route, rebuild_route_from_points, route_edge_with_assigned_ports,
+    route_edge_with_simple_channel, route_points, route_self_loop_with_offset,
+    sample_route_obstacles, step_from_attachment,
 };
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
@@ -52,6 +53,8 @@ const HEADER_KIND_LABEL_RESERVE: f32 = 48.0;
 const ROUTE_CLEARANCE_TARGET: f32 = 14.0;
 /// Environment variable that re-enables detour fallback for debugging.
 const DETOUR_FALLBACK_ENV: &str = "RELUNE_ENABLE_DETOUR_FALLBACK";
+/// Maximum gap between nearby channel candidates that may share one visual bundle.
+const BUNDLE_CHANNEL_TOLERANCE: f32 = 36.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -1165,6 +1168,46 @@ struct RoutingDiagnostics {
     non_self_loop_detour_activations: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BundleRouteMetadata {
+    axis: ChannelAxis,
+    coordinate: f32,
+    source_side: AttachmentSide,
+    target_side: AttachmentSide,
+}
+
+#[derive(Debug, Clone)]
+struct RoutedEdgeDraft {
+    from: String,
+    to: String,
+    label: String,
+    kind: EdgeKind,
+    route: EdgeRoute,
+    is_self_loop: bool,
+    nullable: bool,
+    target_cardinality: relune_core::layout::Cardinality,
+    from_columns: Vec<String>,
+    to_columns: Vec<String>,
+    is_collapsed_join: bool,
+    collapsed_join_table: Option<CollapsedJoinTable>,
+    bundle_metadata: Option<BundleRouteMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct BundleGroupKey {
+    from: String,
+    to: String,
+    axis: ChannelAxis,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BundleClusterStats {
+    shared_channel: f32,
+    source_bundle_axis: f32,
+    target_bundle_axis: f32,
+    anchor_distance: f32,
+}
+
 #[allow(clippy::too_many_lines)]
 fn route_edges_with_diagnostics(
     graph: &LayoutGraph,
@@ -1184,19 +1227,16 @@ fn route_edges_with_diagnostics(
     let mut channel_usage = BTreeMap::new();
     let mut diagnostics = RoutingDiagnostics::default();
 
-    let mut edges = vec![None; graph.edges.len()];
-    let mut placed_labels: Vec<Rect> = Vec::new();
+    let mut routed_edges = vec![None; graph.edges.len()];
 
-    for edge_index in routing_order {
+    for &edge_index in &routing_order {
         let edge = &graph.edges[edge_index];
-        let lane_key = canonical_edge_pair(&edge.from, &edge.to);
-        let lane_index = lane_indices[edge_index];
-        let lane_total = edge_counts.get(&lane_key).copied().unwrap_or(1);
         let from_pos = node_positions.get(edge.from.as_str());
         let to_pos = node_positions.get(edge.to.as_str());
 
         let mut detour_source_side = None;
         let mut detour_target_side = None;
+        let mut bundle_metadata = None;
 
         let Some(port_assignment) = port_assignments.get(edge_index).and_then(Option::as_ref)
         else {
@@ -1256,6 +1296,12 @@ fn route_edges_with_diagnostics(
                 })
             }) {
                 record_channel_usage(&mut channel_usage, channel_axis, channel_coordinate);
+                bundle_metadata = Some(BundleRouteMetadata {
+                    axis: channel_axis,
+                    coordinate: channel_coordinate,
+                    source_side: assignment.source_side,
+                    target_side: assignment.target_side,
+                });
                 route_edge_with_simple_channel(
                     x1,
                     y1,
@@ -1299,10 +1345,14 @@ fn route_edges_with_diagnostics(
         };
 
         let route = match (edge.is_self_loop, detour_source_side, detour_target_side) {
-            (true, _, _) => detour_around_obstacles(&route, &detour_obstacles),
+            (true, _, _) => {
+                bundle_metadata = None;
+                detour_around_obstacles(&route, &detour_obstacles)
+            }
             (false, Some(source_side), Some(target_side))
                 if route_needs_detour(&route, &detour_obstacles) =>
             {
+                bundle_metadata = None;
                 diagnostics.non_self_loop_detour_activations += 1;
                 debug!(
                     edge_from = edge.from,
@@ -1331,7 +1381,48 @@ fn route_edges_with_diagnostics(
             }
         });
 
-        let mut label_obstacles: Vec<Rect> = detour_obstacles.clone();
+        routed_edges[edge_index] = Some(RoutedEdgeDraft {
+            from: edge.from.clone(),
+            to: edge.to.clone(),
+            label,
+            kind: edge.kind,
+            route,
+            is_self_loop: edge.is_self_loop,
+            nullable: edge.nullable,
+            target_cardinality: edge.target_cardinality,
+            from_columns: edge.from_columns.clone(),
+            to_columns: edge.to_columns.clone(),
+            is_collapsed_join: edge.is_collapsed_join,
+            collapsed_join_table: edge.collapsed_join_table.clone(),
+            bundle_metadata,
+        });
+    }
+
+    apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph);
+
+    let mut edges = vec![None; graph.edges.len()];
+    let mut placed_labels: Vec<Rect> = Vec::new();
+
+    for &edge_index in &routing_order {
+        let Some(edge) = routed_edges[edge_index].as_ref() else {
+            continue;
+        };
+        let lane_key = canonical_edge_pair(&edge.from, &edge.to);
+        let lane_index = lane_indices[edge_index];
+        let lane_total = edge_counts.get(&lane_key).copied().unwrap_or(1);
+        let from_pos = node_positions.get(edge.from.as_str());
+        let to_pos = node_positions.get(edge.to.as_str());
+
+        let mut label_obstacles: Vec<Rect> = positioned_nodes
+            .iter()
+            .filter(|node| node.id != edge.from && node.id != edge.to)
+            .map(|node| Rect {
+                x: node.x,
+                y: node.y,
+                w: node.width,
+                h: node.height,
+            })
+            .collect();
         label_obstacles.extend_from_slice(&placed_labels);
         if let Some(&(x, y, w, h)) = from_pos {
             label_obstacles.push(Rect { x, y, w, h });
@@ -1342,29 +1433,29 @@ fn route_edges_with_diagnostics(
             label_obstacles.push(Rect { x, y, w, h });
         }
 
-        let lhw = estimate_label_half_width(&label);
+        let lhw = estimate_label_half_width(&edge.label);
         let label_pos = if lane_total > 1 && !edge.is_self_loop {
             let t = parallel_label_parameter(&edge.from, &edge.to, lane_index, lane_total);
-            point_along_route(&route, t)
+            point_along_route(&edge.route, t)
         } else {
-            route.label_position
+            edge.route.label_position
         };
 
         let preferred_t = if lane_total > 1 && !edge.is_self_loop {
             parallel_label_parameter(&edge.from, &edge.to, lane_index, lane_total)
         } else {
-            estimate_route_parameter(&route, label_pos)
+            estimate_route_parameter(&edge.route, label_pos)
         };
         let (label_x, label_y) =
-            place_label_on_route(&route, preferred_t, &label_obstacles, 4.0, lhw);
+            place_label_on_route(&edge.route, preferred_t, &label_obstacles, 4.0, lhw);
         placed_labels.push(label_rect(label_x, label_y, lhw));
 
         edges[edge_index] = Some(PositionedEdge {
             from: edge.from.clone(),
             to: edge.to.clone(),
-            label,
+            label: edge.label.clone(),
             kind: edge.kind,
-            route,
+            route: edge.route.clone(),
             is_self_loop: edge.is_self_loop,
             nullable: edge.nullable,
             target_cardinality: edge.target_cardinality,
@@ -1380,6 +1471,236 @@ fn route_edges_with_diagnostics(
     let mut edges: Vec<_> = edges.into_iter().flatten().collect();
     resolve_edge_label_collisions(&mut edges, positioned_nodes);
     (edges, diagnostics)
+}
+
+fn apply_parallel_edge_bundling(
+    routed_edges: &mut [Option<RoutedEdgeDraft>],
+    positioned_nodes: &[PositionedNode],
+    graph: &LayoutGraph,
+) {
+    let mut groups: BTreeMap<BundleGroupKey, Vec<usize>> = BTreeMap::new();
+
+    for (edge_index, edge) in routed_edges.iter().enumerate() {
+        let Some(edge) = edge.as_ref() else {
+            continue;
+        };
+        let Some(bundle_metadata) = edge.bundle_metadata else {
+            continue;
+        };
+        if edge.is_self_loop {
+            continue;
+        }
+
+        groups
+            .entry(BundleGroupKey {
+                from: edge.from.clone(),
+                to: edge.to.clone(),
+                axis: bundle_metadata.axis,
+            })
+            .or_default()
+            .push(edge_index);
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    let density = if graph.nodes.is_empty() {
+        0.0
+    } else {
+        graph.edges.len() as f32 / graph.nodes.len() as f32
+    };
+    let channel_tolerance = bundle_channel_tolerance(density);
+
+    for edge_indices in groups.values_mut() {
+        edge_indices.sort_by(|left, right| {
+            bundle_coordinate(routed_edges, *left)
+                .total_cmp(&bundle_coordinate(routed_edges, *right))
+                .then_with(|| left.cmp(right))
+        });
+
+        let mut cluster_start = 0usize;
+        while cluster_start < edge_indices.len() {
+            let mut cluster_end = cluster_start + 1;
+            while cluster_end < edge_indices.len()
+                && (bundle_coordinate(routed_edges, edge_indices[cluster_end])
+                    - bundle_coordinate(routed_edges, edge_indices[cluster_end - 1]))
+                .abs()
+                    <= channel_tolerance
+            {
+                cluster_end += 1;
+            }
+
+            if cluster_end - cluster_start >= 2 {
+                let cluster = &edge_indices[cluster_start..cluster_end];
+                let anchor_distance = bundle_anchor_distance(density, cluster.len());
+                let stats = bundle_cluster_stats(routed_edges, cluster, anchor_distance);
+                for &edge_index in cluster {
+                    let Some(edge) = routed_edges[edge_index].as_mut() else {
+                        continue;
+                    };
+                    let Some(bundle_metadata) = edge.bundle_metadata else {
+                        continue;
+                    };
+                    let candidate = build_bundled_route(&edge.route, bundle_metadata, stats);
+                    if bundled_route_is_valid(&candidate, edge, bundle_metadata, positioned_nodes) {
+                        edge.route = candidate;
+                    }
+                }
+            }
+
+            cluster_start = cluster_end;
+        }
+    }
+}
+
+fn bundle_coordinate(routed_edges: &[Option<RoutedEdgeDraft>], edge_index: usize) -> f32 {
+    routed_edges[edge_index]
+        .as_ref()
+        .and_then(|edge| edge.bundle_metadata.map(|metadata| metadata.coordinate))
+        .unwrap_or(0.0)
+}
+
+fn bundle_channel_tolerance(density: f32) -> f32 {
+    if density >= 1.5 {
+        BUNDLE_CHANNEL_TOLERANCE + 12.0
+    } else {
+        BUNDLE_CHANNEL_TOLERANCE
+    }
+}
+
+fn bundle_anchor_distance(density: f32, cluster_size: usize) -> f32 {
+    #[allow(clippy::cast_precision_loss)]
+    let extra = cluster_size.saturating_sub(2) as f32;
+    let base = if density >= 1.5 { 14.0 } else { 18.0 };
+    base + (extra * 4.0).min(12.0)
+}
+
+fn bundle_cluster_stats(
+    routed_edges: &[Option<RoutedEdgeDraft>],
+    cluster: &[usize],
+    anchor_distance: f32,
+) -> BundleClusterStats {
+    let mut channel_coordinates = Vec::with_capacity(cluster.len());
+    let mut source_axes = Vec::with_capacity(cluster.len());
+    let mut target_axes = Vec::with_capacity(cluster.len());
+
+    for &edge_index in cluster {
+        let edge = routed_edges[edge_index]
+            .as_ref()
+            .expect("bundle cluster should only reference routed edges");
+        let metadata = edge
+            .bundle_metadata
+            .expect("bundle cluster should only reference bundle-eligible edges");
+        let source_anchor = step_from_attachment(
+            (edge.route.x1, edge.route.y1),
+            metadata.source_side,
+            anchor_distance,
+        );
+        let target_anchor = step_from_attachment(
+            (edge.route.x2, edge.route.y2),
+            metadata.target_side,
+            anchor_distance,
+        );
+        channel_coordinates.push(metadata.coordinate);
+        match metadata.axis {
+            ChannelAxis::X => {
+                source_axes.push(source_anchor.1);
+                target_axes.push(target_anchor.1);
+            }
+            ChannelAxis::Y => {
+                source_axes.push(source_anchor.0);
+                target_axes.push(target_anchor.0);
+            }
+        }
+    }
+
+    BundleClusterStats {
+        shared_channel: median_coordinate(&mut channel_coordinates),
+        source_bundle_axis: mean_coordinate(&source_axes),
+        target_bundle_axis: mean_coordinate(&target_axes),
+        anchor_distance,
+    }
+}
+
+fn build_bundled_route(
+    route: &EdgeRoute,
+    metadata: BundleRouteMetadata,
+    stats: BundleClusterStats,
+) -> EdgeRoute {
+    let source = (route.x1, route.y1);
+    let target = (route.x2, route.y2);
+    let source_anchor = step_from_attachment(source, metadata.source_side, stats.anchor_distance);
+    let target_anchor = step_from_attachment(target, metadata.target_side, stats.anchor_distance);
+
+    let points = match metadata.axis {
+        ChannelAxis::X => vec![
+            source,
+            source_anchor,
+            (source_anchor.0, stats.source_bundle_axis),
+            (stats.shared_channel, stats.source_bundle_axis),
+            (stats.shared_channel, stats.target_bundle_axis),
+            (target_anchor.0, stats.target_bundle_axis),
+            target_anchor,
+            target,
+        ],
+        ChannelAxis::Y => vec![
+            source,
+            source_anchor,
+            (stats.source_bundle_axis, source_anchor.1),
+            (stats.source_bundle_axis, stats.shared_channel),
+            (stats.target_bundle_axis, stats.shared_channel),
+            (stats.target_bundle_axis, target_anchor.1),
+            target_anchor,
+            target,
+        ],
+    };
+
+    rebuild_route_from_points(&points, route.style)
+}
+
+fn bundled_route_is_valid(
+    route: &EdgeRoute,
+    edge: &RoutedEdgeDraft,
+    metadata: BundleRouteMetadata,
+    positioned_nodes: &[PositionedNode],
+) -> bool {
+    if endpoint_side_violations(route, metadata.source_side, metadata.target_side) > 0 {
+        return false;
+    }
+
+    let obstacles = positioned_nodes
+        .iter()
+        .filter(|node| node.id != edge.from && node.id != edge.to)
+        .map(|node| Rect {
+            x: node.x,
+            y: node.y,
+            w: node.width,
+            h: node.height,
+        })
+        .collect::<Vec<_>>();
+
+    route_obstacle_hit_count(route, &obstacles, 0.0) == 0
+}
+
+#[allow(clippy::cast_precision_loss)] // Bundle clusters stay tiny and only affect visual interpolation.
+fn mean_coordinate(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.iter().sum::<f32>() / values.len() as f32
+}
+
+fn median_coordinate(values: &mut [f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.sort_by(f32::total_cmp);
+    let middle = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        f32::midpoint(values[middle - 1], values[middle])
+    } else {
+        values[middle]
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3742,8 +4063,25 @@ mod tests {
             Some(&[0, 1]),
         );
         assert_eq!(edges.len(), 2);
-        assert!((edges[0].route.control_points[0].1 - 140.0).abs() < 0.001);
-        assert!((edges[1].route.control_points[0].1 - 116.0).abs() < 0.001);
+
+        let shared_trunk_y = |edge: &PositionedEdge| {
+            route_points(&edge.route)
+                .windows(2)
+                .filter(|segment| (segment[0].1 - segment[1].1).abs() < 0.001)
+                .max_by(|left, right| {
+                    let left_len = (left[1].0 - left[0].0).abs();
+                    let right_len = (right[1].0 - right[0].0).abs();
+                    left_len.total_cmp(&right_len)
+                })
+                .map(|segment| segment[0].1)
+                .expect("bundled route should keep a horizontal trunk")
+        };
+
+        let first_trunk = shared_trunk_y(&edges[0]);
+        let second_trunk = shared_trunk_y(&edges[1]);
+
+        assert!((first_trunk - second_trunk).abs() < 0.001);
+        assert_ne!(route_points(&edges[0].route), route_points(&edges[1].route));
     }
 
     #[test]

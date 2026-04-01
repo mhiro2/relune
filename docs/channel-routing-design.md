@@ -28,8 +28,9 @@ top-to-bottom, orthogonal routing.
     `24px` clearance, with multiple tenant edges reaching `0px`.
   - Several long detours remain, including `tasks -> users` near `4.9x` and
     `projects -> tenants` near `3.8x`.
-  - Parallel edges exist but stay small (`max_size = 2`), so the immediate
-    Phase 4a focus is channel quality before bundling.
+  - Parallel edges stay small (`max_size = 2`), but they are dense enough to
+    benefit from a post-routing bundling pass that keeps node-local fan-out and
+    shares the central trunk when nearby channels can be merged safely.
 - `cyclic_fk.sql`
   - Main reverse-flow and same-rank stress fixture.
   - The current baseline has 4 reverse edges and 4 same-rank edges.
