@@ -10,6 +10,54 @@ use relune_app::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Grouping strategy as exposed to the WASM/JS API.
+///
+/// Uses short kebab-case names ("none", "schema", "prefix") rather than the
+/// internal `GroupingStrategy` `snake_case` variants (`by_schema`, `by_prefix`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WasmGroupBy {
+    #[default]
+    None,
+    Schema,
+    Prefix,
+}
+
+impl From<WasmGroupBy> for GroupingStrategy {
+    fn from(value: WasmGroupBy) -> Self {
+        match value {
+            WasmGroupBy::None => Self::None,
+            WasmGroupBy::Schema => Self::BySchema,
+            WasmGroupBy::Prefix => Self::ByPrefix,
+        }
+    }
+}
+
+/// Layout direction as exposed to the WASM/JS API.
+///
+/// Uses kebab-case names ("top-to-bottom") matching the JS convention, while
+/// the internal `LayoutDirection` uses `snake_case` (`top_to_bottom`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WasmLayoutDirection {
+    #[default]
+    TopToBottom,
+    LeftToRight,
+    RightToLeft,
+    BottomToTop,
+}
+
+impl From<WasmLayoutDirection> for LayoutDirection {
+    fn from(value: WasmLayoutDirection) -> Self {
+        match value {
+            WasmLayoutDirection::TopToBottom => Self::TopToBottom,
+            WasmLayoutDirection::LeftToRight => Self::LeftToRight,
+            WasmLayoutDirection::RightToLeft => Self::RightToLeft,
+            WasmLayoutDirection::BottomToTop => Self::BottomToTop,
+        }
+    }
+}
+
 /// WASM-friendly render request that can be deserialized from JavaScript.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,9 +66,9 @@ pub struct WasmRenderRequest {
     pub sql: Option<String>,
     /// Pre-normalized schema JSON (optional, mutually exclusive with sql).
     pub schema_json: Option<String>,
-    /// Output format: "svg", "html", "graph-json", "schema-json".
+    /// Output format.
     #[serde(default)]
-    pub format: Option<String>,
+    pub format: Option<OutputFormat>,
     /// Focus table name (optional).
     pub focus_table: Option<String>,
     /// Focus depth (optional, default 1).
@@ -32,18 +80,18 @@ pub struct WasmRenderRequest {
     /// Tables to exclude (glob patterns).
     #[serde(default)]
     pub exclude_tables: Vec<String>,
-    /// Grouping strategy: "none", "schema", "prefix".
+    /// Grouping strategy.
     #[serde(default)]
-    pub group_by: Option<String>,
-    /// Layout direction: "top-to-bottom", "left-to-right", "right-to-left", "bottom-to-top".
+    pub group_by: Option<WasmGroupBy>,
+    /// Layout direction.
     #[serde(default)]
-    pub layout_direction: Option<String>,
-    /// Layout algorithm: "hierarchical" or "force-directed".
+    pub layout_direction: Option<WasmLayoutDirection>,
+    /// Layout algorithm.
     #[serde(default)]
-    pub layout_algorithm: Option<String>,
-    /// Edge rendering style: "straight", "orthogonal", or "curved".
+    pub layout_algorithm: Option<LayoutAlgorithm>,
+    /// Edge rendering style.
     #[serde(default)]
-    pub edge_style: Option<String>,
+    pub edge_style: Option<RouteStyle>,
     /// Horizontal spacing hint.
     #[serde(default)]
     pub horizontal_spacing: Option<f32>,
@@ -65,14 +113,7 @@ impl WasmRenderRequest {
             (None, None) => return Err("Must specify either 'sql' or 'schemaJson'".to_string()),
         };
 
-        // Parse output format
-        let output_format = match self.format.as_deref() {
-            None | Some("svg") => OutputFormat::Svg,
-            Some("html") => OutputFormat::Html,
-            Some("graph-json") => OutputFormat::GraphJson,
-            Some("schema-json") => OutputFormat::SchemaJson,
-            Some(other) => return Err(format!("Unknown output format: {other}")),
-        };
+        let output_format = self.format.unwrap_or(OutputFormat::Svg);
 
         // Build focus spec (use FocusSpec::new to clamp depth to MAX_FOCUS_DEPTH)
         let focus = self
@@ -86,44 +127,18 @@ impl WasmRenderRequest {
             exclude: self.exclude_tables.clone(),
         };
 
-        // Parse grouping strategy
-        let grouping_strategy = match self.group_by.as_deref() {
-            None | Some("none") => GroupingStrategy::None,
-            Some("schema") => GroupingStrategy::BySchema,
-            Some("prefix") => GroupingStrategy::ByPrefix,
-            Some(other) => return Err(format!("Unknown grouping strategy: {other}")),
-        };
         let grouping = GroupingSpec {
-            strategy: grouping_strategy,
+            strategy: self.group_by.unwrap_or_default().into(),
         };
 
         let horizontal_spacing =
             validated_spacing(self.horizontal_spacing, 320.0, "horizontalSpacing")?;
         let vertical_spacing = validated_spacing(self.vertical_spacing, 80.0, "verticalSpacing")?;
 
-        // Parse layout direction
-        let layout_direction = match self.layout_direction.as_deref() {
-            None | Some("top-to-bottom") => LayoutDirection::TopToBottom,
-            Some("left-to-right") => LayoutDirection::LeftToRight,
-            Some("right-to-left") => LayoutDirection::RightToLeft,
-            Some("bottom-to-top") => LayoutDirection::BottomToTop,
-            Some(other) => return Err(format!("Unknown layout direction: {other}")),
-        };
-        let layout_algorithm = match self.layout_algorithm.as_deref() {
-            None | Some("hierarchical") => LayoutAlgorithm::Hierarchical,
-            Some("force-directed") => LayoutAlgorithm::ForceDirected,
-            Some(other) => return Err(format!("Unknown layout algorithm: {other}")),
-        };
-        let edge_style = match self.edge_style.as_deref() {
-            None | Some("straight") => RouteStyle::Straight,
-            Some("orthogonal") => RouteStyle::Orthogonal,
-            Some("curved") => RouteStyle::Curved,
-            Some(other) => return Err(format!("Unknown edge style: {other}")),
-        };
         let layout = LayoutSpec {
-            algorithm: layout_algorithm,
-            direction: layout_direction,
-            edge_style,
+            algorithm: self.layout_algorithm.unwrap_or_default(),
+            direction: self.layout_direction.unwrap_or_default().into(),
+            edge_style: self.edge_style.unwrap_or_default(),
             horizontal_spacing,
             vertical_spacing,
             force_iterations: 150,
@@ -155,9 +170,9 @@ pub struct WasmInspectRequest {
     pub schema_json: Option<String>,
     /// Table name to inspect (optional, returns schema summary if not specified).
     pub table: Option<String>,
-    /// Output format: "json" or "text".
+    /// Output format.
     #[serde(default)]
-    pub format: Option<String>,
+    pub format: Option<InspectFormat>,
 }
 
 impl WasmInspectRequest {
@@ -173,17 +188,10 @@ impl WasmInspectRequest {
             (None, None) => return Err("Must specify either 'sql' or 'schemaJson'".to_string()),
         };
 
-        // Parse output format
-        let format = match self.format.as_deref() {
-            None | Some("json") => InspectFormat::Json,
-            Some("text") => InspectFormat::Text,
-            Some(other) => return Err(format!("Unknown inspect format: {other}")),
-        };
-
         Ok(InspectRequest {
             input,
             table: self.table.clone(),
-            format,
+            format: self.format.unwrap_or(InspectFormat::Json),
         })
     }
 }
@@ -196,9 +204,9 @@ pub struct WasmExportRequest {
     pub sql: Option<String>,
     /// Pre-normalized schema JSON (optional, mutually exclusive with sql).
     pub schema_json: Option<String>,
-    /// Export format: "schema-json", "graph-json", "layout-json", "mermaid", "d2", "dot".
+    /// Export format.
     #[serde(default)]
-    pub format: Option<String>,
+    pub format: Option<ExportFormat>,
     /// Focus table name (optional).
     pub focus_table: Option<String>,
     /// Focus depth (optional, default 1).
@@ -210,15 +218,15 @@ pub struct WasmExportRequest {
     /// Tables to exclude (glob patterns).
     #[serde(default)]
     pub exclude_tables: Vec<String>,
-    /// Grouping strategy: "none", "schema", "prefix".
+    /// Grouping strategy.
     #[serde(default)]
-    pub group_by: Option<String>,
-    /// Layout algorithm: "hierarchical" or "force-directed".
+    pub group_by: Option<WasmGroupBy>,
+    /// Layout algorithm.
     #[serde(default)]
-    pub layout_algorithm: Option<String>,
-    /// Edge rendering style: "straight", "orthogonal", or "curved".
+    pub layout_algorithm: Option<LayoutAlgorithm>,
+    /// Edge rendering style.
     #[serde(default)]
-    pub edge_style: Option<String>,
+    pub edge_style: Option<RouteStyle>,
 }
 
 impl WasmExportRequest {
@@ -234,16 +242,7 @@ impl WasmExportRequest {
             (None, None) => return Err("Must specify either 'sql' or 'schemaJson'".to_string()),
         };
 
-        // Parse export format
-        let format = match self.format.as_deref() {
-            None | Some("schema-json") => ExportFormat::SchemaJson,
-            Some("graph-json") => ExportFormat::GraphJson,
-            Some("layout-json") => ExportFormat::LayoutJson,
-            Some("mermaid") => ExportFormat::Mermaid,
-            Some("d2") => ExportFormat::D2,
-            Some("dot") => ExportFormat::Dot,
-            Some(other) => return Err(format!("Unknown export format: {other}")),
-        };
+        let format = self.format.unwrap_or(ExportFormat::SchemaJson);
 
         // Build focus spec (use FocusSpec::new to clamp depth to MAX_FOCUS_DEPTH)
         let focus = self
@@ -257,27 +256,8 @@ impl WasmExportRequest {
             exclude: self.exclude_tables.clone(),
         };
 
-        // Parse grouping strategy
-        let grouping_strategy = match self.group_by.as_deref() {
-            None | Some("none") => GroupingStrategy::None,
-            Some("schema") => GroupingStrategy::BySchema,
-            Some("prefix") => GroupingStrategy::ByPrefix,
-            Some(other) => return Err(format!("Unknown grouping strategy: {other}")),
-        };
         let grouping = GroupingSpec {
-            strategy: grouping_strategy,
-        };
-
-        let layout_algorithm = match self.layout_algorithm.as_deref() {
-            None | Some("hierarchical") => LayoutAlgorithm::Hierarchical,
-            Some("force-directed") => LayoutAlgorithm::ForceDirected,
-            Some(other) => return Err(format!("Unknown layout algorithm: {other}")),
-        };
-        let edge_style = match self.edge_style.as_deref() {
-            None | Some("straight") => RouteStyle::Straight,
-            Some("orthogonal") => RouteStyle::Orthogonal,
-            Some("curved") => RouteStyle::Curved,
-            Some(other) => return Err(format!("Unknown edge style: {other}")),
+            strategy: self.group_by.unwrap_or_default().into(),
         };
 
         Ok(ExportRequest {
@@ -287,8 +267,8 @@ impl WasmExportRequest {
             focus,
             grouping,
             layout: LayoutSpec {
-                algorithm: layout_algorithm,
-                edge_style,
+                algorithm: self.layout_algorithm.unwrap_or_default(),
+                edge_style: self.edge_style.unwrap_or_default(),
                 ..Default::default()
             },
             output_path: None, // Not applicable in WASM
@@ -314,7 +294,7 @@ mod tests {
         let req = WasmRenderRequest {
             sql: Some("CREATE TABLE test (id INT);".to_string()),
             schema_json: None,
-            format: Some("svg".to_string()),
+            format: Some(OutputFormat::Svg),
             focus_table: None,
             depth: None,
             include_tables: vec![],
@@ -343,8 +323,8 @@ mod tests {
             exclude_tables: vec![],
             group_by: None,
             layout_direction: None,
-            layout_algorithm: Some("force-directed".to_string()),
-            edge_style: Some("orthogonal".to_string()),
+            layout_algorithm: Some(LayoutAlgorithm::ForceDirected),
+            edge_style: Some(RouteStyle::Orthogonal),
             horizontal_spacing: None,
             vertical_spacing: None,
         };
@@ -406,7 +386,7 @@ mod tests {
             sql: Some("CREATE TABLE users (id INT);".to_string()),
             schema_json: None,
             table: Some("users".to_string()),
-            format: Some("json".to_string()),
+            format: Some(InspectFormat::Json),
         };
 
         let inspect_req = req.to_inspect_request().unwrap();
@@ -419,14 +399,14 @@ mod tests {
         let req = WasmExportRequest {
             sql: Some("CREATE TABLE test (id INT);".to_string()),
             schema_json: None,
-            format: Some("graph-json".to_string()),
+            format: Some(ExportFormat::GraphJson),
             focus_table: None,
             depth: None,
             include_tables: vec![],
             exclude_tables: vec![],
             group_by: None,
-            layout_algorithm: Some("force-directed".to_string()),
-            edge_style: Some("curved".to_string()),
+            layout_algorithm: Some(LayoutAlgorithm::ForceDirected),
+            edge_style: Some(RouteStyle::Curved),
         };
 
         let export_req = req.to_export_request().unwrap();

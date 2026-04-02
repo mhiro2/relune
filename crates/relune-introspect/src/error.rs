@@ -59,27 +59,6 @@ impl IntrospectError {
     pub fn timeout(msg: impl Into<String>) -> Self {
         Self::Timeout(msg.into())
     }
-
-    /// Check if this error is recoverable (allows partial output).
-    #[must_use]
-    pub const fn is_recoverable(&self) -> bool {
-        matches!(self, Self::MetadataMapping(_))
-    }
-
-    /// Check if this error is related to connection issues.
-    #[must_use]
-    pub const fn is_connection_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Connection(_) | Self::InvalidDatabaseUrl(_) | Self::Timeout(_)
-        )
-    }
-
-    /// Check if this error is a timeout.
-    #[must_use]
-    pub const fn is_timeout(&self) -> bool {
-        matches!(self, Self::Timeout(_))
-    }
 }
 
 /// Convert a `sqlx` connect error into a sanitized introspection error.
@@ -126,39 +105,24 @@ mod tests {
     fn test_invalid_url_error() {
         let err = IntrospectError::invalid_url("Missing scheme");
         assert!(err.to_string().contains("Invalid database URL"));
-        assert!(err.is_connection_error());
     }
 
     #[test]
     fn test_query_error() {
         let err = IntrospectError::query("Table 'users' does not exist");
         assert!(err.to_string().contains("Query error"));
-        assert!(!err.is_connection_error());
     }
 
     #[test]
     fn test_metadata_mapping_error() {
         let err = IntrospectError::metadata_mapping("Unknown column type");
-        assert!(err.is_recoverable());
+        assert!(err.to_string().contains("Metadata mapping error"));
     }
 
     #[test]
     fn test_timeout_error() {
         let err = IntrospectError::timeout("Connection timed out after 30s");
-        assert!(err.is_timeout());
-    }
-
-    #[test]
-    fn test_is_connection_error() {
-        let conn_err = IntrospectError::connection("refused");
-        let url_err = IntrospectError::invalid_url("bad url");
-        let timeout_err = IntrospectError::timeout("slow");
-        let query_err = IntrospectError::query("bad query");
-
-        assert!(conn_err.is_connection_error());
-        assert!(url_err.is_connection_error());
-        assert!(timeout_err.is_connection_error());
-        assert!(!query_err.is_connection_error());
+        assert!(err.to_string().contains("Connection timed out after 30s"));
     }
 
     #[test]

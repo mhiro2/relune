@@ -5,8 +5,8 @@ use anyhow::Context;
 use super::input::InputSelection;
 use crate::cli::{ColorWhen, ExportArgs, ExportFormat, GroupByMode};
 use crate::config::ReluneConfig;
-use crate::error::{CliError, CliResult};
-use crate::output::{DiagnosticPrinter, OutputWriter, print_success};
+use crate::error::CliResult;
+use crate::output::{check_diagnostics, print_success, write_output};
 use relune_app::{
     ExportFormat as AppExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, LayoutSpec, export,
@@ -73,24 +73,8 @@ pub fn run_export(
     // Execute export
     let result = export(request).context("Failed to export schema")?;
 
-    // Print diagnostics
-    let diag_printer = DiagnosticPrinter::new(color);
-    diag_printer.print_all(&result.diagnostics);
-
-    // Check for errors
-    if DiagnosticPrinter::has_errors(&result.diagnostics) {
-        return Err(CliError::general(anyhow::anyhow!(
-            "Errors were encountered during export"
-        )));
-    }
-
-    // Write output
-    let mut writer =
-        OutputWriter::new(args.out.as_deref(), color).context("Failed to create output writer")?;
-    writer
-        .write(&result.content)
-        .context("Failed to write output")?;
-    writer.finish().context("Failed to finalize output")?;
+    check_diagnostics(&result.diagnostics, color, false)?;
+    write_output(&result.content, args.out.as_deref(), color)?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {

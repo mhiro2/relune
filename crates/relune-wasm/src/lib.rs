@@ -174,7 +174,7 @@ pub fn render_svg_from_sql(sql: &str) -> Result<String, JsValue> {
     let req = WasmRenderRequest {
         sql: Some(sql.to_string()),
         schema_json: None,
-        format: Some("svg".to_string()),
+        format: Some(relune_app::OutputFormat::Svg),
         focus_table: None,
         depth: None,
         include_tables: vec![],
@@ -203,7 +203,7 @@ pub fn render_html_from_sql(sql: &str) -> Result<String, JsValue> {
     let req = WasmRenderRequest {
         sql: Some(sql.to_string()),
         schema_json: None,
-        format: Some("html".to_string()),
+        format: Some(relune_app::OutputFormat::Html),
         focus_table: None,
         depth: None,
         include_tables: vec![],
