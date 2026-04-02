@@ -100,8 +100,9 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
         return route.clone();
     }
 
+    let clearance_obstacles = inflate_obstacles(obstacles, ROUTE_CLEARANCE);
     let initial_points = route_points(route);
-    if !route_intersects_obstacles(&initial_points, obstacles) {
+    if !route_intersects_obstacles(&initial_points, &clearance_obstacles) {
         return route.clone();
     }
 
@@ -111,37 +112,30 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
     for _ in 0..4 {
         let mut detoured = Vec::with_capacity(points.len() * 2);
         detoured.push(points[0]);
+        let mut changed = false;
 
         for i in 0..points.len() - 1 {
             let seg_start = points[i];
             let seg_end = points[i + 1];
 
             // Find the nearest intersecting obstacle along this segment.
-            let nearest = obstacles
-                .iter()
-                .filter(|r| {
-                    let clearance = inflate_rect(**r, ROUTE_CLEARANCE);
-                    segment_intersects_rect(seg_start, seg_end, &clearance)
-                })
-                .min_by(|a, b| {
-                    let da = (a.w.mul_add(0.5, a.x) - seg_start.0)
-                        .hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
-                    let db = (b.w.mul_add(0.5, b.x) - seg_start.0)
-                        .hypot(b.h.mul_add(0.5, b.y) - seg_start.1);
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                });
+            let nearest = nearest_intersecting_obstacle(seg_start, seg_end, &clearance_obstacles);
 
             if let Some(obstacle) = nearest {
-                let clearance = inflate_rect(*obstacle, ROUTE_CLEARANCE);
-                let waypoints = compute_detour(seg_start, seg_end, &clearance);
+                let waypoints = compute_detour(seg_start, seg_end, obstacle);
                 detoured.extend_from_slice(&waypoints);
+                changed = true;
             }
             detoured.push(seg_end);
         }
 
+        if !changed {
+            break;
+        }
+
         points = detoured;
 
-        if !route_intersects_obstacles(&points, obstacles) {
+        if !route_intersects_obstacles(&points, &clearance_obstacles) {
             break;
         }
     }
@@ -172,9 +166,16 @@ fn route_intersects_obstacles(points: &[(f32, f32)], obstacles: &[Rect]) -> bool
     points.windows(2).any(|segment| {
         obstacles
             .iter()
-            .map(|obstacle| inflate_rect(*obstacle, ROUTE_CLEARANCE))
-            .any(|obstacle| segment_intersects_rect(segment[0], segment[1], &obstacle))
+            .any(|obstacle| segment_intersects_rect(segment[0], segment[1], obstacle))
     })
+}
+
+fn inflate_obstacles(obstacles: &[Rect], padding: f32) -> Vec<Rect> {
+    obstacles
+        .iter()
+        .copied()
+        .map(|obstacle| inflate_rect(obstacle, padding))
+        .collect()
 }
 
 fn inflate_rect(rect: Rect, padding: f32) -> Rect {
@@ -184,6 +185,23 @@ fn inflate_rect(rect: Rect, padding: f32) -> Rect {
         w: padding.mul_add(2.0, rect.w),
         h: padding.mul_add(2.0, rect.h),
     }
+}
+
+fn nearest_intersecting_obstacle(
+    seg_start: (f32, f32),
+    seg_end: (f32, f32),
+    obstacles: &[Rect],
+) -> Option<&Rect> {
+    obstacles
+        .iter()
+        .filter(|obstacle| segment_intersects_rect(seg_start, seg_end, obstacle))
+        .min_by(|a, b| {
+            let da =
+                (a.w.mul_add(0.5, a.x) - seg_start.0).hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
+            let db =
+                (b.w.mul_add(0.5, b.x) - seg_start.0).hypot(b.h.mul_add(0.5, b.y) - seg_start.1);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 fn add_endpoint_anchors(
