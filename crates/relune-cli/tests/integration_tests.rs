@@ -730,6 +730,34 @@ mod inspect_tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&content).expect("Output file should contain valid JSON");
         assert!(parsed.is_object(), "Inspect JSON should be an object");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Inspection output written to"),
+            "inspect should report file output on stderr"
+        );
+    }
+
+    #[test]
+    fn inspect_quiet_suppresses_output_file_notice() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("inspect.json");
+
+        let output = relune()
+            .arg("--quiet")
+            .arg("inspect")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "inspect should succeed");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Inspection output written to"),
+            "inspect should suppress file output notice when quiet"
+        );
     }
 
     #[test]
@@ -796,6 +824,34 @@ mod lint_tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&content).expect("Output file should contain valid JSON");
         assert!(parsed.is_object(), "Lint JSON should be an object");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Lint report written to"),
+            "lint should report file output on stderr"
+        );
+    }
+
+    #[test]
+    fn lint_quiet_suppresses_output_file_notice() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("lint.json");
+
+        let output = relune()
+            .arg("--quiet")
+            .arg("lint")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "lint should succeed");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Lint report written to"),
+            "lint should suppress file output notice when quiet"
+        );
     }
 
     #[test]
@@ -1283,22 +1339,27 @@ mod diff_tests {
         fs::write(&before_path, "CREATE TABLE users (id INT PRIMARY KEY);").unwrap();
         fs::write(&after_path, "CREATE TABLE posts (id INT PRIMARY KEY);").unwrap();
 
-        let mut cmd = relune();
-        cmd.arg("diff")
+        let output = relune()
+            .arg("diff")
             .arg("--before")
             .arg(&before_path)
             .arg("--after")
             .arg(&after_path)
             .arg("--out")
             .arg(&output_path)
-            .assert()
-            .success();
+            .output()
+            .expect("command should run");
 
+        assert!(output.status.success(), "diff should succeed");
         assert!(output_path.exists(), "Output file should be created");
         let content = fs::read_to_string(&output_path).expect("Failed to read output file");
         assert!(
             content.contains("users") || content.contains("posts"),
             "Output should mention tables"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Diff report written to"),
+            "diff should report file output on stderr"
         );
     }
 

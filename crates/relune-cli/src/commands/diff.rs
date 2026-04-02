@@ -75,7 +75,7 @@ pub fn run_diff(
         };
         print_success(
             &format!(
-                "Diff output written to {} ({})",
+                "Diff report written to {} ({})",
                 out_path.display(),
                 change_summary
             ),

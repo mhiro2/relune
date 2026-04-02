@@ -6,12 +6,17 @@ use super::input::InputSelection;
 use crate::cli::{ColorWhen, LintArgs, LintFormat, LintSeverity};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
-use crate::output::{check_diagnostics, write_output};
+use crate::output::{check_diagnostics, print_success, write_output};
 use relune_app::{LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
 use relune_core::Severity;
 
 /// Run the lint command.
-pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> CliResult<()> {
+pub fn run_lint(
+    args: &LintArgs,
+    color: ColorWhen,
+    quiet: bool,
+    config: &ReluneConfig,
+) -> CliResult<()> {
     // Merge config file with CLI args
     let merged = config.merge_lint_args(args);
 
@@ -56,6 +61,18 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Cli
         return Err(CliError::general(anyhow::anyhow!(
             "Lint issues found at or above the configured severity threshold"
         )));
+    }
+
+    if !quiet && let Some(ref out_path) = args.out {
+        print_success(
+            &format!(
+                "Lint report written to {} ({} issue{})",
+                out_path.display(),
+                result.issues.len(),
+                if result.issues.len() == 1 { "" } else { "s" }
+            ),
+            color,
+        );
     }
 
     Ok(())
