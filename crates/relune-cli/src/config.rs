@@ -261,7 +261,6 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
 
     #[error("Invalid config value: {0}")]
-    #[allow(dead_code)]
     InvalidValue(String),
 }
 
@@ -271,16 +270,6 @@ impl ReluneConfig {
         let content = std::fs::read_to_string(path)?;
         let config: Self = toml::from_str(&content)?;
         Ok(config)
-    }
-
-    /// Load configuration from a file, returning default if file doesn't exist.
-    #[allow(dead_code)]
-    pub fn from_file_or_default(path: &Path) -> Result<Self, ConfigError> {
-        if path.exists() {
-            Self::from_file(path)
-        } else {
-            Ok(Self::default())
-        }
     }
 
     /// Merge CLI render args into this config.
@@ -454,7 +443,6 @@ pub struct MergedRenderConfig {
     pub depth: u32,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
-    #[allow(dead_code)]
     pub show_legend: bool,
     pub show_stats: bool,
 }
@@ -771,20 +759,15 @@ mod tests {
     }
 
     #[test]
-    fn test_from_file_or_default_missing_file() {
+    fn test_from_file_missing_returns_error() {
         let path = PathBuf::from("/nonexistent/path/config.toml");
-        let config = ReluneConfig::from_file_or_default(&path).expect("Should return default");
-
-        // Should be all defaults
-        assert_eq!(config.render.format, None);
-        assert_eq!(config.render.theme, None);
-        assert_eq!(config.render.focus, None);
+        assert!(ReluneConfig::from_file(&path).is_err());
     }
 
     #[test]
-    fn test_from_file_or_default_existing_file() {
+    fn test_from_file_partial() {
         let path = fixtures_dir().join("valid_partial.toml");
-        let config = ReluneConfig::from_file_or_default(&path).expect("Should load config");
+        let config = ReluneConfig::from_file(&path).expect("Should load config");
 
         // Should have loaded values
         assert_eq!(config.render.theme, Some(Theme::Light));

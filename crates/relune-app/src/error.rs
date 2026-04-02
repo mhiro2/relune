@@ -88,12 +88,6 @@ impl AppError {
     pub fn unsupported(msg: impl Into<String>) -> Self {
         Self::Unsupported(msg.into())
     }
-
-    /// Check if this error is recoverable (allows partial output).
-    #[must_use]
-    pub const fn is_recoverable(&self) -> bool {
-        matches!(self, Self::Other(_) | Self::Input(_))
-    }
 }
 
 #[cfg(test)]
@@ -104,14 +98,5 @@ mod tests {
     fn test_error_display() {
         let err = AppError::table_not_found("users");
         assert!(err.to_string().contains("users"));
-    }
-
-    #[test]
-    fn test_error_is_recoverable() {
-        let err = AppError::input("test");
-        assert!(err.is_recoverable());
-
-        let err = AppError::table_not_found("test");
-        assert!(!err.is_recoverable());
     }
 }
