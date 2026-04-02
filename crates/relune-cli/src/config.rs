@@ -1048,6 +1048,7 @@ mod tests {
             dialect: None,
             format: None,
             out: None,
+            stdout: false,
         };
 
         let merged = config.merge_diff_args(&args);
@@ -1071,6 +1072,7 @@ mod tests {
             dialect: Some(DialectArg::Sqlite),
             format: Some(DiffFormat::Json),
             out: None,
+            stdout: false,
         };
 
         let merged = config.merge_diff_args(&args);

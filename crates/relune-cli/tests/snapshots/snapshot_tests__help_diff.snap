@@ -65,5 +65,8 @@ Options:
   -o, --out <FILE>
           Output file path; stdout if omitted
 
+      --stdout
+          Allow raw SVG/HTML output on stdout even when stdout is a terminal
+
   -h, --help
           Print help (see a summary with '-h')

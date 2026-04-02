@@ -7,8 +7,11 @@ use anyhow::Context;
 use super::input::InputSelection;
 use crate::cli::{ColorWhen, GroupByMode, RenderArgs, RenderFormat, Theme};
 use crate::config::ReluneConfig;
-use crate::error::{CliError, CliResult};
-use crate::output::{check_diagnostics, print_stats, print_success, write_output};
+use crate::error::CliResult;
+use crate::output::{
+    check_diagnostics, print_stats, print_success, validate_binary_stdout_usage,
+    validate_markup_stdout_usage, write_output,
+};
 use crate::png;
 use relune_app::{
     FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, OutputFormat, RenderOptions,
@@ -138,23 +141,18 @@ fn validate_stdout_usage(
     explicit_stdout: bool,
     stdout_is_terminal: bool,
 ) -> CliResult<()> {
-    if !has_output_path && !explicit_stdout && stdout_is_terminal {
-        match render_format {
-            RenderFormat::Svg | RenderFormat::Html => {
-                return Err(CliError::usage(anyhow::anyhow!(
-                    "Refusing to write raw SVG/HTML to an interactive terminal. Use --out <FILE> or --stdout."
-                )));
-            }
-            RenderFormat::Png => {
-                return Err(CliError::usage(anyhow::anyhow!(
-                    "Refusing to write binary PNG data to an interactive terminal. Use --out <FILE>."
-                )));
-            }
-            RenderFormat::GraphJson | RenderFormat::SchemaJson => {}
+    match render_format {
+        RenderFormat::Svg | RenderFormat::Html => validate_markup_stdout_usage(
+            "SVG/HTML",
+            has_output_path,
+            explicit_stdout,
+            stdout_is_terminal,
+        ),
+        RenderFormat::Png => {
+            validate_binary_stdout_usage("PNG", has_output_path, stdout_is_terminal)
         }
+        RenderFormat::GraphJson | RenderFormat::SchemaJson => Ok(()),
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

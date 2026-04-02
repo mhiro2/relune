@@ -601,6 +601,10 @@ pub struct DiffArgs {
     /// Output file path; stdout if omitted.
     #[arg(short = 'o', long = "out", value_name = "FILE")]
     pub out: Option<PathBuf>,
+
+    /// Allow raw SVG/HTML output on stdout even when stdout is a terminal.
+    #[arg(long = "stdout", conflicts_with = "out")]
+    pub stdout: bool,
 }
 
 /// Output format for diff command.

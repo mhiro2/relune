@@ -19,7 +19,7 @@ Every command requires **at least one input**. Typical inputs:
 | Live DB | `--db-url <URL>` | Read-only introspection |
 | SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | For SQL parsing |
 
-Output path: **`-o` / `--out`** writes a file. `render` still prints to stdout when piped, but for interactive terminals it now requires **`--stdout`** to emit raw SVG/HTML directly.
+Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly.
 
 For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**.
 
@@ -157,15 +157,19 @@ Compare two schemas. Provide **before** and **after** inputs independently (each
 
 When `--before <FILE>` or `--after <FILE>` is used, Relune inspects the file contents and treats schema JSON as schema JSON even if the extension is not `.json`.
 
+When rendering the diff as `svg` or `html` without `-o`, interactive terminals require `--stdout`; text and JSON remain safe on stdout by default.
+
 | Option | Description |
 |--------|-------------|
 | `-f`, `--format text\|json\|svg\|html` | Output format |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
+| `--stdout` | Explicitly allow raw SVG/HTML on interactive stdout |
 | `--dialect` | For SQL parsing on both sides |
 
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
 relune diff --before old.sql --after new.sql --format html -o diff.html
+relune diff --before old.sql --after new.sql --format html --stdout > diff.html
 relune --config relune.toml diff --before old.sql --after new.sql
 ```

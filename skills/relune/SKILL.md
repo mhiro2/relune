@@ -178,6 +178,7 @@ relune diff --before old.sql --after new.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
 relune diff --before old.sql --after new.sql --format html -o diff.html
 relune diff --before old.sql --after new.sql --format svg -o diff.svg
+relune diff --before old.sql --after new.sql --format html --stdout > diff.html
 relune diff \
   --before-sql-text 'CREATE TABLE users (id INT PRIMARY KEY);' \
   --after-sql-text 'CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);'
@@ -192,7 +193,8 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | Option | Values | Default |
 |--------|--------|---------|
 | `-f`, `--format` | `text`, `json`, `svg`, `html` | `text` |
-| `-o`, `--out` | Output file path | stdout |
+| `-o`, `--out` | Output file path | stdout (`svg`/`html` on terminals require `--stdout`) |
+| `--stdout` | Allow raw `svg`/`html` on interactive stdout | off |
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
@@ -276,7 +278,7 @@ Merge order: built-in defaults -> config file -> CLI arguments.
 
 ### Terminal requires --stdout
 
-When rendering SVG or HTML without `-o`, interactive terminals require `--stdout` to emit raw output. Use `-o` to write to a file instead.
+When rendering or diffing as SVG or HTML without `-o`, interactive terminals require `--stdout` to emit raw output. Use `-o` to write to a file instead.
 
 ### Input too large
 
