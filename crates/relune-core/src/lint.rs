@@ -792,12 +792,14 @@ fn check_foreign_key_indexes_nullable_and_target(
 mod tests {
     use super::*;
     use crate::model::{Column, ColumnId, Index, ReferentialAction, TableId};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
-    static NEXT_TABLE_ID: AtomicU64 = AtomicU64::new(1);
-
-    fn next_table_id() -> TableId {
-        TableId(NEXT_TABLE_ID.fetch_add(1, Ordering::Relaxed))
+    fn test_table_id(schema_name: Option<&str>, name: &str) -> TableId {
+        let mut hasher = DefaultHasher::new();
+        schema_name.hash(&mut hasher);
+        name.hash(&mut hasher);
+        TableId(hasher.finish())
     }
 
     fn create_test_table(
@@ -807,7 +809,7 @@ mod tests {
         indexes: Vec<crate::model::Index>,
     ) -> Table {
         Table {
-            id: next_table_id(),
+            id: test_table_id(None, name),
             stable_id: name.to_string(),
             schema_name: None,
             name: name.to_string(),
@@ -826,7 +828,7 @@ mod tests {
         indexes: Vec<crate::model::Index>,
     ) -> Table {
         Table {
-            id: next_table_id(),
+            id: test_table_id(schema_name, name),
             stable_id: schema_name
                 .map_or_else(|| name.to_string(), |schema| format!("{schema}.{name}")),
             schema_name: schema_name.map(str::to_string),
