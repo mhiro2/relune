@@ -115,6 +115,7 @@ Show schema summary or table details.
 relune inspect --sql schema.sql
 relune inspect --sql schema.sql --table orders
 relune inspect --sql schema.sql --table orders --format json
+relune inspect --sql schema.sql --table orders --format json -o inspect.json
 relune inspect --db-url 'postgres://user:pass@localhost:5432/mydb'
 ```
 
@@ -123,6 +124,7 @@ relune inspect --db-url 'postgres://user:pass@localhost:5432/mydb'
 | `--table` | Table name for detail view | -- (shows summary) |
 | `--summary` | Force summary mode | -- |
 | `--format` | `text`, `json` | `text` |
+| `-o`, `--out` | Output file path | stdout |
 
 ### export
 
@@ -156,6 +158,7 @@ Detect structural issues and anti-patterns. Note: `--sql-text` is not available 
 ```bash
 relune lint --sql schema.sql
 relune lint --sql schema.sql --format json
+relune lint --sql schema.sql --format json -o lint.json
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
 relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
@@ -164,6 +167,7 @@ relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 | Option | Values | Default |
 |--------|--------|---------|
 | `--format` | `text`, `json` | `text` |
+| `-o`, `--out` | Output file path | stdout |
 | `--rules` | Repeatable; run only these rules (kebab-case IDs) | all rules |
 | `--deny` | `error`, `warning`, `info`, `hint` -- min severity for non-zero exit | -- |
 

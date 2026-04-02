@@ -42,14 +42,14 @@ pub fn run_lint(args: &LintArgs, color: ColorWhen, config: &ReluneConfig) -> Cli
 
     check_diagnostics(&result.diagnostics, color, false)?;
 
-    // Format and write output (always to stdout for lint)
+    // Format and write output.
     let output = match merged.format {
         LintFormat::Json => {
             serde_json::to_string_pretty(&result).context("Failed to serialize result to JSON")?
         }
         LintFormat::Text => format_lint_text(&result),
     };
-    write_output(&output, None, color)?;
+    write_output(&output, args.out.as_deref(), color)?;
 
     // Check if we should exit with non-zero code based on --deny
     if result.has_failures(fail_on) {

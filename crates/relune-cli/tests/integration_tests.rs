@@ -705,6 +705,34 @@ mod inspect_tests {
     }
 
     #[test]
+    fn inspect_writes_to_output_file() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("inspect.json");
+
+        let output = relune()
+            .arg("inspect")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "inspect should succeed");
+        assert!(
+            output.stdout.is_empty(),
+            "inspect should not write to stdout when --out is used"
+        );
+
+        let content = fs::read_to_string(&output_path).expect("Failed to read inspect output");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("Output file should contain valid JSON");
+        assert!(parsed.is_object(), "Inspect JSON should be an object");
+    }
+
+    #[test]
     fn inspect_uses_config_format() {
         let mut cmd = relune();
         let output = cmd
@@ -741,6 +769,34 @@ mod inspect_tests {
 
 mod lint_tests {
     use super::*;
+
+    #[test]
+    fn lint_writes_to_output_file() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("lint.json");
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "lint should succeed");
+        assert!(
+            output.stdout.is_empty(),
+            "lint should not write to stdout when --out is used"
+        );
+
+        let content = fs::read_to_string(&output_path).expect("Failed to read lint output");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("Output file should contain valid JSON");
+        assert!(parsed.is_object(), "Lint JSON should be an object");
+    }
 
     #[test]
     fn lint_uses_config_format() {

@@ -78,11 +78,13 @@ Show a schema summary or details for one table.
 | `--table <NAME>` | Table to inspect; omit for summary |
 | `--summary` | Force summary mode |
 | `--format text\|json` | Output encoding |
+| `-o`, `--out <FILE>` | Optional file (else stdout) |
 
 ```bash
 relune inspect --sql schema.sql
 relune inspect --sql schema.sql --table orders
 relune inspect --sql schema.sql --table orders --format json
+relune inspect --sql schema.sql --table orders --format json -o inspect.json
 ```
 
 ---
@@ -133,12 +135,14 @@ Run built-in rules on the schema. Inputs: **`--sql`**, **`--schema-json`**, or *
 | Option | Description |
 |--------|-------------|
 | `--format text\|json` | Report format |
+| `-o`, `--out <FILE>` | Optional file (else stdout) |
 | `--rules <RULE>` | Repeatable; run only these rules |
 | `--deny error\|warning\|info\|hint` | Minimum severity for non-zero exit |
 
 ```bash
 relune lint --sql schema.sql
 relune lint --sql schema.sql --format json
+relune lint --sql schema.sql --format json -o lint.json
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
 ```

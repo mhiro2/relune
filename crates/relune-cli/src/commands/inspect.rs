@@ -32,14 +32,14 @@ pub fn run_inspect(args: &InspectArgs, color: ColorWhen, config: &ReluneConfig) 
 
     check_diagnostics(&result.diagnostics, color, false)?;
 
-    // Format and write output (always to stdout for inspect)
+    // Format and write output.
     let output = match merged.format {
         InspectFormat::Json => {
             serde_json::to_string_pretty(&result).context("Failed to serialize result to JSON")?
         }
         InspectFormat::Text => format_inspect_text(&result),
     };
-    write_output(&output, None, color)?;
+    write_output(&output, args.out.as_deref(), color)?;
 
     Ok(())
 }

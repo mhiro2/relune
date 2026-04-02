@@ -801,6 +801,7 @@ mod tests {
             table: None,
             summary: false,
             format: Some(InspectFormat::Json),
+            out: None,
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -1022,6 +1023,7 @@ mod tests {
             db_url: None,
             schema_json: None,
             format: None,
+            out: None,
             rules: vec![],
             deny: None, // Not specified - should use config
             dialect: crate::cli::DialectArg::Auto,
