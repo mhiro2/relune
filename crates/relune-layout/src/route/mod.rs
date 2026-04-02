@@ -3,6 +3,16 @@
 //! This module provides edge routing algorithms for drawing
 //! connections between nodes in the layout.
 
+mod geometry;
+mod obstacle;
+
+pub use geometry::point_along_route;
+pub(crate) use geometry::{
+    approximate_route_length, rebuild_route_from_points, route_points, sample_route_obstacles,
+};
+pub use obstacle::{detour_around_obstacles, nudge_label};
+
+use geometry::{polyline_midpoint, simplify_orthogonal_path};
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
 /// Outward offset (in pixels) applied to attachment points so that edge
@@ -15,12 +25,6 @@ const BORDER_OUTSET: f32 = 2.0;
 pub const LABEL_HALF_W: f32 = 40.0;
 /// Estimated half-height of an edge label bounding box (in pixels).
 pub const LABEL_HALF_H: f32 = 10.0;
-/// Step size used when probing alternate label positions.
-const LABEL_NUDGE_STEP: f32 = 12.0;
-/// Minimum clearance preserved when rerouting around node obstacles.
-const DETOUR_PADDING: f32 = 12.0;
-/// Extra obstacle inflation used when deciding whether an edge is too close to a node.
-const ROUTE_CLEARANCE: f32 = 14.0;
 
 /// Estimate the half-width of a label bounding box from its text content.
 ///
@@ -51,9 +55,18 @@ pub(crate) enum ChannelAxis {
     Y,
 }
 
-/// Short outward segment length used to preserve endpoint approach direction
-/// when obstacle detours insert extra bends into a route.
-const ENDPOINT_ANCHOR_DISTANCE: f32 = 28.0;
+/// A rectangle representing an obstacle on the canvas (typically a node).
+#[derive(Debug, Clone, Copy)]
+pub struct Rect {
+    /// Left edge X coordinate.
+    pub x: f32,
+    /// Top edge Y coordinate.
+    pub y: f32,
+    /// Width.
+    pub w: f32,
+    /// Height.
+    pub h: f32,
+}
 
 /// Route an edge between two points.
 ///
@@ -469,549 +482,6 @@ impl AttachmentSide {
     }
 }
 
-/// A rectangle representing an obstacle on the canvas (typically a node).
-#[derive(Debug, Clone, Copy)]
-pub struct Rect {
-    /// Left edge X coordinate.
-    pub x: f32,
-    /// Top edge Y coordinate.
-    pub y: f32,
-    /// Width.
-    pub w: f32,
-    /// Height.
-    pub h: f32,
-}
-
-/// Nudge a label position so it does not overlap any of the given rectangles.
-///
-/// The label is shifted outward along the perpendicular to the edge direction
-/// until it clears all obstacles by at least `margin` pixels.
-///
-/// `label_half_w` controls the estimated half-width of the label bounding box.
-/// Pass [`estimate_label_half_width`] of the label text for an accurate estimate,
-/// or [`LABEL_HALF_W`] as a default.
-#[must_use]
-pub fn nudge_label(
-    label: (f32, f32),
-    edge_start: (f32, f32),
-    edge_end: (f32, f32),
-    obstacles: &[Rect],
-    margin: f32,
-    label_half_w: f32,
-    max_offset: f32,
-) -> (f32, f32) {
-    let label_half_h = LABEL_HALF_H;
-
-    let overlaps = |lx: f32, ly: f32| -> bool {
-        obstacles.iter().any(|r| {
-            lx + label_half_w + margin > r.x
-                && lx - label_half_w - margin < r.x + r.w
-                && ly + label_half_h + margin > r.y
-                && ly - label_half_h - margin < r.y + r.h
-        })
-    };
-
-    if !overlaps(label.0, label.1) {
-        return label;
-    }
-
-    // Perpendicular direction to the edge vector.
-    let dx = edge_end.0 - edge_start.0;
-    let dy = edge_end.1 - edge_start.1;
-    let len = dx.hypot(dy).max(1.0);
-    // Normal: rotate 90 degrees.
-    let nx = -dy / len;
-    let ny = dx / len;
-
-    // Try shifting in both perpendicular directions with increasing step.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let max_steps = (max_offset / LABEL_NUDGE_STEP).floor() as usize;
-    #[allow(clippy::cast_precision_loss)]
-    for step in 1..=max_steps {
-        let offset = step as f32 * LABEL_NUDGE_STEP;
-        let candidate_pos = (label.0 + nx * offset, label.1 + ny * offset);
-        if !overlaps(candidate_pos.0, candidate_pos.1) {
-            return candidate_pos;
-        }
-        let candidate_neg = (label.0 - nx * offset, label.1 - ny * offset);
-        if !overlaps(candidate_neg.0, candidate_neg.1) {
-            return candidate_neg;
-        }
-    }
-
-    // Fallback: return original position.
-    label
-}
-
-/// Detour an edge route around obstacle rectangles.
-///
-/// If any segment of the backbone polyline (start → control points → end)
-/// passes through an obstacle, additional waypoints are inserted to route
-/// around it.
-#[must_use]
-pub fn detour_around_obstacles(route: &EdgeRoute, obstacles: &[Rect]) -> EdgeRoute {
-    detour_around_obstacles_with_endpoints(route, obstacles, None, None)
-}
-
-#[must_use]
-pub(crate) fn detour_around_obstacles_with_endpoints(
-    route: &EdgeRoute,
-    obstacles: &[Rect],
-    source_side: Option<AttachmentSide>,
-    target_side: Option<AttachmentSide>,
-) -> EdgeRoute {
-    if obstacles.is_empty() {
-        return route.clone();
-    }
-
-    let initial_points = route_points(route);
-    if !route_intersects_obstacles(&initial_points, obstacles) {
-        return route.clone();
-    }
-
-    let mut points = add_endpoint_anchors(&initial_points, source_side, target_side);
-
-    // Iteratively detour until no segments intersect obstacles (max 4 passes).
-    for _ in 0..4 {
-        let mut detoured = Vec::with_capacity(points.len() * 2);
-        detoured.push(points[0]);
-
-        for i in 0..points.len() - 1 {
-            let seg_start = points[i];
-            let seg_end = points[i + 1];
-
-            // Find the nearest intersecting obstacle along this segment.
-            let nearest = obstacles
-                .iter()
-                .filter(|r| {
-                    let clearance = inflate_rect(**r, ROUTE_CLEARANCE);
-                    segment_intersects_rect(seg_start, seg_end, &clearance)
-                })
-                .min_by(|a, b| {
-                    let da = (a.w.mul_add(0.5, a.x) - seg_start.0)
-                        .hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
-                    let db = (b.w.mul_add(0.5, b.x) - seg_start.0)
-                        .hypot(b.h.mul_add(0.5, b.y) - seg_start.1);
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                });
-
-            if let Some(obstacle) = nearest {
-                let clearance = inflate_rect(*obstacle, ROUTE_CLEARANCE);
-                let waypoints = compute_detour(seg_start, seg_end, &clearance);
-                detoured.extend_from_slice(&waypoints);
-            }
-            detoured.push(seg_end);
-        }
-
-        points = detoured;
-
-        if !route_intersects_obstacles(&points, obstacles) {
-            break;
-        }
-    }
-
-    // Clean up collinear and backtracking waypoints produced by the detour loop.
-    points = simplify_orthogonal_path(&points);
-
-    // Rebuild the route: first and last points are endpoints, middle are control points.
-    let new_start = points[0];
-    let new_end = points[points.len() - 1];
-    let new_control_points: Vec<(f32, f32)> = points[1..points.len() - 1].to_vec();
-
-    // Recompute label position at the midpoint of the new polyline.
-    let label_position = polyline_midpoint(&points);
-
-    EdgeRoute {
-        x1: new_start.0,
-        y1: new_start.1,
-        x2: new_end.0,
-        y2: new_end.1,
-        control_points: new_control_points,
-        style: route.style,
-        label_position,
-    }
-}
-
-/// Returns the full route polyline including endpoints.
-#[must_use]
-pub(crate) fn route_points(route: &EdgeRoute) -> Vec<(f32, f32)> {
-    let mut points: Vec<(f32, f32)> = Vec::with_capacity(route.control_points.len() + 2);
-    points.push((route.x1, route.y1));
-    points.extend_from_slice(&route.control_points);
-    points.push((route.x2, route.y2));
-    points
-}
-
-#[must_use]
-pub(crate) fn rebuild_route_from_points(points: &[(f32, f32)], style: RouteStyle) -> EdgeRoute {
-    let points = simplify_orthogonal_path(points);
-    let start = points.first().copied().unwrap_or((0.0, 0.0));
-    let end = points.last().copied().unwrap_or(start);
-
-    EdgeRoute {
-        x1: start.0,
-        y1: start.1,
-        x2: end.0,
-        y2: end.1,
-        control_points: points[1..points.len().saturating_sub(1)].to_vec(),
-        style,
-        label_position: polyline_midpoint(&points),
-    }
-}
-
-fn route_intersects_obstacles(points: &[(f32, f32)], obstacles: &[Rect]) -> bool {
-    points.windows(2).any(|segment| {
-        obstacles
-            .iter()
-            .map(|obstacle| inflate_rect(*obstacle, ROUTE_CLEARANCE))
-            .any(|obstacle| segment_intersects_rect(segment[0], segment[1], &obstacle))
-    })
-}
-
-fn inflate_rect(rect: Rect, padding: f32) -> Rect {
-    Rect {
-        x: rect.x - padding,
-        y: rect.y - padding,
-        w: padding.mul_add(2.0, rect.w),
-        h: padding.mul_add(2.0, rect.h),
-    }
-}
-
-fn add_endpoint_anchors(
-    points: &[(f32, f32)],
-    source_side: Option<AttachmentSide>,
-    target_side: Option<AttachmentSide>,
-) -> Vec<(f32, f32)> {
-    let Some((&start, rest)) = points.split_first() else {
-        return Vec::new();
-    };
-    let Some((&end, middle)) = rest.split_last() else {
-        return vec![start];
-    };
-
-    let mut anchored = Vec::with_capacity(points.len() + 2);
-    anchored.push(start);
-
-    if let Some(side) = source_side {
-        anchored.push(step_from_attachment(start, side, ENDPOINT_ANCHOR_DISTANCE));
-    }
-
-    anchored.extend_from_slice(middle);
-
-    if let Some(side) = target_side {
-        anchored.push(step_from_attachment(end, side, ENDPOINT_ANCHOR_DISTANCE));
-    }
-
-    anchored.push(end);
-    anchored
-}
-
-/// Check whether a line segment from `a` to `b` passes through the interior
-/// of a rectangle (with a small inset margin to ignore edges that merely
-/// touch the boundary).
-///
-/// Uses the Liang-Barsky algorithm for exact analytical intersection.
-fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: &Rect) -> bool {
-    let margin = 2.0;
-    let rx = r.x + margin;
-    let ry = r.y + margin;
-    let rw = 2.0f32.mul_add(-margin, r.w).max(0.0);
-    let rh = 2.0f32.mul_add(-margin, r.h).max(0.0);
-
-    // Quick AABB test: if the segment's bounding box doesn't overlap the rect, skip.
-    let seg_min_x = a.0.min(b.0);
-    let seg_max_x = a.0.max(b.0);
-    let seg_min_y = a.1.min(b.1);
-    let seg_max_y = a.1.max(b.1);
-    if seg_max_x < rx || seg_min_x > rx + rw || seg_max_y < ry || seg_min_y > ry + rh {
-        return false;
-    }
-
-    // Liang-Barsky: parameterize segment as P(t) = a + t*(b-a), t in [0,1].
-    let dx = b.0 - a.0;
-    let dy = b.1 - a.1;
-
-    let mut t_enter: f32 = 0.0;
-    let mut t_leave: f32 = 1.0;
-
-    // Clip against each of the 4 rectangle edges.
-    // p = -dx, q = a.x - rx  (left edge)
-    // p =  dx, q = rx+rw - a.x (right edge)
-    // p = -dy, q = a.y - ry  (top edge)
-    // p =  dy, q = ry+rh - a.y (bottom edge)
-    let clips: [(f32, f32); 4] = [
-        (-dx, a.0 - rx),
-        (dx, rx + rw - a.0),
-        (-dy, a.1 - ry),
-        (dy, ry + rh - a.1),
-    ];
-
-    for &(p, q) in &clips {
-        if p.abs() < 1e-9 {
-            // Segment is parallel to this edge.
-            if q < 0.0 {
-                return false; // Outside and parallel — no intersection.
-            }
-            // Otherwise inside this slab — continue checking other edges.
-        } else {
-            let t = q / p;
-            if p < 0.0 {
-                // Entering the rectangle from this edge.
-                if t > t_enter {
-                    t_enter = t;
-                }
-            } else {
-                // Leaving the rectangle from this edge.
-                if t < t_leave {
-                    t_leave = t;
-                }
-            }
-            if t_enter > t_leave {
-                return false;
-            }
-        }
-    }
-
-    true
-}
-
-/// Compute detour waypoints around a single obstacle rectangle.
-///
-/// Picks the side of the obstacle that requires the smallest deviation
-/// from the segment direction and routes orthogonally around it.
-#[allow(clippy::suboptimal_flops)]
-fn compute_detour(start: (f32, f32), end: (f32, f32), obstacle: &Rect) -> Vec<(f32, f32)> {
-    let cx = obstacle.x + obstacle.w * 0.5;
-    let cy = obstacle.y + obstacle.h * 0.5;
-    let mid_x = (start.0 + end.0) * 0.5;
-    let mid_y = (start.1 + end.1) * 0.5;
-    let is_vertical = (start.0 - end.0).abs() < 0.5;
-    let is_horizontal = (start.1 - end.1).abs() < 0.5;
-
-    if is_vertical {
-        let detour_x = if start.0 < cx {
-            obstacle.x - DETOUR_PADDING
-        } else {
-            obstacle.x + obstacle.w + DETOUR_PADDING
-        };
-        return vec![(detour_x, start.1), (detour_x, end.1)];
-    }
-
-    if is_horizontal {
-        let detour_y = if start.1 < cy {
-            obstacle.y - DETOUR_PADDING
-        } else {
-            obstacle.y + obstacle.h + DETOUR_PADDING
-        };
-        return vec![(start.0, detour_y), (end.0, detour_y)];
-    }
-
-    // Decide whether to go around the top/bottom or left/right of the obstacle.
-    let dx = (mid_x - cx).abs();
-    let dy = (mid_y - cy).abs();
-
-    if dx > dy {
-        // Horizontal deviation is larger — route above or below.
-        let detour_y = if mid_y < cy {
-            obstacle.y - DETOUR_PADDING
-        } else {
-            obstacle.y + obstacle.h + DETOUR_PADDING
-        };
-        vec![(start.0, detour_y), (end.0, detour_y)]
-    } else {
-        // Vertical deviation is larger — route left or right.
-        let detour_x = if mid_x < cx {
-            obstacle.x - DETOUR_PADDING
-        } else {
-            obstacle.x + obstacle.w + DETOUR_PADDING
-        };
-        vec![(detour_x, start.1), (detour_x, end.1)]
-    }
-}
-
-/// Approximate a route with small axis-aligned obstacle samples.
-///
-/// This is primarily used during label placement so labels can avoid other
-/// edge paths without needing exact curve/segment intersection tests.
-#[must_use]
-pub(crate) fn sample_route_obstacles(route: &EdgeRoute, half_size: f32, spacing: f32) -> Vec<Rect> {
-    let safe_spacing = spacing.max(1.0);
-    let route_length = approximate_route_length(route).max(safe_spacing);
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let sample_count = (route_length / safe_spacing).ceil() as usize;
-    let sample_count = sample_count.max(1);
-
-    let mut obstacles = Vec::with_capacity(sample_count + 1);
-    #[allow(clippy::cast_precision_loss)]
-    for index in 0..=sample_count {
-        let t = index as f32 / sample_count as f32;
-        let (x, y) = point_along_route(route, t);
-        obstacles.push(Rect {
-            x: x - half_size,
-            y: y - half_size,
-            w: half_size * 2.0,
-            h: half_size * 2.0,
-        });
-    }
-    obstacles
-}
-
-/// Returns the total polyline length of the routed edge.
-#[must_use]
-pub(crate) fn approximate_route_length(route: &EdgeRoute) -> f32 {
-    route_points(route)
-        .windows(2)
-        .map(|segment| {
-            let dx = segment[1].0 - segment[0].0;
-            let dy = segment[1].1 - segment[0].1;
-            dx.hypot(dy)
-        })
-        .sum()
-}
-
-/// Simplify an orthogonal path by removing collinear and backtracking points.
-///
-/// Pass 1: remove intermediate points that are collinear with their neighbors
-/// (all three share the same X or same Y coordinate).
-/// Pass 2: remove backtracking — when three consecutive points lie on the same
-/// axis and the direction reverses, the middle point is a stub. Repeat until
-/// stable.
-fn simplify_orthogonal_path(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
-    if points.len() <= 2 {
-        return points.to_vec();
-    }
-
-    // Pass 1: remove collinear intermediate points.
-    let mut result: Vec<(f32, f32)> = Vec::with_capacity(points.len());
-    result.push(points[0]);
-    for i in 1..points.len() - 1 {
-        let prev = *result.last().unwrap();
-        let curr = points[i];
-        let next = points[i + 1];
-        let same_x = (prev.0 - curr.0).abs() < 0.5 && (curr.0 - next.0).abs() < 0.5;
-        let same_y = (prev.1 - curr.1).abs() < 0.5 && (curr.1 - next.1).abs() < 0.5;
-        if same_x || same_y {
-            continue;
-        }
-        result.push(curr);
-    }
-    result.push(*points.last().unwrap());
-
-    // Pass 2: remove backtracking points (iterate until stable).
-    loop {
-        let prev_len = result.len();
-        let mut cleaned: Vec<(f32, f32)> = Vec::with_capacity(result.len());
-        cleaned.push(result[0]);
-
-        let mut i = 1;
-        while i < result.len() - 1 {
-            let a = *cleaned.last().unwrap();
-            let b = result[i];
-            let c = result[i + 1];
-
-            let on_x = (a.0 - b.0).abs() < 0.5 && (b.0 - c.0).abs() < 0.5;
-            let on_y = (a.1 - b.1).abs() < 0.5 && (b.1 - c.1).abs() < 0.5;
-
-            if on_x && (b.1 - a.1) * (c.1 - b.1) < 0.0 {
-                // Vertical backtrack — skip b.
-                i += 1;
-                continue;
-            }
-            if on_y && (b.0 - a.0) * (c.0 - b.0) < 0.0 {
-                // Horizontal backtrack — skip b.
-                i += 1;
-                continue;
-            }
-
-            cleaned.push(b);
-            i += 1;
-        }
-        if i < result.len() {
-            cleaned.push(*result.last().unwrap());
-        }
-
-        result = cleaned;
-        if result.len() == prev_len {
-            break;
-        }
-    }
-
-    result
-}
-
-/// Find the midpoint of a polyline (by arc-length).
-#[allow(clippy::suboptimal_flops)]
-fn polyline_midpoint(points: &[(f32, f32)]) -> (f32, f32) {
-    if points.len() < 2 {
-        return points.first().copied().unwrap_or((0.0, 0.0));
-    }
-
-    let total_length: f32 = points
-        .windows(2)
-        .map(|w| {
-            let dx = w[1].0 - w[0].0;
-            let dy = w[1].1 - w[0].1;
-            dx.hypot(dy)
-        })
-        .sum();
-
-    let half = total_length * 0.5;
-    let mut accumulated = 0.0;
-
-    for w in points.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let seg_len = dx.hypot(dy);
-        if accumulated + seg_len >= half && seg_len > 0.0 {
-            let t = (half - accumulated) / seg_len;
-            return (w[0].0 + dx * t, w[0].1 + dy * t);
-        }
-        accumulated += seg_len;
-    }
-
-    *points.last().unwrap()
-}
-
-/// Compute a point at parameter `t` (0..1) along an edge route.
-///
-/// `t` is interpreted as a fraction of the backbone's total arc length.
-#[must_use]
-pub fn point_along_route(route: &EdgeRoute, t: f32) -> (f32, f32) {
-    point_along_polyline(&route_points(route), t)
-}
-
-/// Compute a point at fraction `t` (0..1) of total arc length along a polyline.
-fn point_along_polyline(points: &[(f32, f32)], t: f32) -> (f32, f32) {
-    if points.len() < 2 {
-        return points.first().copied().unwrap_or((0.0, 0.0));
-    }
-
-    let total_length: f32 = points
-        .windows(2)
-        .map(|w| {
-            let dx = w[1].0 - w[0].0;
-            let dy = w[1].1 - w[0].1;
-            dx.hypot(dy)
-        })
-        .sum();
-
-    let target = total_length * t;
-    let mut accumulated = 0.0;
-
-    for w in points.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let seg_len = dx.hypot(dy);
-        if accumulated + seg_len >= target && seg_len > 0.0 {
-            let frac = (target - accumulated) / seg_len;
-            return (dx.mul_add(frac, w[0].0), dy.mul_add(frac, w[0].1));
-        }
-        accumulated += seg_len;
-    }
-
-    *points.last().unwrap()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1301,7 +771,7 @@ mod tests {
             h: 156.0,
         }];
 
-        let result = detour_around_obstacles_with_endpoints(
+        let result = obstacle::detour_around_obstacles_with_endpoints(
             &route,
             &obstacles,
             Some(AttachmentSide::West),
@@ -1325,7 +795,7 @@ mod tests {
             result
                 .control_points
                 .iter()
-                .any(|&(_, y)| y <= obstacles[0].y - DETOUR_PADDING),
+                .any(|&(_, y)| y <= obstacles[0].y - 12.0),
             "detour should keep a visible gap from the obstacle"
         );
     }
@@ -1382,6 +852,7 @@ mod tests {
 
     #[test]
     fn test_simplify_removes_collinear_points() {
+        use geometry::simplify_orthogonal_path;
         let points = vec![(0.0, 0.0), (0.0, 50.0), (0.0, 100.0)];
         let result = simplify_orthogonal_path(&points);
         assert_eq!(result, vec![(0.0, 0.0), (0.0, 100.0)]);
@@ -1389,6 +860,7 @@ mod tests {
 
     #[test]
     fn test_simplify_removes_backtracking() {
+        use geometry::simplify_orthogonal_path;
         // The exact bug: path goes up then reverses down.
         let points = vec![
             (377.0, 206.0),
@@ -1402,6 +874,7 @@ mod tests {
 
     #[test]
     fn test_simplify_preserves_right_angle_bends() {
+        use geometry::simplify_orthogonal_path;
         let points = vec![(0.0, 0.0), (0.0, 50.0), (100.0, 50.0)];
         let result = simplify_orthogonal_path(&points);
         assert_eq!(result, points);
@@ -1409,6 +882,7 @@ mod tests {
 
     #[test]
     fn test_simplify_full_bug_path() {
+        use geometry::simplify_orthogonal_path;
         let points = vec![
             (2767.0, 105.0),
             (2739.0, 105.0),
@@ -1437,6 +911,7 @@ mod tests {
 
     #[test]
     fn test_polyline_midpoint_two_points() {
+        use geometry::polyline_midpoint;
         let mid = polyline_midpoint(&[(0.0, 0.0), (100.0, 0.0)]);
         assert!((mid.0 - 50.0).abs() < 0.001);
         assert!(mid.1.abs() < 0.001);
@@ -1444,6 +919,7 @@ mod tests {
 
     #[test]
     fn test_polyline_midpoint_three_points() {
+        use geometry::polyline_midpoint;
         let mid = polyline_midpoint(&[(0.0, 0.0), (50.0, 0.0), (50.0, 50.0)]);
         // Total length = 50 + 50 = 100, midpoint at arc-length 50 = (50, 0)
         assert!((mid.0 - 50.0).abs() < 0.001);
