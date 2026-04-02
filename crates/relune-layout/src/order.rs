@@ -254,45 +254,48 @@ fn count_inversions(arr: &[usize]) -> usize {
         return 0;
     }
     let mut work = arr.to_vec();
-    merge_sort_count(&mut work)
+    let mut scratch = vec![0; arr.len()];
+    merge_sort_count(&mut work, &mut scratch)
 }
 
-fn merge_sort_count(arr: &mut [usize]) -> usize {
+fn merge_sort_count(arr: &mut [usize], scratch: &mut [usize]) -> usize {
     let n = arr.len();
     if n <= 1 {
         return 0;
     }
     let mid = n / 2;
     let mut count = 0;
-    count += merge_sort_count(&mut arr[..mid]);
-    count += merge_sort_count(&mut arr[mid..]);
+    count += merge_sort_count(&mut arr[..mid], &mut scratch[..mid]);
+    count += merge_sort_count(&mut arr[mid..], &mut scratch[mid..]);
 
-    // Merge step counting inversions
-    let left = arr[..mid].to_vec();
-    let right = arr[mid..].to_vec();
-    let (mut i, mut j, mut k) = (0, 0, 0);
+    // Merge step counting inversions.
+    let (mut i, mut j, mut k) = (0, mid, 0);
 
-    while i < left.len() && j < right.len() {
-        if left[i] <= right[j] {
-            arr[k] = left[i];
+    while i < mid && j < n {
+        if arr[i] <= arr[j] {
+            scratch[k] = arr[i];
             i += 1;
         } else {
-            arr[k] = right[j];
-            count += left.len() - i; // All remaining left elements form inversions
+            scratch[k] = arr[j];
+            count += mid - i; // All remaining left elements form inversions.
             j += 1;
         }
         k += 1;
     }
-    while i < left.len() {
-        arr[k] = left[i];
+
+    while i < mid {
+        scratch[k] = arr[i];
         i += 1;
         k += 1;
     }
-    while j < right.len() {
-        arr[k] = right[j];
+
+    while j < n {
+        scratch[k] = arr[j];
         j += 1;
         k += 1;
     }
+
+    arr.copy_from_slice(&scratch[..n]);
     count
 }
 
@@ -431,10 +434,10 @@ fn order_by_sifting(
         return ordering;
     }
 
+    let mut reduced_ordering = Vec::with_capacity(ordering.len().saturating_sub(1));
     for i in 0..ordering.len() {
         let node = ordering[i];
-        let mut reduced_ordering = ordering.clone();
-        reduced_ordering.remove(i);
+        fill_reduced_ordering(&ordering, i, &mut reduced_ordering);
 
         let node_targets = collect_target_positions(node, adjacency, &adj_position);
         let other_edges = collect_layer_edges(&reduced_ordering, adjacency, &adj_position);
@@ -467,33 +470,10 @@ fn count_layer_crossings(
     adj_position: &HashMap<usize, usize>,
     adjacency: &BTreeMap<usize, Vec<usize>>,
 ) -> usize {
-    // Build edge list with positions
-    let edges: Vec<(usize, usize)> = layer_nodes
-        .iter()
-        .enumerate()
-        .flat_map(|(pos, &node_idx)| {
-            let neighbors = adjacency.get(&node_idx).map(Vec::as_slice).unwrap_or(&[]);
-            neighbors
-                .iter()
-                .filter_map(|&n| adj_position.get(&n).map(|&adj_pos| (pos, adj_pos)))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    // Count inversions in the edge list (crossings)
-    let mut crossings = 0;
-    for i in 0..edges.len() {
-        for j in (i + 1)..edges.len() {
-            let (from1, to1) = edges[i];
-            let (from2, to2) = edges[j];
-            // Crossing occurs when edges cross
-            if (from1 < from2 && to1 > to2) || (from1 > from2 && to1 < to2) {
-                crossings += 1;
-            }
-        }
-    }
-
-    crossings
+    let mut edges = collect_layer_edges(layer_nodes, adjacency, adj_position);
+    edges.sort_unstable_by_key(|&(src_pos, _)| src_pos);
+    let targets: Vec<usize> = edges.into_iter().map(|(_, dst_pos)| dst_pos).collect();
+    count_inversions(&targets)
 }
 
 /// Apply global sifting across all layers.
@@ -505,17 +485,22 @@ fn apply_global_sifting(nodes_by_rank: &mut [Vec<usize>], adjacency: &BTreeMap<u
 
     for _ in 0..2 {
         for rank_idx in 0..nodes_by_rank.len() {
+            let layer_len = nodes_by_rank[rank_idx].len();
+            if layer_len <= 1 || layer_len > SIFTING_NODE_LIMIT {
+                continue;
+            }
+
             let mut ordering = nodes_by_rank[rank_idx].clone();
             let prev_positions = rank_idx
                 .checked_sub(1)
                 .map(|prev| build_position_index(&nodes_by_rank[prev]));
             let next_positions = (rank_idx + 1 < nodes_by_rank.len())
                 .then(|| build_position_index(&nodes_by_rank[rank_idx + 1]));
+            let mut reduced_ordering = Vec::with_capacity(ordering.len().saturating_sub(1));
 
             for i in 0..ordering.len() {
                 let node = ordering[i];
-                let mut reduced_ordering = ordering.clone();
-                reduced_ordering.remove(i);
+                fill_reduced_ordering(&ordering, i, &mut reduced_ordering);
 
                 let node_prev_targets = prev_positions.as_ref().map_or_else(Vec::new, |pos| {
                     collect_target_positions(node, adjacency, pos)
@@ -567,6 +552,12 @@ fn build_position_index(nodes: &[usize]) -> HashMap<usize, usize> {
         .enumerate()
         .map(|(pos, &idx)| (idx, pos))
         .collect()
+}
+
+fn fill_reduced_ordering(ordering: &[usize], skip_idx: usize, reduced_ordering: &mut Vec<usize>) {
+    reduced_ordering.clear();
+    reduced_ordering.extend_from_slice(&ordering[..skip_idx]);
+    reduced_ordering.extend_from_slice(&ordering[skip_idx + 1..]);
 }
 
 fn collect_target_positions(
