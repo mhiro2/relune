@@ -1160,4 +1160,247 @@ mod tests {
             "removed table should have error overlay"
         );
     }
+
+    // ---------------------------------------------------------------
+    // Combined filter + grouping + overlay tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_diff_svg_filter_and_grouping_combined() {
+        let before = "\
+            CREATE TABLE app_users (id INT PRIMARY KEY);\n\
+            CREATE TABLE app_posts (id INT PRIMARY KEY, user_id INT REFERENCES app_users(id));\n\
+            CREATE TABLE sys_logs (id INT PRIMARY KEY);\n\
+        ";
+        let after = "\
+            CREATE TABLE app_users (id INT PRIMARY KEY, email VARCHAR(255));\n\
+            CREATE TABLE app_posts (id INT PRIMARY KEY, user_id INT REFERENCES app_users(id));\n\
+            CREATE TABLE app_tags (id INT PRIMARY KEY);\n\
+        ";
+
+        // Filter: include only app_* tables; grouping: by prefix
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec!["app_*".to_string()],
+                exclude: vec![],
+            },
+            grouping: relune_core::GroupingSpec {
+                strategy: relune_core::GroupingStrategy::ByPrefix,
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"));
+        // Modified app_users → warning
+        assert!(svg.contains("overlay-warning"), "modified table overlay");
+        // Added app_tags → info
+        assert!(svg.contains("overlay-info"), "added table overlay");
+        // sys_logs is removed but also filtered out by app_* include
+        assert!(
+            !svg.contains("sys_logs"),
+            "sys_logs should be excluded by filter"
+        );
+    }
+
+    #[test]
+    fn test_diff_svg_filter_grouping_with_removed_fk_edge() {
+        let before = "\
+            CREATE TABLE app_users (id INT PRIMARY KEY);\n\
+            CREATE TABLE app_orders (id INT PRIMARY KEY, user_id INT REFERENCES app_users(id));\n\
+            CREATE TABLE app_items (id INT PRIMARY KEY, order_id INT REFERENCES app_orders(id));\n\
+        ";
+        let after = "\
+            CREATE TABLE app_users (id INT PRIMARY KEY);\n\
+            CREATE TABLE app_orders (id INT PRIMARY KEY, user_id INT);\n\
+            CREATE TABLE app_items (id INT PRIMARY KEY, order_id INT REFERENCES app_orders(id));\n\
+        ";
+
+        // FK from orders→users removed; all tables visible with grouping
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            grouping: relune_core::GroupingSpec {
+                strategy: relune_core::GroupingStrategy::ByPrefix,
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"));
+        // app_orders is modified (FK removed)
+        assert!(svg.contains("overlay-warning"), "modified table overlay");
+        // All three tables should be present
+        assert!(svg.contains("app_users"));
+        assert!(svg.contains("app_orders"));
+        assert!(svg.contains("app_items"));
+    }
+
+    // ---------------------------------------------------------------
+    // Multi-schema diff with qualified names
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_diff_svg_multi_schema_qualified_names() {
+        let before = "\
+            CREATE SCHEMA public;\n\
+            CREATE TABLE public.users (id INT PRIMARY KEY);\n\
+            CREATE SCHEMA audit;\n\
+            CREATE TABLE audit.logs (id INT PRIMARY KEY);\n\
+        ";
+        let after = "\
+            CREATE SCHEMA public;\n\
+            CREATE TABLE public.users (id INT PRIMARY KEY, name VARCHAR(255));\n\
+            CREATE SCHEMA audit;\n\
+            CREATE TABLE audit.logs (id INT PRIMARY KEY, action VARCHAR(50));\n\
+            CREATE TABLE audit.events (id INT PRIMARY KEY);\n\
+        ";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"));
+        // Both modified tables → warning overlays
+        assert!(svg.contains("overlay-warning"), "modified tables overlay");
+        // Added events → info overlay
+        assert!(svg.contains("overlay-info"), "added table overlay");
+    }
+
+    #[test]
+    fn test_diff_svg_multi_schema_filter_by_schema_name() {
+        let before = "\
+            CREATE SCHEMA sales;\n\
+            CREATE TABLE sales.orders (id INT PRIMARY KEY);\n\
+            CREATE SCHEMA hr;\n\
+            CREATE TABLE hr.employees (id INT PRIMARY KEY);\n\
+        ";
+        let after = "\
+            CREATE SCHEMA sales;\n\
+            CREATE TABLE sales.orders (id INT PRIMARY KEY, total DECIMAL);\n\
+            CREATE SCHEMA hr;\n\
+            CREATE TABLE hr.employees (id INT PRIMARY KEY, name VARCHAR(255));\n\
+            CREATE TABLE hr.departments (id INT PRIMARY KEY);\n\
+        ";
+
+        // Filter to only show sales schema tables
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec!["sales.*".to_string()],
+                exclude: vec![],
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        // Diff data captures all changes regardless of filter
+        assert_eq!(result.diff.modified_tables.len(), 2);
+        assert_eq!(result.diff.added_tables.len(), 1);
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"));
+        // Modified sales.orders should be visible
+        assert!(svg.contains("overlay-warning"), "modified orders overlay");
+        // hr tables should be filtered out
+        assert!(
+            !svg.contains("employees"),
+            "hr.employees should be excluded"
+        );
+        assert!(
+            !svg.contains("departments"),
+            "hr.departments should be excluded"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Overlay correctness: verify overlay data matches diff data
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_build_diff_overlay_fk_edge_annotations() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id));\n\
+            CREATE TABLE tags (id INT PRIMARY KEY);\n\
+        ";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (id INT PRIMARY KEY, user_id INT);\n\
+            CREATE TABLE tags (id INT PRIMARY KEY, user_id INT REFERENCES users(id));\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+
+        // posts→users edge removed
+        let post_user_edge = overlay.edge("posts", "users");
+        assert!(
+            post_user_edge.is_some(),
+            "posts→users removed FK should be annotated"
+        );
+        assert!(
+            post_user_edge
+                .unwrap()
+                .annotations
+                .iter()
+                .any(|a| a.rule_id.as_deref() == Some("diff-removed")),
+            "posts→users should have diff-removed annotation"
+        );
+
+        // tags→users edge added (via modified table)
+        let tag_user_edge = overlay.edge("tags", "users");
+        assert!(
+            tag_user_edge.is_some(),
+            "tags→users added FK should be annotated"
+        );
+    }
+
+    #[test]
+    fn test_build_diff_schema_with_added_and_removed_fks() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE categories (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id));\n\
+        ";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE categories (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (id INT PRIMARY KEY, cat_id INT REFERENCES categories(id));\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let merged = build_diff_schema(&before_schema, &after_schema, &diff);
+        let posts = merged.tables.iter().find(|t| t.name == "posts").unwrap();
+
+        // Should have both the new FK (→categories) and restored old FK (→users)
+        assert_eq!(
+            posts.foreign_keys.len(),
+            2,
+            "merged schema should contain both added and removed FKs"
+        );
+    }
 }
