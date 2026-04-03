@@ -858,4 +858,187 @@ mod tests {
         // Metadata should include diff issues
         assert!(html.contains("diff-modified"));
     }
+
+    // ---------------------------------------------------------------
+    // Filter × overlay interaction tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_diff_svg_filter_include_preserves_overlay() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));\n\
+        ";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY, email VARCHAR(255));\n\
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));\n\
+            CREATE TABLE products (id INT PRIMARY KEY);\n\
+        ";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec!["users".to_string(), "products".to_string()],
+                exclude: vec![],
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"), "should produce valid SVG");
+        // Modified users → warning overlay
+        assert!(svg.contains("overlay-warning"), "modified table overlay");
+        // Added products → info overlay
+        assert!(svg.contains("overlay-info"), "added table overlay");
+        // orders should be filtered out
+        assert!(
+            !svg.contains(">orders<"),
+            "excluded table should not appear in SVG"
+        );
+    }
+
+    #[test]
+    fn test_diff_svg_filter_exclude_hides_changed_table() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE logs (id INT PRIMARY KEY, ts TIMESTAMP);\n\
+        ";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));\n\
+            CREATE TABLE logs (id INT PRIMARY KEY);\n\
+        ";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec![],
+                exclude: vec!["logs".to_string()],
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        // Diff data should still contain logs as modified
+        assert!(
+            result
+                .diff
+                .modified_tables
+                .iter()
+                .any(|t| t.table_name == "logs"),
+            "diff data should include logs"
+        );
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("overlay-warning"), "users should be modified");
+        assert!(
+            !svg.contains(">logs<"),
+            "excluded table should not appear in SVG"
+        );
+    }
+
+    #[test]
+    fn test_diff_svg_filter_include_all_shows_removed_table() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE old_cache (id INT PRIMARY KEY);\n\
+        ";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY);";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec!["*".to_string()],
+                exclude: vec![],
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        // Removed table → error overlay
+        assert!(
+            svg.contains("overlay-error"),
+            "removed table should have error overlay"
+        );
+        assert!(
+            svg.contains("old_cache"),
+            "removed table should appear in SVG"
+        );
+    }
+
+    #[test]
+    fn test_diff_svg_filter_excludes_removed_table() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE old_cache (id INT PRIMARY KEY);\n\
+        ";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY);";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec![],
+                exclude: vec!["old_*".to_string()],
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        // Diff data still records the removal
+        assert!(
+            result
+                .diff
+                .removed_tables
+                .contains(&"old_cache".to_string()),
+            "diff data should include removed table"
+        );
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(
+            !svg.contains("old_cache"),
+            "filtered-out removed table should not appear"
+        );
+    }
+
+    #[test]
+    fn test_diff_svg_filter_removed_fk_target_excluded() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id));\n\
+        ";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (id INT PRIMARY KEY, user_id INT);\n\
+        ";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter: relune_core::FilterSpec {
+                include: vec!["posts".to_string()],
+                exclude: vec![],
+            },
+            ..Default::default()
+        };
+        // Should not panic even when FK target is filtered out
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"), "should produce valid SVG");
+        // posts is modified (FK removed)
+        assert!(
+            svg.contains("overlay-warning"),
+            "modified table should have warning overlay"
+        );
+    }
 }
