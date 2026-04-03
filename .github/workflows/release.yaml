@@ -20,18 +20,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      - name: Install pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-        with:
-          package_json_file: crates/relune-render-html/package.json
-      - name: Set up Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version-file: crates/relune-render-html/package.json
-          cache: pnpm
-          cache-dependency-path: crates/relune-render-html/pnpm-lock.yaml
-      - name: Install frontend dependencies
-        run: pnpm --dir crates/relune-render-html install --frozen-lockfile
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
       - name: Install Zig
