@@ -35,6 +35,8 @@ pub enum LintRuleId {
     NullableForeignKeyLazyLoad,
     /// Foreign key references columns that are not the full primary key or a unique index on the referenced table.
     ForeignKeyNonUniqueTarget,
+    /// Foreign key references a table that cannot be resolved (missing or ambiguous).
+    UnresolvedForeignKey,
 }
 
 impl LintRuleId {
@@ -51,6 +53,7 @@ impl LintRuleId {
             Self::MissingForeignKeyIndex => "missing-foreign-key-index",
             Self::NullableForeignKeyLazyLoad => "nullable-foreign-key-lazy-load",
             Self::ForeignKeyNonUniqueTarget => "foreign-key-non-unique-target",
+            Self::UnresolvedForeignKey => "unresolved-foreign-key",
         }
     }
 
@@ -61,7 +64,8 @@ impl LintRuleId {
             Self::NoPrimaryKey
             | Self::TooManyNullable
             | Self::MissingForeignKeyIndex
-            | Self::ForeignKeyNonUniqueTarget => Severity::Warning,
+            | Self::ForeignKeyNonUniqueTarget
+            | Self::UnresolvedForeignKey => Severity::Warning,
             Self::OrphanTable | Self::SuspiciousJoinTable | Self::NullableForeignKeyLazyLoad => {
                 Severity::Info
             }
@@ -86,6 +90,7 @@ impl LintRuleId {
             Self::ForeignKeyNonUniqueTarget => {
                 "Foreign key targets columns that are not a primary or unique key"
             }
+            Self::UnresolvedForeignKey => "Foreign key references a table that cannot be resolved",
         }
     }
 
@@ -102,6 +107,7 @@ impl LintRuleId {
             Self::MissingForeignKeyIndex => 7,
             Self::NullableForeignKeyLazyLoad => 8,
             Self::ForeignKeyNonUniqueTarget => 9,
+            Self::UnresolvedForeignKey => 10,
         };
         DiagnosticCode::new("LINT", number)
     }
@@ -266,6 +272,7 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
         check_suspicious_join_table(table, &mut result);
         check_duplicated_fk_pattern(table, &mut result);
         check_non_snake_case_identifiers(table, &mut result);
+        check_unresolved_foreign_keys(schema, table, &mut result);
         check_foreign_key_indexes_nullable_and_target(schema, table, &mut result);
     }
 
@@ -318,12 +325,8 @@ fn build_fk_maps(schema: &Schema) -> (FkMap, FkMap) {
 /// Check: Table has no primary key.
 fn check_no_primary_key(table: &Table, result: &mut LintResult) {
     let has_pk = table.columns.iter().any(|c| c.is_primary_key);
-    let has_pk_index = table
-        .indexes
-        .iter()
-        .any(|idx| idx.is_unique && idx.columns.len() == 1);
 
-    if !has_pk && !has_pk_index {
+    if !has_pk {
         result.add_issue(
             LintIssue::new(
                 LintRuleId::NoPrimaryKey,
@@ -546,13 +549,24 @@ fn check_duplicated_fk_pattern(table: &Table, result: &mut LintResult) {
     }
 }
 
-/// `true` if `s` is non-empty ASCII `snake_case`: starts with `a-z`, then only `a-z`, `0-9`, `_`.
+/// `true` if `s` is non-empty ASCII `snake_case`: optionally starts with one or more `_`,
+/// then only `a-z`, `0-9`, `_`.  The first non-underscore character (if any) must be `a-z`.
+/// Leading underscores are allowed because identifiers like `_id` or `__metadata` are common
+/// and valid in SQL.
 fn is_snake_case(s: &str) -> bool {
-    let mut chars = s.chars();
-    let Some(first) = chars.next() else {
+    if s.is_empty() {
         return false;
-    };
-    if !first.is_ascii_lowercase() {
+    }
+    let mut chars = s.chars().peekable();
+    // Skip any leading underscores.
+    while chars.peek() == Some(&'_') {
+        chars.next();
+    }
+    // If the string is all underscores, allow it.
+    // Check that the first non-underscore character is a lowercase ASCII letter.
+    if let Some(&c) = chars.peek()
+        && !c.is_ascii_lowercase()
+    {
         return false;
     }
     chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
@@ -773,6 +787,43 @@ fn check_non_snake_case_identifiers(table: &Table, result: &mut LintResult) {
     }
 }
 
+/// Check: FK target table is resolvable (not missing or ambiguous).
+fn check_unresolved_foreign_keys(schema: &Schema, table: &Table, result: &mut LintResult) {
+    for fk in &table.foreign_keys {
+        let message = match resolve_table_reference(
+            schema,
+            Some(table),
+            fk.to_schema.as_deref(),
+            &fk.to_table,
+        ) {
+            ForeignKeyTargetResolution::Found(_) => continue,
+            ForeignKeyTargetResolution::Missing => {
+                format!(
+                    "FK on table '{}' references unknown table '{}'",
+                    table.qualified_name(),
+                    fk.to_table,
+                )
+            }
+            ForeignKeyTargetResolution::Ambiguous => {
+                format!(
+                    "FK on table '{}' references ambiguous table '{}'; specify a schema name",
+                    table.qualified_name(),
+                    fk.to_table,
+                )
+            }
+        };
+        result.add_issue(
+            LintIssue::new(
+                LintRuleId::UnresolvedForeignKey,
+                LintRuleId::UnresolvedForeignKey.default_severity(),
+                message,
+            )
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name()),
+        );
+    }
+}
+
 /// Foreign key index coverage, nullable / lazy-load signal, and referenced unique target.
 fn check_foreign_key_indexes_nullable_and_target(
     schema: &Schema,
@@ -967,6 +1018,31 @@ mod tests {
         check_no_primary_key(&table, &mut result);
 
         assert_eq!(result.issues.len(), 0);
+    }
+
+    #[test]
+    fn test_no_primary_key_with_unique_index_only() {
+        // A single-column unique index on a non-PK column must NOT suppress the lint.
+        let table = create_test_table(
+            "users",
+            vec![
+                create_column("email", false, false),
+                create_column("name", false, false),
+            ],
+            vec![],
+            vec![Index {
+                name: Some("users_email_unique".to_string()),
+                columns: vec!["email".to_string()],
+                is_unique: true,
+            }],
+        );
+
+        let mut result = LintResult::new();
+        check_no_primary_key(&table, &mut result);
+
+        assert_eq!(result.issues.len(), 1);
+        assert_eq!(result.issues[0].rule_id, LintRuleId::NoPrimaryKey);
+        assert_eq!(result.stats.warnings, 1);
     }
 
     #[test]
@@ -1505,6 +1581,213 @@ mod tests {
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
+        );
+    }
+
+    #[test]
+    fn test_is_snake_case_edge_cases() {
+        // Standard valid snake_case identifiers.
+        assert!(is_snake_case("id"));
+        assert!(is_snake_case("user_name"));
+        assert!(is_snake_case("col1"));
+        assert!(is_snake_case("a"));
+
+        // Leading underscores — valid in SQL, must be accepted.
+        assert!(is_snake_case("_id"));
+        assert!(is_snake_case("__metadata"));
+        assert!(is_snake_case("_"));
+
+        // Leading underscore followed by uppercase — invalid.
+        assert!(!is_snake_case("_Id"));
+        assert!(!is_snake_case("__Bad"));
+
+        // Starts with uppercase — invalid.
+        assert!(!is_snake_case("Id"));
+        assert!(!is_snake_case("UserName"));
+
+        // Starts with a digit — invalid.
+        assert!(!is_snake_case("0_col"));
+        assert!(!is_snake_case("1name"));
+
+        // Empty string — invalid.
+        assert!(!is_snake_case(""));
+
+        // Consecutive and trailing underscores — still valid.
+        assert!(is_snake_case("user__old"));
+        assert!(is_snake_case("id_"));
+    }
+
+    #[test]
+    fn test_unresolved_foreign_key_missing() {
+        // FK points to a table that does not exist in the schema.
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_id", false, false),
+            ],
+            vec![create_fk("nonexistent_table", &["user_id"])],
+            vec![Index {
+                name: Some("posts_user_id_idx".to_string()),
+                columns: vec!["user_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let schema = Schema {
+            tables: vec![posts],
+            ..Schema::default()
+        };
+        let mut result = LintResult::new();
+        check_unresolved_foreign_keys(&schema, &schema.tables[0], &mut result);
+
+        assert_eq!(result.issues.len(), 1);
+        let issue = &result.issues[0];
+        assert_eq!(issue.rule_id, LintRuleId::UnresolvedForeignKey);
+        assert_eq!(issue.severity, Severity::Warning);
+        assert!(
+            issue.message.contains("unknown table"),
+            "message should mention 'unknown table': {}",
+            issue.message
+        );
+        assert!(
+            issue.message.contains("nonexistent_table"),
+            "message should contain the target table name: {}",
+            issue.message
+        );
+        assert_eq!(issue.table_id, Some("posts".to_string()));
+    }
+
+    #[test]
+    fn test_unresolved_foreign_key_ambiguous() {
+        // FK points to a table name that exists in two schemas without a schema qualifier.
+        let public_users = create_test_table_with_schema(
+            Some("public"),
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+        let auth_users = create_test_table_with_schema(
+            Some("auth"),
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+        // posts has no schema, so "users" is ambiguous between public.users and auth.users.
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_id", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["user_id".to_string()],
+                to_schema: None,
+                to_table: "users".to_string(),
+                to_columns: vec!["id".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![Index {
+                name: Some("posts_user_id_idx".to_string()),
+                columns: vec!["user_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let schema = Schema {
+            tables: vec![public_users, auth_users, posts],
+            ..Schema::default()
+        };
+        let posts_table = &schema.tables[2];
+        let mut result = LintResult::new();
+        check_unresolved_foreign_keys(&schema, posts_table, &mut result);
+
+        assert_eq!(result.issues.len(), 1);
+        let issue = &result.issues[0];
+        assert_eq!(issue.rule_id, LintRuleId::UnresolvedForeignKey);
+        assert_eq!(issue.severity, Severity::Warning);
+        assert!(
+            issue.message.contains("ambiguous table"),
+            "message should mention 'ambiguous table': {}",
+            issue.message
+        );
+        assert!(
+            issue.message.contains("specify a schema name"),
+            "message should suggest specifying a schema name: {}",
+            issue.message
+        );
+        assert!(
+            issue.message.contains("users"),
+            "message should contain the target table name: {}",
+            issue.message
+        );
+        assert_eq!(issue.table_id, Some("posts".to_string()));
+    }
+
+    #[test]
+    fn test_unresolved_foreign_key_fires_in_lint_schema() {
+        // Verify that lint_schema surfaces UnresolvedForeignKey via the per-table loop.
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_id", false, false),
+            ],
+            vec![create_fk("ghost_table", &["user_id"])],
+            vec![Index {
+                name: Some("posts_user_id_idx".to_string()),
+                columns: vec!["user_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let result = lint_schema(&Schema {
+            tables: vec![posts],
+            ..Schema::default()
+        });
+
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::UnresolvedForeignKey),
+            "lint_schema should report UnresolvedForeignKey for a FK pointing to a missing table"
+        );
+    }
+
+    #[test]
+    fn test_unresolved_foreign_key_not_fired_for_resolved_fk() {
+        // When the FK resolves correctly, no UnresolvedForeignKey issue is emitted.
+        let users = create_test_table(
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_id", false, false),
+            ],
+            vec![create_fk("users", &["user_id"])],
+            vec![Index {
+                name: Some("posts_user_id_idx".to_string()),
+                columns: vec!["user_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let schema = Schema {
+            tables: vec![users, posts],
+            ..Schema::default()
+        };
+        let mut result = LintResult::new();
+        check_unresolved_foreign_keys(&schema, &schema.tables[1], &mut result);
+
+        assert!(
+            result.issues.is_empty(),
+            "no UnresolvedForeignKey issue expected when FK resolves correctly"
         );
     }
 }
