@@ -1041,4 +1041,123 @@ mod tests {
             "modified table should have warning overlay"
         );
     }
+
+    // ---------------------------------------------------------------
+    // Grouping × overlay interaction tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_diff_svg_grouping_by_schema_preserves_overlay() {
+        let before = "\
+            CREATE SCHEMA sales;\n\
+            CREATE TABLE sales.orders (id INT PRIMARY KEY);\n\
+            CREATE SCHEMA hr;\n\
+            CREATE TABLE hr.employees (id INT PRIMARY KEY);\n\
+        ";
+        let after = "\
+            CREATE SCHEMA sales;\n\
+            CREATE TABLE sales.orders (id INT PRIMARY KEY, total DECIMAL);\n\
+            CREATE SCHEMA hr;\n\
+            CREATE TABLE hr.employees (id INT PRIMARY KEY);\n\
+            CREATE TABLE hr.departments (id INT PRIMARY KEY);\n\
+        ";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            grouping: relune_core::GroupingSpec {
+                strategy: relune_core::GroupingStrategy::BySchema,
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"), "should produce valid SVG");
+        // Modified orders → warning
+        assert!(
+            svg.contains("overlay-warning"),
+            "modified table should have warning overlay"
+        );
+        // Added departments → info
+        assert!(
+            svg.contains("overlay-info"),
+            "added table should have info overlay"
+        );
+    }
+
+    #[test]
+    fn test_diff_svg_grouping_by_prefix_preserves_overlay() {
+        let before = "\
+            CREATE TABLE app_users (id INT PRIMARY KEY);\n\
+            CREATE TABLE app_posts (id INT PRIMARY KEY);\n\
+            CREATE TABLE sys_logs (id INT PRIMARY KEY);\n\
+        ";
+        let after = "\
+            CREATE TABLE app_users (id INT PRIMARY KEY, name VARCHAR(255));\n\
+            CREATE TABLE app_posts (id INT PRIMARY KEY);\n\
+        ";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            grouping: relune_core::GroupingSpec {
+                strategy: relune_core::GroupingStrategy::ByPrefix,
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(svg.contains("<svg"), "should produce valid SVG");
+        // Modified app_users → warning
+        assert!(
+            svg.contains("overlay-warning"),
+            "modified table should have warning overlay"
+        );
+        // Removed sys_logs → error
+        assert!(
+            svg.contains("overlay-error"),
+            "removed table should have error overlay"
+        );
+        // All tables should be present
+        assert!(svg.contains("app_users"), "app_users should appear");
+        assert!(svg.contains("sys_logs"), "removed table should appear");
+    }
+
+    #[test]
+    fn test_diff_svg_grouping_does_not_hide_removed_table() {
+        let before = "\
+            CREATE TABLE core_users (id INT PRIMARY KEY);\n\
+            CREATE TABLE core_sessions (id INT PRIMARY KEY);\n\
+        ";
+        let after = "CREATE TABLE core_users (id INT PRIMARY KEY);";
+
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            grouping: relune_core::GroupingSpec {
+                strategy: relune_core::GroupingStrategy::ByPrefix,
+            },
+            ..Default::default()
+        };
+        let result = diff(request).unwrap();
+
+        assert!(
+            !result.diff.removed_tables.is_empty(),
+            "should detect removal"
+        );
+        let svg = result.rendered.as_deref().expect("SVG output expected");
+        assert!(
+            svg.contains("core_sessions"),
+            "removed table must remain visible with grouping active"
+        );
+        assert!(
+            svg.contains("overlay-error"),
+            "removed table should have error overlay"
+        );
+    }
 }
