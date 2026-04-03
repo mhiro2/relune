@@ -1,6 +1,6 @@
 //! HTML document generation.
 //!
-//! Embedded viewer scripts are generated from TypeScript in `ts/` into `src/js/` by `build.rs` (`pnpm run build`; outputs are gitignored).
+//! Embedded viewer scripts are authored in `ts/` and committed as bundled assets in `src/js/`.
 
 use crate::options::{HtmlRenderOptions, Theme};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
