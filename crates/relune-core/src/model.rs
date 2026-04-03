@@ -135,6 +135,85 @@ impl Schema {
             Self::validate_table(table, self, &mut errors);
         }
 
+        // --- View validation ---
+        let mut seen_view_names: HashSet<String> = HashSet::new();
+        for view in &self.views {
+            if view.name.trim().is_empty() {
+                errors.push(ValidationError {
+                    table: None,
+                    message: "view has empty name".to_string(),
+                });
+                continue;
+            }
+
+            let key = {
+                let schema = view.schema_name.as_deref().unwrap_or("");
+                format!("{}.{}", schema.to_lowercase(), view.name.to_lowercase())
+            };
+            if !seen_view_names.insert(key) {
+                errors.push(ValidationError {
+                    table: Some(view.qualified_name()),
+                    message: "duplicate view name".to_string(),
+                });
+            }
+
+            let mut seen_col_names: HashSet<String> = HashSet::new();
+            for col in &view.columns {
+                if col.name.trim().is_empty() {
+                    errors.push(ValidationError {
+                        table: Some(view.name.clone()),
+                        message: "column has empty name".to_string(),
+                    });
+                    continue;
+                }
+                if !seen_col_names.insert(col.name.to_lowercase()) {
+                    errors.push(ValidationError {
+                        table: Some(view.qualified_name()),
+                        message: format!("duplicate column name '{}'", col.name),
+                    });
+                }
+                if col.data_type.trim().is_empty() {
+                    errors.push(ValidationError {
+                        table: Some(view.name.clone()),
+                        message: format!("column '{}' has empty data_type", col.name),
+                    });
+                }
+            }
+        }
+
+        // --- Enum validation ---
+        let mut seen_enum_names: HashSet<String> = HashSet::new();
+        for enum_ in &self.enums {
+            if enum_.name.trim().is_empty() {
+                errors.push(ValidationError {
+                    table: None,
+                    message: "enum has empty name".to_string(),
+                });
+                continue;
+            }
+
+            let key = {
+                let schema = enum_.schema_name.as_deref().unwrap_or("");
+                format!("{}.{}", schema.to_lowercase(), enum_.name.to_lowercase())
+            };
+            if !seen_enum_names.insert(key) {
+                errors.push(ValidationError {
+                    table: Some(enum_.qualified_name()),
+                    message: "duplicate enum name".to_string(),
+                });
+            }
+
+            let mut seen_values: HashSet<&str> = HashSet::new();
+            for val in &enum_.values {
+                if !seen_values.insert(val.as_str()) {
+                    errors.push(ValidationError {
+                        table: Some(enum_.qualified_name()),
+                        message: format!("duplicate enum value '{val}'"),
+                    });
+                }
+            }
+        }
+
         errors
     }
 
@@ -146,7 +225,17 @@ impl Schema {
             });
         }
 
-        let col_names: HashSet<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+        let mut col_name_set: HashSet<String> = HashSet::new();
+        for col in &table.columns {
+            let lower = col.name.to_lowercase();
+            if !col_name_set.insert(lower.clone()) {
+                errors.push(ValidationError {
+                    table: Some(table.name.clone()),
+                    message: format!("duplicate column name '{}'", col.name),
+                });
+            }
+        }
+        let col_names = col_name_set;
 
         for col in &table.columns {
             if col.name.trim().is_empty() {
@@ -190,9 +279,35 @@ impl Schema {
             });
         }
 
+        // from_columns must not contain internal duplicates (case-insensitive)
+        {
+            let mut seen: HashSet<String> = HashSet::new();
+            for col in &fk.from_columns {
+                if !seen.insert(col.to_lowercase()) {
+                    errors.push(ValidationError {
+                        table: Some(table.name.clone()),
+                        message: format!("FK from_columns contains duplicate '{col}'"),
+                    });
+                }
+            }
+        }
+
+        // to_columns must not contain internal duplicates (case-insensitive)
+        {
+            let mut seen: HashSet<String> = HashSet::new();
+            for col in &fk.to_columns {
+                if !seen.insert(col.to_lowercase()) {
+                    errors.push(ValidationError {
+                        table: Some(table.name.clone()),
+                        message: format!("FK to_columns contains duplicate '{col}'"),
+                    });
+                }
+            }
+        }
+
         // from_columns reference existing columns in source table
         for col in &fk.from_columns {
-            if !col_names.contains(col) {
+            if !col_names.contains(&col.to_lowercase()) {
                 errors.push(ValidationError {
                     table: Some(table.name.clone()),
                     message: format!("FK from_column '{col}' does not exist in table"),
@@ -808,5 +923,311 @@ mod tests {
         let errs = schema.validate();
         assert_eq!(errs.len(), 1);
         assert!(errs[0].message.contains("non-empty"));
+    }
+
+    // --- Duplicate column name within a table ---
+
+    #[test]
+    fn validate_table_duplicate_column_name_is_detected() {
+        let schema = Schema {
+            tables: vec![make_table("users", None, &["id", "name", "Name"], vec![])],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("duplicate column name 'Name'"));
+        assert_eq!(errs[0].table, Some("users".to_string()));
+    }
+
+    #[test]
+    fn validate_table_unique_column_names_is_ok() {
+        let schema = Schema {
+            tables: vec![make_table("users", None, &["id", "name", "email"], vec![])],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    // --- FK from_columns / to_columns internal duplicates ---
+
+    #[test]
+    fn validate_fk_from_columns_internal_duplicate() {
+        let schema = Schema {
+            tables: vec![
+                make_table("orders", None, &["id", "user_id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk(
+                        "orders",
+                        &["user_id", "user_id"],
+                        &["id", "user_id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert!(errs.iter().any(|e| {
+            e.message
+                .contains("FK from_columns contains duplicate 'user_id'")
+        }));
+    }
+
+    #[test]
+    fn validate_fk_to_columns_internal_duplicate() {
+        let schema = Schema {
+            tables: vec![
+                make_table("orders", None, &["id", "user_id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "user_id"],
+                    vec![make_fk("orders", &["id", "user_id"], &["id", "id"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert!(
+            errs.iter()
+                .any(|e| e.message.contains("FK to_columns contains duplicate 'id'"))
+        );
+    }
+
+    #[test]
+    fn validate_fk_from_columns_case_insensitive_duplicate() {
+        let schema = Schema {
+            tables: vec![
+                make_table("orders", None, &["id", "user_id"], vec![]),
+                make_table(
+                    "posts",
+                    None,
+                    &["id", "User_Id"],
+                    vec![make_fk(
+                        "orders",
+                        &["User_Id", "user_id"],
+                        &["id", "user_id"],
+                    )],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert!(
+            errs.iter()
+                .any(|e| e.message.contains("FK from_columns contains duplicate"))
+        );
+    }
+
+    // --- View validation ---
+
+    fn make_view(name: &str, schema: Option<&str>, cols: &[&str]) -> View {
+        View {
+            id: name.to_string(),
+            schema_name: schema.map(ToString::to_string),
+            name: name.to_string(),
+            columns: cols
+                .iter()
+                .enumerate()
+                .map(|(i, c)| Column {
+                    id: ColumnId(i as u64),
+                    name: (*c).to_string(),
+                    data_type: "text".to_string(),
+                    nullable: true,
+                    is_primary_key: false,
+                    comment: None,
+                })
+                .collect(),
+            definition: None,
+        }
+    }
+
+    #[test]
+    fn validate_view_duplicate_name_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![
+                make_view("active_users", Some("public"), &["id"]),
+                make_view("active_users", Some("public"), &["id"]),
+            ],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("duplicate view name"));
+        assert_eq!(errs[0].table, Some("public.active_users".to_string()));
+    }
+
+    #[test]
+    fn validate_view_same_name_different_schemas_is_ok() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![
+                make_view("active_users", Some("public"), &["id"]),
+                make_view("active_users", Some("auth"), &["id"]),
+            ],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_view_empty_name_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![make_view("", None, &[])],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].message, "view has empty name");
+        assert_eq!(errs[0].table, None);
+    }
+
+    #[test]
+    fn validate_view_duplicate_column_name_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![make_view("summary", None, &["id", "name", "Name"])],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("duplicate column name 'Name'"));
+        assert_eq!(errs[0].table, Some("summary".to_string()));
+    }
+
+    #[test]
+    fn validate_view_empty_column_name_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![View {
+                id: "v".to_string(),
+                schema_name: None,
+                name: "v".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(0),
+                    name: String::new(),
+                    data_type: "text".to_string(),
+                    nullable: true,
+                    is_primary_key: false,
+                    comment: None,
+                }],
+                definition: None,
+            }],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].message, "column has empty name");
+    }
+
+    #[test]
+    fn validate_view_empty_column_data_type_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![View {
+                id: "v".to_string(),
+                schema_name: None,
+                name: "v".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(0),
+                    name: "col".to_string(),
+                    data_type: String::new(),
+                    nullable: true,
+                    is_primary_key: false,
+                    comment: None,
+                }],
+                definition: None,
+            }],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("column 'col' has empty data_type"));
+    }
+
+    // --- Enum validation ---
+
+    fn make_enum(name: &str, schema: Option<&str>, values: &[&str]) -> Enum {
+        Enum {
+            id: name.to_string(),
+            schema_name: schema.map(ToString::to_string),
+            name: name.to_string(),
+            values: values.iter().map(|v| (*v).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn validate_enum_duplicate_name_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![
+                make_enum("status", Some("public"), &["active", "inactive"]),
+                make_enum("status", Some("public"), &["pending"]),
+            ],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("duplicate enum name"));
+        assert_eq!(errs[0].table, Some("public.status".to_string()));
+    }
+
+    #[test]
+    fn validate_enum_same_name_different_schemas_is_ok() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![
+                make_enum("status", Some("public"), &["active"]),
+                make_enum("status", Some("auth"), &["active"]),
+            ],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_enum_empty_name_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![make_enum("", None, &["val"])],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].message, "enum has empty name");
+        assert_eq!(errs[0].table, None);
+    }
+
+    #[test]
+    fn validate_enum_duplicate_value_is_detected() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![make_enum("status", None, &["active", "inactive", "active"])],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("duplicate enum value 'active'"));
+        assert_eq!(errs[0].table, Some("status".to_string()));
+    }
+
+    #[test]
+    fn validate_enum_duplicate_value_is_case_sensitive() {
+        // "Active" and "active" are different enum values - should not trigger duplicate
+        let schema = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![make_enum("status", None, &["active", "Active"])],
+        };
+        assert!(schema.validate().is_empty());
     }
 }
