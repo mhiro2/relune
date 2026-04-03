@@ -801,6 +801,7 @@ mod tests {
             table: None,
             summary: false,
             format: Some(InspectFormat::Json),
+            out: None,
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -1022,6 +1023,7 @@ mod tests {
             db_url: None,
             schema_json: None,
             format: None,
+            out: None,
             rules: vec![],
             deny: None, // Not specified - should use config
             dialect: crate::cli::DialectArg::Auto,
@@ -1048,6 +1050,7 @@ mod tests {
             dialect: None,
             format: None,
             out: None,
+            stdout: false,
         };
 
         let merged = config.merge_diff_args(&args);
@@ -1071,6 +1074,7 @@ mod tests {
             dialect: Some(DialectArg::Sqlite),
             format: Some(DiffFormat::Json),
             out: None,
+            stdout: false,
         };
 
         let merged = config.merge_diff_args(&args);

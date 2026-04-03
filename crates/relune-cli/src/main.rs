@@ -60,13 +60,13 @@ fn run_command(cli: Cli) -> CliResult<()> {
             run_render(&args, cli.color, cli.quiet, &config)?;
         }
         Command::Inspect(args) => {
-            run_inspect(&args, cli.color, &config)?;
+            run_inspect(&args, cli.color, cli.quiet, &config)?;
         }
         Command::Export(args) => {
             run_export(&args, cli.color, cli.quiet, &config)?;
         }
         Command::Lint(args) => {
-            run_lint(&args, cli.color, &config)?;
+            run_lint(&args, cli.color, cli.quiet, &config)?;
         }
         Command::Diff(args) => {
             run_diff(&args, cli.color, cli.quiet, &config)?;

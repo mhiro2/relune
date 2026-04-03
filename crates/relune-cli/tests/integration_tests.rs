@@ -4,10 +4,14 @@
 //! testing render, inspect, and export commands with real fixtures.
 
 use std::fs;
+#[cfg(unix)]
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::Output;
 
 use assert_cmd::Command;
+#[cfg(unix)]
+use portable_pty::{CommandBuilder as PtyCommandBuilder, PtySize, native_pty_system};
 use predicates::prelude::*;
 use relune_testkit::{
     compact_layout_snapshot, config_fixture_path, normalize_workspace_paths, parse_layout_json,
@@ -46,6 +50,51 @@ fn failure_snapshot(name: &str, output: &Output) {
     let exit_code = output.status.code().unwrap_or(-1);
 
     insta::assert_snapshot!(name, format!("exit_code: {exit_code}\nstderr:\n{stderr}"));
+}
+
+#[cfg(unix)]
+fn relune_in_terminal(args: &[String]) -> (u32, String) {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("Failed to create PTY");
+
+    let mut command = PtyCommandBuilder::new(assert_cmd::cargo::cargo_bin("relune"));
+    for arg in args {
+        command.arg(arg);
+    }
+
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .expect("Failed to spawn relune in PTY");
+    drop(pair.slave);
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .expect("Failed to clone PTY reader");
+    let reader_thread = std::thread::spawn(move || {
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
+            .expect("Failed to read PTY output");
+        output
+    });
+
+    let status = child.wait().expect("Failed to wait for relune");
+    drop(pair.master);
+
+    let output = reader_thread.join().expect("PTY reader thread should join");
+    (
+        status.exit_code(),
+        String::from_utf8_lossy(&output).into_owned(),
+    )
 }
 
 // ============================================================================
@@ -705,6 +754,62 @@ mod inspect_tests {
     }
 
     #[test]
+    fn inspect_writes_to_output_file() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("inspect.json");
+
+        let output = relune()
+            .arg("inspect")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "inspect should succeed");
+        assert!(
+            output.stdout.is_empty(),
+            "inspect should not write to stdout when --out is used"
+        );
+
+        let content = fs::read_to_string(&output_path).expect("Failed to read inspect output");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("Output file should contain valid JSON");
+        assert!(parsed.is_object(), "Inspect JSON should be an object");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Inspection output written to"),
+            "inspect should report file output on stderr"
+        );
+    }
+
+    #[test]
+    fn inspect_quiet_suppresses_output_file_notice() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("inspect.json");
+
+        let output = relune()
+            .arg("--quiet")
+            .arg("inspect")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "inspect should succeed");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Inspection output written to"),
+            "inspect should suppress file output notice when quiet"
+        );
+    }
+
+    #[test]
     fn inspect_uses_config_format() {
         let mut cmd = relune();
         let output = cmd
@@ -741,6 +846,62 @@ mod inspect_tests {
 
 mod lint_tests {
     use super::*;
+
+    #[test]
+    fn lint_writes_to_output_file() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("lint.json");
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "lint should succeed");
+        assert!(
+            output.stdout.is_empty(),
+            "lint should not write to stdout when --out is used"
+        );
+
+        let content = fs::read_to_string(&output_path).expect("Failed to read lint output");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("Output file should contain valid JSON");
+        assert!(parsed.is_object(), "Lint JSON should be an object");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Lint report written to"),
+            "lint should report file output on stderr"
+        );
+    }
+
+    #[test]
+    fn lint_quiet_suppresses_output_file_notice() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("lint.json");
+
+        let output = relune()
+            .arg("--quiet")
+            .arg("lint")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "lint should succeed");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Lint report written to"),
+            "lint should suppress file output notice when quiet"
+        );
+    }
 
     #[test]
     fn lint_uses_config_format() {
@@ -998,6 +1159,23 @@ mod multi_format_tests {
 mod diff_tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn diff_terminal_args(format: &str, explicit_stdout: bool) -> Vec<String> {
+        let mut args = vec![
+            "diff".to_string(),
+            "--before".to_string(),
+            simple_blog_fixture().display().to_string(),
+            "--after".to_string(),
+            ecommerce_fixture().display().to_string(),
+            "--format".to_string(),
+            format.to_string(),
+        ];
+        if explicit_stdout {
+            args.push("--stdout".to_string());
+        }
+        args
+    }
+
     #[test]
     fn diff_no_changes() {
         let mut cmd = relune();
@@ -1227,22 +1405,27 @@ mod diff_tests {
         fs::write(&before_path, "CREATE TABLE users (id INT PRIMARY KEY);").unwrap();
         fs::write(&after_path, "CREATE TABLE posts (id INT PRIMARY KEY);").unwrap();
 
-        let mut cmd = relune();
-        cmd.arg("diff")
+        let output = relune()
+            .arg("diff")
             .arg("--before")
             .arg(&before_path)
             .arg("--after")
             .arg(&after_path)
             .arg("--out")
             .arg(&output_path)
-            .assert()
-            .success();
+            .output()
+            .expect("command should run");
 
+        assert!(output.status.success(), "diff should succeed");
         assert!(output_path.exists(), "Output file should be created");
         let content = fs::read_to_string(&output_path).expect("Failed to read output file");
         assert!(
             content.contains("users") || content.contains("posts"),
             "Output should mention tables"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Diff report written to"),
+            "diff should report file output on stderr"
         );
     }
 
@@ -1264,5 +1447,61 @@ mod diff_tests {
             .arg(simple_blog_fixture())
             .assert()
             .failure();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_svg_to_interactive_stdout_requires_explicit_opt_in() {
+        let (exit_code, output) = relune_in_terminal(&diff_terminal_args("svg", false));
+
+        assert_eq!(exit_code, 2, "usage errors should exit with code 2");
+        assert!(
+            output.contains("Use --out <FILE> or --stdout"),
+            "unexpected PTY output: {output}"
+        );
+        assert!(
+            !output.contains("<svg"),
+            "raw SVG should not be emitted to an interactive terminal"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_html_to_interactive_stdout_requires_explicit_opt_in() {
+        let (exit_code, output) = relune_in_terminal(&diff_terminal_args("html", false));
+
+        assert_eq!(exit_code, 2, "usage errors should exit with code 2");
+        assert!(
+            output.contains("Use --out <FILE> or --stdout"),
+            "unexpected PTY output: {output}"
+        );
+        assert!(
+            !output.contains("<!DOCTYPE html>") && !output.contains("<html"),
+            "raw HTML should not be emitted to an interactive terminal"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_svg_to_interactive_stdout_with_explicit_opt_in_succeeds() {
+        let (exit_code, output) = relune_in_terminal(&diff_terminal_args("svg", true));
+
+        assert_eq!(exit_code, 0, "explicit stdout should succeed");
+        assert!(
+            output.contains("<svg"),
+            "explicit stdout should emit SVG markup"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_html_to_interactive_stdout_with_explicit_opt_in_succeeds() {
+        let (exit_code, output) = relune_in_terminal(&diff_terminal_args("html", true));
+
+        assert_eq!(exit_code, 0, "explicit stdout should succeed");
+        assert!(
+            output.contains("<!DOCTYPE html>") || output.contains("<html"),
+            "explicit stdout should emit HTML markup"
+        );
     }
 }

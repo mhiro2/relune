@@ -115,6 +115,7 @@ Show schema summary or table details.
 relune inspect --sql schema.sql
 relune inspect --sql schema.sql --table orders
 relune inspect --sql schema.sql --table orders --format json
+relune inspect --sql schema.sql --table orders --format json -o inspect.json
 relune inspect --db-url 'postgres://user:pass@localhost:5432/mydb'
 ```
 
@@ -123,6 +124,7 @@ relune inspect --db-url 'postgres://user:pass@localhost:5432/mydb'
 | `--table` | Table name for detail view | -- (shows summary) |
 | `--summary` | Force summary mode | -- |
 | `--format` | `text`, `json` | `text` |
+| `-o`, `--out` | Output file path | stdout |
 
 ### export
 
@@ -156,6 +158,7 @@ Detect structural issues and anti-patterns. Note: `--sql-text` is not available 
 ```bash
 relune lint --sql schema.sql
 relune lint --sql schema.sql --format json
+relune lint --sql schema.sql --format json -o lint.json
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
 relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
@@ -164,6 +167,7 @@ relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 | Option | Values | Default |
 |--------|--------|---------|
 | `--format` | `text`, `json` | `text` |
+| `-o`, `--out` | Output file path | stdout |
 | `--rules` | Repeatable; run only these rules (kebab-case IDs) | all rules |
 | `--deny` | `error`, `warning`, `info`, `hint` -- min severity for non-zero exit | -- |
 
@@ -178,6 +182,7 @@ relune diff --before old.sql --after new.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
 relune diff --before old.sql --after new.sql --format html -o diff.html
 relune diff --before old.sql --after new.sql --format svg -o diff.svg
+relune diff --before old.sql --after new.sql --format html --stdout > diff.html
 relune diff \
   --before-sql-text 'CREATE TABLE users (id INT PRIMARY KEY);' \
   --after-sql-text 'CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);'
@@ -192,7 +197,8 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | Option | Values | Default |
 |--------|--------|---------|
 | `-f`, `--format` | `text`, `json`, `svg`, `html` | `text` |
-| `-o`, `--out` | Output file path | stdout |
+| `-o`, `--out` | Output file path | stdout (`svg`/`html` on terminals require `--stdout`) |
+| `--stdout` | Allow raw `svg`/`html` on interactive stdout | off |
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
@@ -276,7 +282,7 @@ Merge order: built-in defaults -> config file -> CLI arguments.
 
 ### Terminal requires --stdout
 
-When rendering SVG or HTML without `-o`, interactive terminals require `--stdout` to emit raw output. Use `-o` to write to a file instead.
+When rendering or diffing as SVG or HTML without `-o`, interactive terminals require `--stdout` to emit raw output. Use `-o` to write to a file instead.
 
 ### Input too large
 

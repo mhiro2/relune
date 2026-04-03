@@ -63,5 +63,8 @@ Options:
           - text: Human-readable text output
           - json: JSON output
 
+  -o, --out <FILE>
+          Output file path; stdout if omitted
+
   -h, --help
           Print help (see a summary with '-h')

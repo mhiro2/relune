@@ -355,6 +355,10 @@ pub struct InspectArgs {
     /// Output format. Defaults to `text` after config merge.
     #[arg(long = "format", value_enum)]
     pub format: Option<InspectFormat>,
+
+    /// Output file path; stdout if omitted.
+    #[arg(short = 'o', long = "out", value_name = "FILE")]
+    pub out: Option<PathBuf>,
 }
 
 /// Output format for inspect command.
@@ -502,6 +506,10 @@ pub struct LintArgs {
     #[arg(long = "format", value_enum)]
     pub format: Option<LintFormat>,
 
+    /// Output file path; stdout if omitted.
+    #[arg(short = 'o', long = "out", value_name = "FILE")]
+    pub out: Option<PathBuf>,
+
     /// Restrict execution to specific rules (can be repeated).
     #[arg(long = "rules", value_name = "RULE")]
     pub rules: Vec<String>,
@@ -601,6 +609,10 @@ pub struct DiffArgs {
     /// Output file path; stdout if omitted.
     #[arg(short = 'o', long = "out", value_name = "FILE")]
     pub out: Option<PathBuf>,
+
+    /// Allow raw SVG/HTML output on stdout even when stdout is a terminal.
+    #[arg(long = "stdout", conflicts_with = "out")]
+    pub stdout: bool,
 }
 
 /// Output format for diff command.

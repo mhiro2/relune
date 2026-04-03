@@ -7,6 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cli::ColorWhen;
+use crate::error::{CliError, CliResult};
 use relune_core::{Diagnostic, Severity};
 
 /// Output writer that handles both file and stdout output.
@@ -226,6 +227,37 @@ pub fn write_output(
         OutputWriter::new(out_path, color).context("Failed to create output writer")?;
     writer.write(content).context("Failed to write output")?;
     writer.finish().context("Failed to finalize output")?;
+    Ok(())
+}
+
+/// Reject raw markup output to an interactive terminal unless explicitly allowed.
+pub fn validate_markup_stdout_usage(
+    markup_label: &str,
+    has_output_path: bool,
+    explicit_stdout: bool,
+    stdout_is_terminal: bool,
+) -> CliResult<()> {
+    if !has_output_path && !explicit_stdout && stdout_is_terminal {
+        return Err(CliError::usage(anyhow::anyhow!(
+            "Refusing to write raw {markup_label} to an interactive terminal. Use --out <FILE> or --stdout."
+        )));
+    }
+
+    Ok(())
+}
+
+/// Reject binary output to an interactive terminal.
+pub fn validate_binary_stdout_usage(
+    format_label: &str,
+    has_output_path: bool,
+    stdout_is_terminal: bool,
+) -> CliResult<()> {
+    if !has_output_path && stdout_is_terminal {
+        return Err(CliError::usage(anyhow::anyhow!(
+            "Refusing to write binary {format_label} data to an interactive terminal. Use --out <FILE>."
+        )));
+    }
+
     Ok(())
 }
 
