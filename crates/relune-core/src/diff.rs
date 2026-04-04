@@ -187,6 +187,14 @@ impl ColumnDiff {
 }
 
 fn diff_columns(old_columns: &[Column], new_columns: &[Column]) -> Vec<ColumnDiff> {
+    diff_columns_with(old_columns, new_columns, columns_differ)
+}
+
+fn diff_columns_with(
+    old_columns: &[Column],
+    new_columns: &[Column],
+    differs: impl Fn(&Column, &Column) -> bool,
+) -> Vec<ColumnDiff> {
     let old_map: HashMap<&str, &Column> =
         old_columns.iter().map(|c| (c.name.as_str(), c)).collect();
     let new_map: HashMap<&str, &Column> =
@@ -208,7 +216,7 @@ fn diff_columns(old_columns: &[Column], new_columns: &[Column]) -> Vec<ColumnDif
     for name in old_names.intersection(&new_names) {
         let old_col = old_map[name];
         let new_col = new_map[name];
-        if columns_differ(old_col, new_col) {
+        if differs(old_col, new_col) {
             diffs.push(ColumnDiff::modified(old_col, new_col));
         }
     }
@@ -218,6 +226,22 @@ fn diff_columns(old_columns: &[Column], new_columns: &[Column]) -> Vec<ColumnDif
 
 fn columns_differ(a: &Column, b: &Column) -> bool {
     a.data_type != b.data_type || a.nullable != b.nullable || a.is_primary_key != b.is_primary_key
+}
+
+fn view_columns_differ(a: &Column, b: &Column) -> bool {
+    matches!(
+        (known_view_data_type(a), known_view_data_type(b)),
+        (Some(left), Some(right)) if left != right
+    )
+}
+
+fn known_view_data_type(column: &Column) -> Option<&str> {
+    let data_type = column.data_type.trim();
+    if data_type.eq_ignore_ascii_case("unknown") || data_type.is_empty() {
+        None
+    } else {
+        Some(data_type)
+    }
 }
 
 /// Diff for a single foreign key between two schemas.
@@ -582,7 +606,8 @@ impl ViewDiff {
     /// Creates a new view diff for a modified view.
     #[must_use]
     pub fn modified(old_view: &View, new_view: &View) -> Self {
-        let column_diffs = diff_columns(&old_view.columns, &new_view.columns);
+        let column_diffs =
+            diff_columns_with(&old_view.columns, &new_view.columns, view_columns_differ);
         let definition_changed = old_view.definition != new_view.definition;
         let (old_definition, new_definition) = if definition_changed {
             (old_view.definition.clone(), new_view.definition.clone())
@@ -1420,6 +1445,80 @@ mod tests {
         assert_eq!(diff.summary.views_modified, 1);
         assert_eq!(diff.summary.view_columns_changed, 1);
         assert_eq!(diff.summary.view_definitions_changed, 1);
+    }
+
+    #[test]
+    fn test_modified_view_ignores_unknown_column_metadata_from_sql_parser() {
+        let before = Schema {
+            tables: vec![],
+            views: vec![create_test_view(
+                "active_users",
+                vec![("id", "unknown"), ("email", "unknown")],
+                Some("SELECT id, email FROM users"),
+            )],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![],
+            views: vec![View {
+                id: "active_users".to_string(),
+                schema_name: None,
+                name: "active_users".to_string(),
+                columns: vec![
+                    Column {
+                        id: ColumnId(0),
+                        name: "id".to_string(),
+                        data_type: "integer".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    },
+                    Column {
+                        id: ColumnId(1),
+                        name: "email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    },
+                ],
+                definition: Some("SELECT id, email FROM users".to_string()),
+            }],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert!(diff.modified_views.is_empty());
+        assert_eq!(diff.summary.view_columns_changed, 0);
+    }
+
+    #[test]
+    fn test_modified_view_still_tracks_known_column_type_changes() {
+        let before = Schema {
+            tables: vec![],
+            views: vec![create_test_view(
+                "active_users",
+                vec![("id", "integer")],
+                Some("SELECT id FROM users"),
+            )],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![],
+            views: vec![create_test_view(
+                "active_users",
+                vec![("id", "bigint")],
+                Some("SELECT id FROM users"),
+            )],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert_eq!(diff.modified_views.len(), 1);
+        assert_eq!(diff.modified_views[0].column_diffs.len(), 1);
+        assert_eq!(diff.summary.view_columns_changed, 1);
     }
 
     #[test]
