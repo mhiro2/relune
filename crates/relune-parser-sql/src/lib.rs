@@ -436,6 +436,105 @@ fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
     }
 }
 
+fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> {
+    let start = data_type.find('(')?;
+    let end = data_type.rfind(')')?;
+    let kind = data_type[..start].trim();
+    if !kind.eq_ignore_ascii_case("enum") && !kind.eq_ignore_ascii_case("set") {
+        return None;
+    }
+
+    let mut values = Vec::new();
+    let mut chars = data_type[start + 1..end].chars().peekable();
+
+    while chars.peek().is_some() {
+        while chars.peek().is_some_and(char::is_ascii_whitespace) {
+            chars.next();
+        }
+
+        if chars.next()? != '\'' {
+            return None;
+        }
+
+        let mut value = String::new();
+        loop {
+            match chars.next()? {
+                '\'' => {
+                    if chars.peek() == Some(&'\'') {
+                        value.push('\'');
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                '\\' => value.push(chars.next()?),
+                c => value.push(c),
+            }
+        }
+        values.push(value);
+
+        while chars.peek().is_some_and(char::is_ascii_whitespace) {
+            chars.next();
+        }
+
+        match chars.peek() {
+            Some(',') => {
+                chars.next();
+            }
+            None => break,
+            _ => return None,
+        }
+    }
+
+    Some((kind.to_ascii_lowercase(), values))
+}
+
+fn canonicalize_mysql_enum_like_type(data_type: &str) -> Option<String> {
+    let (kind, values) = parse_mysql_enum_like_type(data_type)?;
+    let serialized_values = values
+        .into_iter()
+        .map(|value| {
+            let escaped = value.replace('\\', "\\\\").replace('\'', "''");
+            format!("'{escaped}'")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("{kind}({serialized_values})"))
+}
+
+fn infer_mysql_enums(tables: &[Table]) -> Vec<Enum> {
+    let mut enums = Vec::new();
+    let mut seen = HashSet::new();
+
+    for table in tables {
+        for column in &table.columns {
+            let Some(enum_name) = canonicalize_mysql_enum_like_type(&column.data_type) else {
+                continue;
+            };
+            let key = format!(
+                "{}:{}",
+                table.schema_name.as_deref().unwrap_or_default(),
+                enum_name
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+
+            let Some((_, values)) = parse_mysql_enum_like_type(&enum_name) else {
+                continue;
+            };
+            enums.push(Enum {
+                id: normalized_stable_id(table.schema_name.as_deref(), &enum_name),
+                schema_name: table.schema_name.clone(),
+                name: enum_name,
+                values,
+            });
+        }
+    }
+
+    enums
+}
+
 fn split_object_name_parts(name: &ObjectName) -> Vec<String> {
     name.0.iter().map(object_name_part_to_string).collect()
 }
@@ -775,6 +874,16 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                     &truncated,
                     source_span_from_sql_span(input, statement.span()),
                 );
+            }
+        }
+    }
+
+    if ctx.dialect == SqlDialect::Mysql {
+        let mut seen_enum_ids: HashSet<String> =
+            enums.iter().map(|enum_| enum_.id.clone()).collect();
+        for enum_ in infer_mysql_enums(&tables) {
+            if seen_enum_ids.insert(enum_.id.clone()) {
+                enums.push(enum_);
             }
         }
     }
@@ -1340,9 +1449,11 @@ fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedCo
     }
 
     let column_name = normalize_identifier(&column.name.value);
+    let data_type = canonicalize_mysql_enum_like_type(&column.data_type.to_string())
+        .unwrap_or_else(|| column.data_type.to_string());
     ParsedColumn {
         name: column_name,
-        data_type: column.data_type.to_string(),
+        data_type,
         nullable,
         is_primary_key,
     }
@@ -2660,6 +2771,66 @@ mod tests {
         assert_eq!(posts.foreign_keys.len(), 1);
         assert_eq!(posts.foreign_keys[0].to_table, "users");
         assert_eq!(posts.foreign_keys[0].on_delete, ReferentialAction::Cascade);
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_and_set_types_into_schema_enums() {
+        let sql = r"
+            CREATE TABLE `users` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT,
+                `status` ENUM('draft', 'published') NOT NULL,
+                `flags` SET('featured', 'archived') NULL,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB;
+        ";
+        let schema =
+            parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+
+        assert_eq!(schema.enums.len(), 2);
+        assert_eq!(
+            schema.tables[0].columns[1].data_type,
+            "enum('draft','published')"
+        );
+        assert_eq!(
+            schema.tables[0].columns[2].data_type,
+            "set('featured','archived')"
+        );
+
+        let status_enum = schema
+            .enums
+            .iter()
+            .find(|enum_| enum_.name == "enum('draft','published')")
+            .expect("status enum should be inferred");
+        assert_eq!(status_enum.values, vec!["draft", "published"]);
+
+        let flags_enum = schema
+            .enums
+            .iter()
+            .find(|enum_| enum_.name == "set('featured','archived')")
+            .expect("flags set should be inferred");
+        assert_eq!(flags_enum.values, vec!["featured", "archived"]);
+    }
+
+    #[test]
+    fn test_parse_mysql_deduplicates_identical_enum_definitions_per_schema() {
+        let sql = r"
+            CREATE TABLE `users` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT,
+                `status` ENUM('draft', 'published') NOT NULL,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB;
+
+            CREATE TABLE `posts` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT,
+                `status` ENUM('draft', 'published') NOT NULL,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB;
+        ";
+        let schema =
+            parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+
+        assert_eq!(schema.enums.len(), 1);
+        assert_eq!(schema.enums[0].name, "enum('draft','published')");
     }
 
     #[test]

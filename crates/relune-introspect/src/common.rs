@@ -33,9 +33,9 @@ pub struct RawTable {
 /// Raw column metadata from a database catalog.
 #[derive(Debug, Clone)]
 pub struct RawColumn {
-    /// Name of the table containing the column.
+    /// Name of the relation containing the column.
     pub table_name: String,
-    /// Schema name containing the table.
+    /// Schema name containing the relation.
     pub schema_name: String,
     /// Name of the column.
     pub column_name: String,
@@ -217,10 +217,10 @@ pub fn map_schema(
         })
         .collect();
 
-    // Group columns by table
-    let mut columns_by_table: HashMap<(&str, &str), Vec<&RawColumn>> = HashMap::new();
+    // Group columns by relation name
+    let mut columns_by_relation: HashMap<(&str, &str), Vec<&RawColumn>> = HashMap::new();
     for col in columns {
-        columns_by_table
+        columns_by_relation
             .entry((col.schema_name.as_str(), col.table_name.as_str()))
             .or_default()
             .push(col);
@@ -252,7 +252,7 @@ pub fn map_schema(
                 raw_table.schema_name.as_str(),
                 raw_table.table_name.as_str(),
             );
-            let table_columns = columns_by_table.get(&key).cloned().unwrap_or_default();
+            let table_columns = columns_by_relation.get(&key).cloned().unwrap_or_default();
             let table_fks = fks_by_table.get(&key).cloned().unwrap_or_default();
             let table_indexes = indexes_by_table.get(&key).cloned().unwrap_or_default();
 
@@ -261,7 +261,15 @@ pub fn map_schema(
         .collect();
 
     // Map views
-    let mapped_views: Vec<View> = views.into_iter().map(map_view).collect();
+    let mapped_views: Vec<View> = views
+        .into_iter()
+        .map(|raw_view| {
+            let key = (raw_view.schema_name.as_str(), raw_view.view_name.as_str());
+            let view_columns = columns_by_relation.get(&key).cloned().unwrap_or_default();
+
+            map_view(raw_view, view_columns)
+        })
+        .collect();
 
     // Map enums
     let mapped_enums: Vec<Enum> = enums.into_iter().map(map_enum).collect();
@@ -346,14 +354,18 @@ fn map_index(raw_index: &RawIndex) -> Index {
     }
 }
 
-fn map_view(raw_view: RawView) -> View {
+fn map_view(raw_view: RawView, columns: Vec<&RawColumn>) -> View {
     let id = format!("{}.{}", raw_view.schema_name, raw_view.view_name);
+    let mapped_columns = columns
+        .into_iter()
+        .map(|column| map_column(column, &id, false))
+        .collect();
 
     View {
         id,
         schema_name: Some(raw_view.schema_name),
         name: raw_view.view_name,
-        columns: Vec::new(),
+        columns: mapped_columns,
         definition: raw_view.definition,
     }
 }
@@ -366,5 +378,71 @@ fn map_enum(raw_enum: RawEnum) -> Enum {
         schema_name: Some(raw_enum.schema_name),
         name: raw_enum.enum_name,
         values: raw_enum.values,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_schema_populates_view_columns() {
+        let schema = map_schema(
+            vec![RawTable {
+                table_name: "users".to_string(),
+                schema_name: "public".to_string(),
+                table_comment: None,
+            }],
+            &[
+                RawColumn {
+                    table_name: "users".to_string(),
+                    schema_name: "public".to_string(),
+                    column_name: "id".to_string(),
+                    data_type: "integer".to_string(),
+                    is_nullable: false,
+                    is_primary_key: true,
+                    column_comment: None,
+                    ordinal_position: 1,
+                },
+                RawColumn {
+                    table_name: "active_users".to_string(),
+                    schema_name: "public".to_string(),
+                    column_name: "id".to_string(),
+                    data_type: "integer".to_string(),
+                    is_nullable: false,
+                    is_primary_key: false,
+                    column_comment: None,
+                    ordinal_position: 1,
+                },
+                RawColumn {
+                    table_name: "active_users".to_string(),
+                    schema_name: "public".to_string(),
+                    column_name: "email".to_string(),
+                    data_type: "text".to_string(),
+                    is_nullable: false,
+                    is_primary_key: false,
+                    column_comment: None,
+                    ordinal_position: 2,
+                },
+            ],
+            &[],
+            &[],
+            vec![RawView {
+                view_name: "active_users".to_string(),
+                schema_name: "public".to_string(),
+                definition: Some("SELECT id, email FROM users".to_string()),
+                view_comment: None,
+            }],
+            vec![],
+        )
+        .expect("schema mapping should succeed");
+
+        let view = schema.views.first().expect("view should be mapped");
+        assert_eq!(view.columns.len(), 2);
+        assert_eq!(view.columns[0].name, "id");
+        assert_eq!(view.columns[1].name, "email");
+
+        let table = schema.tables.first().expect("table should be mapped");
+        assert!(table.columns[0].is_primary_key);
     }
 }

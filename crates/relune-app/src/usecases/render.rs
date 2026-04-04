@@ -77,7 +77,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     ) {
         let _span = info_span!("layout").entered();
         Some(build_layout_from_graph_with_config(
-            graph.clone().expect("visual outputs require a graph"),
+            graph.as_ref().expect("visual outputs require a graph"),
             &layout_config,
         )?)
     } else {

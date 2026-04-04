@@ -20,6 +20,48 @@ pub struct PostgresCatalog {
 }
 
 const PARALLEL_CATALOG_QUERIES: u32 = 6;
+const FETCH_COLUMNS_QUERY: &str = r"
+            SELECT
+                t.relname AS table_name,
+                n.nspname AS schema_name,
+                a.attname AS column_name,
+                pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+                CASE WHEN a.attnotnull THEN false ELSE true END AS is_nullable,
+                COALESCE(pk.is_pk, false) AS is_primary_key,
+                pg_catalog.col_description(a.attrelid, a.attnum) AS column_comment,
+                a.attnum AS ordinal_position
+            FROM pg_catalog.pg_attribute a
+            INNER JOIN pg_catalog.pg_class t ON t.oid = a.attrelid
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            LEFT JOIN (
+                SELECT
+                    i.indrelid,
+                    a.attnum,
+                    true AS is_pk
+                FROM pg_catalog.pg_index i
+                INNER JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                WHERE i.indisprimary
+            ) pk ON pk.indrelid = a.attrelid AND pk.attnum = a.attnum
+            WHERE a.attnum > 0
+                AND NOT a.attisdropped
+                AND t.relkind IN ('r', 'v', 'm')
+                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                AND n.nspname NOT LIKE 'pg_%'
+            ORDER BY n.nspname, t.relname, a.attnum
+            ";
+const FETCH_VIEWS_QUERY: &str = r"
+            SELECT
+                c.relname AS view_name,
+                n.nspname AS schema_name,
+                pg_catalog.pg_get_viewdef(c.oid, true) AS definition,
+                pg_catalog.obj_description(c.oid, 'pg_class') AS view_comment
+            FROM pg_catalog.pg_class c
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind IN ('v', 'm')
+                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                AND n.nspname NOT LIKE 'pg_%'
+            ORDER BY n.nspname, c.relname
+            ";
 
 impl PostgresCatalog {
     /// Create a new `PostgreSQL` catalog reader.
@@ -61,40 +103,10 @@ impl PostgresCatalog {
 
     /// Fetch all columns from the database, excluding system schemas.
     pub async fn fetch_columns(&self) -> Result<Vec<RawColumn>, IntrospectError> {
-        let rows: Vec<RawColumnRow> = sqlx::query_as(
-            r"
-            SELECT
-                t.relname AS table_name,
-                n.nspname AS schema_name,
-                a.attname AS column_name,
-                pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
-                CASE WHEN a.attnotnull THEN false ELSE true END AS is_nullable,
-                COALESCE(pk.is_pk, false) AS is_primary_key,
-                pg_catalog.col_description(a.attrelid, a.attnum) AS column_comment,
-                a.attnum AS ordinal_position
-            FROM pg_catalog.pg_attribute a
-            INNER JOIN pg_catalog.pg_class t ON t.oid = a.attrelid
-            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-            LEFT JOIN (
-                SELECT
-                    i.indrelid,
-                    a.attnum,
-                    true AS is_pk
-                FROM pg_catalog.pg_index i
-                INNER JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                WHERE i.indisprimary
-            ) pk ON pk.indrelid = a.attrelid AND pk.attnum = a.attnum
-            WHERE a.attnum > 0
-                AND NOT a.attisdropped
-                AND t.relkind = 'r'
-                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                AND n.nspname NOT LIKE 'pg_%'
-            ORDER BY n.nspname, t.relname, a.attnum
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch columns: {e}")))?;
+        let rows: Vec<RawColumnRow> = sqlx::query_as(FETCH_COLUMNS_QUERY)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| IntrospectError::query(format!("Failed to fetch columns: {e}")))?;
 
         Ok(rows
             .into_iter()
@@ -247,24 +259,10 @@ impl PostgresCatalog {
 
     /// Fetch all views from the database.
     pub async fn fetch_views(&self) -> Result<Vec<RawView>, IntrospectError> {
-        let rows: Vec<RawViewRow> = sqlx::query_as(
-            r"
-            SELECT
-                c.relname AS view_name,
-                n.nspname AS schema_name,
-                pg_catalog.pg_get_viewdef(c.oid, true) AS definition,
-                pg_catalog.obj_description(c.oid, 'pg_class') AS view_comment
-            FROM pg_catalog.pg_class c
-            INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.relkind = 'v'
-                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                AND n.nspname NOT LIKE 'pg_%'
-            ORDER BY n.nspname, c.relname
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch views: {e}")))?;
+        let rows: Vec<RawViewRow> = sqlx::query_as(FETCH_VIEWS_QUERY)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| IntrospectError::query(format!("Failed to fetch views: {e}")))?;
 
         Ok(rows
             .into_iter()
@@ -508,5 +506,15 @@ mod tests {
     #[test]
     fn test_pool_max_connections_matches_parallel_queries() {
         assert_eq!(pool_max_connections(), PARALLEL_CATALOG_QUERIES);
+    }
+
+    #[test]
+    fn fetch_columns_query_includes_views() {
+        assert!(FETCH_COLUMNS_QUERY.contains("t.relkind IN ('r', 'v', 'm')"));
+    }
+
+    #[test]
+    fn fetch_views_query_includes_materialized_views() {
+        assert!(FETCH_VIEWS_QUERY.contains("c.relkind IN ('v', 'm')"));
     }
 }

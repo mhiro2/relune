@@ -504,12 +504,12 @@ pub fn build_layout_with_config(
         debug!("Applied focus, resulting in {} nodes", graph.nodes.len());
     }
 
-    build_layout_from_graph_with_config(graph, config)
+    build_layout_from_graph_with_config(&graph, config)
 }
 
 /// Build a positioned layout from a precomputed graph.
 pub fn build_layout_from_graph_with_config(
-    mut graph: LayoutGraph,
+    graph: &LayoutGraph,
     config: &LayoutConfig,
 ) -> Result<PositionedGraph, LayoutError> {
     // Step 2a: Auto-tune spacing based on graph density before compaction.
@@ -541,34 +541,37 @@ pub fn build_layout_from_graph_with_config(
         tuned_config
     };
 
-    // Step 2c: If compact mode hides columns, strip them from graph nodes
-    if compacted.hide_columns {
-        for node in &mut graph.nodes {
+    // Step 2c: If compact mode hides columns, strip them from a temporary graph copy.
+    let compacted_graph = compacted.hide_columns.then(|| {
+        let mut compacted_graph = graph.clone();
+        for node in &mut compacted_graph.nodes {
             node.columns.clear();
         }
-    }
+        compacted_graph
+    });
+    let graph = compacted_graph.as_ref().unwrap_or(graph);
 
     // Step 3: Assign coordinates based on layout mode
-    let node_sizes = measure_node_sizes(&graph, &effective_config);
+    let node_sizes = measure_node_sizes(graph, &effective_config);
     let mut node_ranks = None;
     let (positioned_nodes, width, height) = match effective_config.mode {
         LayoutAlgorithm::Hierarchical => {
             // Hierarchical layout: assign ranks and order
-            let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
+            let ranks = assign_ranks(graph, RankAssignmentStrategy::LongestPath);
             debug!("Assigned {} ranks", ranks.num_ranks);
-            let ordered_nodes = order_nodes_within_layers(&graph, &ranks);
+            let ordered_nodes = order_nodes_within_layers(graph, &ranks);
             node_ranks = Some(ranks.node_rank);
-            assign_coordinates(&graph, &ordered_nodes, &effective_config, &node_sizes)
+            assign_coordinates(graph, &ordered_nodes, &effective_config, &node_sizes)
         }
         LayoutAlgorithm::ForceDirected => {
             // Force-directed layout
-            apply_force_layout(&graph, &effective_config, &node_sizes)
+            apply_force_layout(graph, &effective_config, &node_sizes)
         }
     };
 
     // Step 4: Route edges
     let (positioned_edges, routing_diagnostics) = route_edges_with_diagnostics(
-        &graph,
+        graph,
         &positioned_nodes,
         &effective_config,
         node_ranks.as_deref(),
@@ -3512,6 +3515,24 @@ mod tests {
         // Contrast: when enabled, spacing IS changed.
         let tuned = config.auto_tuned(50, 80);
         assert_ne!(tuned.horizontal_spacing, 500.0);
+    }
+
+    #[test]
+    fn test_build_layout_from_graph_does_not_mutate_input_when_columns_are_hidden() {
+        let schema = make_test_schema();
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let original_column_count = graph.nodes[0].columns.len();
+        let original_first_column_name = graph.nodes[0].columns[0].name.clone();
+        let config = LayoutConfig {
+            show_columns: false,
+            ..Default::default()
+        };
+
+        let positioned = build_layout_from_graph_with_config(&graph, &config).unwrap();
+
+        assert_eq!(graph.nodes[0].columns.len(), original_column_count);
+        assert_eq!(graph.nodes[0].columns[0].name, original_first_column_name);
+        assert!(positioned.nodes[0].columns.is_empty());
     }
 
     #[test]
