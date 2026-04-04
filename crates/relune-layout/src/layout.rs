@@ -16,8 +16,8 @@ use relune_core::{
 };
 
 use crate::channel::{
-    ChannelCandidateClass, ChannelCandidateScore, ChannelCostWeights,
-    compare_channel_candidate_scores,
+    CachedChannelCandidateScore, ChannelCandidateClass, ChannelCandidateScore, ChannelCostWeights,
+    compare_cached_channel_candidate_scores,
 };
 use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
@@ -1960,11 +1960,12 @@ fn obstacle_aware_channel_for_edge(
         if score.hard_constraint_violations != 0 {
             continue;
         }
+        let cached_score = CachedChannelCandidateScore::new(score, weights);
         let is_better = best_score
-            .is_none_or(|best| compare_channel_candidate_scores(score, best, weights).is_lt());
+            .is_none_or(|best| compare_cached_channel_candidate_scores(cached_score, best).is_lt());
         if is_better {
             best_candidate = Some(candidate);
-            best_score = Some(score);
+            best_score = Some(cached_score);
         }
     }
 
