@@ -1,15 +1,16 @@
 //! `MySQL` `information_schema` catalog queries.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sqlx::MySqlPool;
 
 use crate::common::{
-    RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView, parse_referential_action,
+    RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
+    parse_referential_action,
 };
 use crate::error::IntrospectError;
 
-const PARALLEL_CATALOG_QUERIES: u32 = 5;
+const PARALLEL_CATALOG_QUERIES: u32 = 6;
 
 /// Fetches all catalog metadata from a `MySQL` database.
 pub async fn fetch_catalog_metadata(pool: &MySqlPool) -> Result<RawSchema, IntrospectError> {
@@ -23,12 +24,13 @@ struct MySqlCatalog {
 
 impl MySqlCatalog {
     async fn fetch_all(&self) -> Result<RawSchema, IntrospectError> {
-        let (tables, columns, fk_rows, index_rows, views) = tokio::try_join!(
+        let (tables, columns, fk_rows, index_rows, views, enums) = tokio::try_join!(
             self.fetch_tables(),
             self.fetch_columns(),
             self.fetch_foreign_key_rows(),
             self.fetch_index_rows(),
             self.fetch_views(),
+            self.fetch_enums(),
         )?;
 
         let foreign_keys = group_foreign_keys(fk_rows);
@@ -40,7 +42,7 @@ impl MySqlCatalog {
             foreign_keys,
             indexes,
             views,
-            enums: Vec::new(),
+            enums,
         })
     }
 
@@ -219,6 +221,43 @@ impl MySqlCatalog {
             })
             .collect())
     }
+
+    async fn fetch_enums(&self) -> Result<Vec<RawEnum>, IntrospectError> {
+        let rows: Vec<RawEnumRow> = sqlx::query_as(
+            r"
+            SELECT
+                CONVERT(TABLE_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(COLUMN_TYPE USING utf8mb4) AS column_type
+            FROM information_schema.COLUMNS
+            WHERE DATA_TYPE IN ('enum', 'set')
+              AND TABLE_SCHEMA NOT IN (
+                  'information_schema', 'mysql', 'performance_schema', 'sys',
+                  'mysql_innodb_cluster_metadata'
+              )
+            ORDER BY TABLE_SCHEMA, COLUMN_TYPE
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query(format!("Failed to fetch enums: {e}")))?;
+
+        let mut seen = BTreeSet::new();
+        let mut enums = Vec::new();
+
+        for row in rows {
+            let key = (row.schema_name.clone(), row.column_type.clone());
+            if !seen.insert(key) {
+                continue;
+            }
+
+            enums.push(raw_enum_from_mysql_column_type(
+                &row.schema_name,
+                &row.column_type,
+            )?);
+        }
+
+        Ok(enums)
+    }
 }
 
 /// Returns the number of concurrent catalog queries executed for `MySQL`.
@@ -277,6 +316,82 @@ struct RawViewRow {
     view_name: String,
     definition: Option<String>,
     view_comment: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RawEnumRow {
+    schema_name: String,
+    column_type: String,
+}
+
+fn raw_enum_from_mysql_column_type(
+    schema_name: &str,
+    column_type: &str,
+) -> Result<RawEnum, IntrospectError> {
+    let values = parse_mysql_enum_like_values(column_type).ok_or_else(|| {
+        IntrospectError::metadata_mapping(format!(
+            "unsupported MySQL enum/set definition in {schema_name}: {column_type}"
+        ))
+    })?;
+
+    Ok(RawEnum {
+        enum_name: column_type.to_string(),
+        schema_name: schema_name.to_string(),
+        values,
+    })
+}
+
+fn parse_mysql_enum_like_values(column_type: &str) -> Option<Vec<String>> {
+    let start = column_type.find('(')?;
+    let end = column_type.rfind(')')?;
+    let kind = column_type[..start].trim();
+    if !kind.eq_ignore_ascii_case("enum") && !kind.eq_ignore_ascii_case("set") {
+        return None;
+    }
+
+    let mut values = Vec::new();
+    let mut chars = column_type[start + 1..end].chars().peekable();
+
+    while chars.peek().is_some() {
+        while chars.peek().is_some_and(char::is_ascii_whitespace) {
+            chars.next();
+        }
+
+        if chars.next()? != '\'' {
+            return None;
+        }
+
+        let mut value = String::new();
+        loop {
+            match chars.next()? {
+                '\'' => {
+                    if chars.peek() == Some(&'\'') {
+                        value.push('\'');
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                '\\' => value.push(chars.next()?),
+                c => value.push(c),
+            }
+        }
+        values.push(value);
+
+        while chars.peek().is_some_and(char::is_ascii_whitespace) {
+            chars.next();
+        }
+
+        match chars.peek() {
+            Some(',') => {
+                chars.next();
+            }
+            None => break,
+            _ => return None,
+        }
+    }
+
+    Some(values)
 }
 
 fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
@@ -394,5 +509,36 @@ mod tests {
         let err = ordinal_position_from_row(i16::MAX as u64 + 1, "public", "users")
             .expect_err("ordinal_position should overflow");
         assert!(matches!(err, IntrospectError::MetadataMapping(_)));
+    }
+
+    #[test]
+    fn parses_mysql_enum_values() {
+        assert_eq!(
+            parse_mysql_enum_like_values("enum('draft','published')"),
+            Some(vec!["draft".to_string(), "published".to_string()])
+        );
+    }
+
+    #[test]
+    fn parses_mysql_set_values_with_escaped_quotes() {
+        assert_eq!(
+            parse_mysql_enum_like_values("set('O''Reilly','back\\\\slash')"),
+            Some(vec!["O'Reilly".to_string(), "back\\slash".to_string()])
+        );
+    }
+
+    #[test]
+    fn rejects_non_enum_like_column_types() {
+        assert_eq!(parse_mysql_enum_like_values("varchar(255)"), None);
+    }
+
+    #[test]
+    fn builds_raw_enum_from_mysql_column_type() {
+        let raw_enum = raw_enum_from_mysql_column_type("app", "enum('a','b')")
+            .expect("enum definition should parse");
+
+        assert_eq!(raw_enum.schema_name, "app");
+        assert_eq!(raw_enum.enum_name, "enum('a','b')");
+        assert_eq!(raw_enum.values, vec!["a".to_string(), "b".to_string()]);
     }
 }

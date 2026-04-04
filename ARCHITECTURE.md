@@ -128,7 +128,7 @@ Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
 **`View`** — Parsed and introspected across all three dialects. Stored with the original SQL definition.
 
-**`Enum`** — PostgreSQL only (`CREATE TYPE ... AS ENUM`). MySQL/SQLite treat `ENUM` as a column data type, not a schema-level type.
+**`Enum`** — PostgreSQL uses named enum types (`CREATE TYPE ... AS ENUM`). MySQL has no schema-level enum type, but live introspection lifts `ENUM(...)` / `SET(...)` column definitions into `Schema.enums` so they can participate in graphing and diffs. SQLite does not contribute enum metadata.
 
 **Derived artifacts** flow through the pipeline:
 
