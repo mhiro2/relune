@@ -153,7 +153,7 @@ Rule IDs are **kebab-case** (for example `missing-foreign-key-index`, `non-snake
 
 ## `diff`
 
-Compare two schemas. Provide **before** and **after** inputs independently (each side uses one of the following).
+Compare two schemas across tables, views, and enum types. Provide **before** and **after** inputs independently (each side uses one of the following).
 
 **Before:** `--before <FILE>`, `--before-sql-text '<DDL>'`, or `--before-schema-json <FILE>`.
 

@@ -68,7 +68,9 @@ pub fn run_diff(
             let s = &result.diff.summary;
             format!(
                 "{} added, {} removed, {} modified",
-                s.tables_added, s.tables_removed, s.tables_modified
+                s.added_items(),
+                s.removed_items(),
+                s.modified_items()
             )
         } else {
             "no changes".to_string()

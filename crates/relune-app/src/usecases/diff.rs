@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use relune_core::diff::TableDiff;
-use relune_core::{ChangeKind, Schema, Table, diff_schemas};
+use relune_core::diff::{EnumDiff, TableDiff, ViewDiff};
+use relune_core::{ChangeKind, Enum as SchemaEnum, Schema, Table, View, diff_schemas};
 use relune_layout::{Annotation, DiagramOverlay, OverlaySeverity};
 
 use crate::error::AppError;
@@ -143,6 +143,7 @@ fn render_with_schema(
 
 /// Format diff result as human-readable text.
 #[must_use]
+#[allow(clippy::too_many_lines)] // Text output groups every schema object kind in one formatter.
 pub fn format_diff_text(result: &DiffResult) -> String {
     let mut output = String::new();
 
@@ -207,19 +208,147 @@ pub fn format_diff_text(result: &DiffResult) -> String {
                     let _ = writeln!(output, "      {indicator} {fk_name}");
                 }
             }
+
+            if !table_diff.index_diffs.is_empty() {
+                output.push_str("    Indexes:\n");
+                for index_diff in &table_diff.index_diffs {
+                    let indicator = match index_diff.change_kind {
+                        ChangeKind::Added => "+",
+                        ChangeKind::Removed => "-",
+                        ChangeKind::Modified => "~",
+                    };
+                    let index_name = index_diff.name.as_deref().unwrap_or("unnamed");
+                    let _ = writeln!(output, "      {indicator} {index_name}");
+                }
+            }
+        }
+    }
+
+    if !result.diff.added_views.is_empty() {
+        output.push_str("\nAdded views:\n");
+        for view in &result.diff.added_views {
+            let _ = writeln!(output, "  + {view}");
+        }
+    }
+
+    if !result.diff.removed_views.is_empty() {
+        output.push_str("\nRemoved views:\n");
+        for view in &result.diff.removed_views {
+            let _ = writeln!(output, "  - {view}");
+        }
+    }
+
+    if !result.diff.modified_views.is_empty() {
+        output.push_str("\nModified views:\n");
+        for view_diff in &result.diff.modified_views {
+            let change_count =
+                view_diff.column_diffs.len() + usize::from(view_diff.definition_changed());
+            let _ = writeln!(
+                output,
+                "  ~ {} ({change_count} changes)",
+                view_diff.view_name
+            );
+
+            if !view_diff.column_diffs.is_empty() {
+                output.push_str("    Columns:\n");
+                for col_diff in &view_diff.column_diffs {
+                    let indicator = match col_diff.change_kind {
+                        ChangeKind::Added => "+",
+                        ChangeKind::Removed => "-",
+                        ChangeKind::Modified => "~",
+                    };
+                    let _ = writeln!(output, "      {indicator} {}", col_diff.column_name);
+                }
+            }
+
+            if view_diff.definition_changed() {
+                output.push_str("    Definition:\n");
+                output.push_str("      ~ definition\n");
+            }
+        }
+    }
+
+    if !result.diff.added_enums.is_empty() {
+        output.push_str("\nAdded enums:\n");
+        for enum_name in &result.diff.added_enums {
+            let _ = writeln!(output, "  + {enum_name}");
+        }
+    }
+
+    if !result.diff.removed_enums.is_empty() {
+        output.push_str("\nRemoved enums:\n");
+        for enum_name in &result.diff.removed_enums {
+            let _ = writeln!(output, "  - {enum_name}");
+        }
+    }
+
+    if !result.diff.modified_enums.is_empty() {
+        output.push_str("\nModified enums:\n");
+        for enum_diff in &result.diff.modified_enums {
+            let _ = writeln!(
+                output,
+                "  ~ {} ({} changes)",
+                enum_diff.enum_name,
+                enum_diff.value_diffs.len()
+            );
+
+            output.push_str("    Values:\n");
+            for value_diff in &enum_diff.value_diffs {
+                let indicator = match value_diff.change_kind {
+                    ChangeKind::Added => "+",
+                    ChangeKind::Removed => "-",
+                    ChangeKind::Modified => "~",
+                };
+                let detail = match (value_diff.old_position, value_diff.new_position) {
+                    (Some(old_position), Some(new_position)) => {
+                        format!(" (position {} -> {})", old_position + 1, new_position + 1)
+                    }
+                    (Some(old_position), None) => format!(" (position {})", old_position + 1),
+                    (None, Some(new_position)) => format!(" (position {})", new_position + 1),
+                    (None, None) => String::new(),
+                };
+                let _ = writeln!(output, "      {indicator} {}{detail}", value_diff.value);
+            }
         }
     }
 
     // Summary
     let _ = writeln!(
         output,
-        "\nSummary: {} table(s) added, {} removed, {} modified",
+        "\nSummary: {} item(s) added, {} removed, {} modified",
+        summary.added_items(),
+        summary.removed_items(),
+        summary.modified_items()
+    );
+    let _ = writeln!(
+        output,
+        "         tables: {} added, {} removed, {} modified",
         summary.tables_added, summary.tables_removed, summary.tables_modified
     );
     let _ = writeln!(
         output,
-        "         {} column change(s), {} FK change(s), {} index change(s)",
+        "         views: {} added, {} removed, {} modified",
+        summary.views_added, summary.views_removed, summary.views_modified
+    );
+    let _ = writeln!(
+        output,
+        "         enums: {} added, {} removed, {} modified",
+        summary.enums_added, summary.enums_removed, summary.enums_modified
+    );
+    let _ = writeln!(
+        output,
+        "         table internals: {} column change(s), {} FK change(s), {} index change(s)",
         summary.columns_changed, summary.foreign_keys_changed, summary.indexes_changed
+    );
+    let _ = writeln!(
+        output,
+        "         view internals: {} column change(s), {} definition change(s)",
+        summary.view_columns_changed, summary.view_definitions_changed
+    );
+    let _ = writeln!(
+        output,
+        "         enum internals: {} value change(s)",
+        summary.enum_values_changed
     );
 
     output
@@ -229,10 +358,15 @@ pub fn format_diff_text(result: &DiffResult) -> String {
 ///
 /// The merged schema includes:
 /// - All tables from `after` (current state)
+/// - All views and enums from `after` (current state)
 /// - Removed tables from `before` (so they appear ghosted in the diagram)
+/// - Removed views and enums from `before`
 /// - For modified tables with removed FKs, the removed FKs are added back so that
 ///   removed edges are visible in the diagram.
+/// - For modified views and enums, removed columns and values are added back so they
+///   remain visible in the diagram.
 #[must_use]
+#[allow(clippy::too_many_lines)] // Merging added and removed artifacts is easier to audit in one pass.
 pub fn build_diff_schema(
     before: &Schema,
     after: &Schema,
@@ -243,9 +377,21 @@ pub fn build_diff_schema(
         .iter()
         .map(|t| (t.stable_id.as_str(), t))
         .collect();
+    let before_views_by_name: HashMap<String, &View> = before
+        .views
+        .iter()
+        .map(|view| (view.qualified_name(), view))
+        .collect();
+    let before_enums_by_name: HashMap<String, &SchemaEnum> = before
+        .enums
+        .iter()
+        .map(|enum_type| (enum_type.qualified_name(), enum_type))
+        .collect();
 
     // Start with all after tables
     let mut tables: Vec<Table> = after.tables.clone();
+    let mut views = after.views.clone();
+    let mut enums = after.enums.clone();
 
     // For modified tables, add back removed columns and FKs so they remain visible
     for table_diff in &diff.modified_tables {
@@ -309,10 +455,84 @@ pub fn build_diff_schema(
         }
     }
 
+    for view_diff in &diff.modified_views {
+        let has_removed_cols = view_diff
+            .column_diffs
+            .iter()
+            .any(|column| column.change_kind == ChangeKind::Removed);
+        if !has_removed_cols {
+            continue;
+        }
+
+        if let Some(before_view) = before_views_by_name.get(&view_diff.view_name)
+            && let Some(after_view) = views
+                .iter_mut()
+                .find(|view| view.qualified_name() == view_diff.view_name)
+        {
+            let after_column_names: std::collections::HashSet<&str> = after_view
+                .columns
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect();
+            let columns_to_add: Vec<_> = before_view
+                .columns
+                .iter()
+                .filter(|column| !after_column_names.contains(column.name.as_str()))
+                .cloned()
+                .collect();
+            after_view.columns.extend(columns_to_add);
+        }
+    }
+
+    let after_view_ids: std::collections::HashSet<&str> =
+        after.views.iter().map(|view| view.id.as_str()).collect();
+    for view in &before.views {
+        if !after_view_ids.contains(view.id.as_str()) {
+            views.push(view.clone());
+        }
+    }
+
+    for enum_diff in &diff.modified_enums {
+        let has_removed_values = enum_diff
+            .value_diffs
+            .iter()
+            .any(|value| value.change_kind == ChangeKind::Removed);
+        if !has_removed_values {
+            continue;
+        }
+
+        if let Some(before_enum) = before_enums_by_name.get(&enum_diff.enum_name)
+            && let Some(after_enum) = enums
+                .iter_mut()
+                .find(|enum_type| enum_type.qualified_name() == enum_diff.enum_name)
+        {
+            let after_values: std::collections::HashSet<&str> =
+                after_enum.values.iter().map(String::as_str).collect();
+            let values_to_add: Vec<_> = before_enum
+                .values
+                .iter()
+                .filter(|value| !after_values.contains(value.as_str()))
+                .cloned()
+                .collect();
+            after_enum.values.extend(values_to_add);
+        }
+    }
+
+    let after_enum_ids: std::collections::HashSet<&str> = after
+        .enums
+        .iter()
+        .map(|enum_type| enum_type.id.as_str())
+        .collect();
+    for enum_type in &before.enums {
+        if !after_enum_ids.contains(enum_type.id.as_str()) {
+            enums.push(enum_type.clone());
+        }
+    }
+
     Schema {
         tables,
-        views: after.views.clone(),
-        enums: after.enums.clone(),
+        views,
+        enums,
     }
 }
 
@@ -323,6 +543,7 @@ pub fn build_diff_schema(
 /// - Removed tables/edges → `Error` severity, `rule_id = "diff-removed"`
 /// - Modified tables → `Warning` severity, `rule_id = "diff-modified"`
 #[must_use]
+#[allow(clippy::too_many_lines)] // Overlay annotations mirror every diff kind and stay easier to align in one function.
 pub fn build_diff_overlay(
     before: &Schema,
     after: &Schema,
@@ -339,6 +560,26 @@ pub fn build_diff_overlay(
         .tables
         .iter()
         .map(|t| (t.qualified_name(), t))
+        .collect();
+    let before_views_by_name: HashMap<String, &View> = before
+        .views
+        .iter()
+        .map(|view| (view.qualified_name(), view))
+        .collect();
+    let after_views_by_name: HashMap<String, &View> = after
+        .views
+        .iter()
+        .map(|view| (view.qualified_name(), view))
+        .collect();
+    let before_enums_by_name: HashMap<String, &SchemaEnum> = before
+        .enums
+        .iter()
+        .map(|enum_type| (enum_type.qualified_name(), enum_type))
+        .collect();
+    let after_enums_by_name: HashMap<String, &SchemaEnum> = after
+        .enums
+        .iter()
+        .map(|enum_type| (enum_type.qualified_name(), enum_type))
         .collect();
 
     // Annotate added tables
@@ -393,6 +634,74 @@ pub fn build_diff_overlay(
         }
     }
 
+    for view_name in &diff.added_views {
+        if let Some(view) = after_views_by_name.get(view_name) {
+            annotate_view_node(
+                &mut overlay,
+                view,
+                OverlaySeverity::Info,
+                "diff-added",
+                "Added",
+            );
+        }
+    }
+
+    for view_name in &diff.removed_views {
+        if let Some(view) = before_views_by_name.get(view_name) {
+            annotate_view_node(
+                &mut overlay,
+                view,
+                OverlaySeverity::Error,
+                "diff-removed",
+                "Removed",
+            );
+        }
+    }
+
+    for view_diff in &diff.modified_views {
+        let view_id = after_views_by_name
+            .get(&view_diff.view_name)
+            .or_else(|| before_views_by_name.get(&view_diff.view_name))
+            .map(|view| view.id.as_str());
+        if let Some(view_id) = view_id {
+            annotate_modified_view(&mut overlay, view_id, view_diff);
+        }
+    }
+
+    for enum_name in &diff.added_enums {
+        if let Some(enum_type) = after_enums_by_name.get(enum_name) {
+            annotate_enum_node(
+                &mut overlay,
+                enum_type,
+                OverlaySeverity::Info,
+                "diff-added",
+                "Added",
+            );
+        }
+    }
+
+    for enum_name in &diff.removed_enums {
+        if let Some(enum_type) = before_enums_by_name.get(enum_name) {
+            annotate_enum_node(
+                &mut overlay,
+                enum_type,
+                OverlaySeverity::Error,
+                "diff-removed",
+                "Removed",
+            );
+        }
+    }
+
+    for enum_diff in &diff.modified_enums {
+        let enum_id = after_enums_by_name
+            .get(&enum_diff.enum_name)
+            .or_else(|| before_enums_by_name.get(&enum_diff.enum_name))
+            .map(|enum_type| enum_type.id.as_str());
+        if let Some(enum_id) = enum_id {
+            annotate_modified_enum(&mut overlay, enum_id, enum_diff);
+        }
+    }
+
     overlay
 }
 
@@ -409,6 +718,42 @@ fn annotate_table_node(
         Annotation {
             severity,
             message: format!("{label} table ({col_count} columns)"),
+            hint: None,
+            rule_id: Some(rule_id.to_string()),
+        },
+    );
+}
+
+fn annotate_view_node(
+    overlay: &mut DiagramOverlay,
+    view: &View,
+    severity: OverlaySeverity,
+    rule_id: &str,
+    label: &str,
+) {
+    overlay.add_node_annotation(
+        &view.id,
+        Annotation {
+            severity,
+            message: format!("{label} view ({} columns)", view.columns.len()),
+            hint: None,
+            rule_id: Some(rule_id.to_string()),
+        },
+    );
+}
+
+fn annotate_enum_node(
+    overlay: &mut DiagramOverlay,
+    enum_type: &SchemaEnum,
+    severity: OverlaySeverity,
+    rule_id: &str,
+    label: &str,
+) {
+    overlay.add_node_annotation(
+        &enum_type.id,
+        Annotation {
+            severity,
+            message: format!("{label} enum ({} values)", enum_type.values.len()),
             hint: None,
             rule_id: Some(rule_id.to_string()),
         },
@@ -525,6 +870,75 @@ fn annotate_modified_table(
             );
         }
     }
+}
+
+fn annotate_modified_view(overlay: &mut DiagramOverlay, view_id: &str, view_diff: &ViewDiff) {
+    let mut details = Vec::new();
+    for column in &view_diff.column_diffs {
+        details.push(format!(
+            "{} {}",
+            change_indicator(column.change_kind),
+            column.column_name
+        ));
+    }
+    if view_diff.definition_changed() {
+        details.push("~ definition".to_string());
+    }
+
+    let change_count = view_diff.column_diffs.len() + usize::from(view_diff.definition_changed());
+    overlay.add_node_annotation(
+        view_id,
+        Annotation {
+            severity: OverlaySeverity::Warning,
+            message: format!("Modified ({change_count} changes)"),
+            hint: if details.is_empty() {
+                None
+            } else {
+                Some(details.join(", "))
+            },
+            rule_id: Some("diff-modified".to_string()),
+        },
+    );
+}
+
+fn annotate_modified_enum(overlay: &mut DiagramOverlay, enum_id: &str, enum_diff: &EnumDiff) {
+    let details = enum_diff
+        .value_diffs
+        .iter()
+        .map(|value_diff| {
+            if let (Some(old_position), Some(new_position)) =
+                (value_diff.old_position, value_diff.new_position)
+            {
+                format!(
+                    "{} {} ({} -> {})",
+                    change_indicator(value_diff.change_kind),
+                    value_diff.value,
+                    old_position + 1,
+                    new_position + 1
+                )
+            } else {
+                format!(
+                    "{} {}",
+                    change_indicator(value_diff.change_kind),
+                    value_diff.value
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+
+    overlay.add_node_annotation(
+        enum_id,
+        Annotation {
+            severity: OverlaySeverity::Warning,
+            message: format!("Modified ({} changes)", enum_diff.value_diffs.len()),
+            hint: if details.is_empty() {
+                None
+            } else {
+                Some(details.join(", "))
+            },
+            rule_id: Some("diff-modified".to_string()),
+        },
+    );
 }
 
 /// Compute a structural identity key for a FK, matching the diff engine's approach.
@@ -668,6 +1082,30 @@ mod tests {
     }
 
     #[test]
+    fn test_format_diff_text_with_view_and_enum_changes() {
+        let before = "\
+            CREATE TYPE status AS ENUM ('draft', 'published');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status status);\n\
+            CREATE VIEW active_users AS SELECT id, status FROM users;\n\
+        ";
+        let after = "\
+            CREATE TYPE status AS ENUM ('published', 'draft');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status TEXT);\n\
+            CREATE VIEW active_users AS SELECT id FROM users;\n\
+        ";
+
+        let result = diff(DiffRequest::from_sql(before, after)).unwrap();
+        let text = format_diff_text(&result);
+
+        assert!(text.contains("Modified views"));
+        assert!(text.contains("active_users"));
+        assert!(text.contains("Modified enums"));
+        assert!(text.contains("status"));
+        assert!(text.contains("view internals"));
+        assert!(text.contains("enum internals"));
+    }
+
+    #[test]
     fn test_build_diff_schema_includes_all_tables() {
         let before = "CREATE TABLE users (id INT PRIMARY KEY);";
         let after = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));\nCREATE TABLE posts (id INT PRIMARY KEY);";
@@ -720,6 +1158,50 @@ mod tests {
     }
 
     #[test]
+    fn test_build_diff_schema_restores_removed_view_columns_and_enum_values() {
+        let before = "\
+            CREATE TYPE status AS ENUM ('draft', 'published');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status status);\n\
+            CREATE VIEW active_users AS SELECT id, status FROM users;\n\
+        ";
+        let after = "\
+            CREATE TYPE status AS ENUM ('published');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status TEXT);\n\
+            CREATE VIEW active_users AS SELECT id FROM users;\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let merged = build_diff_schema(&before_schema, &after_schema, &diff);
+        let active_users = merged
+            .views
+            .iter()
+            .find(|view| view.name == "active_users")
+            .unwrap();
+        assert!(
+            active_users
+                .columns
+                .iter()
+                .any(|column| column.name == "status"),
+            "removed view column should be restored in merged schema"
+        );
+
+        let status = merged
+            .enums
+            .iter()
+            .find(|enum_type| enum_type.name == "status")
+            .unwrap();
+        assert!(
+            status.values.iter().any(|value| value == "draft"),
+            "removed enum value should be restored in merged schema"
+        );
+    }
+
+    #[test]
     fn test_build_diff_schema_restores_unnamed_fk() {
         let before = "\
             CREATE TABLE users (id INT PRIMARY KEY);\n\
@@ -761,6 +1243,33 @@ mod tests {
         let node = overlay.node("users").expect("should have users overlay");
         assert_eq!(node.annotations[0].rule_id.as_deref(), Some("diff-added"));
         assert_eq!(node.annotations[0].severity, OverlaySeverity::Info);
+    }
+
+    #[test]
+    fn test_build_diff_overlay_view_and_enum_nodes() {
+        let before = "\
+            CREATE TYPE status AS ENUM ('draft', 'published');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status status);\n\
+            CREATE VIEW active_users AS SELECT id, status FROM users;\n\
+        ";
+        let after = "\
+            CREATE TYPE status AS ENUM ('published', 'draft');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status TEXT);\n\
+            CREATE VIEW active_users AS SELECT id FROM users;\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let view_overlay = overlay.node("active_users").expect("view overlay");
+        assert_eq!(view_overlay.max_severity(), Some(OverlaySeverity::Warning));
+
+        let enum_overlay = overlay.node("status").expect("enum overlay");
+        assert_eq!(enum_overlay.max_severity(), Some(OverlaySeverity::Warning));
     }
 
     #[test]

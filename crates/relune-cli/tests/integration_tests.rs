@@ -1252,6 +1252,47 @@ mod diff_tests {
     }
 
     #[test]
+    fn diff_with_view_and_enum_changes() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let before_path = temp.path().join("before.sql");
+        let after_path = temp.path().join("after.sql");
+
+        fs::write(
+            &before_path,
+            "\
+            CREATE TYPE status AS ENUM ('draft', 'published');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status status);\n\
+            CREATE VIEW active_users AS SELECT id, status FROM users;\n\
+            ",
+        )
+        .unwrap();
+        fs::write(
+            &after_path,
+            "\
+            CREATE TYPE status AS ENUM ('published', 'draft');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status TEXT);\n\
+            CREATE VIEW active_users AS SELECT id FROM users;\n\
+            ",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("diff")
+            .arg("--before")
+            .arg(&before_path)
+            .arg("--after")
+            .arg(&after_path)
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        assert!(stdout.contains("Modified views"));
+        assert!(stdout.contains("active_users"));
+        assert!(stdout.contains("Modified enums"));
+        assert!(stdout.contains("status"));
+    }
+
+    #[test]
     fn diff_schema_json_inputs() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");
         let sql_path = simple_blog_fixture();
