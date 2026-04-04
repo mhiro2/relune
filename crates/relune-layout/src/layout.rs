@@ -16,8 +16,8 @@ use relune_core::{
 };
 
 use crate::channel::{
-    ChannelCandidateClass, ChannelCandidateScore, ChannelCostWeights,
-    compare_channel_candidate_scores,
+    CachedChannelCandidateScore, ChannelCandidateClass, ChannelCandidateScore, ChannelCostWeights,
+    compare_cached_channel_candidate_scores,
 };
 use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
@@ -1960,11 +1960,12 @@ fn obstacle_aware_channel_for_edge(
         if score.hard_constraint_violations != 0 {
             continue;
         }
+        let cached_score = CachedChannelCandidateScore::new(score, weights);
         let is_better = best_score
-            .is_none_or(|best| compare_channel_candidate_scores(score, best, weights).is_lt());
+            .is_none_or(|best| compare_cached_channel_candidate_scores(cached_score, best).is_lt());
         if is_better {
             best_candidate = Some(candidate);
-            best_score = Some(score);
+            best_score = Some(cached_score);
         }
     }
 
@@ -2625,6 +2626,15 @@ const LABEL_ROUTE_T_STEP: f32 = 0.08;
 /// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
 const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
 
+const fn edge_route_obstacle_spacing(edge_count: usize) -> f32 {
+    match edge_count {
+        0..=127 => EDGE_ROUTE_OBSTACLE_SPACING,
+        128..=255 => 14.0,
+        256..=511 => 18.0,
+        _ => 24.0,
+    }
+}
+
 #[allow(clippy::cast_precision_loss)] // Edge fan-out counts are small in practice and only affect presentation.
 fn parallel_label_parameter(from: &str, to: &str, lane_index: usize, lane_total: usize) -> f32 {
     let position = (lane_index + 1) as f32 / (lane_total + 1) as f32;
@@ -2750,7 +2760,7 @@ fn resolve_edge_label_collisions(
             sample_route_obstacles(
                 &edge.route,
                 EDGE_ROUTE_OBSTACLE_HALF_SIZE,
-                EDGE_ROUTE_OBSTACLE_SPACING,
+                edge_route_obstacle_spacing(edges.len()),
             )
         })
         .collect();
@@ -2883,6 +2893,14 @@ mod tests {
         Column, ColumnId, ForeignKey, LayoutCompactionSpec, LayoutSpec, ReferentialAction, Table,
         TableId,
     };
+
+    #[test]
+    fn edge_route_obstacle_spacing_scales_with_edge_count() {
+        assert!((edge_route_obstacle_spacing(16) - 10.0).abs() <= f32::EPSILON);
+        assert!((edge_route_obstacle_spacing(128) - 14.0).abs() <= f32::EPSILON);
+        assert!((edge_route_obstacle_spacing(256) - 18.0).abs() <= f32::EPSILON);
+        assert!((edge_route_obstacle_spacing(512) - 24.0).abs() <= f32::EPSILON);
+    }
 
     fn make_test_schema() -> Schema {
         Schema {

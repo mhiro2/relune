@@ -37,9 +37,25 @@ pub fn nudge_label(
     max_offset: f32,
 ) -> (f32, f32) {
     let label_half_h = super::LABEL_HALF_H;
+    let dx = edge_end.0 - edge_start.0;
+    let dy = edge_end.1 - edge_start.1;
+    let len = dx.hypot(dy).max(1.0);
+    let normal = (-dy / len, dx / len);
+    let relevant_obstacles = relevant_label_obstacles(
+        label,
+        obstacles,
+        margin,
+        label_half_w,
+        label_half_h,
+        max_offset,
+        normal,
+    );
+    if relevant_obstacles.is_empty() {
+        return label;
+    }
 
     let overlaps = |lx: f32, ly: f32| -> bool {
-        obstacles.iter().any(|r| {
+        relevant_obstacles.iter().any(|r| {
             lx + label_half_w + margin > r.x
                 && lx - label_half_w - margin < r.x + r.w
                 && ly + label_half_h + margin > r.y
@@ -51,13 +67,8 @@ pub fn nudge_label(
         return label;
     }
 
-    // Perpendicular direction to the edge vector.
-    let dx = edge_end.0 - edge_start.0;
-    let dy = edge_end.1 - edge_start.1;
-    let len = dx.hypot(dy).max(1.0);
     // Normal: rotate 90 degrees.
-    let nx = -dy / len;
-    let ny = dx / len;
+    let (nx, ny) = normal;
 
     // Try shifting in both perpendicular directions with increasing step.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -65,11 +76,11 @@ pub fn nudge_label(
     #[allow(clippy::cast_precision_loss)]
     for step in 1..=max_steps {
         let offset = step as f32 * LABEL_NUDGE_STEP;
-        let candidate_pos = (label.0 + nx * offset, label.1 + ny * offset);
+        let candidate_pos = (nx.mul_add(offset, label.0), ny.mul_add(offset, label.1));
         if !overlaps(candidate_pos.0, candidate_pos.1) {
             return candidate_pos;
         }
-        let candidate_neg = (label.0 - nx * offset, label.1 - ny * offset);
+        let candidate_neg = (nx.mul_add(-offset, label.0), ny.mul_add(-offset, label.1));
         if !overlaps(candidate_neg.0, candidate_neg.1) {
             return candidate_neg;
         }
@@ -77,6 +88,36 @@ pub fn nudge_label(
 
     // Fallback: return original position.
     label
+}
+
+fn relevant_label_obstacles(
+    label: (f32, f32),
+    obstacles: &[Rect],
+    margin: f32,
+    label_half_w: f32,
+    label_half_h: f32,
+    max_offset: f32,
+    normal: (f32, f32),
+) -> Vec<Rect> {
+    let offset_x = normal.0 * max_offset;
+    let offset_y = normal.1 * max_offset;
+    let extent_x = label_half_w + margin;
+    let extent_y = label_half_h + margin;
+    let sweep_min_x = (label.0 - offset_x).min(label.0 + offset_x) - extent_x;
+    let sweep_max_x = (label.0 - offset_x).max(label.0 + offset_x) + extent_x;
+    let sweep_min_y = (label.1 - offset_y).min(label.1 + offset_y) - extent_y;
+    let sweep_max_y = (label.1 - offset_y).max(label.1 + offset_y) + extent_y;
+
+    obstacles
+        .iter()
+        .copied()
+        .filter(|obstacle| {
+            obstacle.x < sweep_max_x
+                && obstacle.x + obstacle.w > sweep_min_x
+                && obstacle.y < sweep_max_y
+                && obstacle.y + obstacle.h > sweep_min_y
+        })
+        .collect()
 }
 
 /// Detour an edge route around obstacle rectangles.

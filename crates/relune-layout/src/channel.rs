@@ -91,6 +91,51 @@ impl ChannelCandidateScore {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CachedChannelCandidateScore {
+    pub(crate) score: ChannelCandidateScore,
+    weighted_soft_cost: u64,
+}
+
+impl CachedChannelCandidateScore {
+    #[must_use]
+    pub(crate) fn new(score: ChannelCandidateScore, weights: ChannelCostWeights) -> Self {
+        Self {
+            score,
+            weighted_soft_cost: score.weighted_soft_cost(weights),
+        }
+    }
+}
+
+#[must_use]
+pub(crate) fn compare_cached_channel_candidate_scores(
+    left: CachedChannelCandidateScore,
+    right: CachedChannelCandidateScore,
+) -> Ordering {
+    left.score
+        .hard_constraint_violations
+        .cmp(&right.score.hard_constraint_violations)
+        .then_with(|| left.weighted_soft_cost.cmp(&right.weighted_soft_cost))
+        .then_with(|| {
+            left.score
+                .clearance_penalty
+                .cmp(&right.score.clearance_penalty)
+        })
+        .then_with(|| left.score.total_length.cmp(&right.score.total_length))
+        .then_with(|| left.score.bend_count.cmp(&right.score.bend_count))
+        .then_with(|| {
+            left.score
+                .center_deviation
+                .cmp(&right.score.center_deviation)
+        })
+        .then_with(|| {
+            left.score
+                .congestion_penalty
+                .cmp(&right.score.congestion_penalty)
+        })
+        .then_with(|| left.score.stable_order.cmp(&right.score.stable_order))
+}
+
 /// Compares two candidate scores with a fixed, deterministic tie-break order.
 #[must_use]
 pub fn compare_channel_candidate_scores(
@@ -98,18 +143,10 @@ pub fn compare_channel_candidate_scores(
     right: ChannelCandidateScore,
     weights: ChannelCostWeights,
 ) -> Ordering {
-    left.hard_constraint_violations
-        .cmp(&right.hard_constraint_violations)
-        .then_with(|| {
-            left.weighted_soft_cost(weights)
-                .cmp(&right.weighted_soft_cost(weights))
-        })
-        .then_with(|| left.clearance_penalty.cmp(&right.clearance_penalty))
-        .then_with(|| left.total_length.cmp(&right.total_length))
-        .then_with(|| left.bend_count.cmp(&right.bend_count))
-        .then_with(|| left.center_deviation.cmp(&right.center_deviation))
-        .then_with(|| left.congestion_penalty.cmp(&right.congestion_penalty))
-        .then_with(|| left.stable_order.cmp(&right.stable_order))
+    compare_cached_channel_candidate_scores(
+        CachedChannelCandidateScore::new(left, weights),
+        CachedChannelCandidateScore::new(right, weights),
+    )
 }
 
 #[cfg(test)]
@@ -247,6 +284,37 @@ mod tests {
         assert_eq!(
             compare_channel_candidate_scores(earlier, later, weights),
             Ordering::Less
+        );
+    }
+
+    #[test]
+    fn cached_candidate_score_matches_raw_comparison_order() {
+        let weights = ChannelCostWeights::default();
+        let left = ChannelCandidateScore {
+            hard_constraint_violations: 0,
+            clearance_penalty: 5,
+            total_length: 100,
+            bend_count: 2,
+            center_deviation: 12,
+            congestion_penalty: 1,
+            stable_order: 2,
+        };
+        let right = ChannelCandidateScore {
+            hard_constraint_violations: 0,
+            clearance_penalty: 4,
+            total_length: 108,
+            bend_count: 2,
+            center_deviation: 12,
+            congestion_penalty: 1,
+            stable_order: 1,
+        };
+
+        assert_eq!(
+            compare_cached_channel_candidate_scores(
+                CachedChannelCandidateScore::new(left, weights),
+                CachedChannelCandidateScore::new(right, weights),
+            ),
+            compare_channel_candidate_scores(left, right, weights)
         );
     }
 }

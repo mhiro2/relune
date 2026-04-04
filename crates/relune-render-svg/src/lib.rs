@@ -46,7 +46,7 @@ pub fn render_svg_with_overlay(
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> String {
     let colors = get_colors(options.theme);
-    let mut out = String::new();
+    let mut out = String::with_capacity(estimate_svg_capacity(graph, options, overlay));
 
     let _ = write!(
         out,
@@ -97,6 +97,90 @@ pub fn render_svg_with_overlay(
 
     out.push_str("</svg>");
     out
+}
+
+fn estimate_svg_capacity(
+    graph: &relune_layout::PositionedGraph,
+    options: SvgRenderOptions,
+    overlay: Option<&relune_layout::DiagramOverlay>,
+) -> usize {
+    let base = 4_096usize;
+    let group_bytes: usize = graph
+        .groups
+        .iter()
+        .map(|group| 256 + group.id.len() * 4 + group.label.len() * 6)
+        .sum();
+    let edge_bytes: usize = graph
+        .edges
+        .iter()
+        .map(|edge| {
+            let route_bytes = edge.route.control_points.len() * 48;
+            let label_bytes = edge.label.len() * 12;
+            let endpoint_bytes = (edge.from.len() + edge.to.len()) * 6;
+            let column_bytes = edge
+                .from_columns
+                .iter()
+                .chain(&edge.to_columns)
+                .map(|column| 24 + column.len() * 10)
+                .sum::<usize>();
+            let tooltip_bytes = if options.show_tooltips { 256 } else { 0 };
+            let overlay_bytes = overlay
+                .and_then(|item| item.edge(&edge.from, &edge.to))
+                .map_or(0, estimate_edge_overlay_bytes);
+            768 + route_bytes
+                + label_bytes
+                + endpoint_bytes
+                + column_bytes
+                + tooltip_bytes
+                + overlay_bytes
+        })
+        .sum();
+    let node_bytes: usize = graph
+        .nodes
+        .iter()
+        .map(|node| {
+            let label_bytes = node.id.len() * 6 + node.label.len() * 12;
+            let column_bytes = node
+                .columns
+                .iter()
+                .map(|column| 320 + (column.name.len() + column.data_type.len()) * 12)
+                .sum::<usize>();
+            let tooltip_bytes = if options.show_tooltips {
+                192 + node.columns.len() * 48
+            } else {
+                0
+            };
+            let overlay_bytes = overlay
+                .and_then(|item| item.node(&node.id))
+                .map_or(0, estimate_node_overlay_bytes);
+            1_024 + label_bytes + column_bytes + tooltip_bytes + overlay_bytes
+        })
+        .sum();
+    let legend_bytes = if options.show_legend { 1_024 } else { 0 };
+
+    base + group_bytes + edge_bytes + node_bytes + legend_bytes
+}
+
+fn estimate_node_overlay_bytes(overlay: &relune_layout::NodeOverlay) -> usize {
+    estimate_annotations_bytes(&overlay.annotations)
+}
+
+fn estimate_edge_overlay_bytes(overlay: &relune_layout::EdgeOverlay) -> usize {
+    estimate_annotations_bytes(&overlay.annotations)
+}
+
+fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usize {
+    annotations
+        .iter()
+        .map(|annotation| {
+            let hint_bytes = annotation.hint.as_ref().map_or(0, |hint| hint.len() * 10);
+            let rule_id_bytes = annotation
+                .rule_id
+                .as_ref()
+                .map_or(0, |rule_id| rule_id.len() * 6);
+            192 + annotation.message.len() * 12 + hint_bytes + rule_id_bytes
+        })
+        .sum()
 }
 
 fn out_push_defs(out: &mut String, colors: &ThemeColors) {
@@ -2268,6 +2352,41 @@ mod tests {
         assert!(svg.contains("edge-kind-foreign-key overlay-warning"));
         // Tooltip should include annotation
         assert!(svg.contains("[warning] Missing index on FK"));
+    }
+
+    #[test]
+    fn test_svg_capacity_estimate_covers_overlay_render() {
+        let graph = multi_node_graph();
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.add_node_annotation(
+            "users",
+            relune_layout::Annotation {
+                severity: relune_layout::OverlaySeverity::Warning,
+                message: "Very long warning message for capacity estimation".to_string(),
+                hint: Some("Helpful remediation guidance for the warning".to_string()),
+                rule_id: Some("warn-capacity".to_string()),
+            },
+        );
+        overlay.add_edge_annotation(
+            "posts",
+            "users",
+            relune_layout::Annotation {
+                severity: relune_layout::OverlaySeverity::Error,
+                message: "Another long edge warning for tooltip expansion".to_string(),
+                hint: Some("Add the missing index".to_string()),
+                rule_id: Some("edge-capacity".to_string()),
+            },
+        );
+
+        let options = SvgRenderOptions {
+            show_legend: true,
+            show_tooltips: true,
+            ..Default::default()
+        };
+        let estimated = estimate_svg_capacity(&graph, options, Some(&overlay));
+        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
+
+        assert!(estimated >= svg.len());
     }
 
     #[test]
