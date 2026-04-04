@@ -1766,8 +1766,8 @@ mod tests {
     fn test_pan_zoom_js_clamps_panning_to_viewport_bounds() {
         let js = build_pan_zoom_js();
 
-        assert!(js.contains("const clampPan ="));
-        assert!(js.contains("const getAvailableViewport ="));
+        assert!(js.contains("function clampPan("));
+        assert!(js.contains("function getAvailableViewport("));
         assert!(js.contains("contentX - diagram.x"));
     }
 
@@ -2096,8 +2096,8 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(html.contains("highlightNeighbors"));
-        assert!(html.contains("clearHighlights"));
+        assert!(html.contains("computeNeighborHighlights"));
+        assert!(html.contains("clearHighlightClasses"));
         assert!(html.contains("inboundMap"));
         assert!(html.contains("outboundMap"));
     }
@@ -2113,8 +2113,8 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(!html.contains("highlightNeighbors"));
-        assert!(!html.contains("clearHighlights"));
+        assert!(!html.contains("computeNeighborHighlights"));
+        assert!(!html.contains("clearHighlightClasses"));
         assert!(!html.contains("inboundMap"));
         assert!(!html.contains("outboundMap"));
     }

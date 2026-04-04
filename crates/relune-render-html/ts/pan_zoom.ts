@@ -1,39 +1,13 @@
+import { emitViewerEvent, getViewerRuntime } from './viewer_api';
 import {
-  emitViewerEvent,
-  getViewerRuntime,
-  type DiagramBounds,
-  type ViewportState,
-} from './viewer_api';
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function parseViewBox(svg: SVGSVGElement): DiagramBounds {
-  const raw = svg.getAttribute('viewBox');
-  if (raw === null) {
-    return { x: 0, y: 0, width: 0, height: 0 };
-  }
-
-  const parts = raw
-    .split(/\s+/)
-    .map(Number)
-    .filter((value) => Number.isFinite(value));
-
-  return {
-    x: parts[0] ?? 0,
-    y: parts[1] ?? 0,
-    width: parts[2] ?? 0,
-    height: parts[3] ?? 0,
-  };
-}
-
-interface AvailableViewportRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
+  clamp,
+  parseViewBox,
+  clampPan,
+  computeFit,
+  computeZoomAt,
+  buildViewportState,
+} from './pan_zoom_state';
+import { getAvailableViewport, applyTransform } from './pan_zoom_dom';
 
 {
   const viewportEl = document.getElementById('viewport');
@@ -59,151 +33,40 @@ interface AvailableViewportRect {
       let startPanX = 0;
       let startPanY = 0;
 
-      const getAvailableViewport = (): AvailableViewportRect => {
-        const rect = viewportEl.getBoundingClientRect();
-        const leftInset = overlayInset(document.getElementById('search-panel'), 'left');
-        const rightInset = overlayInset(document.getElementById('detail-drawer'), 'right');
-        const topInset = Math.max(
-          overlayInset(document.querySelector('h1'), 'top'),
-          overlayInset(document.getElementById('filter-reset-bar'), 'top'),
-        );
-        const bottomInset = Math.max(
-          overlayInset(document.getElementById('viewer-controls'), 'bottom'),
-          overlayInset(document.getElementById('minimap-shell'), 'bottom'),
-        );
-
-        return {
-          left: leftInset,
-          top: topInset,
-          width: Math.max(rect.width - leftInset - rightInset, 120),
-          height: Math.max(rect.height - topInset - bottomInset, 120),
-        };
-      };
-
-      const clampAxis = (
-        nextPan: number,
-        contentSize: number,
-        viewportStart: number,
-        viewportSize: number,
-      ): number => {
-        if (contentSize <= viewportSize) {
-          return viewportStart + (viewportSize - contentSize) / 2;
-        }
-
-        const padding = clamp(viewportSize * 0.08, 24, 80);
-        const minPan = viewportStart + viewportSize - contentSize - padding;
-        const maxPan = viewportStart + padding;
-        return clamp(nextPan, minPan, maxPan);
-      };
-
-      const clampPan = (nextPanX: number, nextPanY: number): { panX: number; panY: number } => {
-        const availableViewport = getAvailableViewport();
-        const scaledWidth = diagram.width * scale;
-        const scaledHeight = diagram.height * scale;
-
-        return {
-          panX: clampAxis(nextPanX, scaledWidth, availableViewport.left, availableViewport.width),
-          panY: clampAxis(nextPanY, scaledHeight, availableViewport.top, availableViewport.height),
-        };
-      };
-
-      const currentState = (): ViewportState => {
-        const rect = viewportEl.getBoundingClientRect();
-        return {
-          scale,
-          panX,
-          panY,
-          viewportWidth: rect.width,
-          viewportHeight: rect.height,
-          contentWidth: diagram.width,
-          contentHeight: diagram.height,
-        };
-      };
-
-      const overlayInset = (
-        element: Element | null,
-        side: 'left' | 'right' | 'top' | 'bottom',
-      ): number => {
-        if (!(element instanceof HTMLElement) || element.hasAttribute('hidden')) {
-          return 0;
-        }
-
-        const viewportRect = viewportEl.getBoundingClientRect();
-        const rect = element.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
-          return 0;
-        }
-
-        switch (side) {
-          case 'left':
-            return Math.max(0, rect.right - viewportRect.left + 16);
-          case 'right':
-            return Math.max(0, viewportRect.right - rect.left + 16);
-          case 'top':
-            return Math.max(0, rect.bottom - viewportRect.top + 16);
-          case 'bottom':
-            return Math.max(0, viewportRect.bottom - rect.top + 16);
-        }
-      };
-
       const updateTransform = (): void => {
-        const constrainedPan = clampPan(panX, panY);
-        panX = constrainedPan.panX;
-        panY = constrainedPan.panY;
-
-        const scaledWidth = diagram.width * scale;
-        const scaledHeight = diagram.height * scale;
-        svg.style.width = `${scaledWidth}px`;
-        svg.style.height = `${scaledHeight}px`;
-        canvasEl.style.width = `${scaledWidth}px`;
-        canvasEl.style.height = `${scaledHeight}px`;
-        canvasEl.style.transform = `translate(${panX}px, ${panY}px)`;
-        if (zoomLevelEl instanceof HTMLElement) {
-          zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
-        }
-        emitViewerEvent('relune:viewport-changed', currentState());
+        const available = getAvailableViewport(viewportEl);
+        const constrained = clampPan(panX, panY, scale, diagram, available);
+        panX = constrained.panX;
+        panY = constrained.panY;
+        applyTransform(svg, canvasEl, zoomLevelEl, scale, panX, panY, diagram);
+        emitViewerEvent(
+          'relune:viewport-changed',
+          buildViewportState(scale, panX, panY, viewportEl, diagram),
+        );
       };
 
       const zoomAt = (nextScale: number, localX: number, localY: number): void => {
-        const clampedScale = clamp(nextScale, 0.1, 2);
-        const scaleFactor = clampedScale / scale;
-        panX = localX - (localX - panX) * scaleFactor;
-        panY = localY - (localY - panY) * scaleFactor;
-        scale = clampedScale;
+        const result = computeZoomAt(scale, panX, panY, nextScale, localX, localY);
+        scale = result.scale;
+        panX = result.panX;
+        panY = result.panY;
         updateTransform();
       };
 
       const fitToScreen = (): void => {
-        const availableViewport = getAvailableViewport();
-        if (
-          diagram.width <= 0 ||
-          diagram.height <= 0 ||
-          availableViewport.width <= 0 ||
-          availableViewport.height <= 0
-        ) {
-          return;
-        }
-
-        const padding = 40;
-        scale = clamp(
-          Math.min(
-            (availableViewport.width - padding * 2) / diagram.width,
-            (availableViewport.height - padding * 2) / diagram.height,
-          ),
-          0.1,
-          2,
-        );
-        panX = availableViewport.left + (availableViewport.width - diagram.width * scale) / 2;
-        panY = availableViewport.top + (availableViewport.height - diagram.height * scale) / 2;
+        const available = getAvailableViewport(viewportEl);
+        const result = computeFit(diagram, available);
+        if (result === null) return;
+        scale = result.scale;
+        panX = result.panX;
+        panY = result.panY;
         updateTransform();
       };
 
       const centerOnContent = (contentX: number, contentY: number): void => {
-        const availableViewport = getAvailableViewport();
-        panX =
-          availableViewport.left + availableViewport.width / 2 - (contentX - diagram.x) * scale;
-        panY =
-          availableViewport.top + availableViewport.height / 2 - (contentY - diagram.y) * scale;
+        const available = getAvailableViewport(viewportEl);
+        panX = available.left + available.width / 2 - (contentX - diagram.x) * scale;
+        panY = available.top + available.height / 2 - (contentY - diagram.y) * scale;
         updateTransform();
       };
 
@@ -222,10 +85,10 @@ interface AvailableViewportRect {
         center(contentX: number, contentY: number): void {
           centerOnContent(contentX, contentY);
         },
-        getState(): ViewportState {
-          return currentState();
+        getState() {
+          return buildViewportState(scale, panX, panY, viewportEl, diagram);
         },
-        getDiagramBounds(): DiagramBounds {
+        getDiagramBounds() {
           return diagram;
         },
         setState(nextScale: number, nextPanX: number, nextPanY: number): void {
@@ -236,10 +99,10 @@ interface AvailableViewportRect {
         },
       };
 
+      // ── Mouse events ──────────────────────────────────────────────────
+
       viewportEl.addEventListener('mousedown', (event: MouseEvent) => {
-        if (event.button !== 0) {
-          return;
-        }
+        if (event.button !== 0) return;
         isDragging = true;
         startX = event.clientX;
         startY = event.clientY;
@@ -250,9 +113,7 @@ interface AvailableViewportRect {
       });
 
       document.addEventListener('mousemove', (event: MouseEvent) => {
-        if (!isDragging) {
-          return;
-        }
+        if (!isDragging) return;
         panX = startPanX + (event.clientX - startX);
         panY = startPanY + (event.clientY - startY);
         updateTransform();
@@ -273,9 +134,7 @@ interface AvailableViewportRect {
             updateTransform();
             return;
           }
-          if (event.deltaY === 0) {
-            return;
-          }
+          if (event.deltaY === 0) return;
           const rect = viewportEl.getBoundingClientRect();
           zoomAt(
             scale * (event.deltaY > 0 ? 0.9 : 1.1),
@@ -285,6 +144,8 @@ interface AvailableViewportRect {
         },
         { passive: false },
       );
+
+      // ── Touch events ──────────────────────────────────────────────────
 
       let touchStartDist = 0;
       let touchStartScale = 1;
@@ -338,17 +199,11 @@ interface AvailableViewportRect {
         isDragging = false;
       });
 
-      zoomInBtn?.addEventListener('click', () => {
-        runtime.viewport?.zoomIn();
-      });
+      // ── Buttons ───────────────────────────────────────────────────────
 
-      zoomOutBtn?.addEventListener('click', () => {
-        runtime.viewport?.zoomOut();
-      });
-
-      zoomFitBtn?.addEventListener('click', () => {
-        fitToScreen();
-      });
+      zoomInBtn?.addEventListener('click', () => runtime.viewport?.zoomIn());
+      zoomOutBtn?.addEventListener('click', () => runtime.viewport?.zoomOut());
+      zoomFitBtn?.addEventListener('click', () => fitToScreen());
 
       window.addEventListener('resize', fitToScreen);
       requestAnimationFrame(fitToScreen);
