@@ -228,6 +228,12 @@ interface AvailableViewportRect {
         getDiagramBounds(): DiagramBounds {
           return diagram;
         },
+        setState(nextScale: number, nextPanX: number, nextPanY: number): void {
+          scale = clamp(nextScale, 0.1, 2);
+          panX = nextPanX;
+          panY = nextPanY;
+          updateTransform();
+        },
       };
 
       viewportEl.addEventListener('mousedown', (event: MouseEvent) => {

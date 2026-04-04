@@ -15,6 +15,7 @@ const entries = [
   "minimap",
   "shortcuts",
   "load_motion",
+  "url_state",
 ];
 
 await Promise.all(

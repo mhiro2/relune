@@ -22,17 +22,22 @@ export interface ViewerViewportApi {
   center(contentX: number, contentY: number): void;
   getState(): ViewportState | null;
   getDiagramBounds(): DiagramBounds | null;
+  setState(scale: number, panX: number, panY: number): void;
 }
 
 export interface ViewerFiltersApi {
   reset(): void;
   hasActiveFilters(): boolean;
+  setSelectedTypes(types: string[]): void;
+  getSelectedTypes(): string[];
 }
 
 export interface ViewerSearchApi {
   focus(): void;
   clear(): void;
   isActive(): boolean;
+  setQuery(query: string): void;
+  getQuery(): string;
 }
 
 export interface ViewerSelectionApi {
@@ -41,11 +46,17 @@ export interface ViewerSelectionApi {
   getSelected(): string | null;
 }
 
+export interface ViewerGroupsApi {
+  setVisibility(groupId: string, visible: boolean): void;
+  getHiddenGroups(): string[];
+}
+
 export interface ViewerRuntime {
   viewport?: ViewerViewportApi;
   filters?: ViewerFiltersApi;
   search?: ViewerSearchApi;
   selection?: ViewerSelectionApi;
+  groups?: ViewerGroupsApi;
 }
 
 declare global {

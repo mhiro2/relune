@@ -16,6 +16,12 @@
   }
 
   // ts/viewer_api.ts
+  function getViewerRuntime() {
+    if (window.reluneViewer === void 0) {
+      window.reluneViewer = {};
+    }
+    return window.reluneViewer;
+  }
   function emitViewerEvent(name, detail) {
     document.dispatchEvent(new CustomEvent(name, { detail }));
   }
@@ -170,6 +176,19 @@
         const hideAllBtn = document.getElementById("hide-all-groups");
         showAllBtn?.addEventListener("click", showAllGroups);
         hideAllBtn?.addEventListener("click", hideAllGroups);
+        const runtime = getViewerRuntime();
+        runtime.groups = {
+          setVisibility(groupId, visible) {
+            const checkbox = document.getElementById(`group-${groupId}`);
+            if (checkbox instanceof HTMLInputElement && checkbox.checked !== visible) {
+              checkbox.checked = visible;
+              toggleGroup(groupId, visible);
+            }
+          },
+          getHiddenGroups() {
+            return groups.filter((group) => visibleGroups[group.id] === false).map((group) => group.id);
+          }
+        };
         buildGroupList();
       }
     }

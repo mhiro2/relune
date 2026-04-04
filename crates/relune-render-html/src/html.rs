@@ -59,6 +59,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         js_parts.push(build_highlight_js());
     }
     js_parts.push(build_load_motion_js());
+    js_parts.push(build_url_state_js());
     let js = if js_parts.is_empty() {
         None
     } else {
@@ -1516,6 +1517,11 @@ const fn build_shortcuts_js() -> &'static str {
 /// Build the load animation JavaScript.
 const fn build_load_motion_js() -> &'static str {
     include_str!("js/load_motion.js")
+}
+
+/// Build the URL state synchronisation JavaScript.
+const fn build_url_state_js() -> &'static str {
+    include_str!("js/url_state.js")
 }
 
 #[allow(clippy::needless_raw_string_hashes)]

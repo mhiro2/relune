@@ -126,6 +126,13 @@
         },
         isActive() {
           return searchInput.value.trim() !== "";
+        },
+        setQuery(query) {
+          searchInput.value = query;
+          performSearch(query);
+        },
+        getQuery() {
+          return searchInput.value;
         }
       };
       let debounceTimer = null;

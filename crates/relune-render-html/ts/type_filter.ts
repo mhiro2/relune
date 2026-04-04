@@ -212,6 +212,19 @@ function tableMatchesAnySelectedType(table: TableMetadata, selectedTypes: Set<st
       hasActiveFilters(): boolean {
         return activeTypes().length > 0;
       },
+      setSelectedTypes(types: string[]): void {
+        selectedTypes.clear();
+        for (const t of types) {
+          if (typeSet.has(t)) {
+            selectedTypes.add(t);
+          }
+        }
+        rebuildList();
+        applyTypeFilter();
+      },
+      getSelectedTypes(): string[] {
+        return selectedTypeList();
+      },
     };
 
     queryInput?.addEventListener('input', () => {

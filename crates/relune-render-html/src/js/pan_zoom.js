@@ -186,6 +186,12 @@
           },
           getDiagramBounds() {
             return diagram;
+          },
+          setState(nextScale, nextPanX, nextPanY) {
+            scale = clamp(nextScale, 0.1, 2);
+            panX = nextPanX;
+            panY = nextPanY;
+            updateTransform();
           }
         };
         viewportEl.addEventListener("mousedown", (event) => {

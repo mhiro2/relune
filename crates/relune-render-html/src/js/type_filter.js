@@ -227,6 +227,19 @@
         },
         hasActiveFilters() {
           return activeTypes().length > 0;
+        },
+        setSelectedTypes(types) {
+          selectedTypes.clear();
+          for (const t of types) {
+            if (typeSet.has(t)) {
+              selectedTypes.add(t);
+            }
+          }
+          rebuildList();
+          applyTypeFilter();
+        },
+        getSelectedTypes() {
+          return selectedTypeList();
         }
       };
       queryInput?.addEventListener("input", () => {

@@ -87,6 +87,13 @@ import { emitViewerEvent, getViewerRuntime } from './viewer_api';
       isActive(): boolean {
         return searchInput.value.trim() !== '';
       },
+      setQuery(query: string): void {
+        searchInput.value = query;
+        performSearch(query);
+      },
+      getQuery(): string {
+        return searchInput.value;
+      },
     };
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;

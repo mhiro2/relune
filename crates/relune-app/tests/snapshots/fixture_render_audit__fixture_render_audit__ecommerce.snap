@@ -45,7 +45,7 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 362846,
+      "bytes": 369574,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true

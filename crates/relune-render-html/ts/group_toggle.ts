@@ -1,5 +1,5 @@
 import { parseReluneMetadata, type GroupMetadata } from './metadata';
-import { emitViewerEvent } from './viewer_api';
+import { emitViewerEvent, getViewerRuntime } from './viewer_api';
 
 {
   const metadata = parseReluneMetadata();
@@ -186,6 +186,22 @@ import { emitViewerEvent } from './viewer_api';
 
       showAllBtn?.addEventListener('click', showAllGroups);
       hideAllBtn?.addEventListener('click', hideAllGroups);
+
+      const runtime = getViewerRuntime();
+      runtime.groups = {
+        setVisibility(groupId: string, visible: boolean): void {
+          const checkbox = document.getElementById(`group-${groupId}`);
+          if (checkbox instanceof HTMLInputElement && checkbox.checked !== visible) {
+            checkbox.checked = visible;
+            toggleGroup(groupId, visible);
+          }
+        },
+        getHiddenGroups(): string[] {
+          return groups
+            .filter((group) => visibleGroups[group.id] === false)
+            .map((group) => group.id);
+        },
+      };
 
       buildGroupList();
     }
