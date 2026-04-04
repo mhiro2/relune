@@ -101,7 +101,7 @@ fn render_with_schema(
             .map_err(relune_layout::LayoutError::from)?;
     }
 
-    let positioned = build_layout_from_graph_with_config(graph.clone(), &layout_config)?;
+    let positioned = build_layout_from_graph_with_config(&graph, &layout_config)?;
 
     let svg_theme = match request.options.theme {
         RenderTheme::Light => SvgTheme::Light,

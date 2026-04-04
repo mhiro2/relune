@@ -46,7 +46,7 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
     // Parse input
     let (schema, diagnostics) = schema_from_input(&request.input)?;
     let stats = schema.stats();
-    let mut graph = export_format_uses_graph(request.format)
+    let graph = export_format_uses_graph(request.format)
         .then(|| graph_for_export(&request, &schema))
         .transpose()?;
 
@@ -62,7 +62,7 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
         ExportFormat::LayoutJson => {
             let config = LayoutConfig::from(&request.layout);
             let positioned = build_layout_from_graph_with_config(
-                graph.take().expect("layout json requires graph"),
+                graph.as_ref().expect("layout json requires graph"),
                 &config,
             )?;
             serde_json::to_string_pretty(&positioned)?
