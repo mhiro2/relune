@@ -3,7 +3,7 @@
 //! This module builds a layout-oriented graph from a normalized Schema,
 //! with support for filtering, focus, and grouping.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use relune_core::{
     EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, NodeKind, Schema, Table,
@@ -59,27 +59,65 @@ fn column_flag_sets(table: &Table) -> (BTreeSet<String>, BTreeSet<String>) {
     (foreign_key_columns, indexed_columns)
 }
 
-fn resolve_foreign_key_target<'a>(
-    tables: &[&'a Table],
-    table: &Table,
-    to_table: &str,
-) -> Option<&'a Table> {
-    let target = to_table.to_lowercase();
+#[derive(Debug, Default)]
+struct TableIndex<'a> {
+    exact: HashMap<(Option<String>, String), &'a Table>,
+    by_name: HashMap<String, Vec<&'a Table>>,
+}
 
-    tables
-        .iter()
-        .copied()
-        .find(|candidate| {
-            candidate.schema_name == table.schema_name
-                && (candidate.name.to_lowercase() == target
-                    || candidate.stable_id.to_lowercase() == target)
-        })
-        .or_else(|| {
-            tables.iter().copied().find(|candidate| {
-                candidate.name.to_lowercase() == target
-                    || candidate.stable_id.to_lowercase() == target
+impl<'a> TableIndex<'a> {
+    fn new(tables: &[&'a Table]) -> Self {
+        let mut index = Self::default();
+        for table in tables {
+            index.insert(table);
+        }
+        index
+    }
+
+    fn insert(&mut self, table: &'a Table) {
+        let schema = table.schema_name.as_ref().map(|name| name.to_lowercase());
+        let name = table.name.to_lowercase();
+        let stable_id = table.stable_id.to_lowercase();
+
+        self.exact.insert((schema.clone(), name.clone()), table);
+        self.by_name.entry(name).or_default().push(table);
+
+        self.exact.insert((schema, stable_id.clone()), table);
+        if stable_id != table.name.to_lowercase() {
+            self.by_name.entry(stable_id).or_default().push(table);
+        }
+    }
+
+    fn resolve(
+        &self,
+        source_table: &Table,
+        to_schema: Option<&str>,
+        to_table: &str,
+    ) -> Option<&'a Table> {
+        let target = to_table.to_lowercase();
+
+        if let Some(target_schema) = to_schema {
+            return self
+                .exact
+                .get(&(Some(target_schema.to_lowercase()), target))
+                .copied();
+        }
+
+        if let Some(source_schema) = source_table.schema_name.as_deref().map(str::to_lowercase)
+            && let Some(table) = self.exact.get(&(Some(source_schema), target.clone()))
+        {
+            return Some(*table);
+        }
+
+        self.exact
+            .get(&(None, target.clone()))
+            .copied()
+            .or_else(|| {
+                self.by_name
+                    .get(&target)
+                    .and_then(|tables| tables.first().copied())
             })
-        })
+    }
 }
 
 fn has_unique_column_set(table: &Table, columns: &[String]) -> bool {
@@ -106,21 +144,21 @@ fn has_unique_column_set(table: &Table, columns: &[String]) -> bool {
 }
 
 fn infer_target_cardinality(
-    tables: &[&Table],
+    table_index: &TableIndex<'_>,
     source_table: &Table,
+    to_schema: Option<&str>,
     to_table: &str,
     to_columns: &[String],
 ) -> Cardinality {
-    resolve_foreign_key_target(tables, source_table, to_table).map_or(
-        Cardinality::Many,
-        |target_table| {
+    table_index
+        .resolve(source_table, to_schema, to_table)
+        .map_or(Cardinality::Many, |target_table| {
             if has_unique_column_set(target_table, to_columns) {
                 Cardinality::One
             } else {
                 Cardinality::Many
             }
-        },
-    )
+        })
 }
 
 impl EnumIndex {
@@ -450,7 +488,6 @@ impl LayoutGraphBuilder {
         views: &[&View],
         enums: &[&Enum],
     ) -> (Vec<LayoutNode>, Vec<LayoutEdge>) {
-        let table_ids: BTreeSet<&str> = tables.iter().map(|t| t.stable_id.as_str()).collect();
         let table_names: BTreeSet<String> = tables
             .iter()
             .flat_map(|table| [table.name.to_lowercase(), table.stable_id.to_lowercase()])
@@ -470,6 +507,7 @@ impl LayoutGraphBuilder {
         for enum_type in enums {
             enum_index.insert(enum_type);
         }
+        let table_index = TableIndex::new(tables);
 
         let mut nodes = Vec::with_capacity(tables.len() + views.len() + enums.len());
         let mut edges = Vec::new();
@@ -518,11 +556,17 @@ impl LayoutGraphBuilder {
                 // Only include edges where both endpoints are in our filtered set
                 // For self-loops, we always include them
                 if is_self_loop
-                    || table_ids.contains(fk.to_table.as_str())
-                    || tables.iter().any(|t| t.name == fk.to_table)
+                    || table_index
+                        .resolve(table, fk.to_schema.as_deref(), &fk.to_table)
+                        .is_some()
                 {
-                    let target_cardinality =
-                        infer_target_cardinality(tables, table, &fk.to_table, &fk.to_columns);
+                    let target_cardinality = infer_target_cardinality(
+                        &table_index,
+                        table,
+                        fk.to_schema.as_deref(),
+                        &fk.to_table,
+                        &fk.to_columns,
+                    );
                     edges.push(LayoutEdge {
                         from: table.stable_id.clone(),
                         to: fk.to_table.clone(),
@@ -1351,6 +1395,158 @@ mod tests {
                         name: Some("fk_posts_author_email".to_string()),
                         from_columns: vec!["author_email".to_string()],
                         to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["email".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        assert_eq!(graph.edges[0].target_cardinality, Cardinality::Many);
+    }
+
+    #[test]
+    fn test_foreign_key_target_cardinality_prefers_same_schema_match() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "public.users".to_string(),
+                    schema_name: Some("public".to_string()),
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "auth.users".to_string(),
+                    schema_name: Some("auth".to_string()),
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![Index {
+                        name: Some("auth_users_email_key".to_string()),
+                        columns: vec!["email".to_string()],
+                        is_unique: true,
+                    }],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(3),
+                    stable_id: "auth.posts".to_string(),
+                    schema_name: Some("auth".to_string()),
+                    name: "posts".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(3),
+                        name: "author_email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: Some("fk_posts_author_email".to_string()),
+                        from_columns: vec!["author_email".to_string()],
+                        to_schema: None,
+                        to_table: "users".to_string(),
+                        to_columns: vec!["email".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    indexes: vec![],
+                    comment: None,
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        assert_eq!(graph.edges[0].target_cardinality, Cardinality::One);
+    }
+
+    #[test]
+    fn test_foreign_key_target_cardinality_uses_explicit_schema_match() {
+        let schema = Schema {
+            tables: vec![
+                Table {
+                    id: TableId(1),
+                    stable_id: "public.users".to_string(),
+                    schema_name: Some("public".to_string()),
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(1),
+                        name: "email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(2),
+                    stable_id: "auth.users".to_string(),
+                    schema_name: Some("auth".to_string()),
+                    name: "users".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(2),
+                        name: "email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![],
+                    indexes: vec![Index {
+                        name: Some("auth_users_email_key".to_string()),
+                        columns: vec!["email".to_string()],
+                        is_unique: true,
+                    }],
+                    comment: None,
+                },
+                Table {
+                    id: TableId(3),
+                    stable_id: "auth.posts".to_string(),
+                    schema_name: Some("auth".to_string()),
+                    name: "posts".to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(3),
+                        name: "author_email".to_string(),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: false,
+                        comment: None,
+                    }],
+                    foreign_keys: vec![ForeignKey {
+                        name: Some("fk_posts_author_email".to_string()),
+                        from_columns: vec!["author_email".to_string()],
+                        to_schema: Some("public".to_string()),
                         to_table: "users".to_string(),
                         to_columns: vec!["email".to_string()],
                         on_delete: ReferentialAction::NoAction,
