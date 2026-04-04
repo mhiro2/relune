@@ -20,6 +20,19 @@ pub struct PostgresCatalog {
 }
 
 const PARALLEL_CATALOG_QUERIES: u32 = 6;
+const FETCH_VIEWS_QUERY: &str = r"
+            SELECT
+                c.relname AS view_name,
+                n.nspname AS schema_name,
+                pg_catalog.pg_get_viewdef(c.oid, true) AS definition,
+                pg_catalog.obj_description(c.oid, 'pg_class') AS view_comment
+            FROM pg_catalog.pg_class c
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind IN ('v', 'm')
+                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                AND n.nspname NOT LIKE 'pg_%'
+            ORDER BY n.nspname, c.relname
+            ";
 
 impl PostgresCatalog {
     /// Create a new `PostgreSQL` catalog reader.
@@ -247,24 +260,10 @@ impl PostgresCatalog {
 
     /// Fetch all views from the database.
     pub async fn fetch_views(&self) -> Result<Vec<RawView>, IntrospectError> {
-        let rows: Vec<RawViewRow> = sqlx::query_as(
-            r"
-            SELECT
-                c.relname AS view_name,
-                n.nspname AS schema_name,
-                pg_catalog.pg_get_viewdef(c.oid, true) AS definition,
-                pg_catalog.obj_description(c.oid, 'pg_class') AS view_comment
-            FROM pg_catalog.pg_class c
-            INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.relkind = 'v'
-                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                AND n.nspname NOT LIKE 'pg_%'
-            ORDER BY n.nspname, c.relname
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch views: {e}")))?;
+        let rows: Vec<RawViewRow> = sqlx::query_as(FETCH_VIEWS_QUERY)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| IntrospectError::query(format!("Failed to fetch views: {e}")))?;
 
         Ok(rows
             .into_iter()
@@ -508,5 +507,10 @@ mod tests {
     #[test]
     fn test_pool_max_connections_matches_parallel_queries() {
         assert_eq!(pool_max_connections(), PARALLEL_CATALOG_QUERIES);
+    }
+
+    #[test]
+    fn fetch_views_query_includes_materialized_views() {
+        assert!(FETCH_VIEWS_QUERY.contains("c.relkind IN ('v', 'm')"));
     }
 }
