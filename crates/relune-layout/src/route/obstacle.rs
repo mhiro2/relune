@@ -76,11 +76,11 @@ pub fn nudge_label(
     #[allow(clippy::cast_precision_loss)]
     for step in 1..=max_steps {
         let offset = step as f32 * LABEL_NUDGE_STEP;
-        let candidate_pos = (label.0 + nx * offset, label.1 + ny * offset);
+        let candidate_pos = (nx.mul_add(offset, label.0), ny.mul_add(offset, label.1));
         if !overlaps(candidate_pos.0, candidate_pos.1) {
             return candidate_pos;
         }
-        let candidate_neg = (label.0 - nx * offset, label.1 - ny * offset);
+        let candidate_neg = (nx.mul_add(-offset, label.0), ny.mul_add(-offset, label.1));
         if !overlaps(candidate_neg.0, candidate_neg.1) {
             return candidate_neg;
         }

@@ -2626,7 +2626,7 @@ const LABEL_ROUTE_T_STEP: f32 = 0.08;
 /// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
 const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
 
-fn edge_route_obstacle_spacing(edge_count: usize) -> f32 {
+const fn edge_route_obstacle_spacing(edge_count: usize) -> f32 {
     match edge_count {
         0..=127 => EDGE_ROUTE_OBSTACLE_SPACING,
         128..=255 => 14.0,
@@ -2896,10 +2896,10 @@ mod tests {
 
     #[test]
     fn edge_route_obstacle_spacing_scales_with_edge_count() {
-        assert_eq!(edge_route_obstacle_spacing(16), 10.0);
-        assert_eq!(edge_route_obstacle_spacing(128), 14.0);
-        assert_eq!(edge_route_obstacle_spacing(256), 18.0);
-        assert_eq!(edge_route_obstacle_spacing(512), 24.0);
+        assert!((edge_route_obstacle_spacing(16) - 10.0).abs() <= f32::EPSILON);
+        assert!((edge_route_obstacle_spacing(128) - 14.0).abs() <= f32::EPSILON);
+        assert!((edge_route_obstacle_spacing(256) - 18.0).abs() <= f32::EPSILON);
+        assert!((edge_route_obstacle_spacing(512) - 24.0).abs() <= f32::EPSILON);
     }
 
     fn make_test_schema() -> Schema {
