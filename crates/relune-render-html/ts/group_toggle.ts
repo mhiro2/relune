@@ -1,5 +1,10 @@
 import { parseReluneMetadata, type GroupMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime } from './viewer_api';
+import {
+  emitViewerEvent,
+  getViewerRuntime,
+  markViewerModuleReady,
+  reportSessionStorageError,
+} from './viewer_api';
 import {
   buildGroupListDOM,
   applyGroupVisibility,
@@ -34,8 +39,8 @@ import {
         applyPanelCollapsed(next);
         try {
           sessionStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
-        } catch {
-          // Ignore storage errors
+        } catch (error: unknown) {
+          reportSessionStorageError('saving the group panel state', error);
         }
       });
 
@@ -43,8 +48,8 @@ import {
         if (sessionStorage.getItem(COLLAPSE_KEY) === '1') {
           applyPanelCollapsed(true);
         }
-      } catch {
-        // Ignore storage errors
+      } catch (error: unknown) {
+        reportSessionStorageError('restoring the group panel state', error);
       }
 
       const groupTableMap: Record<string, string[]> = {};
@@ -122,6 +127,7 @@ import {
             .map((group) => group.id);
         },
       };
+      markViewerModuleReady('groups');
 
       if (groupList) {
         buildGroupListDOM(groups, groupList, toggleGroup);

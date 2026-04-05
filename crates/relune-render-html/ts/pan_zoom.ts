@@ -1,4 +1,4 @@
-import { emitViewerEvent, getViewerRuntime } from './viewer_api';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 import {
   clamp,
   parseViewBox,
@@ -98,6 +98,7 @@ import { getAvailableViewport, applyTransform } from './pan_zoom_dom';
           updateTransform();
         },
       };
+      markViewerModuleReady('viewport');
 
       // ── Mouse events ──────────────────────────────────────────────────
 

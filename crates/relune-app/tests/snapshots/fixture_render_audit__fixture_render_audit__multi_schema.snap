@@ -5,15 +5,19 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
 {
   "fixture": "multi_schema.sql",
   "layout": {
-    "edge_count": 0,
-    "height": 322.0,
+    "edge_count": 6,
+    "height": 830.0,
     "node_count": 7,
-    "width": 3793.199951171875
+    "width": 2114.60009765625
   },
   "patterns": {
     "long_detours": {
       "count_over_1_8x": 0,
-      "worst_examples": []
+      "worst_examples": [
+        "public.posts[author_id] -> public.users[id] (1.24x)",
+        "inventory.stock[product_id] -> inventory.products[id] (1.00x)",
+        "sales.order_items[order_id] -> sales.orders[id] (1.00x)"
+      ]
     },
     "parallel_groups": {
       "count": 0,
@@ -29,20 +33,24 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
       "examples": []
     },
     "tight_clearance": {
-      "count_under_24px": 0,
-      "worst_examples": []
+      "count_under_24px": 1,
+      "worst_examples": [
+        "sales.order_items[order_id] -> sales.orders[id] (16.0px)",
+        "public.posts[author_id] -> public.users[id] (52.0px)",
+        "inventory.stock[product_id] -> inventory.products[id] (76.0px)"
+      ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 357872,
+      "bytes": 379568,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 47754,
-      "edge_groups": 0,
+      "bytes": 56769,
+      "edge_groups": 48,
       "node_groups": 7
     }
   }

@@ -1,5 +1,5 @@
 import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
-import { getViewerRuntime } from './viewer_api';
+import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './viewer_api';
 
 {
   const runtime = getViewerRuntime();
@@ -186,6 +186,26 @@ import { getViewerRuntime } from './viewer_api';
     }
   }
 
+  function expectedViewerModules(): ViewerModule[] {
+    const modules: ViewerModule[] = [];
+    if (document.getElementById('zoom-fit') !== null) {
+      modules.push('viewport');
+    }
+    if (document.getElementById('table-search') instanceof HTMLInputElement) {
+      modules.push('search');
+    }
+    if (document.getElementById('type-filter-section') !== null) {
+      modules.push('filters');
+    }
+    if (document.getElementById('detail-drawer') !== null) {
+      modules.push('selection');
+    }
+    if ((metadata?.groups?.length ?? 0) > 0) {
+      modules.push('groups');
+    }
+    return modules;
+  }
+
   // ---------------------------------------------------------------------------
   // Listen for state changes and update URL
   // ---------------------------------------------------------------------------
@@ -201,7 +221,5 @@ import { getViewerRuntime } from './viewer_api';
   // Init: restore state after all modules have initialised
   // ---------------------------------------------------------------------------
 
-  requestAnimationFrame(() => {
-    restoreFromHash();
-  });
+  waitForViewerModules(expectedViewerModules(), restoreFromHash);
 }

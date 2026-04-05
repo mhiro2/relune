@@ -45,7 +45,19 @@ export function columnMatchesSelectedType(columnType: string, selectedType: stri
 
   const baseColumn = base(column);
   const baseSelected = base(selected);
-  return baseColumn === baseSelected || column.includes(selected) || selected.includes(column);
+
+  const startsWithTypeToken = (value: string, token: string): boolean =>
+    value === token ||
+    value.startsWith(`${token}(`) ||
+    value.startsWith(`${token} `) ||
+    value.startsWith(`${token}[`) ||
+    value.startsWith(`${token},`);
+
+  return (
+    baseColumn === baseSelected ||
+    startsWithTypeToken(column, selected) ||
+    startsWithTypeToken(selected, column)
+  );
 }
 
 export function tableMatchesAnySelectedType(

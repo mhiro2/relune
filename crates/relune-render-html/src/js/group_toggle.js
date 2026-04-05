@@ -16,14 +16,81 @@
   }
 
   // ts/viewer_api.ts
+  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
+  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
+  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
   function getViewerRuntime() {
-    if (window.reluneViewer === void 0) {
-      window.reluneViewer = {};
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
+      viewerWindow[VIEWER_RUNTIME_KEY] = {};
     }
-    return window.reluneViewer;
+    return viewerWindow[VIEWER_RUNTIME_KEY];
+  }
+  function readyModules() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
+      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
+    }
+    return viewerWindow[VIEWER_READY_MODULES_KEY];
+  }
+  function runtimeWaiters() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
+      viewerWindow[VIEWER_WAITERS_KEY] = [];
+    }
+    return viewerWindow[VIEWER_WAITERS_KEY];
+  }
+  function markViewerModuleReady(module) {
+    readyModules().add(module);
+    flushViewerWaiters();
+  }
+  function flushViewerWaiters() {
+    const ready = readyModules();
+    const remaining = [];
+    for (const waiter of runtimeWaiters()) {
+      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
+        waiter.callback();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    const viewerWindow = window;
+    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
   }
   function emitViewerEvent(name, detail) {
     document.dispatchEvent(new CustomEvent(name, { detail }));
+  }
+  function noticeStack() {
+    const existing = document.getElementById("relune-viewer-notices");
+    if (existing instanceof HTMLElement) {
+      return existing;
+    }
+    const stack = document.createElement("div");
+    stack.id = "relune-viewer-notices";
+    stack.className = "viewer-notice-stack";
+    document.body.appendChild(stack);
+    return stack;
+  }
+  function showViewerNotice(message, severity = "warning") {
+    const item = document.createElement("div");
+    item.className = `viewer-notice viewer-notice-${severity}`;
+    item.setAttribute("role", severity === "warning" ? "alert" : "status");
+    item.textContent = message;
+    noticeStack().appendChild(item);
+    window.setTimeout(() => {
+      item.remove();
+    }, 4500);
+  }
+  function reportSessionStorageError(action, error) {
+    const isQuotaExceeded = error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+    if (isQuotaExceeded) {
+      showViewerNotice(
+        `Session storage is full while ${action}. Viewer state was not saved.`,
+        "warning"
+      );
+      return;
+    }
+    console.warn(`Session storage error while ${action}`, error);
   }
 
   // ts/group_toggle_dom.ts
@@ -136,14 +203,16 @@
           applyPanelCollapsed(next);
           try {
             sessionStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
-          } catch {
+          } catch (error) {
+            reportSessionStorageError("saving the group panel state", error);
           }
         });
         try {
           if (sessionStorage.getItem(COLLAPSE_KEY) === "1") {
             applyPanelCollapsed(true);
           }
-        } catch {
+        } catch (error) {
+          reportSessionStorageError("restoring the group panel state", error);
         }
         const groupTableMap = {};
         for (const group of groups) {
@@ -170,6 +239,7 @@
             return groups.filter((group) => visibleGroups[group.id] === false).map((group) => group.id);
           }
         };
+        markViewerModuleReady("groups");
         if (groupList) {
           buildGroupListDOM(groups, groupList, toggleGroup);
         }
