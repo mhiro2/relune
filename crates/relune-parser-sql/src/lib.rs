@@ -30,13 +30,19 @@ pub use relune_core::diagnostic::codes;
 /// Error type for parse failures.
 #[derive(Debug, Error)]
 pub enum ParseError {
-    /// SQL parsing error from sqlparser.
+    /// SQL parsing error message.
     #[error("SQL parse error: {0}")]
-    Sql(#[from] sqlparser::parser::ParserError),
+    Sql(String),
 
     /// Fatal error during schema construction.
     #[error("Schema error: {0}")]
     Schema(String),
+}
+
+impl From<sqlparser::parser::ParserError> for ParseError {
+    fn from(error: sqlparser::parser::ParserError) -> Self {
+        Self::Sql(error.to_string())
+    }
 }
 
 /// Output from parsing SQL with diagnostics support.
@@ -436,11 +442,61 @@ fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
     }
 }
 
+const MAX_UNSUPPORTED_DEBUG_LEN: usize = 80;
+const MAX_UNSUPPORTED_DEBUG_PREFIX_LEN: usize = MAX_UNSUPPORTED_DEBUG_LEN - 3;
+
+fn truncate_unsupported_debug(debug_str: &str) -> String {
+    if debug_str.len() <= MAX_UNSUPPORTED_DEBUG_LEN {
+        return debug_str.to_owned();
+    }
+
+    let boundary = debug_str.floor_char_boundary(MAX_UNSUPPORTED_DEBUG_PREFIX_LEN);
+    format!("{}...", &debug_str[..boundary])
+}
+
+fn parse_mysql_enum_like_value(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Option<String> {
+    if chars.next()? != '\'' {
+        return None;
+    }
+
+    let mut value = String::new();
+    loop {
+        match chars.next()? {
+            '\'' => {
+                if chars.peek() == Some(&'\'') {
+                    value.push('\'');
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            '\\' => {
+                let escaped = chars.next()?;
+                match escaped {
+                    '\\' | '\'' => value.push(escaped),
+                    other => {
+                        value.push('\\');
+                        value.push(other);
+                    }
+                }
+            }
+            c => value.push(c),
+        }
+    }
+
+    Some(value)
+}
+
 fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> {
     let start = data_type.find('(')?;
     let end = data_type.rfind(')')?;
     let kind = data_type[..start].trim();
     if !kind.eq_ignore_ascii_case("enum") && !kind.eq_ignore_ascii_case("set") {
+        return None;
+    }
+    if start.saturating_add(1) > end {
         return None;
     }
 
@@ -452,26 +508,7 @@ fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> 
             chars.next();
         }
 
-        if chars.next()? != '\'' {
-            return None;
-        }
-
-        let mut value = String::new();
-        loop {
-            match chars.next()? {
-                '\'' => {
-                    if chars.peek() == Some(&'\'') {
-                        value.push('\'');
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                '\\' => value.push(chars.next()?),
-                c => value.push(c),
-            }
-        }
-        values.push(value);
+        values.push(parse_mysql_enum_like_value(&mut chars)?);
 
         while chars.peek().is_some_and(char::is_ascii_whitespace) {
             chars.next();
@@ -865,11 +902,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             _ => {
                 // Generic unsupported statement - truncate to avoid huge debug output
                 let debug_str = format!("{statement:?}");
-                let truncated = if debug_str.len() > 80 {
-                    format!("{}...", &debug_str[..77])
-                } else {
-                    debug_str
-                };
+                let truncated = truncate_unsupported_debug(&debug_str);
                 ctx.warn_unsupported(
                     &truncated,
                     source_span_from_sql_span(input, statement.span()),
@@ -1995,6 +2028,16 @@ mod tests {
     }
 
     #[test]
+    fn truncates_unsupported_debug_output_on_utf8_boundaries() {
+        let debug = "絵文字🙂".repeat(20);
+        let truncated = truncate_unsupported_debug(&debug);
+
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.is_char_boundary(truncated.len() - 3));
+        assert!(truncated.len() <= MAX_UNSUPPORTED_DEBUG_LEN);
+    }
+
+    #[test]
     fn alter_table_add_column_before_create_index() {
         let sql = r"
         CREATE TABLE users (id BIGINT PRIMARY KEY);
@@ -2111,6 +2154,25 @@ mod tests {
         let err = parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres)
             .expect_err("strict parsing should reject error diagnostics");
         assert!(err.to_string().contains("error diagnostics"));
+    }
+
+    #[test]
+    fn parse_error_wraps_sqlparser_errors_as_strings() {
+        let parser_error = Parser::new(&PostgreSqlDialect {})
+            .try_with_sql("CREATE TABLE")
+            .expect("tokenization should succeed")
+            .parse_statement()
+            .expect_err("statement should fail");
+
+        let error = ParseError::from(parser_error);
+
+        match error {
+            ParseError::Sql(message) => {
+                assert!(!message.is_empty());
+                assert!(message.contains("sql parser error"));
+            }
+            ParseError::Schema(message) => panic!("unexpected schema error: {message}"),
+        }
     }
 
     #[test]
@@ -2809,6 +2871,27 @@ mod tests {
             .find(|enum_| enum_.name == "set('featured','archived')")
             .expect("flags set should be inferred");
         assert_eq!(flags_enum.values, vec!["featured", "archived"]);
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_rejects_reversed_parentheses() {
+        assert_eq!(parse_mysql_enum_like_type(")enum("), None);
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_preserves_trailing_backslash() {
+        assert_eq!(
+            parse_mysql_enum_like_type("enum('back\\\\')"),
+            Some(("enum".to_string(), vec!["back\\".to_string()]))
+        );
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_preserves_unknown_backslash_sequences() {
+        assert_eq!(
+            parse_mysql_enum_like_type(r"enum('line\nbreak')"),
+            Some(("enum".to_string(), vec![r"line\nbreak".to_string()]))
+        );
     }
 
     #[test]
