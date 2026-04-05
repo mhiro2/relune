@@ -127,6 +127,9 @@ import { rebuildFilterList, syncFilterChrome } from './type_filter_dom';
       getSelectedTypes(): string[] {
         return selectedTypeList(state.selectedTypes);
       },
+      getAvailableTypes(): string[] {
+        return [...state.allTypes];
+      },
     };
 
     queryInput?.addEventListener('input', () => {

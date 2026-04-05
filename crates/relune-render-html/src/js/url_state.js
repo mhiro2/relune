@@ -13,6 +13,15 @@
     let readHash = function() {
       const raw = location.hash.replace(/^#/, "");
       return new URLSearchParams(raw);
+    }, parseAllowedTypes = function(typesRaw, allowedTypes) {
+      const selected = /* @__PURE__ */ new Set();
+      for (const type of typesRaw.split(",")) {
+        const candidate = type.trim();
+        if (candidate !== "" && allowedTypes.has(candidate)) {
+          selected.add(candidate);
+        }
+      }
+      return [...selected];
     }, scheduleWrite = function() {
       if (writeTimer !== null) {
         clearTimeout(writeTimer);
@@ -69,7 +78,8 @@
       }
       const typesRaw = params.get(PARAM_TYPES);
       if (typesRaw !== null && typesRaw !== "") {
-        const types = typesRaw.split(",").filter((t) => t !== "");
+        const allowedTypes = new Set(runtime.filters?.getAvailableTypes() ?? []);
+        const types = parseAllowedTypes(typesRaw, allowedTypes);
         if (types.length > 0) {
           runtime.filters?.setSelectedTypes(types);
         }
@@ -86,7 +96,7 @@
         runtime.selection?.select(table);
       }
     };
-    readHash2 = readHash, scheduleWrite2 = scheduleWrite, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash;
+    readHash2 = readHash, parseAllowedTypes2 = parseAllowedTypes, scheduleWrite2 = scheduleWrite, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash;
     const runtime = getViewerRuntime();
     const PARAM_SEARCH = "q";
     const PARAM_TABLE = "t";
@@ -107,6 +117,7 @@
     });
   }
   var readHash2;
+  var parseAllowedTypes2;
   var scheduleWrite2;
   var writeHash2;
   var restoreFromHash2;

@@ -30,6 +30,7 @@ export interface ViewerFiltersApi {
   hasActiveFilters(): boolean;
   setSelectedTypes(types: string[]): void;
   getSelectedTypes(): string[];
+  getAvailableTypes(): string[];
 }
 
 export interface ViewerSearchApi {

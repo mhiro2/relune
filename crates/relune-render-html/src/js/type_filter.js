@@ -264,6 +264,9 @@
         },
         getSelectedTypes() {
           return selectedTypeList(state.selectedTypes);
+        },
+        getAvailableTypes() {
+          return [...state.allTypes];
         }
       };
       queryInput?.addEventListener("input", () => {

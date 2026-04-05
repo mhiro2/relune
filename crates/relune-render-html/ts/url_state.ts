@@ -20,6 +20,17 @@ import { getViewerRuntime } from './viewer_api';
     return new URLSearchParams(raw);
   }
 
+  function parseAllowedTypes(typesRaw: string, allowedTypes: ReadonlySet<string>): string[] {
+    const selected = new Set<string>();
+    for (const type of typesRaw.split(',')) {
+      const candidate = type.trim();
+      if (candidate !== '' && allowedTypes.has(candidate)) {
+        selected.add(candidate);
+      }
+    }
+    return [...selected];
+  }
+
   // ---------------------------------------------------------------------------
   // Write to URL hash (debounced)
   // ---------------------------------------------------------------------------
@@ -102,7 +113,8 @@ import { getViewerRuntime } from './viewer_api';
     // Restore type filters
     const typesRaw = params.get(PARAM_TYPES);
     if (typesRaw !== null && typesRaw !== '') {
-      const types = typesRaw.split(',').filter((t) => t !== '');
+      const allowedTypes = new Set(runtime.filters?.getAvailableTypes() ?? []);
+      const types = parseAllowedTypes(typesRaw, allowedTypes);
       if (types.length > 0) {
         runtime.filters?.setSelectedTypes(types);
       }
