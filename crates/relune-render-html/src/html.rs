@@ -59,6 +59,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         js_parts.push(build_highlight_js());
     }
     js_parts.push(build_load_motion_js());
+    js_parts.push(build_url_state_js());
     let js = if js_parts.is_empty() {
         None
     } else {
@@ -1518,6 +1519,11 @@ const fn build_load_motion_js() -> &'static str {
     include_str!("js/load_motion.js")
 }
 
+/// Build the URL state synchronisation JavaScript.
+const fn build_url_state_js() -> &'static str {
+    include_str!("js/url_state.js")
+}
+
 #[allow(clippy::needless_raw_string_hashes)]
 fn build_filter_reset_bar_html() -> String {
     r#"  <div class="filter-reset-bar" id="filter-reset-bar" hidden>
@@ -1760,8 +1766,8 @@ mod tests {
     fn test_pan_zoom_js_clamps_panning_to_viewport_bounds() {
         let js = build_pan_zoom_js();
 
-        assert!(js.contains("const clampPan ="));
-        assert!(js.contains("const getAvailableViewport ="));
+        assert!(js.contains("function clampPan("));
+        assert!(js.contains("function getAvailableViewport("));
         assert!(js.contains("contentX - diagram.x"));
     }
 
@@ -2090,8 +2096,8 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(html.contains("highlightNeighbors"));
-        assert!(html.contains("clearHighlights"));
+        assert!(html.contains("computeNeighborHighlights"));
+        assert!(html.contains("clearHighlightClasses"));
         assert!(html.contains("inboundMap"));
         assert!(html.contains("outboundMap"));
     }
@@ -2107,8 +2113,8 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(!html.contains("highlightNeighbors"));
-        assert!(!html.contains("clearHighlights"));
+        assert!(!html.contains("computeNeighborHighlights"));
+        assert!(!html.contains("clearHighlightClasses"));
         assert!(!html.contains("inboundMap"));
         assert!(!html.contains("outboundMap"));
     }

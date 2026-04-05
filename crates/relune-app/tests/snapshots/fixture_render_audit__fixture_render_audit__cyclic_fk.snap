@@ -53,7 +53,7 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 388801,
+      "bytes": 399206,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true

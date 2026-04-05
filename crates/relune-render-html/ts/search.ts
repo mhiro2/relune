@@ -1,6 +1,7 @@
 import { syncEdgeDimming } from './edge_filters';
 import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
 import { emitViewerEvent, getViewerRuntime } from './viewer_api';
+import { computeSearchMatches } from './search_actions';
 
 {
   const searchInput = document.getElementById('table-search');
@@ -20,8 +21,6 @@ import { emitViewerEvent, getViewerRuntime } from './viewer_api';
     const performSearch = (query: string): void => {
       const q = query.toLowerCase().trim();
       const nodes = svgRoot.querySelectorAll('.node');
-      let matchCount = 0;
-      const totalCount = nodes.length;
 
       if (q === '') {
         nodes.forEach((node) => {
@@ -33,38 +32,29 @@ import { emitViewerEvent, getViewerRuntime } from './viewer_api';
         emitViewerEvent('relune:search-changed', {
           active: false,
           query: '',
-          matches: totalCount,
-          total: totalCount,
+          matches: nodes.length,
+          total: nodes.length,
         });
         return;
       }
 
       searchClear?.classList.add('visible');
 
-      nodes.forEach((node) => {
-        const tableId = node.getAttribute('data-id') ?? node.getAttribute('data-table-id') ?? '';
-        const tableName = tableNames[tableId] ?? tableId;
-        const nodeText = node.textContent?.toLowerCase() ?? '';
-
-        const matches =
-          tableName.toLowerCase().includes(q) ||
-          tableId.toLowerCase().includes(q) ||
-          nodeText.includes(q);
-
+      const { results, matchCount, total } = computeSearchMatches(nodes, tableNames, query);
+      for (const { node, matches } of results) {
         if (matches) {
           node.classList.remove('dimmed-by-search');
           node.classList.add('highlighted-by-search');
-          matchCount += 1;
         } else {
           node.classList.remove('highlighted-by-search');
           node.classList.add('dimmed-by-search');
         }
-      });
+      }
 
       syncEdgeDimming(svgRoot);
 
       if (searchResults) {
-        searchResults.textContent = `${matchCount} of ${totalCount} objects`;
+        searchResults.textContent = `${matchCount} of ${total} objects`;
         searchResults.classList.add('visible');
       }
 
@@ -72,7 +62,7 @@ import { emitViewerEvent, getViewerRuntime } from './viewer_api';
         active: true,
         query,
         matches: matchCount,
-        total: totalCount,
+        total,
       });
     };
 
@@ -86,6 +76,13 @@ import { emitViewerEvent, getViewerRuntime } from './viewer_api';
       },
       isActive(): boolean {
         return searchInput.value.trim() !== '';
+      },
+      setQuery(query: string): void {
+        searchInput.value = query;
+        performSearch(query);
+      },
+      getQuery(): string {
+        return searchInput.value;
       },
     };
 
