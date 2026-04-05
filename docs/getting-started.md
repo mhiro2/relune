@@ -28,6 +28,12 @@ relune render --sql schema.sql --format html -o erd.html
 
 `render` draws tables, views, and PostgreSQL enum types when they are present in the schema.
 
+Generate **Markdown documentation**:
+
+```bash
+relune doc --sql schema.sql -o schema.md
+```
+
 Summarize the schema in the terminal:
 
 ```bash

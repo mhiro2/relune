@@ -75,6 +75,15 @@ Reduce noise in larger schemas:
 - group by schema or prefix
 - include or exclude selected tables
 
+### Schema documentation
+
+Generate per-table Markdown documentation:
+
+- table and column listings with types, nullability, and key indicators
+- foreign key references and referential actions
+- index details, views, and enum types
+- overview statistics
+
 ### Text exports
 
 Export diagrams to formats that fit docs and code review workflows:
@@ -123,6 +132,9 @@ relune render --sql schema.sql -o erd.svg
 # Generate an interactive HTML viewer
 relune render --sql schema.sql --format html -o erd.html
 
+# Generate Markdown documentation
+relune doc --sql schema.sql -o schema.md
+
 # Inspect the schema summary
 relune inspect --sql schema.sql
 ```
@@ -139,6 +151,9 @@ relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 
 # Use a force-directed layout with orthogonal edges
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o erd-force.svg
+
+# Generate Markdown docs to a file
+relune doc --sql schema.sql -o schema.md
 
 # Export as Mermaid
 relune export --sql schema.sql --format mermaid -o erd.mmd
@@ -168,7 +183,7 @@ Download the latest release from GitHub Releases and place `relune` on your `PAT
 
 ## Common use cases
 
-* **Document an existing database** from raw SQL DDL
+* **Document an existing database** from raw SQL DDL with `relune doc`
 * **Review schema changes** in pull requests with text exports and diffs
 * **Explore large schemas** with focus, traversal depth, and filtering
 * **Generate artifacts** for internal docs and architecture notes

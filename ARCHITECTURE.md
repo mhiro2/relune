@@ -71,7 +71,7 @@ Relune is a **reusable schema graph engine** with multiple delivery surfaces (CL
 | `relune-render-theme` | Shared theme palette and render-facing theme DTOs used by SVG and HTML renderers |
 | `relune-render-svg` | Layout → SVG string |
 | `relune-render-html` | Layout → self-contained HTML + embedded SVG + viewer scripts |
-| `relune-app` | Use-cases: parse/introspect, render, export, lint, diff wiring |
+| `relune-app` | Use-cases: parse/introspect, render, doc, export, lint, diff wiring |
 | `relune-cli` | Args, config TOML, stdin/stdout/files, exit codes |
 | `relune-wasm` | `wasm-bindgen` façade, JSON in/out |
 | `relune-testkit` | Shared test helpers (tests only) |
@@ -97,7 +97,7 @@ docs/              # user-facing guides
 SQL file | SQL text | schema JSON | db URL  +  optional relune.toml
     → relune-cli (I/O, load config)
     → relune-app (choose adapter, build pipeline)
-    → Schema → graph → layout → (+ optional overlay) → SVG | HTML | JSON | diagram text
+    → Schema → graph → layout → (+ optional overlay) → SVG | HTML | Markdown | JSON | diagram text
     → file or stdout
 ```
 
@@ -181,6 +181,7 @@ Supported paths into a `Schema`:
 | Shared palettes / theme DTOs | `relune-render-theme` |
 | SVG | `relune-render-svg` |
 | Self-contained HTML | `relune-render-html` |
+| Markdown documentation | `relune-app` (doc use-case, schema → Markdown) |
 | `schema-json` / `graph-json` / `layout-json` | Core + layout serialization |
 | Mermaid `erDiagram`, D2, Graphviz DOT | `relune-layout` (text from the same positioned graph) |
 
@@ -188,7 +189,7 @@ Supported paths into a `Schema`:
 
 ## 8. Configuration
 
-CLI merges **defaults → TOML file → flags** for command settings (`render`, `inspect`, `export`, `lint`, `diff`). Implementation: `crates/relune-cli/src/config.rs`. Required inputs still come from the CLI. After merge, render/export apply semantic validation for focus depth and filter combinations, and diff file inputs are classified by content instead of extension alone.
+CLI merges **defaults → TOML file → flags** for command settings (`render`, `inspect`, `doc`, `export`, `lint`, `diff`). Implementation: `crates/relune-cli/src/config.rs`. Required inputs still come from the CLI. After merge, render/export apply semantic validation for focus depth and filter combinations, and diff file inputs are classified by content instead of extension alone.
 
 ---
 

@@ -10,6 +10,7 @@ Understand, visualize, and review database schemas from the command line.
 ## Why relune
 
 - **Visualize schemas** -- render ERDs as SVG (static) or HTML (interactive pan/zoom/search/filters)
+- **Document schemas** -- generate Markdown documentation covering tables, columns, keys, indexes, views, and enums
 - **Inspect structure** -- summarize tables, columns, types, constraints, and relationships
 - **Lint for issues** -- detect missing primary keys, FK index gaps, naming inconsistencies, orphan tables
 - **Diff revisions** -- compare before/after schemas with text or visual diffs
@@ -35,6 +36,9 @@ relune render --sql schema.sql -o erd.svg
 
 # Interactive HTML viewer
 relune render --sql schema.sql --format html -o erd.html
+
+# Generate Markdown documentation
+relune doc --sql schema.sql -o schema.md
 
 # Summarize the schema
 relune inspect --sql schema.sql
@@ -106,6 +110,20 @@ Validation rules:
 - The focused table cannot be excluded
 - If `--include` is set, it must contain the focused table
 - The same table cannot appear in both `--include` and `--exclude`
+
+### doc
+
+Generate Markdown documentation for a schema.
+
+```bash
+relune doc --sql schema.sql -o schema.md
+relune doc --sql schema.sql
+relune doc --db-url 'postgres://user:pass@localhost:5432/mydb' -o schema.md
+```
+
+| Option | Values | Default |
+|--------|--------|---------|
+| `-o`, `--out` | Output file path | stdout |
 
 ### inspect
 
@@ -207,9 +225,10 @@ File inputs are auto-detected by content (schema JSON works even without `.json`
 
 ### Schema review
 
-Combine inspect, lint, and render for a full schema audit:
+Combine doc, inspect, lint, and render for a full schema audit:
 
 ```bash
+relune doc --sql schema.sql -o schema.md                 # documentation
 relune inspect --sql schema.sql                          # overview
 relune lint --sql schema.sql                             # find issues
 relune render --sql schema.sql --format html -o erd.html # visualize
