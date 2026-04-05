@@ -298,6 +298,18 @@ impl From<&relune_core::Index> for IndexDetails {
     }
 }
 
+/// Result of a doc generation operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocResult {
+    /// The generated documentation content.
+    pub content: String,
+    /// Diagnostics collected during processing.
+    #[serde(default)]
+    pub diagnostics: Vec<Diagnostic>,
+    /// Statistics about the documented schema.
+    pub stats: SchemaStats,
+}
+
 /// Result of an export operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportResult {

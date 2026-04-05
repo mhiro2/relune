@@ -89,6 +89,22 @@ relune inspect --sql schema.sql --table orders --format json -o inspect.json
 
 ---
 
+## `doc`
+
+Generate Markdown documentation for a schema. Outputs a single Markdown file covering tables, columns, types, constraints, foreign keys, indexes, views, and enums.
+
+| Option | Description |
+|--------|-------------|
+| `-o`, `--out <FILE>` | Optional file (else stdout) |
+
+```bash
+relune doc --sql schema.sql -o schema.md
+relune doc --sql schema.sql
+relune doc --db-url 'postgres://user:pass@localhost:5432/mydb' -o schema.md
+```
+
+---
+
 ## `export`
 
 Emit normalized JSON or diagram text. **`--format` is required.**

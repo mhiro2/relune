@@ -37,25 +37,27 @@ pub mod usecases;
 
 // Re-export request types
 pub use request::{
-    DiffFormat, DiffRequest, ExportFormat, ExportRequest, InputSource, InspectFormat,
-    InspectRequest, LintFormat, LintRequest, OutputFormat, RenderOptions, RenderRequest,
-    RenderTheme,
+    DiffFormat, DiffRequest, DocFormat, DocRequest, ExportFormat, ExportRequest, InputSource,
+    InspectFormat, InspectRequest, LintFormat, LintRequest, OutputFormat, RenderOptions,
+    RenderRequest, RenderTheme,
 };
 
 // Re-export result types
 pub use result::{
-    ColumnDetails, DiffResult, ExportResult, ForeignKeyDetails, IndexDetails, InspectResult,
-    LintResult, RenderResult, RenderStats, SchemaSummary, TableDetails, TableSummary,
+    ColumnDetails, DiffResult, DocResult, ExportResult, ForeignKeyDetails, IndexDetails,
+    InspectResult, LintResult, RenderResult, RenderStats, SchemaSummary, TableDetails,
+    TableSummary,
 };
 
 // Re-export error type
 pub use error::AppError;
 
 // Re-export use case functions
-pub use usecases::{diff, export, inspect, lint, render};
+pub use usecases::{diff, doc, export, inspect, lint, render};
 
 // Re-export from usecases for convenience
 pub use usecases::diff::{build_diff_overlay, build_diff_schema, format_diff_text};
+pub use usecases::doc::format_doc_markdown;
 pub use usecases::inspect::format_inspect_text;
 pub use usecases::lint::{format_lint_json, format_lint_text};
 

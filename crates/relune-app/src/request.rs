@@ -493,6 +493,51 @@ impl DiffRequest {
     }
 }
 
+/// Request to generate schema documentation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DocRequest {
+    /// Input source for the schema.
+    pub input: InputSource,
+    /// Output format.
+    #[serde(default)]
+    pub format: DocFormat,
+    /// Optional output file path. If None, output goes to stdout.
+    pub output_path: Option<PathBuf>,
+}
+
+impl DocRequest {
+    /// Create a new doc request from SQL text.
+    pub fn from_sql(sql: impl Into<String>) -> Self {
+        Self {
+            input: InputSource::sql_text(sql),
+            ..Default::default()
+        }
+    }
+
+    /// Set the output format.
+    #[must_use]
+    pub const fn with_format(mut self, format: DocFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Set the output file path.
+    #[must_use]
+    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.output_path = Some(path.into());
+        self
+    }
+}
+
+/// Output format for doc command.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DocFormat {
+    /// Markdown output.
+    #[default]
+    Markdown,
+}
+
 /// Output format for diff command.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

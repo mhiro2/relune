@@ -6,7 +6,7 @@ use std::path::Path;
 use relune_app::InputSource;
 use relune_core::SqlDialect;
 
-use crate::cli::{DiffArgs, ExportArgs, InspectArgs, LintArgs, RenderArgs};
+use crate::cli::{DiffArgs, DocArgs, ExportArgs, InspectArgs, LintArgs, RenderArgs};
 use crate::error::{CliError, CliResult};
 
 /// Input selection resolved from a CLI command.
@@ -101,6 +101,17 @@ impl<'a> InputSelection<'a> {
     /// Build a selection for `export`.
     #[must_use]
     pub(crate) fn from_export(args: &'a ExportArgs) -> Self {
+        Self::new(
+            args.sql.as_deref(),
+            args.sql_text.as_deref(),
+            args.schema_json.as_deref(),
+            args.db_url.as_deref(),
+        )
+    }
+
+    /// Build a selection for `doc`.
+    #[must_use]
+    pub(crate) fn from_doc(args: &'a DocArgs) -> Self {
         Self::new(
             args.sql.as_deref(),
             args.sql_text.as_deref(),
