@@ -436,11 +436,26 @@ fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
     }
 }
 
+const MAX_UNSUPPORTED_DEBUG_LEN: usize = 80;
+const MAX_UNSUPPORTED_DEBUG_PREFIX_LEN: usize = MAX_UNSUPPORTED_DEBUG_LEN - 3;
+
+fn truncate_unsupported_debug(debug_str: &str) -> String {
+    if debug_str.len() <= MAX_UNSUPPORTED_DEBUG_LEN {
+        return debug_str.to_owned();
+    }
+
+    let boundary = debug_str.floor_char_boundary(MAX_UNSUPPORTED_DEBUG_PREFIX_LEN);
+    format!("{}...", &debug_str[..boundary])
+}
+
 fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> {
     let start = data_type.find('(')?;
     let end = data_type.rfind(')')?;
     let kind = data_type[..start].trim();
     if !kind.eq_ignore_ascii_case("enum") && !kind.eq_ignore_ascii_case("set") {
+        return None;
+    }
+    if start.saturating_add(1) > end {
         return None;
     }
 
@@ -865,11 +880,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             _ => {
                 // Generic unsupported statement - truncate to avoid huge debug output
                 let debug_str = format!("{statement:?}");
-                let truncated = if debug_str.len() > 80 {
-                    format!("{}...", &debug_str[..77])
-                } else {
-                    debug_str
-                };
+                let truncated = truncate_unsupported_debug(&debug_str);
                 ctx.warn_unsupported(
                     &truncated,
                     source_span_from_sql_span(input, statement.span()),
@@ -1995,6 +2006,16 @@ mod tests {
     }
 
     #[test]
+    fn truncates_unsupported_debug_output_on_utf8_boundaries() {
+        let debug = "絵文字🙂".repeat(20);
+        let truncated = truncate_unsupported_debug(&debug);
+
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.is_char_boundary(truncated.len() - 3));
+        assert!(truncated.len() <= MAX_UNSUPPORTED_DEBUG_LEN);
+    }
+
+    #[test]
     fn alter_table_add_column_before_create_index() {
         let sql = r"
         CREATE TABLE users (id BIGINT PRIMARY KEY);
@@ -2809,6 +2830,11 @@ mod tests {
             .find(|enum_| enum_.name == "set('featured','archived')")
             .expect("flags set should be inferred");
         assert_eq!(flags_enum.values, vec!["featured", "archived"]);
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_rejects_reversed_parentheses() {
+        assert_eq!(parse_mysql_enum_like_type(")enum("), None);
     }
 
     #[test]
