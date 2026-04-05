@@ -4,13 +4,22 @@ import type { NeighborHighlight } from './highlight_actions';
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
+const ALLOWED_DIFF_KINDS = new Set(['added', 'removed', 'modified']);
+const ALLOWED_SEVERITIES = new Set(['error', 'warning', 'info', 'hint']);
+/** Sanitize a value for use in CSS class names. Returns empty string for unknown values. */
+function safeCssToken(value: string, allowlist: ReadonlySet<string>): string {
+  return allowlist.has(value) ? value : '';
+}
+
 function clearChildren(element: HTMLElement): void {
   element.replaceChildren();
 }
 
 function diffBadge(kind: string): HTMLDivElement {
   const badge = document.createElement('div');
-  badge.className = `detail-diff-badge detail-diff-badge-${kind}`;
+  const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
+  badge.className =
+    safe !== '' ? `detail-diff-badge detail-diff-badge-${safe}` : 'detail-diff-badge';
   badge.textContent = kind;
   return badge;
 }
@@ -209,7 +218,11 @@ function buildColumnElement(column: {
 
   if (column.diff_kind) {
     const diffPill = document.createElement('span');
-    diffPill.className = `detail-column-pill detail-column-pill-diff detail-column-pill-diff-${column.diff_kind}`;
+    const safeDiff = safeCssToken(column.diff_kind, ALLOWED_DIFF_KINDS);
+    diffPill.className =
+      safeDiff !== ''
+        ? `detail-column-pill detail-column-pill-diff detail-column-pill-diff-${safeDiff}`
+        : 'detail-column-pill detail-column-pill-diff';
     diffPill.textContent = column.diff_kind;
     pills.appendChild(diffPill);
   }
@@ -246,13 +259,15 @@ function buildRelationElement(
 
 function buildIssueElement(issue: IssueMetadata): HTMLDivElement {
   const issueEl = document.createElement('div');
-  issueEl.className = `detail-issue detail-issue-${issue.severity}`;
+  const safeSev = safeCssToken(issue.severity, ALLOWED_SEVERITIES);
+  issueEl.className = safeSev !== '' ? `detail-issue detail-issue-${safeSev}` : 'detail-issue';
 
   const header = document.createElement('div');
   header.className = 'detail-issue-header';
 
   const badge = document.createElement('span');
-  badge.className = `detail-issue-badge detail-issue-badge-${issue.severity}`;
+  badge.className =
+    safeSev !== '' ? `detail-issue-badge detail-issue-badge-${safeSev}` : 'detail-issue-badge';
   badge.textContent = issue.severity;
 
   const msg = document.createElement('span');
@@ -329,7 +344,11 @@ function buildObjectBrowserButton(
       return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
     }, 'hint' as string);
     const issueBadge = document.createElement('span');
-    issueBadge.className = `object-browser-issue-badge object-browser-issue-badge-${maxSeverity}`;
+    const safeSev = safeCssToken(maxSeverity, ALLOWED_SEVERITIES);
+    issueBadge.className =
+      safeSev !== ''
+        ? `object-browser-issue-badge object-browser-issue-badge-${safeSev}`
+        : 'object-browser-issue-badge';
     issueBadge.textContent = String(tableIssues.length);
     issueBadge.title = `${tableIssues.length} issue${tableIssues.length === 1 ? '' : 's'}`;
     header.append(name, issueBadge, kind);
