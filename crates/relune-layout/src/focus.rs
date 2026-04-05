@@ -5,18 +5,32 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::graph::{LayoutGraph, LayoutGraphBuilder, LayoutNode};
 use relune_core::{FocusSpec, Schema};
 use thiserror::Error;
-use tracing::debug;
-
-use crate::graph::{LayoutGraph, LayoutGraphBuilder, LayoutNode};
 
 /// Error during focus extraction.
 #[derive(Debug, Error)]
 pub enum FocusError {
     /// The specified focus target table was not found in the graph.
-    #[error("focus target table not found: {0}")]
-    TargetNotFound(String),
+    #[error("focus target table not found: {table}")]
+    TargetNotFound {
+        /// Requested focus table.
+        table: String,
+    },
+
+    /// The graph referenced an edge endpoint that does not exist in the node index.
+    #[error(
+        "focus extraction graph invariant violated for edge {from} -> {to}: missing {missing_endpoint} node"
+    )]
+    GraphInvariant {
+        /// Source node ID.
+        from: String,
+        /// Target node ID.
+        to: String,
+        /// Missing endpoint label.
+        missing_endpoint: &'static str,
+    },
 }
 
 /// Extractor for focused subgraphs.
@@ -45,13 +59,15 @@ impl FocusExtractor {
                     .iter()
                     .position(|n| n.table_name == focus.table || n.label == focus.table)
             })
-            .ok_or_else(|| FocusError::TargetNotFound(focus.table.clone()))?;
+            .ok_or_else(|| FocusError::TargetNotFound {
+                table: focus.table.clone(),
+            })?;
 
         // Find all nodes within the specified depth using BFS
-        let included_indices = self.find_nodes_within_depth(graph, target_idx, focus.depth);
+        let included_indices = self.find_nodes_within_depth(graph, target_idx, focus.depth)?;
 
         // Build the filtered graph
-        Ok(self.build_focused_graph(graph, &included_indices))
+        self.build_focused_graph(graph, &included_indices)
     }
 
     /// Extract a focused subgraph from a schema directly.
@@ -71,7 +87,7 @@ impl FocusExtractor {
         graph: &LayoutGraph,
         target_idx: usize,
         depth: u32,
-    ) -> BTreeSet<usize> {
+    ) -> Result<BTreeSet<usize>, FocusError> {
         let mut visited = BTreeSet::new();
         let mut current_level = BTreeSet::new();
         current_level.insert(target_idx);
@@ -79,13 +95,22 @@ impl FocusExtractor {
         // Build adjacency map for both directions
         let mut adjacency: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
         for edge in &graph.edges {
-            if let (Some(&from_idx), Some(&to_idx)) = (
-                graph.node_index.get(&edge.from),
-                graph.node_index.get(&edge.to),
-            ) {
-                adjacency.entry(from_idx).or_default().insert(to_idx);
-                adjacency.entry(to_idx).or_default().insert(from_idx);
-            }
+            let Some(&from_idx) = graph.node_index.get(&edge.from) else {
+                return Err(FocusError::GraphInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    missing_endpoint: "source",
+                });
+            };
+            let Some(&to_idx) = graph.node_index.get(&edge.to) else {
+                return Err(FocusError::GraphInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    missing_endpoint: "target",
+                });
+            };
+            adjacency.entry(from_idx).or_default().insert(to_idx);
+            adjacency.entry(to_idx).or_default().insert(from_idx);
         }
 
         // BFS for the specified depth
@@ -109,7 +134,7 @@ impl FocusExtractor {
             }
         }
 
-        visited
+        Ok(visited)
     }
 
     /// Build a new graph containing only the included nodes and their edges.
@@ -118,7 +143,7 @@ impl FocusExtractor {
         &self,
         graph: &LayoutGraph,
         included_indices: &BTreeSet<usize>,
-    ) -> LayoutGraph {
+    ) -> Result<LayoutGraph, FocusError> {
         let nodes: Vec<LayoutNode> = included_indices
             .iter()
             .map(|&idx| {
@@ -132,22 +157,18 @@ impl FocusExtractor {
         let mut edges = Vec::new();
         for edge in &graph.edges {
             let Some(&from_idx) = graph.node_index.get(&edge.from) else {
-                debug!(
-                    from = %edge.from,
-                    to = %edge.to,
-                    kind = ?edge.kind,
-                    "Skipping edge during focus extraction because the source node is missing"
-                );
-                continue;
+                return Err(FocusError::GraphInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    missing_endpoint: "source",
+                });
             };
             let Some(&to_idx) = graph.node_index.get(&edge.to) else {
-                debug!(
-                    from = %edge.from,
-                    to = %edge.to,
-                    kind = ?edge.kind,
-                    "Skipping edge during focus extraction because the target node is missing"
-                );
-                continue;
+                return Err(FocusError::GraphInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    missing_endpoint: "target",
+                });
             };
 
             if included_indices.contains(&from_idx) && included_indices.contains(&to_idx) {
@@ -166,13 +187,13 @@ impl FocusExtractor {
         // Build new groups (empty for focused graphs by default)
         let groups = Vec::new();
 
-        LayoutGraph {
+        Ok(LayoutGraph {
             nodes,
             edges,
             groups,
             node_index,
             reverse_index,
-        }
+        })
     }
 }
 
@@ -331,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_focused_graph_skips_dangling_edges() {
+    fn test_build_focused_graph_reports_dangling_edges() {
         let extractor = FocusExtractor;
         let graph = LayoutGraph {
             nodes: vec![
@@ -401,20 +422,17 @@ mod tests {
             ]),
         };
 
-        let focused = extractor.build_focused_graph(&graph, &BTreeSet::from([0_usize, 1_usize]));
+        let error = extractor
+            .build_focused_graph(&graph, &BTreeSet::from([0_usize, 1_usize]))
+            .expect_err("dangling edges should surface a graph invariant error");
 
-        assert_eq!(focused.nodes.len(), 2);
-        assert_eq!(focused.edges.len(), 1);
-        assert_eq!(focused.edges[0].from, "posts");
-        assert_eq!(focused.edges[0].to, "users");
-        assert_eq!(focused.nodes[0].group_index, None);
-        assert_eq!(focused.nodes[1].group_index, None);
-        assert_eq!(
-            focused.node_index,
-            BTreeMap::from([
-                ("users".to_string(), 0_usize),
-                ("posts".to_string(), 1_usize),
-            ])
-        );
+        assert!(matches!(
+            error,
+            FocusError::GraphInvariant {
+                from,
+                to,
+                missing_endpoint: "source",
+            } if from == "ghost" && to == "users"
+        ));
     }
 }

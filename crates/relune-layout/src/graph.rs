@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use relune_core::{
-    EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, NodeKind, Schema, Table,
-    View, layout::Cardinality,
+    Diagnostic, DiagnosticCode, EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec,
+    GroupingStrategy, NodeKind, Schema, Table, View, layout::Cardinality,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -180,7 +180,12 @@ impl EnumIndex {
         }
     }
 
-    fn resolve(&self, table: &Table, data_type: &str) -> Option<String> {
+    fn resolve(
+        &self,
+        table: &Table,
+        data_type: &str,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<String> {
         let data_type = data_type.to_lowercase();
         if data_type.contains('.')
             && let Some(enum_id) = self.exact.get(&data_type)
@@ -208,6 +213,21 @@ impl EnumIndex {
             data_type = %data_type,
             "Ambiguous enum reference skipped"
         );
+        let candidate_names = candidates
+            .iter()
+            .map(|(schema_name, enum_id)| match schema_name {
+                Some(schema_name) => format!("{schema_name}.{data_type} ({enum_id})"),
+                None => format!("{data_type} ({enum_id})"),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        diagnostics.push(Diagnostic::warning(
+            DiagnosticCode::new("GRAPH", 1),
+            format!(
+                "Ambiguous enum reference '{data_type}' on table '{}' matched multiple enums: {candidate_names}",
+                table.qualified_name()
+            ),
+        ));
         None
     }
 }
@@ -392,13 +412,19 @@ impl LayoutGraphBuilder {
     /// Build the layout graph from a schema.
     #[must_use]
     pub fn build(&self, schema: &Schema) -> LayoutGraph {
+        self.build_with_diagnostics(schema).0
+    }
+
+    /// Build the layout graph and return graph-construction diagnostics.
+    #[must_use]
+    pub fn build_with_diagnostics(&self, schema: &Schema) -> (LayoutGraph, Vec<Diagnostic>) {
         // Step 1: Filter schema objects
         let filtered_tables = self.filter_tables(&schema.tables);
         let filtered_views = self.filter_views(&schema.views);
         let filtered_enums = self.filter_enums(&schema.enums);
 
         // Step 2: Build nodes with relationship counts
-        let (mut nodes, mut edges) =
+        let (mut nodes, mut edges, diagnostics) =
             self.build_nodes_and_edges(&filtered_tables, &filtered_views, &filtered_enums);
 
         // Step 3: Compute relationship counts
@@ -432,13 +458,16 @@ impl LayoutGraphBuilder {
             }
         }
 
-        LayoutGraph {
-            nodes,
-            edges,
-            groups,
-            node_index,
-            reverse_index,
-        }
+        (
+            LayoutGraph {
+                nodes,
+                edges,
+                groups,
+                node_index,
+                reverse_index,
+            },
+            diagnostics,
+        )
     }
 
     /// Filter tables based on include/exclude patterns.
@@ -487,7 +516,7 @@ impl LayoutGraphBuilder {
         tables: &[&Table],
         views: &[&View],
         enums: &[&Enum],
-    ) -> (Vec<LayoutNode>, Vec<LayoutEdge>) {
+    ) -> (Vec<LayoutNode>, Vec<LayoutEdge>, Vec<Diagnostic>) {
         let table_names: BTreeSet<String> = tables
             .iter()
             .flat_map(|table| [table.name.to_lowercase(), table.stable_id.to_lowercase()])
@@ -511,6 +540,7 @@ impl LayoutGraphBuilder {
 
         let mut nodes = Vec::with_capacity(tables.len() + views.len() + enums.len());
         let mut edges = Vec::new();
+        let mut diagnostics = Vec::new();
 
         for table in tables {
             let (foreign_key_columns, indexed_columns) = column_flag_sets(table);
@@ -543,6 +573,13 @@ impl LayoutGraphBuilder {
             // Build edges for foreign keys
             for fk in &table.foreign_keys {
                 let is_self_loop = fk.to_table == table.stable_id || fk.to_table == table.name;
+                let target_id = if is_self_loop {
+                    Some(table.stable_id.clone())
+                } else {
+                    table_index
+                        .resolve(table, fk.to_schema.as_deref(), &fk.to_table)
+                        .map(|target| target.stable_id.clone())
+                };
 
                 // Determine if FK is nullable by checking source columns
                 let fk_nullable = fk.from_columns.iter().all(|col_name| {
@@ -555,11 +592,7 @@ impl LayoutGraphBuilder {
 
                 // Only include edges where both endpoints are in our filtered set
                 // For self-loops, we always include them
-                if is_self_loop
-                    || table_index
-                        .resolve(table, fk.to_schema.as_deref(), &fk.to_table)
-                        .is_some()
-                {
+                if let Some(target_id) = target_id {
                     let target_cardinality = infer_target_cardinality(
                         &table_index,
                         table,
@@ -569,7 +602,7 @@ impl LayoutGraphBuilder {
                     );
                     edges.push(LayoutEdge {
                         from: table.stable_id.clone(),
-                        to: fk.to_table.clone(),
+                        to: target_id,
                         name: fk.name.clone(),
                         from_columns: fk.from_columns.clone(),
                         to_columns: fk.to_columns.clone(),
@@ -584,7 +617,9 @@ impl LayoutGraphBuilder {
             }
 
             for column in &table.columns {
-                if let Some(enum_id) = enum_index.resolve(table, &column.data_type) {
+                if let Some(enum_id) =
+                    enum_index.resolve(table, &column.data_type, &mut diagnostics)
+                {
                     edges.push(LayoutEdge {
                         from: table.stable_id.clone(),
                         to: enum_id,
@@ -708,7 +743,7 @@ impl LayoutGraphBuilder {
             });
         }
 
-        (nodes, edges)
+        (nodes, edges, diagnostics)
     }
 
     /// Compute inbound/outbound relationship counts for each node.
