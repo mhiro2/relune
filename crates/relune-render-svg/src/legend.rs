@@ -1,6 +1,6 @@
 //! Legend and statistics rendering for schema diagrams.
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use relune_core::model::SchemaStats;
 
@@ -28,7 +28,7 @@ pub fn render_legend(
     stats: Option<&SchemaStats>,
     svg_width: f32,
     svg_height: f32,
-) {
+) -> fmt::Result {
     let bar_height = 42.0;
     let side_padding = 18.0;
     let legend_width = (svg_width - side_padding * 2.0).clamp(320.0, 640.0);
@@ -39,37 +39,37 @@ pub fn render_legend(
 
     out.push_str(r#"<g class="legend">"#);
 
-    let _ = write!(
+    write!(
         out,
         r#"<rect class="legend-background" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="18" fill="{}" fill-opacity="0.94" stroke="{}" stroke-opacity="0.82" stroke-width="1.1"/>"#,
         legend_x, legend_y, legend_width, bar_height, theme.group_fill, theme.group_stroke
-    );
-    let _ = write!(
+    )?;
+    write!(
         out,
         r#"<text class="legend-title" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em" fill="{}">LEGEND</text>"#,
         cursor_x, baseline_y, theme.text_primary
-    );
+    )?;
     cursor_x += 84.0;
-    render_legend_pk_indicator(out, cursor_x, baseline_y - 8.0);
+    render_legend_pk_indicator(out, cursor_x, baseline_y - 8.0)?;
     cursor_x += 16.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Primary key", theme);
+    render_legend_item_label(out, cursor_x, baseline_y, "Primary key", theme)?;
     cursor_x += 82.0;
-    render_legend_fk_indicator(out, cursor_x, baseline_y - 7.0);
+    render_legend_fk_indicator(out, cursor_x, baseline_y - 7.0)?;
     cursor_x += 22.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Foreign key", theme);
+    render_legend_item_label(out, cursor_x, baseline_y, "Foreign key", theme)?;
     cursor_x += 84.0;
-    render_legend_idx_indicator(out, cursor_x, baseline_y - 8.0);
+    render_legend_idx_indicator(out, cursor_x, baseline_y - 8.0)?;
     cursor_x += 16.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Indexed", theme);
+    render_legend_item_label(out, cursor_x, baseline_y, "Indexed", theme)?;
     cursor_x += 62.0;
-    let _ = write!(
+    write!(
         out,
         r#"<text class="legend-nullable" x="{cursor_x:.1}" y="{baseline_y:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11" font-style="italic" fill="{NULLABLE_TEXT}">nullable</text>"#
-    );
+    )?;
 
     if let Some(stats) = stats {
         let stats_x = legend_x + legend_width - 144.0;
-        let _ = write!(
+        write!(
             out,
             r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/><text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
             stats_x - 16.0,
@@ -83,53 +83,71 @@ pub fn render_legend(
             stats.table_count,
             stats.column_count,
             stats.foreign_key_count
-        );
+        )?;
     }
 
     out.push_str("</g>");
+    Ok(())
 }
 
 /// Renders a small key icon for the legend.
-fn render_legend_pk_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
+fn render_legend_pk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+    write!(
         out,
         r#"<path class="legend-pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="{PK_STROKE}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"#,
         x,
         y + 3.2,
         x + 3.2,
         y + 3.2
-    );
+    )
 }
 
 /// Renders a small link indicator for the legend.
-fn render_legend_fk_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
+fn render_legend_fk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+    write!(
         out,
         r#"<path class="legend-fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" stroke="{FK_COLOR}" stroke-width="1.5" fill="none" stroke-linecap="round"/>"#,
         x,
         y + 3.4
-    );
+    )
 }
 
 /// Renders a small bolt indicator for the legend.
-fn render_legend_idx_indicator(out: &mut String, x: f32, y: f32) {
-    let _ = write!(
+fn render_legend_idx_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+    write!(
         out,
         r#"<path class="legend-idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="{IDX_COLOR}"/>"#
-    );
+    )
 }
 
-fn render_legend_item_label(out: &mut String, x: f32, y: f32, label: &str, theme: &ThemeColors) {
-    let _ = write!(
+fn render_legend_item_label(
+    out: &mut String,
+    x: f32,
+    y: f32,
+    label: &str,
+    theme: &ThemeColors,
+) -> fmt::Result {
+    write!(
         out,
         r#"<text x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{}</text>"#,
         x, y, theme.text_secondary, label
-    );
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn render_legend_ok(
+        out: &mut String,
+        colors: &ThemeColors,
+        stats: Option<&SchemaStats>,
+        width: f32,
+        height: f32,
+    ) {
+        render_legend(out, colors, stats, width, height)
+            .expect("legend rendering should succeed in tests");
+    }
 
     fn test_theme_colors() -> ThemeColors {
         ThemeColors {
@@ -159,7 +177,7 @@ mod tests {
         let colors = test_theme_colors();
         let mut out = String::new();
 
-        render_legend(&mut out, &colors, None, 800.0, 600.0);
+        render_legend_ok(&mut out, &colors, None, 800.0, 600.0);
 
         assert!(out.contains("class=\"legend\""));
         assert!(out.contains("class=\"legend-background\""));
@@ -182,7 +200,7 @@ mod tests {
         };
         let mut out = String::new();
 
-        render_legend(&mut out, &colors, Some(&stats), 800.0, 600.0);
+        render_legend_ok(&mut out, &colors, Some(&stats), 800.0, 600.0);
 
         assert!(out.contains("class=\"legend\""));
         assert!(out.contains("5 tables · 42 columns · 8 FKs"));
@@ -193,7 +211,7 @@ mod tests {
         let colors = test_theme_colors();
         let mut out = String::new();
 
-        render_legend(&mut out, &colors, None, 800.0, 600.0);
+        render_legend_ok(&mut out, &colors, None, 800.0, 600.0);
 
         // Bottom bar layout centers the legend horizontally near the canvas edge.
         assert!(out.contains("x=\"80.0\""));

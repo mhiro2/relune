@@ -1,6 +1,6 @@
 //! Group rendering for SVG output.
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use relune_layout::PositionedGroup;
 
@@ -12,14 +12,18 @@ use crate::theme::ThemeColors;
 /// * `out` - The output string buffer
 /// * `group` - The positioned group to render
 /// * `colors` - The theme colors to use
-pub fn render_group(out: &mut String, group: &PositionedGroup, colors: &ThemeColors) {
+pub fn render_group(
+    out: &mut String,
+    group: &PositionedGroup,
+    colors: &ThemeColors,
+) -> fmt::Result {
     // Skip rendering if group has zero dimensions
     if group.width <= 0.0 || group.height <= 0.0 {
-        return;
+        return Ok(());
     }
 
     // Render the group box with a distinct background plane and accent band.
-    let _ = write!(
+    write!(
         out,
         r#"<g class="group" data-group-id="{}"><rect class="group-box" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="20" ry="20" fill="{}" stroke="{}" stroke-width="1.5" stroke-dasharray="10,5" filter="url(#group-shadow)"/><rect class="group-band" x="{:.1}" y="{:.1}" width="{:.1}" height="34" rx="20" ry="20" fill="{}" fill-opacity="0.92"/><line class="group-divider" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/></g>"#,
         escape_attribute(&group.id),
@@ -38,19 +42,20 @@ pub fn render_group(out: &mut String, group: &PositionedGroup, colors: &ThemeCol
         group.x + group.width - 12.0,
         group.y + 34.0,
         colors.group_stroke
-    );
+    )?;
 
     // Render the group label at top-left inside the group
     if !group.label.is_empty() {
-        let _ = write!(
+        write!(
             out,
             r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em" fill="{}">{}</text>"#,
             group.x + 12.0,
             group.y + 22.0,
             colors.text_secondary,
             escape_text(&group.label)
-        );
+        )?;
     }
+    Ok(())
 }
 
 use crate::escape::{escape_attribute, escape_text};
@@ -58,6 +63,10 @@ use crate::escape::{escape_attribute, escape_text};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn render_group_ok(out: &mut String, group: &PositionedGroup, colors: &ThemeColors) {
+        render_group(out, group, colors).expect("group rendering should succeed in tests");
+    }
 
     fn test_colors() -> ThemeColors {
         ThemeColors {
@@ -95,7 +104,7 @@ mod tests {
 
         let colors = test_colors();
         let mut out = String::new();
-        render_group(&mut out, &group, &colors);
+        render_group_ok(&mut out, &group, &colors);
 
         assert!(out.contains("class=\"group-box\""));
         assert!(out.contains("data-group-id=\"group1\""));
@@ -118,7 +127,7 @@ mod tests {
 
         let colors = test_colors();
         let mut out = String::new();
-        render_group(&mut out, &group, &colors);
+        render_group_ok(&mut out, &group, &colors);
 
         assert!(out.contains("class=\"group-box\""));
         assert!(!out.contains("class=\"group-label\""));
@@ -137,7 +146,7 @@ mod tests {
 
         let colors = test_colors();
         let mut out = String::new();
-        render_group(&mut out, &group, &colors);
+        render_group_ok(&mut out, &group, &colors);
 
         // Should not render anything
         assert!(out.is_empty());
@@ -156,7 +165,7 @@ mod tests {
 
         let colors = test_colors();
         let mut out = String::new();
-        render_group(&mut out, &group, &colors);
+        render_group_ok(&mut out, &group, &colors);
 
         // Should contain escaped characters
         assert!(out.contains("&amp;"));
@@ -180,7 +189,7 @@ mod tests {
 
         let colors = test_colors();
         let mut out = String::new();
-        render_group(&mut out, &group, &colors);
+        render_group_ok(&mut out, &group, &colors);
 
         assert!(out.contains("rx=\"20\""));
         assert!(out.contains("ry=\"20\""));

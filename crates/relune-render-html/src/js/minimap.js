@@ -1,11 +1,13 @@
 "use strict";
 (() => {
   // ts/viewer_api.ts
+  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
   function getViewerRuntime() {
-    if (window.reluneViewer === void 0) {
-      window.reluneViewer = {};
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
+      viewerWindow[VIEWER_RUNTIME_KEY] = {};
     }
-    return window.reluneViewer;
+    return viewerWindow[VIEWER_RUNTIME_KEY];
   }
 
   // ts/minimap.ts

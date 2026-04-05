@@ -342,7 +342,9 @@ mod tests {
         column_y_offset_from_center,
     };
     use crate::graph::{LayoutEdge, LayoutGraph};
-    use crate::layout::{LayoutConfig, PositionedColumn, PositionedNode};
+    use crate::layout::{
+        ColumnFlags, ColumnRelationFlags, LayoutConfig, PositionedColumn, PositionedNode,
+    };
     use crate::route::AttachmentSide;
     use relune_core::{EdgeKind, LayoutDirection, layout::Cardinality};
 
@@ -503,18 +505,26 @@ mod tests {
                 PositionedColumn {
                     name: "id".to_string(),
                     data_type: "int".to_string(),
-                    is_primary_key: true,
-                    is_foreign_key: false,
-                    is_indexed: false,
-                    nullable: false,
+                    flags: ColumnFlags {
+                        nullable: false,
+                        relation: ColumnRelationFlags {
+                            is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
+                        },
+                    },
                 },
                 PositionedColumn {
                     name: "author_id".to_string(),
                     data_type: "int".to_string(),
-                    is_primary_key: false,
-                    is_foreign_key: true,
-                    is_indexed: true,
-                    nullable: false,
+                    flags: ColumnFlags {
+                        nullable: false,
+                        relation: ColumnRelationFlags {
+                            is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
+                        },
+                    },
                 },
             ],
             x: 0.0,

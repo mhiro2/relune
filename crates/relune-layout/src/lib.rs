@@ -26,9 +26,10 @@ pub use graph::{
     LayoutRequest,
 };
 pub use layout::{
-    LayoutConfig, LayoutError, LayoutMode, PositionedColumn, PositionedEdge,
-    PositionedEdgeRoutingDebug, PositionedGraph, PositionedGraphRoutingDebug, PositionedGroup,
-    PositionedNode, build_layout, build_layout_from_graph_with_config, build_layout_with_config,
+    ColumnFlags, ColumnRelationFlags, LayoutConfig, LayoutError, LayoutMode, PositionedColumn,
+    PositionedEdge, PositionedEdgeRoutingDebug, PositionedGraph, PositionedGraphRoutingDebug,
+    PositionedGroup, PositionedNode, build_layout, build_layout_from_graph_with_config,
+    build_layout_with_config,
 };
 pub use order::{
     CrossingReductionStrategy, order_nodes_within_layers, order_nodes_within_layers_with_strategy,

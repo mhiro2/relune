@@ -15,6 +15,22 @@ use crate::request::{OutputFormat, RenderOptions, RenderRequest, RenderTheme};
 use crate::result::{RenderResult, RenderStats};
 use crate::schema_input::schema_from_input;
 
+enum RenderPath {
+    Svg {
+        positioned: relune_layout::PositionedGraph,
+    },
+    Html {
+        graph: relune_layout::LayoutGraph,
+        positioned: relune_layout::PositionedGraph,
+    },
+    GraphJson {
+        graph: relune_layout::LayoutGraph,
+    },
+    SchemaJson {
+        export: relune_core::export::SchemaExport,
+    },
+}
+
 /// Execute a render request.
 #[allow(clippy::needless_pass_by_value)]
 #[allow(clippy::too_many_lines)] // This usecase keeps parse, graph, layout, and render timing in one flow.
@@ -37,6 +53,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
         let _span = info_span!("parse").entered();
         schema_from_input(&request.input)?
     };
+    let mut diagnostics = diagnostics;
     let stats = schema.stats();
     let parse_time = parse_start.elapsed();
     debug!(
@@ -45,71 +62,85 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
         "parse complete"
     );
 
-    // Step 2: Build graph when the selected output needs graph data.
+    // Step 2-3: Prepare the render path and intermediate data.
     let graph_start = Instant::now();
     let layout_config = LayoutConfig::from(&request.layout);
-    let graph = matches!(
-        request.output_format,
-        OutputFormat::Svg | OutputFormat::Html | OutputFormat::GraphJson
-    )
-    .then(|| {
-        let _span = info_span!("graph_build").entered();
-        let mut g = LayoutGraphBuilder::new()
-            .filter(request.filter.clone())
-            .focus(request.focus.clone())
-            .grouping(request.grouping)
-            .build(&schema);
-        if let Some(ref focus) = request.focus {
-            g = FocusExtractor
-                .extract(&g, focus)
-                .map_err(relune_layout::LayoutError::from)?;
+    let (render_path, graph_time, layout_time) = match request.output_format {
+        OutputFormat::Svg => {
+            let (graph, graph_diagnostics) = {
+                let _span = info_span!("graph_build").entered();
+                build_graph(&request, &schema)?
+            };
+            diagnostics.extend(graph_diagnostics);
+            let graph_time = graph_start.elapsed();
+            let layout_start = Instant::now();
+            let positioned = {
+                let _span = info_span!("layout").entered();
+                build_layout_from_graph_with_config(&graph, &layout_config)?
+            };
+            let layout_time = layout_start.elapsed();
+            (RenderPath::Svg { positioned }, graph_time, layout_time)
         }
-        Ok::<_, AppError>(g)
-    })
-    .transpose()?;
-    let graph_time = graph_start.elapsed();
-
-    // Step 3: Layout for visual outputs.
-    let layout_start = Instant::now();
-    let positioned = if matches!(
-        request.output_format,
-        OutputFormat::Svg | OutputFormat::Html
-    ) {
-        let _span = info_span!("layout").entered();
-        Some(build_layout_from_graph_with_config(
-            graph.as_ref().expect("visual outputs require a graph"),
-            &layout_config,
-        )?)
-    } else {
-        None
+        OutputFormat::Html => {
+            let (graph, graph_diagnostics) = {
+                let _span = info_span!("graph_build").entered();
+                build_graph(&request, &schema)?
+            };
+            diagnostics.extend(graph_diagnostics);
+            let graph_time = graph_start.elapsed();
+            let layout_start = Instant::now();
+            let positioned = {
+                let _span = info_span!("layout").entered();
+                build_layout_from_graph_with_config(&graph, &layout_config)?
+            };
+            let layout_time = layout_start.elapsed();
+            (
+                RenderPath::Html { graph, positioned },
+                graph_time,
+                layout_time,
+            )
+        }
+        OutputFormat::GraphJson => {
+            let (graph, graph_diagnostics) = {
+                let _span = info_span!("graph_build").entered();
+                build_graph(&request, &schema)?
+            };
+            diagnostics.extend(graph_diagnostics);
+            (
+                RenderPath::GraphJson { graph },
+                graph_start.elapsed(),
+                std::time::Duration::ZERO,
+            )
+        }
+        OutputFormat::SchemaJson => (
+            RenderPath::SchemaJson {
+                export: relune_core::export::export_schema(&schema),
+            },
+            std::time::Duration::ZERO,
+            std::time::Duration::ZERO,
+        ),
     };
-    let layout_time = layout_start.elapsed();
 
     // Step 4: Render
     let render_start = Instant::now();
     let content = {
         let _span = info_span!("render", format = ?request.output_format).entered();
-        match request.output_format {
-            OutputFormat::Svg => render_svg_output(
-                positioned.as_ref().expect("svg output requires layout"),
-                &stats,
-                request.options,
-                request.overlay.as_ref(),
-            ),
-            OutputFormat::Html => render_html_output(
-                positioned.as_ref().expect("html output requires layout"),
-                graph.as_ref().expect("html output requires graph"),
+        match render_path {
+            RenderPath::Svg { positioned } => render_svg_output(
+                &positioned,
                 &stats,
                 request.options,
                 request.overlay.as_ref(),
             )?,
-            OutputFormat::GraphJson => {
-                serde_json::to_string_pretty(graph.as_ref().expect("graph json requires graph"))?
-            }
-            OutputFormat::SchemaJson => {
-                let export = relune_core::export::export_schema(&schema);
-                serde_json::to_string_pretty(&export)?
-            }
+            RenderPath::Html { graph, positioned } => render_html_output(
+                &positioned,
+                &graph,
+                &stats,
+                request.options,
+                request.overlay.as_ref(),
+            )?,
+            RenderPath::GraphJson { graph } => serde_json::to_string_pretty(&graph)?,
+            RenderPath::SchemaJson { export } => serde_json::to_string_pretty(&export)?,
         }
     };
     let render_time = render_start.elapsed();
@@ -135,13 +166,30 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     })
 }
 
+fn build_graph(
+    request: &RenderRequest,
+    schema: &relune_core::Schema,
+) -> Result<(relune_layout::LayoutGraph, Vec<relune_core::Diagnostic>), AppError> {
+    let (mut graph, diagnostics) = LayoutGraphBuilder::new()
+        .filter(request.filter.clone())
+        .focus(request.focus.clone())
+        .grouping(request.grouping)
+        .build_with_diagnostics(schema);
+    if let Some(ref focus) = request.focus {
+        graph = FocusExtractor
+            .extract(&graph, focus)
+            .map_err(relune_layout::LayoutError::from)?;
+    }
+    Ok((graph, diagnostics))
+}
+
 /// Render to SVG format.
 fn render_svg_output(
     positioned: &relune_layout::PositionedGraph,
     _stats: &SchemaStats,
     options: RenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
-) -> String {
+) -> Result<String, AppError> {
     let options = SvgRenderOptions {
         theme: map_svg_theme(options.theme),
         show_legend: options.show_legend,
@@ -150,7 +198,7 @@ fn render_svg_output(
         compact: false,
         show_tooltips: true,
     };
-    render_svg_with_overlay(positioned, options, overlay)
+    Ok(render_svg_with_overlay(positioned, options, overlay)?)
 }
 
 /// Render to HTML format.
@@ -170,7 +218,7 @@ fn render_html_output(
         compact: false,
         show_tooltips: true,
     };
-    let svg = render_svg_with_overlay(positioned, svg_options, overlay);
+    let svg = render_svg_with_overlay(positioned, svg_options, overlay)?;
 
     // Then wrap in HTML (with overlay)
     let html_options = HtmlRenderOptions {

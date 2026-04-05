@@ -15,6 +15,40 @@
     }
   }
 
+  // ts/viewer_api.ts
+  function noticeStack() {
+    const existing = document.getElementById("relune-viewer-notices");
+    if (existing instanceof HTMLElement) {
+      return existing;
+    }
+    const stack = document.createElement("div");
+    stack.id = "relune-viewer-notices";
+    stack.className = "viewer-notice-stack";
+    document.body.appendChild(stack);
+    return stack;
+  }
+  function showViewerNotice(message, severity = "warning") {
+    const item = document.createElement("div");
+    item.className = `viewer-notice viewer-notice-${severity}`;
+    item.setAttribute("role", severity === "warning" ? "alert" : "status");
+    item.textContent = message;
+    noticeStack().appendChild(item);
+    window.setTimeout(() => {
+      item.remove();
+    }, 4500);
+  }
+  function reportSessionStorageError(action, error) {
+    const isQuotaExceeded = error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+    if (isQuotaExceeded) {
+      showViewerNotice(
+        `Session storage is full while ${action}. Viewer state was not saved.`,
+        "warning"
+      );
+      return;
+    }
+    console.warn(`Session storage error while ${action}`, error);
+  }
+
   // ts/collapse.ts
   function setStyleCursor(el, cursor) {
     const styled = el;
@@ -31,7 +65,8 @@
           "relune-collapsed-tables",
           JSON.stringify(Array.from(collapsedTables))
         );
-      } catch {
+      } catch (error) {
+        reportSessionStorageError("saving collapsed tables", error);
       }
     };
     saveState2 = saveState;
@@ -55,7 +90,8 @@
           }
         }
       }
-    } catch {
+    } catch (error) {
+      reportSessionStorageError("restoring collapsed tables", error);
     }
     const canvas = document.getElementById("canvas");
     const svg = canvas?.querySelector("svg");

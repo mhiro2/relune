@@ -16,11 +16,46 @@
   }
 
   // ts/viewer_api.ts
+  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
+  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
+  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
   function getViewerRuntime() {
-    if (window.reluneViewer === void 0) {
-      window.reluneViewer = {};
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
+      viewerWindow[VIEWER_RUNTIME_KEY] = {};
     }
-    return window.reluneViewer;
+    return viewerWindow[VIEWER_RUNTIME_KEY];
+  }
+  function readyModules() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
+      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
+    }
+    return viewerWindow[VIEWER_READY_MODULES_KEY];
+  }
+  function runtimeWaiters() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
+      viewerWindow[VIEWER_WAITERS_KEY] = [];
+    }
+    return viewerWindow[VIEWER_WAITERS_KEY];
+  }
+  function markViewerModuleReady(module) {
+    readyModules().add(module);
+    flushViewerWaiters();
+  }
+  function flushViewerWaiters() {
+    const ready = readyModules();
+    const remaining = [];
+    for (const waiter of runtimeWaiters()) {
+      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
+        waiter.callback();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    const viewerWindow = window;
+    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
   }
   function emitViewerEvent(name, detail) {
     document.dispatchEvent(new CustomEvent(name, { detail }));
@@ -472,6 +507,7 @@
           return state.selectedNode;
         }
       };
+      markViewerModuleReady("selection");
       syncObjectBrowser();
     }
   }

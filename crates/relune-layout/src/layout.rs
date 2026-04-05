@@ -299,7 +299,25 @@ impl LayoutConfig {
 pub enum LayoutError {
     /// Error occurred during focus extraction.
     #[error("focus extraction failed: {0}")]
-    FocusError(#[from] crate::focus::FocusError),
+    Focus(#[from] crate::focus::FocusError),
+
+    /// Coordinate assignment left a node without a position.
+    #[error("coordinate assignment did not produce a position for node {node_id}")]
+    MissingNodePosition {
+        /// Stable node identifier.
+        node_id: String,
+    },
+
+    /// Edge routing could not find a required graph component.
+    #[error("edge routing invariant violated for edge {from} -> {to}: {detail}")]
+    RoutingInvariant {
+        /// Source node identifier.
+        from: String,
+        /// Target node identifier.
+        to: String,
+        /// Human-readable detail.
+        detail: &'static str,
+    },
 }
 
 /// A positioned node ready for rendering.
@@ -329,16 +347,9 @@ pub struct PositionedNode {
     pub group_index: Option<usize>,
 }
 
-/// Column information for positioned nodes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct PositionedColumn {
-    /// Column name.
-    pub name: String,
-    /// Column data type.
-    pub data_type: String,
-    /// Whether the column can be null.
-    pub nullable: bool,
+/// Shared flag set for rendered columns.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ColumnRelationFlags {
     /// Whether this column is part of the primary key.
     pub is_primary_key: bool,
     /// Whether this column participates in a foreign key.
@@ -347,6 +358,28 @@ pub struct PositionedColumn {
     /// Whether this column appears in an index.
     #[serde(default)]
     pub is_indexed: bool,
+}
+
+/// Shared flag set for rendered columns.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ColumnFlags {
+    /// Whether the column can be null.
+    pub nullable: bool,
+    /// Relationship and index markers.
+    #[serde(flatten)]
+    pub relation: ColumnRelationFlags,
+}
+
+/// Column information for positioned nodes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionedColumn {
+    /// Column name.
+    pub name: String,
+    /// Column data type.
+    pub data_type: String,
+    /// Boolean render flags flattened for stable serialized output.
+    #[serde(flatten)]
+    pub flags: ColumnFlags,
 }
 
 /// A positioned edge ready for rendering.
@@ -541,16 +574,6 @@ pub fn build_layout_from_graph_with_config(
         tuned_config
     };
 
-    // Step 2c: If compact mode hides columns, strip them from a temporary graph copy.
-    let compacted_graph = compacted.hide_columns.then(|| {
-        let mut compacted_graph = graph.clone();
-        for node in &mut compacted_graph.nodes {
-            node.columns.clear();
-        }
-        compacted_graph
-    });
-    let graph = compacted_graph.as_ref().unwrap_or(graph);
-
     // Step 3: Assign coordinates based on layout mode
     let node_sizes = measure_node_sizes(graph, &effective_config);
     let mut node_ranks = None;
@@ -561,7 +584,7 @@ pub fn build_layout_from_graph_with_config(
             debug!("Assigned {} ranks", ranks.num_ranks);
             let ordered_nodes = order_nodes_within_layers(graph, &ranks);
             node_ranks = Some(ranks.node_rank);
-            assign_coordinates(graph, &ordered_nodes, &effective_config, &node_sizes)
+            assign_coordinates(graph, &ordered_nodes, &effective_config, &node_sizes)?
         }
         LayoutAlgorithm::ForceDirected => {
             // Force-directed layout
@@ -575,7 +598,7 @@ pub fn build_layout_from_graph_with_config(
         &positioned_nodes,
         &effective_config,
         node_ranks.as_deref(),
-    );
+    )?;
 
     // Step 5: Position groups
     let positioned_groups = position_groups(&graph.groups, &positioned_nodes);
@@ -605,7 +628,7 @@ fn assign_coordinates(
     ordered_nodes: &[Vec<usize>],
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
-) -> (Vec<PositionedNode>, f32, f32) {
+) -> Result<(Vec<PositionedNode>, f32, f32), LayoutError> {
     let n = graph.nodes.len();
     // Index by graph node index so that positioned_nodes[node_idx] correctly
     // addresses the corresponding node (needed by resolve_rank_collisions).
@@ -646,13 +669,24 @@ fn assign_coordinates(
                 node_y,
                 node_size.width,
                 node_size.height,
+                config.show_columns,
             ));
         }
     }
 
     // Every graph node must have been assigned a position above.
-    let mut positioned_nodes: Vec<PositionedNode> =
-        positioned_slots.into_iter().map(Option::unwrap).collect();
+    let mut positioned_nodes = Vec::with_capacity(positioned_slots.len());
+    for (node_idx, slot) in positioned_slots.into_iter().enumerate() {
+        let Some(node) = slot else {
+            let node_id = graph
+                .reverse_index
+                .get(&node_idx)
+                .cloned()
+                .unwrap_or_else(|| format!("#{node_idx}"));
+            return Err(LayoutError::MissingNodePosition { node_id });
+        };
+        positioned_nodes.push(node);
+    }
 
     resolve_rank_collisions(&mut positioned_nodes, ordered_nodes, config, is_horizontal);
     let graph_bounds = compute_graph_bounds(&positioned_nodes, config);
@@ -673,7 +707,7 @@ fn assign_coordinates(
     }
 
     let (width, height) = compute_graph_bounds(&positioned_nodes, config);
-    (positioned_nodes, width, height)
+    Ok((positioned_nodes, width, height))
 }
 
 /// Node count threshold above which the spatial grid is used for repulsion.
@@ -958,7 +992,7 @@ fn apply_force_layout(
             max_x = max_x.max(x + size.width);
             max_y = max_y.max(y + size.height);
 
-            build_positioned_node(node, x, y, size.width, size.height)
+            build_positioned_node(node, x, y, size.width, size.height, config.show_columns)
         })
         .collect();
 
@@ -974,23 +1008,31 @@ fn build_positioned_node(
     y: f32,
     width: f32,
     height: f32,
+    show_columns: bool,
 ) -> PositionedNode {
     PositionedNode {
         id: node.id.clone(),
         label: node.label.clone(),
         kind: node.kind,
-        columns: node
-            .columns
-            .iter()
-            .map(|c| PositionedColumn {
-                name: c.name.clone(),
-                data_type: c.data_type.clone(),
-                nullable: c.nullable,
-                is_primary_key: c.is_primary_key,
-                is_foreign_key: c.is_foreign_key,
-                is_indexed: c.is_indexed,
-            })
-            .collect(),
+        columns: if show_columns {
+            node.columns
+                .iter()
+                .map(|c| PositionedColumn {
+                    name: c.name.clone(),
+                    data_type: c.data_type.clone(),
+                    flags: ColumnFlags {
+                        nullable: c.nullable,
+                        relation: ColumnRelationFlags {
+                            is_primary_key: c.is_primary_key,
+                            is_foreign_key: c.is_foreign_key,
+                            is_indexed: c.is_indexed,
+                        },
+                    },
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
         x,
         y,
         width,
@@ -1018,6 +1060,9 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
         .node_padding
         .mul_add(2.0, estimate_text_width(&node.label, HEADER_FONT_SIZE))
         + HEADER_KIND_LABEL_RESERVE;
+    if !config.show_columns {
+        return header_width.max(minimum_width).ceil();
+    }
 
     let column_width = node
         .columns
@@ -1048,6 +1093,12 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
 #[allow(clippy::suboptimal_flops)]
 #[allow(clippy::missing_const_for_fn)] // This helper stays non-const to avoid over-constraining floating-point layout code.
 fn estimate_node_height(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
+    if !config.show_columns {
+        return config
+            .node_padding
+            .mul_add(2.0, config.header_height)
+            .ceil();
+    }
     config
         .node_padding
         .mul_add(
@@ -1216,15 +1267,14 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
 }
 
 /// Route all edges in the graph.
-#[allow(clippy::too_many_lines)]
 #[cfg_attr(not(test), allow(dead_code))] // Test helpers exercise the wrapper directly.
 fn route_edges(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
     config: &LayoutConfig,
     node_ranks: Option<&[usize]>,
-) -> Vec<PositionedEdge> {
-    route_edges_with_diagnostics(graph, positioned_nodes, config, node_ranks).0
+) -> Result<Vec<PositionedEdge>, LayoutError> {
+    Ok(route_edges_with_diagnostics(graph, positioned_nodes, config, node_ranks)?.0)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -1242,18 +1292,10 @@ struct BundleRouteMetadata {
 
 #[derive(Debug, Clone)]
 struct RoutedEdgeDraft {
-    from: String,
-    to: String,
+    edge_index: usize,
     label: String,
     kind: EdgeKind,
     route: EdgeRoute,
-    is_self_loop: bool,
-    nullable: bool,
-    target_cardinality: relune_core::layout::Cardinality,
-    from_columns: Vec<String>,
-    to_columns: Vec<String>,
-    is_collapsed_join: bool,
-    collapsed_join_table: Option<CollapsedJoinTable>,
     bundle_metadata: Option<BundleRouteMetadata>,
     routing_debug: PositionedEdgeRoutingDebug,
 }
@@ -1279,7 +1321,7 @@ fn route_edges_with_diagnostics(
     positioned_nodes: &[PositionedNode],
     config: &LayoutConfig,
     node_ranks: Option<&[usize]>,
-) -> (Vec<PositionedEdge>, RoutingDiagnostics) {
+) -> Result<(Vec<PositionedEdge>, RoutingDiagnostics), LayoutError> {
     let node_positions: BTreeMap<&str, (f32, f32, f32, f32)> = positioned_nodes
         .iter()
         .map(|node| (node.id.as_str(), (node.x, node.y, node.width, node.height)))
@@ -1317,7 +1359,11 @@ fn route_edges_with_diagnostics(
 
         let Some(port_assignment) = port_assignments.get(edge_index).and_then(Option::as_ref)
         else {
-            continue;
+            return Err(LayoutError::RoutingInvariant {
+                from: edge.from.clone(),
+                to: edge.to.clone(),
+                detail: "port assignment missing",
+            });
         };
 
         let detour_obstacles: Vec<Rect> = positioned_nodes
@@ -1333,11 +1379,14 @@ fn route_edges_with_diagnostics(
 
         let route = if let EdgePortAssignment::SelfLoop(assignment) = port_assignment {
             routing_debug.self_loop_radius_offset = Some(assignment.radius_offset);
-            if let Some(&(x, y, w, h)) = from_pos {
-                route_self_loop_with_offset(x, y, w, h, config.edge_style, assignment.radius_offset)
-            } else {
-                continue;
-            }
+            let Some(&(x, y, w, h)) = from_pos else {
+                return Err(LayoutError::RoutingInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    detail: "source node position missing for self-loop",
+                });
+            };
+            route_self_loop_with_offset(x, y, w, h, config.edge_style, assignment.radius_offset)
         } else if let (
             EdgePortAssignment::Regular(assignment),
             Some(&(x1, y1, w1, h1)),
@@ -1346,50 +1395,101 @@ fn route_edges_with_diagnostics(
         {
             routing_debug = build_regular_edge_debug(*assignment);
 
-            if let Some((candidate, source_rank, target_rank)) = node_ranks.and_then(|ranks| {
-                let source_rank = node_rank_for_edge_endpoint(graph, ranks, edge.from.as_str())?;
-                let target_rank = node_rank_for_edge_endpoint(graph, ranks, edge.to.as_str())?;
-                obstacle_aware_channel_for_edge(
-                    graph,
-                    edge,
-                    ranks,
-                    rank_bounds.as_deref(),
-                    config.direction,
-                    (x1, y1, w1, h1),
-                    (x2, y2, w2, h2),
-                    assignment,
-                    &detour_obstacles,
-                    &channel_usage,
-                    config.edge_style,
-                )
-                .map(|candidate| (candidate, source_rank, target_rank))
-            }) {
-                record_channel_usage(&mut channel_usage, candidate.axis, candidate.coordinate);
-                bundle_metadata = Some(BundleRouteMetadata {
-                    axis: candidate.axis,
-                    coordinate: candidate.coordinate,
-                    source_side: assignment.source_side,
-                    target_side: assignment.target_side,
-                });
-                routing_debug.channel_axis = Some(channel_axis_name(candidate.axis).to_string());
-                routing_debug.channel_coordinate = Some(candidate.coordinate);
-                route_edge_with_candidate_channel(
-                    x1,
-                    y1,
-                    w1,
-                    h1,
-                    x2,
-                    y2,
-                    w2,
-                    h2,
-                    config.edge_style,
-                    assignment,
-                    candidate,
-                    config.direction,
-                    source_rank,
-                    target_rank,
-                    rank_bounds.as_deref(),
-                )
+            if let Some(ranks) = node_ranks {
+                let Some(source_rank) =
+                    node_rank_for_edge_endpoint(graph, ranks, edge.from.as_str())
+                else {
+                    return Err(LayoutError::RoutingInvariant {
+                        from: edge.from.clone(),
+                        to: edge.to.clone(),
+                        detail: "source node rank missing",
+                    });
+                };
+                let Some(target_rank) = node_rank_for_edge_endpoint(graph, ranks, edge.to.as_str())
+                else {
+                    return Err(LayoutError::RoutingInvariant {
+                        from: edge.from.clone(),
+                        to: edge.to.clone(),
+                        detail: "target node rank missing",
+                    });
+                };
+                if let Some(candidate) = obstacle_aware_channel_for_edge(
+                    ObstacleRoutingContext {
+                        graph,
+                        edge,
+                        node_ranks: ranks,
+                        rank_bounds: rank_bounds.as_deref(),
+                        direction: config.direction,
+                        assignment,
+                        obstacles: &detour_obstacles,
+                        channel_usage: &channel_usage,
+                        style: config.edge_style,
+                    },
+                    Rect {
+                        x: x1,
+                        y: y1,
+                        w: w1,
+                        h: h1,
+                    },
+                    Rect {
+                        x: x2,
+                        y: y2,
+                        w: w2,
+                        h: h2,
+                    },
+                ) {
+                    record_channel_usage(&mut channel_usage, candidate.axis, candidate.coordinate);
+                    bundle_metadata = Some(BundleRouteMetadata {
+                        axis: candidate.axis,
+                        coordinate: candidate.coordinate,
+                        source_side: assignment.source_side,
+                        target_side: assignment.target_side,
+                    });
+                    routing_debug.channel_axis =
+                        Some(channel_axis_name(candidate.axis).to_string());
+                    routing_debug.channel_coordinate = Some(candidate.coordinate);
+                    route_edge_with_candidate_channel(
+                        Rect {
+                            x: x1,
+                            y: y1,
+                            w: w1,
+                            h: h1,
+                        },
+                        Rect {
+                            x: x2,
+                            y: y2,
+                            w: w2,
+                            h: h2,
+                        },
+                        config.edge_style,
+                        assignment,
+                        candidate,
+                        RankedChannelContext {
+                            direction: config.direction,
+                            source_rank,
+                            target_rank,
+                            rank_bounds: rank_bounds.as_deref(),
+                        },
+                    )
+                } else {
+                    route_edge_with_assigned_ports(
+                        x1,
+                        y1,
+                        w1,
+                        h1,
+                        x2,
+                        y2,
+                        w2,
+                        h2,
+                        config.edge_style,
+                        assignment.source_side,
+                        assignment.target_side,
+                        assignment.source_slot_offset,
+                        assignment.target_slot_offset,
+                        assignment.source_row_offset,
+                        assignment.target_row_offset,
+                    )
+                }
             } else {
                 route_edge_with_assigned_ports(
                     x1,
@@ -1410,7 +1510,11 @@ fn route_edges_with_diagnostics(
                 )
             }
         } else {
-            continue;
+            return Err(LayoutError::RoutingInvariant {
+                from: edge.from.clone(),
+                to: edge.to.clone(),
+                detail: "edge endpoint position missing",
+            });
         };
 
         let route = match edge.is_self_loop {
@@ -1441,18 +1545,10 @@ fn route_edges_with_diagnostics(
         });
 
         routed_edges[edge_index] = Some(RoutedEdgeDraft {
-            from: edge.from.clone(),
-            to: edge.to.clone(),
+            edge_index,
             label,
             kind: edge.kind,
             route,
-            is_self_loop: edge.is_self_loop,
-            nullable: edge.nullable,
-            target_cardinality: edge.target_cardinality,
-            from_columns: edge.from_columns.clone(),
-            to_columns: edge.to_columns.clone(),
-            is_collapsed_join: edge.is_collapsed_join,
-            collapsed_join_table: edge.collapsed_join_table.clone(),
             bundle_metadata,
             routing_debug,
         });
@@ -1467,15 +1563,16 @@ fn route_edges_with_diagnostics(
         let Some(edge) = routed_edges[edge_index].as_ref() else {
             continue;
         };
-        let lane_key = canonical_edge_pair(&edge.from, &edge.to);
+        let source_edge = &graph.edges[edge.edge_index];
+        let lane_key = canonical_edge_pair(&source_edge.from, &source_edge.to);
         let lane_index = lane_indices[edge_index];
         let lane_total = edge_counts.get(&lane_key).copied().unwrap_or(1);
-        let from_pos = node_positions.get(edge.from.as_str());
-        let to_pos = node_positions.get(edge.to.as_str());
+        let from_pos = node_positions.get(source_edge.from.as_str());
+        let to_pos = node_positions.get(source_edge.to.as_str());
 
         let mut label_obstacles: Vec<Rect> = positioned_nodes
             .iter()
-            .filter(|node| node.id != edge.from && node.id != edge.to)
+            .filter(|node| node.id != source_edge.from && node.id != source_edge.to)
             .map(|node| Rect {
                 x: node.x,
                 y: node.y,
@@ -1487,22 +1584,27 @@ fn route_edges_with_diagnostics(
         if let Some(&(x, y, w, h)) = from_pos {
             label_obstacles.push(Rect { x, y, w, h });
         }
-        if !edge.is_self_loop
+        if !source_edge.is_self_loop
             && let Some(&(x, y, w, h)) = to_pos
         {
             label_obstacles.push(Rect { x, y, w, h });
         }
 
         let lhw = estimate_label_half_width(&edge.label);
-        let label_pos = if lane_total > 1 && !edge.is_self_loop {
-            let t = parallel_label_parameter(&edge.from, &edge.to, lane_index, lane_total);
+        let label_pos = if lane_total > 1 && !source_edge.is_self_loop {
+            let t = parallel_label_parameter(
+                &source_edge.from,
+                &source_edge.to,
+                lane_index,
+                lane_total,
+            );
             point_along_route(&edge.route, t)
         } else {
             edge.route.label_position
         };
 
-        let preferred_t = if lane_total > 1 && !edge.is_self_loop {
-            parallel_label_parameter(&edge.from, &edge.to, lane_index, lane_total)
+        let preferred_t = if lane_total > 1 && !source_edge.is_self_loop {
+            parallel_label_parameter(&source_edge.from, &source_edge.to, lane_index, lane_total)
         } else {
             estimate_route_parameter(&edge.route, label_pos)
         };
@@ -1511,18 +1613,18 @@ fn route_edges_with_diagnostics(
         placed_labels.push(label_rect(label_x, label_y, lhw));
 
         edges[edge_index] = Some(PositionedEdge {
-            from: edge.from.clone(),
-            to: edge.to.clone(),
+            from: source_edge.from.clone(),
+            to: source_edge.to.clone(),
             label: edge.label.clone(),
             kind: edge.kind,
             route: edge.route.clone(),
-            is_self_loop: edge.is_self_loop,
-            nullable: edge.nullable,
-            target_cardinality: edge.target_cardinality,
-            from_columns: edge.from_columns.clone(),
-            to_columns: edge.to_columns.clone(),
-            is_collapsed_join: edge.is_collapsed_join,
-            collapsed_join_table: edge.collapsed_join_table.clone(),
+            is_self_loop: source_edge.is_self_loop,
+            nullable: source_edge.nullable,
+            target_cardinality: source_edge.target_cardinality,
+            from_columns: source_edge.from_columns.clone(),
+            to_columns: source_edge.to_columns.clone(),
+            is_collapsed_join: source_edge.is_collapsed_join,
+            collapsed_join_table: source_edge.collapsed_join_table.clone(),
             label_x,
             label_y,
             routing_debug: Some(edge.routing_debug.clone()),
@@ -1531,7 +1633,7 @@ fn route_edges_with_diagnostics(
 
     let mut edges: Vec<_> = edges.into_iter().flatten().collect();
     resolve_edge_label_collisions(&mut edges, positioned_nodes);
-    (edges, diagnostics)
+    Ok((edges, diagnostics))
 }
 
 fn build_regular_edge_debug(assignment: RegularPortAssignment) -> PositionedEdgeRoutingDebug {
@@ -1581,14 +1683,15 @@ fn apply_parallel_edge_bundling(
         let Some(bundle_metadata) = edge.bundle_metadata else {
             continue;
         };
-        if edge.is_self_loop {
+        let source_edge = &graph.edges[edge.edge_index];
+        if source_edge.is_self_loop {
             continue;
         }
 
         groups
             .entry(BundleGroupKey {
-                from: edge.from.clone(),
-                to: edge.to.clone(),
+                from: source_edge.from.clone(),
+                to: source_edge.to.clone(),
                 axis: bundle_metadata.axis,
             })
             .or_default()
@@ -1634,7 +1737,13 @@ fn apply_parallel_edge_bundling(
                         continue;
                     };
                     let candidate = build_bundled_route(&edge.route, bundle_metadata, stats);
-                    if bundled_route_is_valid(&candidate, edge, bundle_metadata, positioned_nodes) {
+                    if bundled_route_is_valid(
+                        &candidate,
+                        graph,
+                        edge,
+                        bundle_metadata,
+                        positioned_nodes,
+                    ) {
                         edge.route = candidate;
                     }
                 }
@@ -1752,17 +1861,19 @@ fn build_bundled_route(
 
 fn bundled_route_is_valid(
     route: &EdgeRoute,
+    graph: &LayoutGraph,
     edge: &RoutedEdgeDraft,
     metadata: BundleRouteMetadata,
     positioned_nodes: &[PositionedNode],
 ) -> bool {
+    let source_edge = &graph.edges[edge.edge_index];
     if endpoint_side_violations(route, metadata.source_side, metadata.target_side) > 0 {
         return false;
     }
 
     let obstacles = positioned_nodes
         .iter()
-        .filter(|node| node.id != edge.from && node.id != edge.to)
+        .filter(|node| node.id != source_edge.from && node.id != source_edge.to)
         .map(|node| Rect {
             x: node.x,
             y: node.y,
@@ -1852,29 +1963,23 @@ fn inter_rank_channel(
     }
 }
 
-fn same_rank_x_channel(
-    source_rect: (f32, f32, f32, f32),
-    target_rect: (f32, f32, f32, f32),
-) -> f32 {
-    let source_center = source_rect.0 + source_rect.2 / 2.0;
-    let target_center = target_rect.0 + target_rect.2 / 2.0;
+fn same_rank_x_channel(source_rect: Rect, target_rect: Rect) -> f32 {
+    let source_center = source_rect.x + source_rect.w / 2.0;
+    let target_center = target_rect.x + target_rect.w / 2.0;
     if source_center <= target_center {
-        f32::midpoint(source_rect.0 + source_rect.2, target_rect.0)
+        f32::midpoint(source_rect.x + source_rect.w, target_rect.x)
     } else {
-        f32::midpoint(source_rect.0, target_rect.0 + target_rect.2)
+        f32::midpoint(source_rect.x, target_rect.x + target_rect.w)
     }
 }
 
-fn same_rank_y_channel(
-    source_rect: (f32, f32, f32, f32),
-    target_rect: (f32, f32, f32, f32),
-) -> f32 {
-    let source_center = source_rect.1 + source_rect.3 / 2.0;
-    let target_center = target_rect.1 + target_rect.3 / 2.0;
+fn same_rank_y_channel(source_rect: Rect, target_rect: Rect) -> f32 {
+    let source_center = source_rect.y + source_rect.h / 2.0;
+    let target_center = target_rect.y + target_rect.h / 2.0;
     if source_center <= target_center {
-        f32::midpoint(source_rect.1 + source_rect.3, target_rect.1)
+        f32::midpoint(source_rect.y + source_rect.h, target_rect.y)
     } else {
-        f32::midpoint(source_rect.1, target_rect.1 + target_rect.3)
+        f32::midpoint(source_rect.y, target_rect.y + target_rect.h)
     }
 }
 
@@ -1893,38 +1998,62 @@ struct ObstacleAwareChannelCandidate {
     stable_order: u32,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn obstacle_aware_channel_for_edge(
-    graph: &LayoutGraph,
-    edge: &crate::graph::LayoutEdge,
-    node_ranks: &[usize],
-    rank_bounds: Option<&[RankAxisBounds]>,
+#[derive(Debug, Clone, Copy)]
+struct RankedChannelContext<'a> {
     direction: LayoutDirection,
-    source_rect: (f32, f32, f32, f32),
-    target_rect: (f32, f32, f32, f32),
-    assignment: &RegularPortAssignment,
-    obstacles: &[Rect],
-    channel_usage: &BTreeMap<(ChannelAxis, i32), u32>,
+    source_rank: usize,
+    target_rank: usize,
+    rank_bounds: Option<&'a [RankAxisBounds]>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ObstacleRoutingContext<'a> {
+    graph: &'a LayoutGraph,
+    edge: &'a crate::graph::LayoutEdge,
+    node_ranks: &'a [usize],
+    rank_bounds: Option<&'a [RankAxisBounds]>,
+    direction: LayoutDirection,
+    assignment: &'a RegularPortAssignment,
+    obstacles: &'a [Rect],
+    channel_usage: &'a BTreeMap<(ChannelAxis, i32), u32>,
     style: RouteStyle,
+}
+
+fn obstacle_aware_channel_for_edge(
+    context: ObstacleRoutingContext<'_>,
+    source_rect: Rect,
+    target_rect: Rect,
 ) -> Option<ObstacleAwareChannelCandidate> {
-    let source_rank = node_rank_for_edge_endpoint(graph, node_ranks, edge.from.as_str())?;
-    let target_rank = node_rank_for_edge_endpoint(graph, node_ranks, edge.to.as_str())?;
+    let source_rank = node_rank_for_edge_endpoint(
+        context.graph,
+        context.node_ranks,
+        context.edge.from.as_str(),
+    )?;
+    let target_rank =
+        node_rank_for_edge_endpoint(context.graph, context.node_ranks, context.edge.to.as_str())?;
+    let ranked_context = RankedChannelContext {
+        direction: context.direction,
+        source_rank,
+        target_rank,
+        rank_bounds: context.rank_bounds,
+    };
+    let rank_bounds = context.rank_bounds?;
     let search_plan = channel_search_plan(
         source_rank,
         target_rank,
-        rank_bounds?,
-        direction,
+        rank_bounds,
+        context.direction,
         source_rect,
         target_rect,
     )?;
     let weights = ChannelCostWeights::default();
     let mut best_candidate = None;
     let mut best_score = None;
-    let mut candidates = channel_candidates(search_plan, source_rank, target_rank, rank_bounds?);
+    let mut candidates = channel_candidates(search_plan, source_rank, target_rank, rank_bounds);
     if search_plan.class != ChannelCandidateClass::SameRank {
         let start_order = u32::try_from(candidates.len()).expect("candidate count should fit u32");
         candidates.extend(bypass_channel_candidates(
-            direction,
+            context.direction,
             source_rect,
             target_rect,
             start_order,
@@ -1933,29 +2062,20 @@ fn obstacle_aware_channel_for_edge(
 
     for candidate in candidates {
         let route = route_edge_with_candidate_channel(
-            source_rect.0,
-            source_rect.1,
-            source_rect.2,
-            source_rect.3,
-            target_rect.0,
-            target_rect.1,
-            target_rect.2,
-            target_rect.3,
-            style,
-            assignment,
+            source_rect,
+            target_rect,
+            context.style,
+            context.assignment,
             candidate,
-            direction,
-            source_rank,
-            target_rank,
-            rank_bounds,
+            ranked_context,
         );
         let score = score_channel_candidate(
             &route,
-            obstacles,
-            assignment.source_side,
-            assignment.target_side,
+            context.obstacles,
+            context.assignment.source_side,
+            context.assignment.target_side,
             candidate,
-            channel_usage,
+            context.channel_usage,
         );
         if score.hard_constraint_violations != 0 {
             continue;
@@ -1977,8 +2097,8 @@ fn channel_search_plan(
     target_rank: usize,
     rank_bounds: &[RankAxisBounds],
     direction: LayoutDirection,
-    source_rect: (f32, f32, f32, f32),
-    target_rect: (f32, f32, f32, f32),
+    source_rect: Rect,
+    target_rect: Rect,
 ) -> Option<ChannelSearchPlan> {
     let same_rank = source_rank == target_rank;
     let baseline = match direction {
@@ -2067,17 +2187,17 @@ fn channel_candidates(
 
 fn bypass_channel_candidates(
     direction: LayoutDirection,
-    source_rect: (f32, f32, f32, f32),
-    target_rect: (f32, f32, f32, f32),
+    source_rect: Rect,
+    target_rect: Rect,
     start_order: u32,
 ) -> Vec<ObstacleAwareChannelCandidate> {
     let mut candidates = Vec::with_capacity(BYPASS_CHANNEL_OFFSETS.len() * 2);
 
     match direction {
         LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
-            let right_baseline = (source_rect.0 + source_rect.2).max(target_rect.0 + target_rect.2)
+            let right_baseline = (source_rect.x + source_rect.w).max(target_rect.x + target_rect.w)
                 + BYPASS_CHANNEL_MARGIN;
-            let left_baseline = source_rect.0.min(target_rect.0) - BYPASS_CHANNEL_MARGIN;
+            let left_baseline = source_rect.x.min(target_rect.x) - BYPASS_CHANNEL_MARGIN;
             append_bypass_candidates(
                 &mut candidates,
                 ChannelAxis::X,
@@ -2087,10 +2207,10 @@ fn bypass_channel_candidates(
             );
         }
         LayoutDirection::LeftToRight | LayoutDirection::RightToLeft => {
-            let bottom_baseline = (source_rect.1 + source_rect.3)
-                .max(target_rect.1 + target_rect.3)
+            let bottom_baseline = (source_rect.y + source_rect.h)
+                .max(target_rect.y + target_rect.h)
                 + BYPASS_CHANNEL_MARGIN;
-            let top_baseline = source_rect.1.min(target_rect.1) - BYPASS_CHANNEL_MARGIN;
+            let top_baseline = source_rect.y.min(target_rect.y) - BYPASS_CHANNEL_MARGIN;
             append_bypass_candidates(
                 &mut candidates,
                 ChannelAxis::Y,
@@ -2129,33 +2249,23 @@ fn append_bypass_candidates(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn route_edge_with_candidate_channel(
-    x1: f32,
-    y1: f32,
-    w1: f32,
-    h1: f32,
-    x2: f32,
-    y2: f32,
-    w2: f32,
-    h2: f32,
+    source_rect: Rect,
+    target_rect: Rect,
     style: RouteStyle,
     assignment: &RegularPortAssignment,
     candidate: ObstacleAwareChannelCandidate,
-    direction: LayoutDirection,
-    source_rank: usize,
-    target_rank: usize,
-    rank_bounds: Option<&[RankAxisBounds]>,
+    context: RankedChannelContext<'_>,
 ) -> EdgeRoute {
     let seed_route = route_edge_with_assigned_ports(
-        x1,
-        y1,
-        w1,
-        h1,
-        x2,
-        y2,
-        w2,
-        h2,
+        source_rect.x,
+        source_rect.y,
+        source_rect.w,
+        source_rect.h,
+        target_rect.x,
+        target_rect.y,
+        target_rect.w,
+        target_rect.h,
         style,
         assignment.source_side,
         assignment.target_side,
@@ -2172,10 +2282,7 @@ fn route_edge_with_candidate_channel(
         assignment.source_side,
         assignment.target_side,
         candidate,
-        direction,
-        source_rank,
-        target_rank,
-        rank_bounds,
+        context,
     );
 
     let points = match candidate.axis {
@@ -2200,37 +2307,33 @@ fn route_edge_with_candidate_channel(
     rebuild_route_from_points(&points, style)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn candidate_channel_anchors(
     source: (f32, f32),
     target: (f32, f32),
     source_side: AttachmentSide,
     target_side: AttachmentSide,
     candidate: ObstacleAwareChannelCandidate,
-    direction: LayoutDirection,
-    source_rank: usize,
-    target_rank: usize,
-    rank_bounds: Option<&[RankAxisBounds]>,
+    context: RankedChannelContext<'_>,
 ) -> ((f32, f32), (f32, f32)) {
-    match (direction, candidate.axis, rank_bounds) {
+    match (context.direction, candidate.axis, context.rank_bounds) {
         (
             LayoutDirection::TopToBottom | LayoutDirection::BottomToTop,
             ChannelAxis::X,
             Some(bounds),
-        ) if source_rank != target_rank => {
-            let Some(source_bounds) = bounds.get(source_rank).copied() else {
+        ) if context.source_rank != context.target_rank => {
+            let Some(source_bounds) = bounds.get(context.source_rank).copied() else {
                 return (
                     step_from_attachment(source, source_side, ROUTE_STUB_DISTANCE),
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            let Some(target_bounds) = bounds.get(target_rank).copied() else {
+            let Some(target_bounds) = bounds.get(context.target_rank).copied() else {
                 return (
                     step_from_attachment(source, source_side, ROUTE_STUB_DISTANCE),
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            if source_rank < target_rank {
+            if context.source_rank < context.target_rank {
                 (
                     (source.0, source_bounds.max + ROUTE_STUB_DISTANCE),
                     (target.0, target_bounds.min - ROUTE_STUB_DISTANCE),
@@ -2246,20 +2349,20 @@ fn candidate_channel_anchors(
             LayoutDirection::LeftToRight | LayoutDirection::RightToLeft,
             ChannelAxis::Y,
             Some(bounds),
-        ) if source_rank != target_rank => {
-            let Some(source_bounds) = bounds.get(source_rank).copied() else {
+        ) if context.source_rank != context.target_rank => {
+            let Some(source_bounds) = bounds.get(context.source_rank).copied() else {
                 return (
                     step_from_attachment(source, source_side, ROUTE_STUB_DISTANCE),
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            let Some(target_bounds) = bounds.get(target_rank).copied() else {
+            let Some(target_bounds) = bounds.get(context.target_rank).copied() else {
                 return (
                     step_from_attachment(source, source_side, ROUTE_STUB_DISTANCE),
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            if source_rank < target_rank {
+            if context.source_rank < context.target_rank {
                 (
                     (source_bounds.max + ROUTE_STUB_DISTANCE, source.1),
                     (target_bounds.min - ROUTE_STUB_DISTANCE, target.1),
@@ -3433,13 +3536,13 @@ mod tests {
             group_index: None,
         };
 
-        let positioned = build_positioned_node(&node, 10.0, 20.0, 200.0, 100.0);
+        let positioned = build_positioned_node(&node, 10.0, 20.0, 200.0, 100.0, true);
 
-        assert!(positioned.columns[0].is_primary_key);
-        assert!(!positioned.columns[0].is_foreign_key);
-        assert!(!positioned.columns[0].is_indexed);
-        assert!(positioned.columns[1].is_foreign_key);
-        assert!(positioned.columns[1].is_indexed);
+        assert!(positioned.columns[0].flags.relation.is_primary_key);
+        assert!(!positioned.columns[0].flags.relation.is_foreign_key);
+        assert!(!positioned.columns[0].flags.relation.is_indexed);
+        assert!(positioned.columns[1].flags.relation.is_foreign_key);
+        assert!(positioned.columns[1].flags.relation.is_indexed);
     }
 
     #[test]
@@ -3595,18 +3698,26 @@ mod tests {
                 PositionedColumn {
                     name: "id".to_string(),
                     data_type: "int".to_string(),
-                    is_primary_key: true,
-                    is_foreign_key: false,
-                    is_indexed: false,
-                    nullable: false,
+                    flags: ColumnFlags {
+                        nullable: false,
+                        relation: ColumnRelationFlags {
+                            is_primary_key: true,
+                            is_foreign_key: false,
+                            is_indexed: false,
+                        },
+                    },
                 },
                 PositionedColumn {
                     name: "user_id".to_string(),
                     data_type: "int".to_string(),
-                    is_primary_key: false,
-                    is_foreign_key: true,
-                    is_indexed: true,
-                    nullable: false,
+                    flags: ColumnFlags {
+                        nullable: false,
+                        relation: ColumnRelationFlags {
+                            is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: true,
+                        },
+                    },
                 },
             ],
             x: 0.0,
@@ -3661,10 +3772,14 @@ mod tests {
             columns: vec![PositionedColumn {
                 name: "id".to_string(),
                 data_type: "int".to_string(),
-                is_primary_key: true,
-                is_foreign_key: false,
-                is_indexed: false,
-                nullable: false,
+                flags: ColumnFlags {
+                    nullable: false,
+                    relation: ColumnRelationFlags {
+                        is_primary_key: true,
+                        is_foreign_key: false,
+                        is_indexed: false,
+                    },
+                },
             }],
             height: 60.0,
             ..empty_node
@@ -3887,7 +4002,8 @@ mod tests {
             },
         ];
 
-        let edges = route_edges(&graph, &positioned_nodes, &LayoutConfig::default(), None);
+        let edges = route_edges(&graph, &positioned_nodes, &LayoutConfig::default(), None)
+            .expect("parallel edge routing should succeed");
         assert_eq!(edges.len(), 2);
 
         for edge in &edges {
@@ -4176,7 +4292,8 @@ mod tests {
         ];
         let config = LayoutConfig::default();
 
-        let edges = route_edges(&graph, &positioned_nodes, &config, Some(&[0, 1]));
+        let edges = route_edges(&graph, &positioned_nodes, &config, Some(&[0, 1]))
+            .expect("ranked routing should succeed");
         let edge = edges.first().expect("edge");
 
         assert_eq!(edge.route.control_points.len(), 2);
@@ -4218,7 +4335,8 @@ mod tests {
         ];
         let config = LayoutConfig::default();
 
-        let edges = route_edges(&graph, &positioned_nodes, &config, Some(&[0, 0]));
+        let edges = route_edges(&graph, &positioned_nodes, &config, Some(&[0, 0]))
+            .expect("same-rank routing should succeed");
         let edge = edges.first().expect("edge");
         assert!(
             edge.route
@@ -4278,7 +4396,8 @@ mod tests {
             &positioned_nodes,
             &LayoutConfig::default(),
             Some(&[0, 1]),
-        );
+        )
+        .expect("diagnostic routing should succeed");
         let edge = edges.first().expect("edge");
         let channel_y = edge.route.control_points[0].1;
 
@@ -4368,7 +4487,8 @@ mod tests {
             &positioned_nodes,
             &LayoutConfig::default(),
             Some(&[0, 1]),
-        );
+        )
+        .expect("bundled routing should succeed");
         assert_eq!(edges.len(), 2);
 
         let shared_trunk_y = |edge: &PositionedEdge| {
@@ -4441,7 +4561,8 @@ mod tests {
             &positioned_nodes,
             &LayoutConfig::default(),
             Some(&[1, 0]),
-        );
+        )
+        .expect("reverse-channel routing should succeed");
         let edge = edges.first().expect("edge");
 
         assert_eq!(diagnostics.non_self_loop_detour_activations, 0);
@@ -4505,17 +4626,29 @@ mod tests {
         }];
 
         let candidate = obstacle_aware_channel_for_edge(
-            &graph,
-            &graph.edges[0],
-            &node_ranks,
-            Some(&rank_bounds),
-            config.direction,
-            (0.0, 0.0, 100.0, 80.0),
-            (200.0, 200.0, 100.0, 80.0),
-            &assignment,
-            &obstacles,
-            &BTreeMap::new(),
-            RouteStyle::Orthogonal,
+            ObstacleRoutingContext {
+                graph: &graph,
+                edge: &graph.edges[0],
+                node_ranks: &node_ranks,
+                rank_bounds: Some(&rank_bounds),
+                direction: config.direction,
+                assignment: &assignment,
+                obstacles: &obstacles,
+                channel_usage: &BTreeMap::new(),
+                style: RouteStyle::Orthogonal,
+            },
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 80.0,
+            },
+            Rect {
+                x: 200.0,
+                y: 200.0,
+                w: 100.0,
+                h: 80.0,
+            },
         );
 
         assert!(candidate.is_none());
@@ -4567,7 +4700,8 @@ mod tests {
         });
 
         let (_, diagnostics) =
-            route_edges_with_diagnostics(&graph, &positioned_nodes, &LayoutConfig::default(), None);
+            route_edges_with_diagnostics(&graph, &positioned_nodes, &LayoutConfig::default(), None)
+                .expect("unranked routing should succeed");
         assert_eq!(diagnostics.non_self_loop_detour_activations, 1);
     }
 
@@ -4621,7 +4755,8 @@ mod tests {
             &positioned_nodes,
             &LayoutConfig::default(),
             Some(&[0, 2]),
-        );
+        )
+        .expect("vertical bypass routing should succeed");
         let edge = edges.first().expect("edge");
 
         assert_eq!(diagnostics.non_self_loop_detour_activations, 0);
@@ -4686,7 +4821,8 @@ mod tests {
         ];
 
         let (edges, diagnostics) =
-            route_edges_with_diagnostics(&graph, &positioned_nodes, &config, Some(&[0, 2]));
+            route_edges_with_diagnostics(&graph, &positioned_nodes, &config, Some(&[0, 2]))
+                .expect("horizontal bypass routing should succeed");
         let edge = edges.first().expect("edge");
 
         assert_eq!(diagnostics.non_self_loop_detour_activations, 0);

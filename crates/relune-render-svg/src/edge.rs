@@ -1,6 +1,6 @@
 //! Enhanced edge rendering with CSS classes and data attributes for interactivity.
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use relune_core::layout::{EdgeRoute, RouteStyle};
 use relune_layout::PositionedEdge;
@@ -53,7 +53,7 @@ fn polyline_path_d(points: &[(f32, f32)]) -> String {
 
     let mut d = format!("M {x:.1} {y:.1}");
     for &(px, py) in &points[1..] {
-        let _ = write!(&mut d, " L {px:.1} {py:.1}");
+        write!(&mut d, " L {px:.1} {py:.1}").expect("writing SVG path to String must succeed");
     }
     d
 }
@@ -82,21 +82,24 @@ fn rounded_backbone_path_d(points: &[(f32, f32)], curve_offset: f32) -> String {
         let radius = max_radius.min(incoming * 0.5).min(outgoing * 0.5);
 
         if radius <= 0.0 || is_collinear(prev, curr, next) {
-            let _ = write!(&mut d, " L {:.1} {:.1}", curr.0, curr.1);
+            write!(&mut d, " L {:.1} {:.1}", curr.0, curr.1)
+                .expect("writing SVG path to String must succeed");
             continue;
         }
 
         let before = move_toward(curr, prev, radius);
         let after = move_toward(curr, next, radius);
-        let _ = write!(
+        write!(
             &mut d,
             " L {:.1} {:.1} Q {:.1} {:.1} {:.1} {:.1}",
             before.0, before.1, curr.0, curr.1, after.0, after.1
-        );
+        )
+        .expect("writing SVG path to String must succeed");
     }
 
     let end = points[points.len() - 1];
-    let _ = write!(&mut d, " L {:.1} {:.1}", end.0, end.1);
+    write!(&mut d, " L {:.1} {:.1}", end.0, end.1)
+        .expect("writing SVG path to String must succeed");
     d
 }
 
@@ -244,7 +247,7 @@ pub fn render_edge(
     edge: &PositionedEdge,
     theme: &ThemeColors,
     options: &EdgeRenderOptions,
-) {
+) -> fmt::Result {
     let path_d = edge_route_svg_path_d(&edge.route, options.curve_offset);
 
     // Build stroke dash array if dashed
@@ -257,15 +260,15 @@ pub fn render_edge(
     // Add tooltip if enabled
     if options.show_tooltips {
         let tooltip_text = generate_edge_tooltip(edge);
-        let _ = write!(
+        write!(
             out,
             r#"<g class="edge-group"><title>{}</title>"#,
             escape_text(&tooltip_text)
-        );
+        )?;
     }
 
     // Render the path with CSS class and data attributes
-    let _ = write!(
+    write!(
         out,
         r#"<path class="edge-path" data-from="{}" data-to="{}" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" marker-end="url(#arrow)"{}/>"#,
         escape_attribute(&edge.from),
@@ -274,7 +277,7 @@ pub fn render_edge(
         theme.edge_stroke,
         options.stroke_width,
         stroke_dasharray
-    );
+    )?;
 
     // Determine if we need to render any labels
     let has_label = options.show_labels && !edge.label.is_empty();
@@ -286,14 +289,14 @@ pub fn render_edge(
         if options.show_tooltips {
             out.push_str("</g>");
         }
-        return;
+        return Ok(());
     }
 
     let going_right = edge.route.x2 > edge.route.x1;
 
     // Render cardinality indicators at endpoints
     if has_cardinality {
-        render_cardinality_labels(out, edge, theme, going_right);
+        render_cardinality_labels(out, edge, theme, going_right)?;
     }
 
     // Build the main label text
@@ -311,20 +314,21 @@ pub fn render_edge(
         let label_y = edge.label_y;
 
         // Render label with background for better readability
-        let _ = write!(
+        write!(
             out,
             r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="10" fill="{}" text-anchor="middle">{}</text>"#,
             label_x,
             label_y,
             theme.text_muted,
             escape_text(&label_text)
-        );
+        )?;
     }
 
     // Close the group tag if tooltips are enabled
     if options.show_tooltips {
         out.push_str("</g>");
     }
+    Ok(())
 }
 
 /// Renders cardinality labels at the endpoints of an edge.
@@ -333,7 +337,7 @@ fn render_cardinality_labels(
     edge: &PositionedEdge,
     theme: &ThemeColors,
     going_right: bool,
-) {
+) -> fmt::Result {
     // Source side (FK / child table): always "many" — each parent can be
     // referenced by multiple child rows.  The nullable flag determines
     // participation: optional (0..N) vs mandatory (1..N).
@@ -358,18 +362,19 @@ fn render_cardinality_labels(
     let target_anchor = if going_right { "start" } else { "end" };
 
     // Render source cardinality
-    let _ = write!(
+    write!(
         out,
         r#"<text class="cardinality-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="600" fill="{}" text-anchor="{}" dominant-baseline="middle">{}</text>"#,
         source_x, source_y, theme.text_secondary, source_anchor, source_symbol
-    );
+    )?;
 
     // Render target cardinality
-    let _ = write!(
+    write!(
         out,
         r#"<text class="cardinality-label" x="{:.1}" y="{:.1}" font-family="ui-sans-serif, system-ui" font-size="9" font-weight="600" fill="{}" text-anchor="{}" dominant-baseline="middle">{}</text>"#,
         target_x, target_y, theme.text_secondary, target_anchor, target_symbol
-    );
+    )?;
+    Ok(())
 }
 
 /// Generates tooltip text for an edge.
@@ -411,6 +416,15 @@ mod tests {
     use super::*;
     use relune_core::EdgeKind;
     use relune_core::layout::{Cardinality, EdgeRoute, RouteStyle};
+
+    fn render_edge_ok(
+        out: &mut String,
+        edge: &PositionedEdge,
+        colors: &ThemeColors,
+        options: &EdgeRenderOptions,
+    ) {
+        render_edge(out, edge, colors, options).expect("edge rendering should succeed in tests");
+    }
 
     fn create_test_theme() -> ThemeColors {
         ThemeColors {
@@ -494,7 +508,7 @@ mod tests {
         let options = EdgeRenderOptions::default();
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         assert!(out.contains("class=\"edge-path\""));
         assert!(out.contains("data-from=\"users\""));
@@ -515,7 +529,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         assert!(out.contains("stroke-dasharray=\"5,3\""));
     }
@@ -544,7 +558,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         assert!(!out.contains("edge-label"));
         assert!(!out.contains("test_label"));
@@ -574,7 +588,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         // Non-nullable FK should show "1..N" at source (mandatory many)
         assert!(out.contains(">1..N</text>"));
@@ -606,7 +620,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         // Nullable FK should show "0..N" at source (optional many)
         assert!(out.contains(">0..N</text>"));
@@ -639,7 +653,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         assert!(out.contains(">N</text>"));
     }
@@ -668,7 +682,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         // Should show both label and FK column
         assert!(out.contains("fk_product: product_id"));
@@ -698,7 +712,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         // Should show both FK columns
         assert!(out.contains("tenant_id, order_id"));
@@ -728,7 +742,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         // Should not contain cardinality class
         assert!(!out.contains("cardinality-label"));
@@ -758,7 +772,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         // Label uses layout-computed `label_y` (straight route: segment midpoint).
         assert!(out.contains("y=\"50.0\""));
@@ -802,7 +816,7 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_edge(&mut out, &edge, &colors, &options);
+        render_edge_ok(&mut out, &edge, &colors, &options);
 
         assert!(out.contains("M 100.0 25.0"));
         assert!(out.contains("L 150.0 25.0"));

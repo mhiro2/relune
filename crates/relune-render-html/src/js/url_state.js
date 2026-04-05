@@ -19,11 +19,37 @@
   }
 
   // ts/viewer_api.ts
+  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
+  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
+  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
   function getViewerRuntime() {
-    if (window.reluneViewer === void 0) {
-      window.reluneViewer = {};
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
+      viewerWindow[VIEWER_RUNTIME_KEY] = {};
     }
-    return window.reluneViewer;
+    return viewerWindow[VIEWER_RUNTIME_KEY];
+  }
+  function readyModules() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
+      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
+    }
+    return viewerWindow[VIEWER_READY_MODULES_KEY];
+  }
+  function runtimeWaiters() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
+      viewerWindow[VIEWER_WAITERS_KEY] = [];
+    }
+    return viewerWindow[VIEWER_WAITERS_KEY];
+  }
+  function waitForViewerModules(modules, callback) {
+    const pending = new Set(modules);
+    if (pending.size === 0 || Array.from(pending).every((module) => readyModules().has(module))) {
+      callback();
+      return;
+    }
+    runtimeWaiters().push({ modules: pending, callback });
   }
 
   // ts/url_state.ts
@@ -138,8 +164,26 @@
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
       }
+    }, expectedViewerModules = function() {
+      const modules = [];
+      if (document.getElementById("zoom-fit") !== null) {
+        modules.push("viewport");
+      }
+      if (document.getElementById("table-search") instanceof HTMLInputElement) {
+        modules.push("search");
+      }
+      if (document.getElementById("type-filter-section") !== null) {
+        modules.push("filters");
+      }
+      if (document.getElementById("detail-drawer") !== null) {
+        modules.push("selection");
+      }
+      if ((metadata?.groups?.length ?? 0) > 0) {
+        modules.push("groups");
+      }
+      return modules;
     };
-    readHash2 = readHash, parseAllowedTypes2 = parseAllowedTypes, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash;
+    readHash2 = readHash, parseAllowedTypes2 = parseAllowedTypes, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
     const runtime = getViewerRuntime();
     const metadata = parseReluneMetadata();
     const tables = metadata?.tables ?? [];
@@ -161,9 +205,7 @@
     document.addEventListener("relune:viewport-changed", scheduleWrite);
     document.addEventListener("relune:filters-changed", scheduleWrite);
     document.addEventListener("relune:groups-changed", scheduleWrite);
-    requestAnimationFrame(() => {
-      restoreFromHash();
-    });
+    waitForViewerModules(expectedViewerModules(), restoreFromHash);
   }
   var readHash2;
   var parseAllowedTypes2;
@@ -174,4 +216,5 @@
   var scheduleWrite2;
   var writeHash2;
   var restoreFromHash2;
+  var expectedViewerModules2;
 })();

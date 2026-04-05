@@ -66,14 +66,10 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         Some(js_parts.join("\n\n"))
     };
 
-    let heading = if options.title.is_some() {
-        Some(format!(
-            "<h1>{}</h1>",
-            escape_xml_text(options.title.as_deref().unwrap())
-        ))
-    } else {
-        None
-    };
+    let heading = options
+        .title
+        .as_deref()
+        .map(|heading| format!("<h1>{}</h1>", escape_xml_text(heading)));
 
     let group_panel = if options.enable_group_toggles && !options.enable_search {
         Some(build_group_panel_html())
@@ -1367,6 +1363,38 @@ fn build_css(
       backdrop-filter: blur(16px);
       z-index: 180;
       margin: 0;
+    }}
+
+    .viewer-notice-stack {{
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 320;
+      pointer-events: none;
+    }}
+
+    body:has(h1) .viewer-notice-stack {{
+      top: 61px;
+    }}
+
+    .viewer-notice {{
+      max-width: min(360px, calc(100vw - 24px));
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--panel-border);
+      background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+      box-shadow: var(--panel-shadow);
+      color: var(--text-color);
+      backdrop-filter: blur(16px);
+      font-size: 13px;
+      line-height: 1.4;
+    }}
+
+    .viewer-notice-warning {{
+      border-color: color-mix(in srgb, var(--accent-color) 44%, var(--panel-border));
     }}
 
     .container {{

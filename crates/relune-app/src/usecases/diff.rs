@@ -115,7 +115,7 @@ fn render_with_schema(
         compact: false,
         show_tooltips: true,
     };
-    let svg = render_svg_with_overlay(&positioned, svg_options, request.overlay.as_ref());
+    let svg = render_svg_with_overlay(&positioned, svg_options, request.overlay.as_ref())?;
 
     match request.output_format {
         OutputFormat::Svg => Ok(svg),

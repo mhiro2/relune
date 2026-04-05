@@ -3,7 +3,7 @@
 //! This crate provides SVG rendering functionality for visualizing database schemas
 //! as interactive diagrams.
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use relune_core::{
     EdgeKind, NodeKind,
@@ -11,6 +11,7 @@ use relune_core::{
 };
 
 pub mod edge;
+mod error;
 pub mod escape;
 pub mod geometry;
 pub mod group;
@@ -19,6 +20,7 @@ mod options;
 mod theme;
 
 pub use edge::{EdgeRenderOptions, render_edge};
+pub use error::SvgRenderError;
 pub use geometry::{Point, Rect, clamp, compute_column_y, compute_node_height, lerp};
 pub use group::render_group;
 pub use legend::render_legend;
@@ -30,8 +32,10 @@ pub use theme::{Theme, ThemeColors, get_colors};
 /// Supports group rendering for visually grouping related tables.
 /// When an overlay is provided, annotations (lint warnings, diff status, etc.)
 /// are attached to the corresponding nodes and edges.
-#[must_use]
-pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOptions) -> String {
+pub fn render_svg(
+    graph: &relune_layout::PositionedGraph,
+    options: SvgRenderOptions,
+) -> Result<String, SvgRenderError> {
     render_svg_with_overlay(graph, options, None)
 }
 
@@ -39,31 +43,30 @@ pub fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOpti
 ///
 /// This is the full-featured entry point. `render_svg` delegates here with
 /// `overlay = None` for backwards compatibility.
-#[must_use]
 pub fn render_svg_with_overlay(
     graph: &relune_layout::PositionedGraph,
     options: SvgRenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
-) -> String {
+) -> Result<String, SvgRenderError> {
     let colors = get_colors(options.theme);
     let mut out = String::with_capacity(estimate_svg_capacity(graph, options, overlay));
 
-    let _ = write!(
+    write!(
         out,
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{:.0}" height="{:.0}" viewBox="0 0 {:.0} {:.0}" fill="none">"#,
         graph.width, graph.height, graph.width, graph.height
-    );
-    out_push_defs(&mut out, &colors);
-    let _ = write!(
+    )?;
+    out_push_defs(&mut out, &colors)?;
+    write!(
         out,
         r#"<rect width="100%" height="100%" fill="{}"/>"#,
         colors.background
-    );
+    )?;
     out.push_str(r#"<rect width="100%" height="100%" fill="url(#canvas-grid)" opacity="0.92"/>"#);
 
     // Render groups FIRST (behind nodes and edges)
     for group in &graph.groups {
-        render_group(&mut out, group, &colors);
+        render_group(&mut out, group, &colors)?;
     }
 
     // Render edges with enhanced options
@@ -74,7 +77,7 @@ pub fn render_svg_with_overlay(
     };
     for (index, edge) in graph.edges.iter().enumerate() {
         let edge_overlay = overlay.and_then(|o| o.edge(&edge.from, &edge.to));
-        render_edge_internal(&mut out, edge, &colors, &edge_options, index, edge_overlay);
+        render_edge_internal(&mut out, edge, &colors, &edge_options, index, edge_overlay)?;
     }
 
     // Render nodes
@@ -87,16 +90,16 @@ pub fn render_svg_with_overlay(
             options.show_tooltips,
             index,
             node_overlay,
-        );
+        )?;
     }
 
     // Render legend if requested
     if options.show_legend {
-        render_legend(&mut out, &colors, None, graph.width, graph.height);
+        render_legend(&mut out, &colors, None, graph.width, graph.height)?;
     }
 
     out.push_str("</svg>");
-    out
+    Ok(out)
 }
 
 fn estimate_svg_capacity(
@@ -183,14 +186,14 @@ fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usiz
         .sum()
 }
 
-fn out_push_defs(out: &mut String, colors: &ThemeColors) {
+fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
     let (shadow_dy, shadow_blur, hatch_color) = if is_light_theme(colors) {
         ("2", "5", "#cbd5e1")
     } else {
         ("4", "8", "#334155")
     };
 
-    let _ = write!(
+    write!(
         out,
         r"<defs>
 <style>
@@ -209,8 +212,8 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
 </style>",
         glow_color = colors.glow_color,
         glow_particle = colors.glow_particle,
-    );
-    let _ = write!(
+    )?;
+    write!(
         out,
         r#"
 <pattern id="canvas-grid" width="32" height="32" patternUnits="userSpaceOnUse">
@@ -259,7 +262,8 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) {
         colors.node_shadow,
         colors.node_shadow,
         colors.glow_color
-    );
+    )?;
+    Ok(())
 }
 
 /// Node rendering for relune-layout `PositionedNode`.
@@ -272,7 +276,7 @@ fn render_node_internal(
     show_tooltips: bool,
     index: usize,
     overlay: Option<&relune_layout::NodeOverlay>,
-) {
+) -> fmt::Result {
     let kind = node_kind_name(node.kind);
     let node_style = node_style(node.kind, colors);
     let node_label = node_kind_label(node.kind);
@@ -287,7 +291,7 @@ fn render_node_internal(
         None => "",
     };
 
-    let _ = write!(
+    write!(
         out,
         r#"<g class="table-node node node-kind-{}{}" data-table-id="{}" data-id="{}" data-node-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
@@ -296,12 +300,16 @@ fn render_node_internal(
         escape_attribute(&node.id),
         kind,
         index as f32 * 0.022
-    );
+    )?;
 
     // Add tooltip if enabled (with overlay annotations appended)
     if show_tooltips {
         let column_count = node.columns.len();
-        let pk_count = node.columns.iter().filter(|c| c.is_primary_key).count();
+        let pk_count = node
+            .columns
+            .iter()
+            .filter(|c| c.flags.relation.is_primary_key)
+            .count();
         let mut tooltip_parts = vec![
             format!("{} {}", node.label, node_label),
             format!(
@@ -329,11 +337,11 @@ fn render_node_internal(
                 }
             }
         }
-        let _ = write!(
+        write!(
             out,
             r"<title>{}</title>",
             escape_text(&tooltip_parts.join("\n"))
-        );
+        )?;
     }
 
     // Node border: override stroke color when overlay severity is present
@@ -342,18 +350,18 @@ fn render_node_internal(
         None => (node_style.stroke, "1.6"),
     };
 
-    let _ = write!(
+    write!(
         out,
         r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" stroke="{}" stroke-width="{}" filter="url(#node-shadow)"/>"#,
         node.x, node.y, node.width, node.height, node_style.body_fill, stroke_color, stroke_width
-    );
-    let _ = write!(
+    )?;
+    write!(
         out,
         r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="32" rx="16" ry="16" fill="{}"/>"#,
         node.x, node.y, node.width, node_style.header_fill
-    );
+    )?;
     // Gradient transition from header to body — eliminates the hard underlay band
-    let _ = write!(
+    write!(
         out,
         r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{index})"/>"#,
         node_style.header_fill,
@@ -361,8 +369,8 @@ fn render_node_internal(
         node.x,
         node.y + 16.0,
         node.width
-    );
-    let _ = write!(
+    )?;
+    write!(
         out,
         r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
         node.x + 10.0,
@@ -372,15 +380,15 @@ fn render_node_internal(
         node.y + 21.0,
         colors.text_primary,
         escape_text(&node.label)
-    );
-    let _ = write!(
+    )?;
+    write!(
         out,
         r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="9" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
         node.x + node.width - 10.0,
         node.y + 21.0,
         colors.text_muted,
         escape_text(&kind.to_ascii_uppercase())
-    );
+    )?;
 
     // Render severity badge when overlay has annotations
     if let Some(severity) = max_severity {
@@ -392,20 +400,20 @@ fn render_node_internal(
             severity,
             annotation_count,
             colors,
-        );
+        )?;
     }
 
     let mut line_y = node.y + 46.0;
     for (column_index, column) in node.columns.iter().enumerate() {
-        let _ = write!(
+        write!(
             out,
             r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
             escape_attribute(&column.name),
-            column.nullable
-        );
+            column.flags.nullable
+        )?;
         if index > 0 {
             let separator_y = line_y - 12.0;
-            let _ = write!(
+            write!(
                 out,
                 r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.38" stroke-width="1"/>"#,
                 node.x + 10.0,
@@ -413,7 +421,7 @@ fn render_node_internal(
                 node.x + node.width - 10.0,
                 separator_y,
                 node_style.separator
-            );
+            )?;
         }
         let text = if node.kind == NodeKind::Enum {
             format!("• {}", column.name)
@@ -422,12 +430,12 @@ fn render_node_internal(
         } else {
             format!("{}: {}", column.name, column.data_type)
         };
-        let font_style = if column.nullable {
+        let font_style = if column.flags.nullable {
             r#" font-style="italic""#
         } else {
             ""
         };
-        let _ = write!(
+        write!(
             out,
             r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>{}</text>"#,
             node.x + 10.0,
@@ -435,37 +443,38 @@ fn render_node_internal(
             column_text_width(node, column),
             node.x + 10.0,
             line_y,
-            if column.nullable {
+            if column.flags.nullable {
                 colors.text_muted
             } else {
                 colors.text_secondary
             },
             font_style,
             escape_text(&text)
-        );
+        )?;
 
         let mut icon_x = node.x + node.width - 22.0;
-        if column.is_indexed {
-            render_idx_indicator(out, icon_x, line_y - 9.0);
+        if column.flags.relation.is_indexed {
+            render_idx_indicator(out, icon_x, line_y - 9.0)?;
             icon_x -= 24.0;
         }
-        if column.is_foreign_key {
-            render_fk_indicator(out, icon_x, line_y - 9.0);
+        if column.flags.relation.is_foreign_key {
+            render_fk_indicator(out, icon_x, line_y - 9.0)?;
             icon_x -= 24.0;
         }
-        if column.is_primary_key {
-            render_pk_indicator(out, icon_x, line_y - 8.5);
+        if column.flags.relation.is_primary_key {
+            render_pk_indicator(out, icon_x, line_y - 8.5)?;
         }
 
         out.push_str("</g>");
         line_y += 18.0;
     }
-    let _ = write!(
+    write!(
         out,
         r#"<rect class="type-filter-overlay" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="url(#type-filter-hatch)" opacity="0"/>"#,
         node.x, node.y, node.width, node.height
-    );
+    )?;
     out.push_str("</g>");
+    Ok(())
 }
 
 /// Edge rendering for relune-layout `PositionedEdge`.
@@ -479,7 +488,7 @@ fn render_edge_internal(
     options: &EdgeRenderOptions,
     index: usize,
     overlay: Option<&relune_layout::EdgeOverlay>,
-) {
+) -> fmt::Result {
     let kind = edge_kind_name(edge.kind);
     let edge_style = edge_style(edge.kind, colors);
     let path_d = crate::edge::edge_route_svg_path_d(&edge.route, options.curve_offset);
@@ -506,7 +515,7 @@ fn render_edge_internal(
         None => "",
     };
 
-    let _ = write!(
+    write!(
         out,
         r#"<g class="edge edge-kind-{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
@@ -515,7 +524,7 @@ fn render_edge_internal(
         escape_attribute(&edge.to),
         kind,
         index as f32 * 0.016 + 0.04
-    );
+    )?;
 
     // Add tooltip if enabled (with overlay annotations appended)
     if options.show_tooltips {
@@ -526,13 +535,13 @@ fn render_edge_internal(
             tooltip_text.push('\n');
             for annotation in &edge_overlay.annotations {
                 let severity_label = overlay_severity_label(annotation.severity);
-                let _ = write!(tooltip_text, "\n[{severity_label}] {}", annotation.message);
+                write!(tooltip_text, "\n[{severity_label}] {}", annotation.message)?;
                 if let Some(ref hint) = annotation.hint {
-                    let _ = write!(tooltip_text, "\n  → {hint}");
+                    write!(tooltip_text, "\n  → {hint}")?;
                 }
             }
         }
-        let _ = write!(out, r"<title>{}</title>", escape_text(&tooltip_text));
+        write!(out, r"<title>{}</title>", escape_text(&tooltip_text))?;
     }
 
     // Override stroke color when overlay severity is present
@@ -550,7 +559,7 @@ fn render_edge_internal(
     };
     match stroke_dasharray {
         Some(stroke_dasharray) => {
-            let _ = write!(
+            write!(
                 out,
                 r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} stroke-dasharray="{}" pathLength="100"/>"#,
                 escape_attribute(&path_d),
@@ -561,10 +570,10 @@ fn render_edge_internal(
                 options.stroke_width,
                 marker_attrs,
                 stroke_dasharray
-            );
+            )?;
         }
         None => {
-            let _ = write!(
+            write!(
                 out,
                 r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} pathLength="100" />"#,
                 escape_attribute(&path_d),
@@ -574,16 +583,16 @@ fn render_edge_internal(
                 effective_stroke,
                 options.stroke_width,
                 marker_attrs,
-            );
+            )?;
         }
     }
 
     if edge.kind == EdgeKind::ForeignKey {
         out.push_str(r#"<g class="edge-particles" opacity="0">"#);
-        let _ = write!(
+        write!(
             out,
             r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle>"##
-        );
+        )?;
         out.push_str("</g>");
     }
 
@@ -596,7 +605,7 @@ fn render_edge_internal(
             edge.nullable,
             edge.target_cardinality,
             effective_stroke,
-        );
+        )?;
     }
 
     // Render the label if enabled
@@ -604,7 +613,7 @@ fn render_edge_internal(
         let label_x = edge.label_x;
         let label_y = edge.label_y;
         let label_width = estimate_label_width(&edge.label);
-        let _ = write!(
+        write!(
             out,
             r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="18" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
             label_width.mul_add(-0.5, label_x),
@@ -612,44 +621,52 @@ fn render_edge_internal(
             label_width,
             node_label_background(colors),
             edge_style.stroke
-        );
+        )?;
 
-        let _ = write!(
+        write!(
             out,
             r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="{}">{}</text>"#,
             label_x,
             label_y,
             edge_style.label_fill.unwrap_or(colors.text_muted),
             escape_text(&edge.label)
-        );
+        )?;
     }
 
     out.push_str("</g>");
+    Ok(())
 }
 
 /// Unified column-metadata badge renderer.
 ///
 /// All indicators share the same rounded-rect + label form-factor so they are
 /// instantly distinguishable at a glance regardless of density.
-fn render_column_badge(out: &mut String, x: f32, y: f32, label: &str, bg: &str, fg: &str) {
-    let _ = write!(
+fn render_column_badge(
+    out: &mut String,
+    x: f32,
+    y: f32,
+    label: &str,
+    bg: &str,
+    fg: &str,
+) -> fmt::Result {
+    write!(
         out,
         r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="20" height="13" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
         x + 2.5,
         y + 9.5,
-    );
+    )
 }
 
-fn render_pk_indicator(out: &mut String, x: f32, y: f32) {
-    render_column_badge(out, x, y, "PK", "#fbbf24", "#fbbf24");
+fn render_pk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+    render_column_badge(out, x, y, "PK", "#fbbf24", "#fbbf24")
 }
 
-fn render_fk_indicator(out: &mut String, x: f32, y: f32) {
-    render_column_badge(out, x, y, "FK", "#38bdf8", "#38bdf8");
+fn render_fk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+    render_column_badge(out, x, y, "FK", "#38bdf8", "#38bdf8")
 }
 
-fn render_idx_indicator(out: &mut String, x: f32, y: f32) {
-    render_column_badge(out, x, y, "IX", "#f59e0b", "#f59e0b");
+fn render_idx_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+    render_column_badge(out, x, y, "IX", "#f59e0b", "#f59e0b")
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -890,7 +907,7 @@ fn render_inline_crow_markers(
     nullable: bool,
     target_cardinality: Cardinality,
     marker_color: &str,
-) {
+) -> fmt::Result {
     let start = (route.x1, route.y1);
     let end = (route.x2, route.y2);
 
@@ -901,7 +918,7 @@ fn render_inline_crow_markers(
         let prp = perp_vec(tang);
         let upper = offset_point(base, prp, CROW_SPREAD);
         let lower = offset_point(base, prp, -CROW_SPREAD);
-        let _ = write!(
+        write!(
             out,
             r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision"/>"#,
             upper.0,
@@ -917,28 +934,28 @@ fn render_inline_crow_markers(
             start.0,
             start.1,
             marker_color,
-        );
+        )?;
 
         // Secondary symbol behind the crow's foot.
         if nullable {
             // Circle (zero indicator).
             let (c, _) = sample_route_from_start(route, COMPOUND_SECONDARY);
-            let _ = write!(
+            write!(
                 out,
                 r#"<circle class="crow-inline" cx="{:.1}" cy="{:.1}" r="{CIRCLE_RADIUS}" fill="none" stroke="{}" stroke-width="1.2" shape-rendering="geometricPrecision"/>"#,
                 c.0, c.1, marker_color,
-            );
+            )?;
         } else {
             // Bar (mandatory indicator).
             let (c, t) = sample_route_from_start(route, COMPOUND_SECONDARY);
             let prp = perp_vec(t);
             let upper = offset_point(c, prp, BAR_HALF);
             let lower = offset_point(c, prp, -BAR_HALF);
-            let _ = write!(
+            write!(
                 out,
                 r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
                 upper.0, upper.1, lower.0, lower.1, marker_color,
-            );
+            )?;
         }
     }
 
@@ -950,11 +967,11 @@ fn render_inline_crow_markers(
             let prp = perp_vec(t);
             let upper = offset_point(c, prp, BAR_HALF);
             let lower = offset_point(c, prp, -BAR_HALF);
-            let _ = write!(
+            write!(
                 out,
                 r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
                 upper.0, upper.1, lower.0, lower.1, marker_color,
-            );
+            )?;
         }
         Cardinality::Many => {
             // Crow's foot converging at endpoint.
@@ -962,7 +979,7 @@ fn render_inline_crow_markers(
             let prp = perp_vec(tang);
             let upper = offset_point(base, prp, CROW_SPREAD);
             let lower = offset_point(base, prp, -CROW_SPREAD);
-            let _ = write!(
+            write!(
                 out,
                 r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision"/>"#,
                 upper.0,
@@ -978,7 +995,7 @@ fn render_inline_crow_markers(
                 end.0,
                 end.1,
                 marker_color,
-            );
+            )?;
         }
         Cardinality::ZeroOrOne => {
             // Bar near endpoint.
@@ -986,20 +1003,21 @@ fn render_inline_crow_markers(
             let bp = perp_vec(bt);
             let upper = offset_point(b, bp, BAR_HALF);
             let lower = offset_point(b, bp, -BAR_HALF);
-            let _ = write!(
+            write!(
                 out,
                 r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
                 upper.0, upper.1, lower.0, lower.1, marker_color,
-            );
+            )?;
             // Circle further back.
             let (c, _) = sample_route_from_end(route, COMPOUND_SECONDARY);
-            let _ = write!(
+            write!(
                 out,
                 r#"<circle class="crow-inline" cx="{:.1}" cy="{:.1}" r="{CIRCLE_RADIUS}" fill="none" stroke="{}" stroke-width="1.2" shape-rendering="geometricPrecision"/>"#,
                 c.0, c.1, marker_color,
-            );
+            )?;
         }
     }
+    Ok(())
 }
 
 /// Choose Crow's Foot SVG markers for a FK edge.
@@ -1057,9 +1075,9 @@ fn column_text_width(
     node: &relune_layout::PositionedNode,
     column: &relune_layout::PositionedColumn,
 ) -> f32 {
-    let icon_slots = usize::from(column.is_indexed)
-        + usize::from(column.is_foreign_key)
-        + usize::from(column.is_primary_key);
+    let icon_slots = usize::from(column.flags.relation.is_indexed)
+        + usize::from(column.flags.relation.is_foreign_key)
+        + usize::from(column.flags.relation.is_primary_key);
     if icon_slots == 0 {
         (node.width - 20.0).max(18.0)
     } else {
@@ -1122,7 +1140,7 @@ fn render_severity_badge(
     severity: relune_layout::OverlaySeverity,
     count: usize,
     colors: &ThemeColors,
-) {
+) -> fmt::Result {
     let fill = overlay_severity_color(severity, colors);
     let text_fill = if is_light_theme(colors) {
         "#ffffff"
@@ -1132,12 +1150,12 @@ fn render_severity_badge(
     let label = count.to_string();
     let badge_width = if count >= 10 { 22.0 } else { 18.0 };
     let badge_x = x - badge_width / 2.0;
-    let _ = write!(
+    write!(
         out,
         r#"<rect class="overlay-badge" x="{badge_x:.1}" y="{y:.1}" width="{badge_width:.1}" height="18" rx="9" fill="{fill}"/><text x="{:.1}" y="{:.1}" font-family="'Inter', system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle" fill="{text_fill}">{label}</text>"#,
         badge_x + badge_width / 2.0,
         y + 13.0,
-    );
+    )
 }
 
 use escape::{escape_attribute, escape_text};
@@ -1147,8 +1165,47 @@ mod tests {
     use super::*;
     use relune_core::{EdgeKind, NodeKind};
     use relune_layout::{
-        EdgeRoute, PositionedColumn, PositionedEdge, PositionedGroup, PositionedNode, RouteStyle,
+        ColumnFlags, ColumnRelationFlags, EdgeRoute, PositionedColumn, PositionedEdge,
+        PositionedGroup, PositionedNode, RouteStyle,
     };
+
+    fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOptions) -> String {
+        super::render_svg(graph, options).expect("svg rendering should succeed in tests")
+    }
+
+    fn render_svg_with_overlay(
+        graph: &relune_layout::PositionedGraph,
+        options: SvgRenderOptions,
+        overlay: Option<&relune_layout::DiagramOverlay>,
+    ) -> String {
+        super::render_svg_with_overlay(graph, options, overlay)
+            .expect("svg overlay rendering should succeed in tests")
+    }
+
+    fn relation_flags(
+        is_primary_key: bool,
+        is_foreign_key: bool,
+        is_indexed: bool,
+    ) -> ColumnRelationFlags {
+        ColumnRelationFlags {
+            is_primary_key,
+            is_foreign_key,
+            is_indexed,
+        }
+    }
+
+    fn column(
+        name: &str,
+        data_type: &str,
+        nullable: bool,
+        relation: ColumnRelationFlags,
+    ) -> PositionedColumn {
+        PositionedColumn {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            flags: ColumnFlags { nullable, relation },
+        }
+    }
 
     /// Helper function to create a test `PositionedGraph` with empty state
     fn empty_graph() -> relune_layout::PositionedGraph {
@@ -1170,22 +1227,8 @@ mod tests {
                 label: "users".to_string(),
                 kind: NodeKind::Table,
                 columns: vec![
-                    PositionedColumn {
-                        name: "id".to_string(),
-                        data_type: "uuid PK".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        is_foreign_key: false,
-                        is_indexed: false,
-                    },
-                    PositionedColumn {
-                        name: "name".to_string(),
-                        data_type: "text".to_string(),
-                        nullable: false,
-                        is_primary_key: false,
-                        is_foreign_key: false,
-                        is_indexed: false,
-                    },
+                    column("id", "uuid PK", false, relation_flags(true, false, false)),
+                    column("name", "text", false, relation_flags(false, false, false)),
                 ],
                 x: 56.0,
                 y: 56.0,
@@ -1213,22 +1256,8 @@ mod tests {
                     label: "users".to_string(),
                     kind: NodeKind::Table,
                     columns: vec![
-                        PositionedColumn {
-                            name: "id".to_string(),
-                            data_type: "uuid PK".to_string(),
-                            nullable: false,
-                            is_primary_key: true,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
-                        PositionedColumn {
-                            name: "name".to_string(),
-                            data_type: "text".to_string(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
+                        column("id", "uuid PK", false, relation_flags(true, false, false)),
+                        column("name", "text", false, relation_flags(false, false, false)),
                     ],
                     x: 56.0,
                     y: 56.0,
@@ -1243,30 +1272,9 @@ mod tests {
                     label: "posts".to_string(),
                     kind: NodeKind::Table,
                     columns: vec![
-                        PositionedColumn {
-                            name: "id".to_string(),
-                            data_type: "uuid PK".to_string(),
-                            nullable: false,
-                            is_primary_key: true,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
-                        PositionedColumn {
-                            name: "user_id".to_string(),
-                            data_type: "uuid".to_string(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: true,
-                            is_indexed: true,
-                        },
-                        PositionedColumn {
-                            name: "title".to_string(),
-                            data_type: "text".to_string(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
+                        column("id", "uuid PK", false, relation_flags(true, false, false)),
+                        column("user_id", "uuid", false, relation_flags(false, true, true)),
+                        column("title", "text", false, relation_flags(false, false, false)),
                     ],
                     x: 56.0,
                     y: 230.0,
@@ -1365,14 +1373,12 @@ mod tests {
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
-                    columns: vec![PositionedColumn {
-                        name: "status".to_string(),
-                        data_type: "status".to_string(),
-                        nullable: false,
-                        is_primary_key: false,
-                        is_foreign_key: false,
-                        is_indexed: false,
-                    }],
+                    columns: vec![column(
+                        "status",
+                        "status",
+                        false,
+                        relation_flags(false, false, false),
+                    )],
                     x: 56.0,
                     y: 56.0,
                     width: 260.0,
@@ -1385,14 +1391,12 @@ mod tests {
                     id: "active_users".to_string(),
                     label: "active_users".to_string(),
                     kind: NodeKind::View,
-                    columns: vec![PositionedColumn {
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: false,
-                        is_foreign_key: false,
-                        is_indexed: false,
-                    }],
+                    columns: vec![column(
+                        "id",
+                        "int",
+                        false,
+                        relation_flags(false, false, false),
+                    )],
                     x: 396.0,
                     y: 56.0,
                     width: 260.0,
@@ -1406,22 +1410,8 @@ mod tests {
                     label: "status".to_string(),
                     kind: NodeKind::Enum,
                     columns: vec![
-                        PositionedColumn {
-                            name: "active".to_string(),
-                            data_type: String::new(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
-                        PositionedColumn {
-                            name: "inactive".to_string(),
-                            data_type: String::new(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
+                        column("active", "", false, relation_flags(false, false, false)),
+                        column("inactive", "", false, relation_flags(false, false, false)),
                     ],
                     x: 396.0,
                     y: 216.0,
@@ -1548,14 +1538,12 @@ mod tests {
                 id: "test".to_string(),
                 label: "Test & <Label>".to_string(),
                 kind: NodeKind::Table,
-                columns: vec![PositionedColumn {
-                    name: "col \"name\"".to_string(),
-                    data_type: "text".to_string(),
-                    nullable: false,
-                    is_primary_key: false,
-                    is_foreign_key: false,
-                    is_indexed: false,
-                }],
+                columns: vec![column(
+                    "col \"name\"",
+                    "text",
+                    false,
+                    relation_flags(false, false, false),
+                )],
                 x: 56.0,
                 y: 56.0,
                 width: 260.0,
@@ -1618,14 +1606,12 @@ mod tests {
                 id: payload.to_string(),
                 label: payload.to_string(),
                 kind: NodeKind::Table,
-                columns: vec![PositionedColumn {
-                    name: payload.to_string(),
-                    data_type: "text".to_string(),
-                    nullable: false,
-                    is_primary_key: false,
-                    is_foreign_key: false,
-                    is_indexed: false,
-                }],
+                columns: vec![column(
+                    payload,
+                    "text",
+                    false,
+                    relation_flags(false, false, false),
+                )],
                 x: 56.0,
                 y: 56.0,
                 width: 280.0,
@@ -2012,22 +1998,8 @@ mod tests {
                     label: "users".to_string(),
                     kind: NodeKind::Table,
                     columns: vec![
-                        PositionedColumn {
-                            name: "id".to_string(),
-                            data_type: "uuid".to_string(),
-                            nullable: false,
-                            is_primary_key: true,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
-                        PositionedColumn {
-                            name: "name".to_string(),
-                            data_type: "text".to_string(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
+                        column("id", "uuid", false, relation_flags(true, false, false)),
+                        column("name", "text", false, relation_flags(false, false, false)),
                     ],
                     x: 56.0,
                     y: 56.0,
@@ -2042,22 +2014,8 @@ mod tests {
                     label: "posts".to_string(),
                     kind: NodeKind::Table,
                     columns: vec![
-                        PositionedColumn {
-                            name: "id".to_string(),
-                            data_type: "uuid".to_string(),
-                            nullable: false,
-                            is_primary_key: true,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
-                        PositionedColumn {
-                            name: "user_id".to_string(),
-                            data_type: "uuid".to_string(),
-                            nullable: false,
-                            is_primary_key: false,
-                            is_foreign_key: true,
-                            is_indexed: true,
-                        },
+                        column("id", "uuid", false, relation_flags(true, false, false)),
+                        column("user_id", "uuid", false, relation_flags(false, true, true)),
                     ],
                     x: 56.0,
                     y: 230.0,
@@ -2114,14 +2072,12 @@ mod tests {
                 id: "users".to_string(),
                 label: "users".to_string(),
                 kind: NodeKind::Table,
-                columns: vec![PositionedColumn {
-                    name: "id".to_string(),
-                    data_type: "uuid".to_string(),
-                    nullable: false,
-                    is_primary_key: true,
-                    is_foreign_key: false,
-                    is_indexed: false,
-                }],
+                columns: vec![column(
+                    "id",
+                    "uuid",
+                    false,
+                    relation_flags(true, false, false),
+                )],
                 x: 56.0,
                 y: 56.0,
                 width: 260.0,
@@ -2259,14 +2215,12 @@ mod tests {
                 id: "test & table".to_string(),
                 label: "Test & <Table>".to_string(),
                 kind: NodeKind::Table,
-                columns: vec![PositionedColumn {
-                    name: "col \"name\"".to_string(),
-                    data_type: "text".to_string(),
-                    nullable: false,
-                    is_primary_key: false,
-                    is_foreign_key: false,
-                    is_indexed: false,
-                }],
+                columns: vec![column(
+                    "col \"name\"",
+                    "text",
+                    false,
+                    relation_flags(false, false, false),
+                )],
                 x: 56.0,
                 y: 56.0,
                 width: 260.0,
@@ -2433,7 +2387,9 @@ mod snapshot_tests {
             .schema
             .as_ref()
             .and_then(|schema| build_layout(schema).ok())
-            .map(|positioned_graph| render_svg(&positioned_graph, SvgRenderOptions::default()));
+            .and_then(|positioned_graph| {
+                render_svg(&positioned_graph, SvgRenderOptions::default()).ok()
+            });
         (parse_output, svg)
     }
 

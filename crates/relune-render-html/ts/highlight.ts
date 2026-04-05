@@ -1,5 +1,5 @@
 import { parseReluneMetadata, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime } from './viewer_api';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 import { createHighlightState } from './highlight_state';
 import { computeNeighborHighlights, matchesBrowserQuery } from './highlight_actions';
 import {
@@ -207,6 +207,7 @@ import {
         return state.selectedNode;
       },
     };
+    markViewerModuleReady('selection');
 
     syncObjectBrowser();
   }

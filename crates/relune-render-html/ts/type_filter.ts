@@ -1,6 +1,6 @@
 import { syncEdgeDimming } from './edge_filters';
 import { parseReluneMetadata, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime } from './viewer_api';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 import {
   createTypeFilterState,
   tableMatchesAnySelectedType,
@@ -131,6 +131,7 @@ import { rebuildFilterList, syncFilterChrome } from './type_filter_dom';
         return [...state.allTypes];
       },
     };
+    markViewerModuleReady('filters');
 
     queryInput?.addEventListener('input', () => {
       rebuild();

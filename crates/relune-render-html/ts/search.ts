@@ -1,6 +1,6 @@
 import { syncEdgeDimming } from './edge_filters';
 import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime } from './viewer_api';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 import { computeSearchMatches } from './search_actions';
 
 {
@@ -85,6 +85,7 @@ import { computeSearchMatches } from './search_actions';
         return searchInput.value;
       },
     };
+    markViewerModuleReady('search');
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const debouncedSearch = (query: string): void => {

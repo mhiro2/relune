@@ -10,6 +10,7 @@ relune-core = { path = "../relune-core" }
 relune-layout = { path = "../relune-layout" }
 relune-render-theme = { path = "../relune-render-theme" }
 serde.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

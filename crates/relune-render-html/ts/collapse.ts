@@ -1,4 +1,5 @@
 import { parseReluneMetadata } from './metadata';
+import { reportSessionStorageError } from './viewer_api';
 
 function setStyleCursor(el: Element, cursor: string): void {
   const styled = el as HTMLElement | SVGGraphicsElement;
@@ -39,8 +40,8 @@ interface TableNodeEntry {
         }
       }
     }
-  } catch {
-    // Ignore storage errors
+  } catch (error: unknown) {
+    reportSessionStorageError('restoring collapsed tables', error);
   }
 
   function saveState(): void {
@@ -49,8 +50,8 @@ interface TableNodeEntry {
         'relune-collapsed-tables',
         JSON.stringify(Array.from(collapsedTables)),
       );
-    } catch {
-      // Ignore storage errors
+    } catch (error: unknown) {
+      reportSessionStorageError('saving collapsed tables', error);
     }
   }
 
