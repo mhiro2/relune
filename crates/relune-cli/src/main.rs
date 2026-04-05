@@ -14,7 +14,7 @@ mod output;
 mod png;
 
 use cli::{Cli, Command};
-use commands::{run_diff, run_export, run_inspect, run_lint, run_render};
+use commands::{run_diff, run_doc, run_export, run_inspect, run_lint, run_render};
 use config::ReluneConfig;
 use error::{CliError, CliResult};
 
@@ -61,6 +61,9 @@ fn run_command(cli: Cli) -> CliResult<()> {
         }
         Command::Inspect(args) => {
             run_inspect(&args, cli.color, cli.quiet, &config)?;
+        }
+        Command::Doc(args) => {
+            run_doc(&args, cli.color, cli.quiet, &config)?;
         }
         Command::Export(args) => {
             run_export(&args, cli.color, cli.quiet, &config)?;

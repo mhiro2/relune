@@ -59,6 +59,9 @@ pub enum Command {
     /// Lint schema for issues and anti-patterns.
     Lint(LintArgs),
 
+    /// Generate schema documentation as Markdown.
+    Doc(DocArgs),
+
     /// Compare two schemas and show differences.
     Diff(DiffArgs),
 }
@@ -463,6 +466,52 @@ pub enum ExportFormat {
     D2,
     /// Graphviz DOT (`digraph`).
     Dot,
+}
+
+// ============================================================================
+// Doc Command
+// ============================================================================
+
+/// Generate schema documentation as Markdown.
+#[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("input")
+            .args(["sql", "sql_text", "schema_json", "db_url"])
+            .required(true)
+            .multiple(false)
+    )
+)]
+pub struct DocArgs {
+    // -------------------------------------------------------------------------
+    // Input options (at least one required)
+    // -------------------------------------------------------------------------
+    /// Read SQL DDL from a file.
+    #[arg(long = "sql", value_name = "FILE")]
+    pub sql: Option<PathBuf>,
+
+    /// Read SQL DDL directly from a string.
+    #[arg(long = "sql-text", value_name = "TEXT")]
+    pub sql_text: Option<String>,
+
+    /// Read a normalized schema JSON file.
+    #[arg(long = "schema-json", value_name = "FILE")]
+    pub schema_json: Option<PathBuf>,
+
+    /// Database URL for live introspection: `postgres://`, `mysql://`, `mariadb://`, or `sqlite:` (no SQL file).
+    #[arg(long = "db-url", value_name = "URL")]
+    pub db_url: Option<String>,
+
+    /// SQL dialect for parsing (auto-detected if omitted).
+    #[arg(long = "dialect", value_enum, default_value = "auto")]
+    pub dialect: DialectArg,
+
+    // -------------------------------------------------------------------------
+    // Output options
+    // -------------------------------------------------------------------------
+    /// Output file path; stdout if omitted.
+    #[arg(short = 'o', long = "out", value_name = "FILE")]
+    pub out: Option<PathBuf>,
 }
 
 // ============================================================================
