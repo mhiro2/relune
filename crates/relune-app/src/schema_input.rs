@@ -28,7 +28,10 @@ pub(crate) fn schema_from_input(
             );
             match output.schema {
                 Some(schema) => Ok((schema, output.diagnostics)),
-                None => Err(AppError::input("Failed to parse SQL: no schema produced")),
+                None => Err(AppError::input_with_type(
+                    "sql_text",
+                    "Failed to parse SQL: no schema produced",
+                )),
             }
         }
         InputSource::SqlFile { path, dialect } => {
@@ -45,7 +48,10 @@ pub(crate) fn schema_from_input(
             );
             match output.schema {
                 Some(schema) => Ok((schema, output.diagnostics)),
-                None => Err(AppError::input("Failed to parse SQL: no schema produced")),
+                None => Err(AppError::input_with_type(
+                    "sql_file",
+                    "Failed to parse SQL: no schema produced",
+                )),
             }
         }
         InputSource::SchemaJson { json } => {
@@ -69,9 +75,12 @@ pub(crate) fn schema_from_input(
 
 fn ensure_text_size_within_limit(size: usize, input_type: &str) -> Result<(), AppError> {
     if size > MAX_TEXT_INPUT_SIZE_BYTES {
-        return Err(AppError::input(format!(
-            "{input_type} is too large: {size} bytes exceeds the {MAX_TEXT_INPUT_SIZE_BYTES} byte limit"
-        )));
+        return Err(AppError::input_with_type(
+            input_type,
+            format!(
+                "{input_type} is too large: {size} bytes exceeds the {MAX_TEXT_INPUT_SIZE_BYTES} byte limit"
+            ),
+        ));
     }
     Ok(())
 }
@@ -79,12 +88,15 @@ fn ensure_text_size_within_limit(size: usize, input_type: &str) -> Result<(), Ap
 fn ensure_file_size_within_limit(path: &std::path::Path) -> Result<(), AppError> {
     let size = std::fs::metadata(path)?.len();
     if size > MAX_INPUT_FILE_SIZE_BYTES {
-        return Err(AppError::input(format!(
-            "Input file '{}' is too large: {} bytes exceeds the {} byte limit",
-            path.display(),
-            size,
-            MAX_INPUT_FILE_SIZE_BYTES
-        )));
+        return Err(AppError::input_with_type(
+            "file",
+            format!(
+                "Input file '{}' is too large: {} bytes exceeds the {} byte limit",
+                path.display(),
+                size,
+                MAX_INPUT_FILE_SIZE_BYTES
+            ),
+        ));
     }
 
     Ok(())
@@ -102,7 +114,12 @@ fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| AppError::Other(format!("Failed to start async runtime: {e}")))?
+        .map_err(|e| {
+            AppError::other(
+                "async runtime",
+                format!("Failed to start async runtime: {e}"),
+            )
+        })?
         .block_on(schema_from_db_url_async(url))
 }
 
@@ -115,7 +132,7 @@ fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
 pub async fn schema_from_db_url_async(url: &str) -> Result<Schema, AppError> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
-        return Err(AppError::input("Database URL is empty"));
+        return Err(AppError::input_with_type("db_url", "Database URL is empty"));
     }
 
     relune_introspect::introspect_database(trimmed)
@@ -140,7 +157,7 @@ mod tests {
     fn rejects_invalid_sql_text() {
         let input = InputSource::sql_text("THIS IS NOT VALID SQL");
         let err = schema_from_input(&input).expect_err("invalid SQL should fail");
-        assert!(matches!(err, AppError::Input(_) | AppError::Parse(_)));
+        assert!(matches!(err, AppError::Input { .. } | AppError::Parse(_)));
     }
 
     #[test]
@@ -166,7 +183,7 @@ mod tests {
         drop(file);
 
         let err = ensure_file_size_within_limit(&path).expect_err("file size should be rejected");
-        assert!(matches!(err, AppError::Input(_)));
+        assert!(matches!(err, AppError::Input { .. }));
 
         let _ = std::fs::remove_file(path);
     }

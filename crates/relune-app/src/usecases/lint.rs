@@ -251,7 +251,7 @@ mod tests {
         let err = lint(request).expect_err("unknown rule ids should be rejected");
 
         match err {
-            AppError::Input(message) => {
+            AppError::Input { message, .. } => {
                 assert!(message.contains("Unknown lint rule id"));
                 assert!(message.contains("definitely-not-a-rule"));
             }
