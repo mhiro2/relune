@@ -1,7 +1,11 @@
+import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
 import { getViewerRuntime } from './viewer_api';
 
 {
   const runtime = getViewerRuntime();
+  const metadata = parseReluneMetadata();
+  const tables: TableMetadata[] = metadata?.tables ?? [];
+  const tableIds = new Set(tables.map((table) => table.id));
 
   const PARAM_SEARCH = 'q';
   const PARAM_TABLE = 't';
@@ -10,6 +14,9 @@ import { getViewerRuntime } from './viewer_api';
   const PARAM_PAN_Y = 'y';
   const PARAM_TYPES = 'types';
   const PARAM_HIDDEN_GROUPS = 'hg';
+  const MIN_VIEWPORT_SCALE = 0.1;
+  const MAX_VIEWPORT_SCALE = 2;
+  const MIN_VIEWPORT_PAN_LIMIT = 10_000;
 
   // ---------------------------------------------------------------------------
   // Read from URL hash
@@ -29,6 +36,49 @@ import { getViewerRuntime } from './viewer_api';
       }
     }
     return [...selected];
+  }
+
+  function maxViewportPanMagnitude(): number {
+    const bounds = runtime.viewport?.getDiagramBounds();
+    if (bounds === null || bounds === undefined) {
+      return MIN_VIEWPORT_PAN_LIMIT;
+    }
+    const extent = Math.max(Math.abs(bounds.x), Math.abs(bounds.y), bounds.width, bounds.height, 1);
+    return Math.max(extent * MAX_VIEWPORT_SCALE * 4, MIN_VIEWPORT_PAN_LIMIT);
+  }
+
+  function hasValidViewportState(scale: number, panX: number, panY: number): boolean {
+    return (
+      Number.isFinite(scale) &&
+      Number.isFinite(panX) &&
+      Number.isFinite(panY) &&
+      scale >= MIN_VIEWPORT_SCALE &&
+      scale <= MAX_VIEWPORT_SCALE &&
+      Math.abs(panX) <= maxViewportPanMagnitude() &&
+      Math.abs(panY) <= maxViewportPanMagnitude()
+    );
+  }
+
+  function matchesMetadataSearch(table: TableMetadata, query: string): boolean {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery === '') {
+      return false;
+    }
+    const searchable = [
+      tableDisplayName(table),
+      table.id,
+      table.table_name,
+      table.schema_name ?? '',
+      table.kind,
+      ...(table.columns ?? []).flatMap((column) => [column.name, column.data_type ?? '']),
+    ]
+      .join('\n')
+      .toLowerCase();
+    return searchable.includes(normalizedQuery);
+  }
+
+  function hasMetadataSearchMatch(query: string): boolean {
+    return tables.some((table) => matchesMetadataSearch(table, query));
   }
 
   // ---------------------------------------------------------------------------
@@ -99,14 +149,14 @@ import { getViewerRuntime } from './viewer_api';
       const scale = Number.parseFloat(s);
       const panX = Number.parseFloat(x);
       const panY = Number.parseFloat(y);
-      if (Number.isFinite(scale) && Number.isFinite(panX) && Number.isFinite(panY)) {
+      if (hasValidViewportState(scale, panX, panY)) {
         runtime.viewport?.setState(scale, panX, panY);
       }
     }
 
     // Restore search query
     const query = params.get(PARAM_SEARCH);
-    if (query !== null && query !== '') {
+    if (query !== null && query !== '' && hasMetadataSearchMatch(query)) {
       runtime.search?.setQuery(query);
     }
 
@@ -131,7 +181,7 @@ import { getViewerRuntime } from './viewer_api';
 
     // Restore selected table (last, so it can center on restored viewport scale)
     const table = params.get(PARAM_TABLE);
-    if (table !== null && table !== '') {
+    if (table !== null && table !== '' && tableIds.has(table)) {
       runtime.selection?.select(table);
     }
   }
