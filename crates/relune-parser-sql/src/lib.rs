@@ -30,13 +30,19 @@ pub use relune_core::diagnostic::codes;
 /// Error type for parse failures.
 #[derive(Debug, Error)]
 pub enum ParseError {
-    /// SQL parsing error from sqlparser.
+    /// SQL parsing error message.
     #[error("SQL parse error: {0}")]
-    Sql(#[from] sqlparser::parser::ParserError),
+    Sql(String),
 
     /// Fatal error during schema construction.
     #[error("Schema error: {0}")]
     Schema(String),
+}
+
+impl From<sqlparser::parser::ParserError> for ParseError {
+    fn from(error: sqlparser::parser::ParserError) -> Self {
+        Self::Sql(error.to_string())
+    }
 }
 
 /// Output from parsing SQL with diagnostics support.
@@ -448,6 +454,41 @@ fn truncate_unsupported_debug(debug_str: &str) -> String {
     format!("{}...", &debug_str[..boundary])
 }
 
+fn parse_mysql_enum_like_value(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Option<String> {
+    if chars.next()? != '\'' {
+        return None;
+    }
+
+    let mut value = String::new();
+    loop {
+        match chars.next()? {
+            '\'' => {
+                if chars.peek() == Some(&'\'') {
+                    value.push('\'');
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            '\\' => {
+                let escaped = chars.next()?;
+                match escaped {
+                    '\\' | '\'' => value.push(escaped),
+                    other => {
+                        value.push('\\');
+                        value.push(other);
+                    }
+                }
+            }
+            c => value.push(c),
+        }
+    }
+
+    Some(value)
+}
+
 fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> {
     let start = data_type.find('(')?;
     let end = data_type.rfind(')')?;
@@ -467,26 +508,7 @@ fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> 
             chars.next();
         }
 
-        if chars.next()? != '\'' {
-            return None;
-        }
-
-        let mut value = String::new();
-        loop {
-            match chars.next()? {
-                '\'' => {
-                    if chars.peek() == Some(&'\'') {
-                        value.push('\'');
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                '\\' => value.push(chars.next()?),
-                c => value.push(c),
-            }
-        }
-        values.push(value);
+        values.push(parse_mysql_enum_like_value(&mut chars)?);
 
         while chars.peek().is_some_and(char::is_ascii_whitespace) {
             chars.next();
@@ -2135,6 +2157,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_error_wraps_sqlparser_errors_as_strings() {
+        let parser_error = Parser::new(&PostgreSqlDialect {})
+            .try_with_sql("CREATE TABLE")
+            .expect("tokenization should succeed")
+            .parse_statement()
+            .expect_err("statement should fail");
+
+        let error = ParseError::from(parser_error);
+
+        match error {
+            ParseError::Sql(message) => {
+                assert!(!message.is_empty());
+                assert!(message.contains("sql parser error"));
+            }
+            ParseError::Schema(message) => panic!("unexpected schema error: {message}"),
+        }
+    }
+
+    #[test]
     fn normalizes_constraint_and_index_names_on_storage() {
         let sql = r"
         CREATE TABLE orgs (
@@ -2835,6 +2876,22 @@ mod tests {
     #[test]
     fn test_parse_mysql_enum_like_type_rejects_reversed_parentheses() {
         assert_eq!(parse_mysql_enum_like_type(")enum("), None);
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_preserves_trailing_backslash() {
+        assert_eq!(
+            parse_mysql_enum_like_type("enum('back\\\\')"),
+            Some(("enum".to_string(), vec!["back\\".to_string()]))
+        );
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_preserves_unknown_backslash_sequences() {
+        assert_eq!(
+            parse_mysql_enum_like_type(r"enum('line\nbreak')"),
+            Some(("enum".to_string(), vec![r"line\nbreak".to_string()]))
+        );
     }
 
     #[test]
