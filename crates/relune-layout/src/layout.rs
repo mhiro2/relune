@@ -3094,6 +3094,9 @@ fn position_groups(
     }
 
     let padding = 20.0;
+    // Top padding reserves room for the group label band rendered by SVG/HTML
+    // backends so the band never overlaps the topmost node row.
+    let top_padding = 44.0;
 
     groups
         .iter()
@@ -3144,9 +3147,9 @@ fn position_groups(
                 id: group.id.clone(),
                 label: group.label.clone(),
                 x: min_x - padding,
-                y: min_y - padding,
+                y: min_y - top_padding,
                 width: max_x - min_x + padding * 2.0,
-                height: max_y - min_y + padding * 2.0,
+                height: max_y - min_y + top_padding + padding,
             }
         })
         .collect()
