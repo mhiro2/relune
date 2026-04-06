@@ -43,6 +43,15 @@ It helps you work with schema structure across the full lifecycle:
 
 Whether you are documenting a legacy database, reviewing a migration, or exploring a large schema, Relune is built to make database structure easier to understand and communicate.
 
+## Preview
+
+<table>
+  <tr>
+    <td><img src="assets/demo_main.png" alt="Relune demo" width="600" /></td>
+    <td><img src="assets/demo_html.png" alt="Interactive HTML viewer" width="600" /></td>
+  </tr>
+</table>
+
 ## What it does well
 
 ### Diagram rendering
