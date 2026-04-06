@@ -477,7 +477,7 @@ fn orthogonal_control_points(
 }
 
 impl AttachmentSide {
-    const fn is_horizontal(self) -> bool {
+    pub(crate) const fn is_horizontal(self) -> bool {
         matches!(self, Self::East | Self::West)
     }
 }
