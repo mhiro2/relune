@@ -56,8 +56,10 @@ const BUNDLE_CHANNEL_TOLERANCE: f32 = 36.0;
 const ROUTE_STUB_DISTANCE: f32 = 28.0;
 /// Margin added when probing side corridors outside the endpoint nodes.
 const BYPASS_CHANNEL_MARGIN: f32 = 24.0;
-/// Additional offsets explored for bypass corridors after the first outer lane.
-const BYPASS_CHANNEL_OFFSETS: &[f32] = &[0.0, 48.0, 96.0, 144.0];
+/// Distance between adjacent outer bypass lanes.
+const BYPASS_CHANNEL_LANE_STEP: f32 = 48.0;
+/// Additional bypass lanes explored beyond the first outer lane on each side.
+const BYPASS_CHANNEL_EXTRA_LANES: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -128,42 +130,77 @@ impl Default for LayoutConfig {
 }
 
 impl LayoutConfig {
-    /// Validates that spacing and dimension values are positive.
-    /// Replaces non-positive values with defaults.
-    #[must_use]
-    pub fn validated(mut self) -> Self {
-        let defaults = Self::default();
-        if self.horizontal_spacing <= 0.0 {
-            self.horizontal_spacing = defaults.horizontal_spacing;
+    /// Validates that numeric settings are finite and internally consistent.
+    pub fn validate(&self) -> Result<(), LayoutConfigValidationError> {
+        let mut issues = Vec::new();
+
+        validate_finite("origin_x", self.origin_x, &mut issues);
+        validate_finite("origin_y", self.origin_y, &mut issues);
+        validate_positive("horizontal_spacing", self.horizontal_spacing, &mut issues);
+        validate_positive("vertical_spacing", self.vertical_spacing, &mut issues);
+        validate_positive("node_width", self.node_width, &mut issues);
+        validate_positive("column_height", self.column_height, &mut issues);
+        validate_positive("header_height", self.header_height, &mut issues);
+        validate_non_negative("node_padding", self.node_padding, &mut issues);
+        validate_positive(
+            "compaction.min_horizontal_spacing",
+            self.compaction.min_horizontal_spacing,
+            &mut issues,
+        );
+        validate_positive(
+            "compaction.min_vertical_spacing",
+            self.compaction.min_vertical_spacing,
+            &mut issues,
+        );
+        validate_positive(
+            "compaction.min_node_width",
+            self.compaction.min_node_width,
+            &mut issues,
+        );
+        validate_non_negative(
+            "compaction.min_node_padding",
+            self.compaction.min_node_padding,
+            &mut issues,
+        );
+
+        if self.force_iterations == 0 {
+            issues.push("force_iterations must be greater than 0".to_string());
         }
-        if self.vertical_spacing <= 0.0 {
-            self.vertical_spacing = defaults.vertical_spacing;
+
+        validate_upper_bound(
+            "compaction.min_horizontal_spacing",
+            self.compaction.min_horizontal_spacing,
+            "horizontal_spacing",
+            self.horizontal_spacing,
+            &mut issues,
+        );
+        validate_upper_bound(
+            "compaction.min_vertical_spacing",
+            self.compaction.min_vertical_spacing,
+            "vertical_spacing",
+            self.vertical_spacing,
+            &mut issues,
+        );
+        validate_upper_bound(
+            "compaction.min_node_width",
+            self.compaction.min_node_width,
+            "node_width",
+            self.node_width,
+            &mut issues,
+        );
+        validate_upper_bound(
+            "compaction.min_node_padding",
+            self.compaction.min_node_padding,
+            "node_padding",
+            self.node_padding,
+            &mut issues,
+        );
+
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(LayoutConfigValidationError::new(&issues))
         }
-        if self.node_width <= 0.0 {
-            self.node_width = defaults.node_width;
-        }
-        if self.column_height <= 0.0 {
-            self.column_height = defaults.column_height;
-        }
-        if self.header_height <= 0.0 {
-            self.header_height = defaults.header_height;
-        }
-        if self.node_padding < 0.0 {
-            self.node_padding = defaults.node_padding;
-        }
-        if self.compaction.min_horizontal_spacing <= 0.0 {
-            self.compaction.min_horizontal_spacing = defaults.compaction.min_horizontal_spacing;
-        }
-        if self.compaction.min_vertical_spacing <= 0.0 {
-            self.compaction.min_vertical_spacing = defaults.compaction.min_vertical_spacing;
-        }
-        if self.compaction.min_node_width <= 0.0 {
-            self.compaction.min_node_width = defaults.compaction.min_node_width;
-        }
-        if self.compaction.min_node_padding < 0.0 {
-            self.compaction.min_node_padding = defaults.compaction.min_node_padding;
-        }
-        self
     }
 }
 
@@ -180,7 +217,40 @@ impl From<&LayoutSpec> for LayoutConfig {
             auto_tune_spacing: spec.auto_tune_spacing,
             ..Default::default()
         }
-        .validated()
+    }
+}
+
+fn validate_finite(field: &'static str, value: f32, issues: &mut Vec<String>) {
+    if !value.is_finite() {
+        issues.push(format!("{field} must be finite, got {value}"));
+    }
+}
+
+fn validate_positive(field: &'static str, value: f32, issues: &mut Vec<String>) {
+    validate_finite(field, value, issues);
+    if value <= 0.0 {
+        issues.push(format!("{field} must be greater than 0, got {value}"));
+    }
+}
+
+fn validate_non_negative(field: &'static str, value: f32, issues: &mut Vec<String>) {
+    validate_finite(field, value, issues);
+    if value < 0.0 {
+        issues.push(format!("{field} must be at least 0, got {value}"));
+    }
+}
+
+fn validate_upper_bound(
+    minimum_field: &'static str,
+    minimum_value: f32,
+    base_field: &'static str,
+    base_value: f32,
+    issues: &mut Vec<String>,
+) {
+    if minimum_value > base_value {
+        issues.push(format!(
+            "{minimum_field} must be less than or equal to {base_field}, got {minimum_value} > {base_value}"
+        ));
     }
 }
 
@@ -294,12 +364,31 @@ impl LayoutConfig {
     }
 }
 
+/// Validation error for an invalid layout configuration.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("invalid layout config: {message}")]
+pub struct LayoutConfigValidationError {
+    message: String,
+}
+
+impl LayoutConfigValidationError {
+    fn new(issues: &[String]) -> Self {
+        Self {
+            message: issues.join("; "),
+        }
+    }
+}
+
 /// Error during layout.
 #[derive(Debug, Error)]
 pub enum LayoutError {
     /// Error occurred during focus extraction.
     #[error("focus extraction failed: {0}")]
     Focus(#[from] crate::focus::FocusError),
+
+    /// Layout configuration failed validation.
+    #[error(transparent)]
+    InvalidConfig(#[from] LayoutConfigValidationError),
 
     /// Coordinate assignment left a node without a position.
     #[error("coordinate assignment did not produce a position for node {node_id}")]
@@ -545,6 +634,8 @@ pub fn build_layout_from_graph_with_config(
     graph: &LayoutGraph,
     config: &LayoutConfig,
 ) -> Result<PositionedGraph, LayoutError> {
+    config.validate()?;
+
     // Step 2a: Auto-tune spacing based on graph density before compaction.
     let tuned_config = if config.auto_tune_spacing {
         config
@@ -2364,7 +2455,7 @@ fn bypass_channel_candidates(
     target_rect: Rect,
     start_order: u32,
 ) -> Vec<ObstacleAwareChannelCandidate> {
-    let mut candidates = Vec::with_capacity(BYPASS_CHANNEL_OFFSETS.len() * 2);
+    let mut candidates = Vec::with_capacity(bypass_channel_lane_count().saturating_mul(2));
 
     match direction {
         LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
@@ -2397,6 +2488,16 @@ fn bypass_channel_candidates(
     candidates
 }
 
+const fn bypass_channel_lane_count() -> usize {
+    BYPASS_CHANNEL_EXTRA_LANES + 1
+}
+
+fn bypass_channel_offsets() -> impl ExactSizeIterator<Item = f32> {
+    (0..bypass_channel_lane_count()).map(|lane_index| {
+        BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).expect("lane index"))
+    })
+}
+
 fn append_bypass_candidates(
     candidates: &mut Vec<ObstacleAwareChannelCandidate>,
     axis: ChannelAxis,
@@ -2404,7 +2505,7 @@ fn append_bypass_candidates(
     negative_baseline: f32,
     start_order: u32,
 ) {
-    for (offset_index, offset) in BYPASS_CHANNEL_OFFSETS.iter().copied().enumerate() {
+    for (offset_index, offset) in bypass_channel_offsets().enumerate() {
         let stable_order =
             start_order + u32::try_from(offset_index.saturating_mul(2)).expect("offset index");
         candidates.push(ObstacleAwareChannelCandidate {
@@ -4053,6 +4154,44 @@ mod tests {
     }
 
     #[test]
+    fn test_layout_config_validate_rejects_invalid_values() {
+        let config = LayoutConfig {
+            horizontal_spacing: 0.0,
+            node_padding: -1.0,
+            force_iterations: 0,
+            ..Default::default()
+        };
+
+        let error = config.validate().expect_err("config should be invalid");
+        let message = error.to_string();
+
+        assert!(message.contains("horizontal_spacing must be greater than 0"));
+        assert!(message.contains("node_padding must be at least 0"));
+        assert!(message.contains("force_iterations must be greater than 0"));
+    }
+
+    #[test]
+    fn test_build_layout_rejects_inconsistent_compaction_bounds() {
+        let schema = make_test_schema();
+        let config = LayoutConfig {
+            horizontal_spacing: 200.0,
+            compaction: LayoutCompactionSpec {
+                min_horizontal_spacing: 220.0,
+                ..LayoutCompactionSpec::default()
+            },
+            ..Default::default()
+        };
+
+        let error = build_layout_with_config(&schema, &LayoutRequest::default(), &config)
+            .expect_err("config should fail validation");
+
+        assert!(matches!(error, LayoutError::InvalidConfig(_)));
+        assert!(error.to_string().contains(
+            "compaction.min_horizontal_spacing must be less than or equal to horizontal_spacing"
+        ));
+    }
+
+    #[test]
     #[allow(clippy::float_cmp)]
     fn test_auto_tuned_identity_for_empty_graph() {
         let config = LayoutConfig::default();
@@ -5247,6 +5386,36 @@ mod tests {
             0
         );
         assert!(edge.route.control_points.len() >= 4);
+    }
+
+    #[test]
+    fn test_bypass_channel_candidates_expand_symmetrically_per_lane() {
+        let source_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 80.0,
+        };
+        let target_rect = Rect {
+            x: 0.0,
+            y: 420.0,
+            w: 100.0,
+            h: 80.0,
+        };
+
+        let candidates =
+            bypass_channel_candidates(LayoutDirection::TopToBottom, source_rect, target_rect, 7);
+
+        assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
+        for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {
+            let expected_offset = BYPASS_CHANNEL_LANE_STEP
+                * f32::from(u16::try_from(lane_index).expect("lane index"));
+            assert_eq!(pair[0].axis, ChannelAxis::X);
+            assert_eq!(pair[1].axis, ChannelAxis::X);
+            assert!((pair[0].coordinate - pair[0].baseline - expected_offset).abs() < f32::EPSILON);
+            assert!((pair[1].baseline - pair[1].coordinate - expected_offset).abs() < f32::EPSILON);
+            assert_eq!(pair[0].stable_order + 1, pair[1].stable_order);
+        }
     }
 
     #[test]
