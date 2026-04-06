@@ -130,42 +130,77 @@ impl Default for LayoutConfig {
 }
 
 impl LayoutConfig {
-    /// Validates that spacing and dimension values are positive.
-    /// Replaces non-positive values with defaults.
-    #[must_use]
-    pub fn validated(mut self) -> Self {
-        let defaults = Self::default();
-        if self.horizontal_spacing <= 0.0 {
-            self.horizontal_spacing = defaults.horizontal_spacing;
+    /// Validates that numeric settings are finite and internally consistent.
+    pub fn validate(&self) -> Result<(), LayoutConfigValidationError> {
+        let mut issues = Vec::new();
+
+        validate_finite("origin_x", self.origin_x, &mut issues);
+        validate_finite("origin_y", self.origin_y, &mut issues);
+        validate_positive("horizontal_spacing", self.horizontal_spacing, &mut issues);
+        validate_positive("vertical_spacing", self.vertical_spacing, &mut issues);
+        validate_positive("node_width", self.node_width, &mut issues);
+        validate_positive("column_height", self.column_height, &mut issues);
+        validate_positive("header_height", self.header_height, &mut issues);
+        validate_non_negative("node_padding", self.node_padding, &mut issues);
+        validate_positive(
+            "compaction.min_horizontal_spacing",
+            self.compaction.min_horizontal_spacing,
+            &mut issues,
+        );
+        validate_positive(
+            "compaction.min_vertical_spacing",
+            self.compaction.min_vertical_spacing,
+            &mut issues,
+        );
+        validate_positive(
+            "compaction.min_node_width",
+            self.compaction.min_node_width,
+            &mut issues,
+        );
+        validate_non_negative(
+            "compaction.min_node_padding",
+            self.compaction.min_node_padding,
+            &mut issues,
+        );
+
+        if self.force_iterations == 0 {
+            issues.push("force_iterations must be greater than 0".to_string());
         }
-        if self.vertical_spacing <= 0.0 {
-            self.vertical_spacing = defaults.vertical_spacing;
+
+        validate_upper_bound(
+            "compaction.min_horizontal_spacing",
+            self.compaction.min_horizontal_spacing,
+            "horizontal_spacing",
+            self.horizontal_spacing,
+            &mut issues,
+        );
+        validate_upper_bound(
+            "compaction.min_vertical_spacing",
+            self.compaction.min_vertical_spacing,
+            "vertical_spacing",
+            self.vertical_spacing,
+            &mut issues,
+        );
+        validate_upper_bound(
+            "compaction.min_node_width",
+            self.compaction.min_node_width,
+            "node_width",
+            self.node_width,
+            &mut issues,
+        );
+        validate_upper_bound(
+            "compaction.min_node_padding",
+            self.compaction.min_node_padding,
+            "node_padding",
+            self.node_padding,
+            &mut issues,
+        );
+
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(LayoutConfigValidationError::new(&issues))
         }
-        if self.node_width <= 0.0 {
-            self.node_width = defaults.node_width;
-        }
-        if self.column_height <= 0.0 {
-            self.column_height = defaults.column_height;
-        }
-        if self.header_height <= 0.0 {
-            self.header_height = defaults.header_height;
-        }
-        if self.node_padding < 0.0 {
-            self.node_padding = defaults.node_padding;
-        }
-        if self.compaction.min_horizontal_spacing <= 0.0 {
-            self.compaction.min_horizontal_spacing = defaults.compaction.min_horizontal_spacing;
-        }
-        if self.compaction.min_vertical_spacing <= 0.0 {
-            self.compaction.min_vertical_spacing = defaults.compaction.min_vertical_spacing;
-        }
-        if self.compaction.min_node_width <= 0.0 {
-            self.compaction.min_node_width = defaults.compaction.min_node_width;
-        }
-        if self.compaction.min_node_padding < 0.0 {
-            self.compaction.min_node_padding = defaults.compaction.min_node_padding;
-        }
-        self
     }
 }
 
@@ -182,7 +217,40 @@ impl From<&LayoutSpec> for LayoutConfig {
             auto_tune_spacing: spec.auto_tune_spacing,
             ..Default::default()
         }
-        .validated()
+    }
+}
+
+fn validate_finite(field: &'static str, value: f32, issues: &mut Vec<String>) {
+    if !value.is_finite() {
+        issues.push(format!("{field} must be finite, got {value}"));
+    }
+}
+
+fn validate_positive(field: &'static str, value: f32, issues: &mut Vec<String>) {
+    validate_finite(field, value, issues);
+    if value <= 0.0 {
+        issues.push(format!("{field} must be greater than 0, got {value}"));
+    }
+}
+
+fn validate_non_negative(field: &'static str, value: f32, issues: &mut Vec<String>) {
+    validate_finite(field, value, issues);
+    if value < 0.0 {
+        issues.push(format!("{field} must be at least 0, got {value}"));
+    }
+}
+
+fn validate_upper_bound(
+    minimum_field: &'static str,
+    minimum_value: f32,
+    base_field: &'static str,
+    base_value: f32,
+    issues: &mut Vec<String>,
+) {
+    if minimum_value > base_value {
+        issues.push(format!(
+            "{minimum_field} must be less than or equal to {base_field}, got {minimum_value} > {base_value}"
+        ));
     }
 }
 
@@ -296,12 +364,31 @@ impl LayoutConfig {
     }
 }
 
+/// Validation error for an invalid layout configuration.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("invalid layout config: {message}")]
+pub struct LayoutConfigValidationError {
+    message: String,
+}
+
+impl LayoutConfigValidationError {
+    fn new(issues: &[String]) -> Self {
+        Self {
+            message: issues.join("; "),
+        }
+    }
+}
+
 /// Error during layout.
 #[derive(Debug, Error)]
 pub enum LayoutError {
     /// Error occurred during focus extraction.
     #[error("focus extraction failed: {0}")]
     Focus(#[from] crate::focus::FocusError),
+
+    /// Layout configuration failed validation.
+    #[error(transparent)]
+    InvalidConfig(#[from] LayoutConfigValidationError),
 
     /// Coordinate assignment left a node without a position.
     #[error("coordinate assignment did not produce a position for node {node_id}")]
@@ -547,6 +634,8 @@ pub fn build_layout_from_graph_with_config(
     graph: &LayoutGraph,
     config: &LayoutConfig,
 ) -> Result<PositionedGraph, LayoutError> {
+    config.validate()?;
+
     // Step 2a: Auto-tune spacing based on graph density before compaction.
     let tuned_config = if config.auto_tune_spacing {
         config
@@ -2404,7 +2493,9 @@ const fn bypass_channel_lane_count() -> usize {
 }
 
 fn bypass_channel_offsets() -> impl ExactSizeIterator<Item = f32> {
-    (0..bypass_channel_lane_count()).map(|lane_index| BYPASS_CHANNEL_LANE_STEP * lane_index as f32)
+    (0..bypass_channel_lane_count()).map(|lane_index| {
+        BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).expect("lane index"))
+    })
 }
 
 fn append_bypass_candidates(
@@ -4063,6 +4154,44 @@ mod tests {
     }
 
     #[test]
+    fn test_layout_config_validate_rejects_invalid_values() {
+        let config = LayoutConfig {
+            horizontal_spacing: 0.0,
+            node_padding: -1.0,
+            force_iterations: 0,
+            ..Default::default()
+        };
+
+        let error = config.validate().expect_err("config should be invalid");
+        let message = error.to_string();
+
+        assert!(message.contains("horizontal_spacing must be greater than 0"));
+        assert!(message.contains("node_padding must be at least 0"));
+        assert!(message.contains("force_iterations must be greater than 0"));
+    }
+
+    #[test]
+    fn test_build_layout_rejects_inconsistent_compaction_bounds() {
+        let schema = make_test_schema();
+        let config = LayoutConfig {
+            horizontal_spacing: 200.0,
+            compaction: LayoutCompactionSpec {
+                min_horizontal_spacing: 220.0,
+                ..LayoutCompactionSpec::default()
+            },
+            ..Default::default()
+        };
+
+        let error = build_layout_with_config(&schema, &LayoutRequest::default(), &config)
+            .expect_err("config should fail validation");
+
+        assert!(matches!(error, LayoutError::InvalidConfig(_)));
+        assert!(error.to_string().contains(
+            "compaction.min_horizontal_spacing must be less than or equal to horizontal_spacing"
+        ));
+    }
+
+    #[test]
     #[allow(clippy::float_cmp)]
     fn test_auto_tuned_identity_for_empty_graph() {
         let config = LayoutConfig::default();
@@ -5279,7 +5408,8 @@ mod tests {
 
         assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
         for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {
-            let expected_offset = BYPASS_CHANNEL_LANE_STEP * lane_index as f32;
+            let expected_offset = BYPASS_CHANNEL_LANE_STEP
+                * f32::from(u16::try_from(lane_index).expect("lane index"));
             assert_eq!(pair[0].axis, ChannelAxis::X);
             assert_eq!(pair[1].axis, ChannelAxis::X);
             assert!((pair[0].coordinate - pair[0].baseline - expected_offset).abs() < f32::EPSILON);
