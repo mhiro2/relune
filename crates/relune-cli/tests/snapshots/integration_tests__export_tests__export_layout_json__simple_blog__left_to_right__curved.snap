@@ -8,7 +8,7 @@ expression: compact_layout_snapshot(&graph)
       "control_points": [
         [
           491.0,
-          130.0
+          139.0
         ],
         [
           491.0,
@@ -26,16 +26,16 @@ expression: compact_layout_snapshot(&graph)
       "is_self_loop": false,
       "label": "post_id",
       "label_x": 491.0,
-      "label_y": 117.5,
+      "label_y": 122.0,
       "nullable": false,
       "route_label_position": [
         491.0,
-        117.5
+        122.0
       ],
       "source_side": "east",
       "start": [
         349.0,
-        130.0
+        139.0
       ],
       "style": "Curved",
       "target_cardinality": "One",
@@ -49,7 +49,7 @@ expression: compact_layout_snapshot(&graph)
       "control_points": [
         [
           375.0,
-          134.0
+          125.0
         ],
         [
           375.0,
@@ -74,17 +74,17 @@ expression: compact_layout_snapshot(&graph)
       ],
       "is_self_loop": false,
       "label": "user_id",
-      "label_x": 783.5,
+      "label_x": 788.0,
       "label_y": 32.0,
       "nullable": false,
       "route_label_position": [
-        783.5,
+        788.0,
         32.0
       ],
       "source_side": "east",
       "start": [
         349.0,
-        134.0
+        125.0
       ],
       "style": "Curved",
       "target_cardinality": "One",

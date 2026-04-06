@@ -55,6 +55,7 @@ struct EndpointCandidate {
 }
 
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub(crate) fn assign_edge_ports(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
@@ -137,7 +138,7 @@ pub(crate) fn assign_edge_ports(
             });
     }
 
-    for candidates in endpoint_groups.values_mut() {
+    for ((node_id, side), candidates) in &mut endpoint_groups {
         candidates.sort_by(|left, right| {
             left.remote_order
                 .total_cmp(&right.remote_order)
@@ -147,21 +148,69 @@ pub(crate) fn assign_edge_ports(
         });
 
         let slot_total = candidates.len();
-        for (slot_index, candidate) in candidates.iter().enumerate() {
-            let slot_offset = centered_slot_offset(slot_index, slot_total);
-            let Some(Some(EdgePortAssignment::Regular(assignment))) =
-                assignments.get_mut(candidate.edge_index)
-            else {
-                continue;
-            };
-            if candidate.is_source {
-                assignment.source_slot_offset = slot_offset;
-                assignment.source_slot_index = slot_index;
-                assignment.source_slot_count = slot_total;
+
+        // For horizontal sides (East/West), `row_offset` is also added to the
+        // port Y in `apply_endpoint_offsets`, so slot and row offsets are in
+        // the same axis and may cancel each other out. We solve a constrained
+        // isotonic regression over the row offsets, preserving the
+        // remote-order monotonicity (to keep source-side fan-outs free of
+        // self-crossings) while pulling each port toward its column row.
+        //
+        // For vertical sides (North/South) the column offset does not affect
+        // the port X, so the naive centered distribution stays correct.
+        if side.is_horizontal() && slot_total >= 2 {
+            let max_offset = node_by_id
+                .get(node_id.as_str())
+                .map_or(f32::INFINITY, |node| (node.height / 2.0 - 4.0).max(0.0));
+            let policy = centered_slot_gap(slot_total);
+            #[allow(clippy::cast_precision_loss)]
+            let span_cap = if max_offset.is_finite() {
+                (2.0 * max_offset) / (slot_total - 1) as f32
             } else {
-                assignment.target_slot_offset = slot_offset;
-                assignment.target_slot_index = slot_index;
-                assignment.target_slot_count = slot_total;
+                f32::INFINITY
+            };
+            let effective_gap = policy.min(span_cap).max(0.0);
+
+            let desired: Vec<f32> = candidates.iter().map(|c| c.row_order).collect();
+            let assigned = pav_pack_with_min_gap(&desired, effective_gap, -max_offset, max_offset);
+
+            for (slot_index, candidate) in candidates.iter().enumerate() {
+                let effective_offset = assigned[slot_index];
+                let Some(Some(EdgePortAssignment::Regular(assignment))) =
+                    assignments.get_mut(candidate.edge_index)
+                else {
+                    continue;
+                };
+                // The renderer computes port_y = center + slot_offset + row_offset;
+                // choose slot_offset so the sum equals the packed effective offset.
+                let slot_offset = effective_offset - candidate.row_order;
+                if candidate.is_source {
+                    assignment.source_slot_offset = slot_offset;
+                    assignment.source_slot_index = slot_index;
+                    assignment.source_slot_count = slot_total;
+                } else {
+                    assignment.target_slot_offset = slot_offset;
+                    assignment.target_slot_index = slot_index;
+                    assignment.target_slot_count = slot_total;
+                }
+            }
+        } else {
+            for (slot_index, candidate) in candidates.iter().enumerate() {
+                let slot_offset = centered_slot_offset(slot_index, slot_total);
+                let Some(Some(EdgePortAssignment::Regular(assignment))) =
+                    assignments.get_mut(candidate.edge_index)
+                else {
+                    continue;
+                };
+                if candidate.is_source {
+                    assignment.source_slot_offset = slot_offset;
+                    assignment.source_slot_index = slot_index;
+                    assignment.source_slot_count = slot_total;
+                } else {
+                    assignment.target_slot_offset = slot_offset;
+                    assignment.target_slot_index = slot_index;
+                    assignment.target_slot_count = slot_total;
+                }
             }
         }
     }
@@ -299,14 +348,91 @@ fn self_loop_radius_offset(slot_index: usize) -> f32 {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn centered_slot_offset(slot_index: usize, slot_total: usize) -> f32 {
-    let gap = if slot_total <= 2 {
+fn centered_slot_gap(slot_total: usize) -> f32 {
+    if slot_total <= 2 {
         BASE_SLOT_GAP
     } else {
         (BASE_SLOT_GAP * 2.0 / (slot_total as f32).sqrt()).clamp(MIN_SLOT_GAP, MAX_SLOT_GAP)
-    };
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn centered_slot_offset(slot_index: usize, slot_total: usize) -> f32 {
+    let gap = centered_slot_gap(slot_total);
     let center = (slot_total.saturating_sub(1)) as f32 * 0.5;
     (slot_index as f32 - center) * gap
+}
+
+/// Constrained isotonic regression: pick values `assigned[i]` minimizing
+/// `Σ (assigned[i] - desired[i])²` subject to
+/// `assigned[i] >= assigned[i-1] + gap`, then shift the resulting block to
+/// fit within `[min_bound, max_bound]`. A uniform shift preserves min-gap,
+/// so the only way min-gap is violated in the output is when the required
+/// span `(n − 1) * gap` exceeds `max_bound - min_bound`; callers are
+/// expected to choose `gap` so that does not happen.
+///
+/// The transformation `z[i] = desired[i] - i * gap` reduces the problem to
+/// unconstrained isotonic regression on `z`, solved by Pool Adjacent
+/// Violators in O(n).
+#[allow(clippy::cast_precision_loss)]
+fn pav_pack_with_min_gap(desired: &[f32], gap: f32, min_bound: f32, max_bound: f32) -> Vec<f32> {
+    let n = desired.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![desired[0].clamp(min_bound, max_bound)];
+    }
+
+    // PAV on z[i] = desired[i] - i * gap.
+    let mut blocks: Vec<(f32, usize)> = Vec::with_capacity(n);
+    for (i, &d) in desired.iter().enumerate() {
+        let z = (i as f32).mul_add(-gap, d);
+        let mut cur_mean = z;
+        let mut cur_weight = 1usize;
+        while let Some(&(prev_mean, prev_weight)) = blocks.last() {
+            if prev_mean <= cur_mean {
+                break;
+            }
+            blocks.pop();
+            let total_weight = prev_weight + cur_weight;
+            cur_mean = prev_mean.mul_add(prev_weight as f32, cur_mean * cur_weight as f32)
+                / total_weight as f32;
+            cur_weight = total_weight;
+        }
+        blocks.push((cur_mean, cur_weight));
+    }
+
+    let mut assigned = Vec::with_capacity(n);
+    let mut idx = 0usize;
+    for (mean, weight) in blocks {
+        for _ in 0..weight {
+            assigned.push((idx as f32).mul_add(gap, mean));
+            idx += 1;
+        }
+    }
+
+    // Uniform shift to fit bounds; preserves min-gap.
+    let low_excess = min_bound - assigned[0];
+    if low_excess > 0.0 {
+        for a in &mut assigned {
+            *a += low_excess;
+        }
+    }
+    let high_excess = assigned[n - 1] - max_bound;
+    if high_excess > 0.0 {
+        for a in &mut assigned {
+            *a -= high_excess;
+        }
+    }
+
+    // Pathological fallback: required span exceeds available bounds. Clamp
+    // individually (min-gap may be sacrificed, which is unavoidable here).
+    for a in &mut assigned {
+        *a = a.clamp(min_bound, max_bound);
+    }
+
+    assigned
 }
 
 const fn node_center(node: &PositionedNode) -> (f32, f32) {
@@ -548,6 +674,216 @@ mod tests {
 
         assert!(gap_six < gap_two);
         assert!(gap_six >= 10.0);
+    }
+
+    fn node_with_fk_columns(
+        id: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        columns: &[&str],
+    ) -> PositionedNode {
+        // Match LayoutConfig defaults: node_padding=8, header_height=32, column_height=18.
+        #[allow(clippy::cast_precision_loss)]
+        let height = (columns.len() as f32).mul_add(18.0, 16.0 + 32.0);
+        PositionedNode {
+            id: id.to_string(),
+            label: id.to_string(),
+            kind: NodeKind::Table,
+            columns: columns
+                .iter()
+                .map(|name| PositionedColumn {
+                    name: (*name).to_string(),
+                    data_type: "int".to_string(),
+                    flags: ColumnFlags {
+                        nullable: false,
+                        relation: ColumnRelationFlags {
+                            is_primary_key: false,
+                            is_foreign_key: true,
+                            is_indexed: false,
+                        },
+                    },
+                })
+                .collect(),
+            x,
+            y,
+            width,
+            height,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        }
+    }
+
+    #[test]
+    fn test_assign_edge_ports_horizontal_join_table_avoids_port_collapse() {
+        // LTR + join table with 2 FKs whose column rows and target y positions
+        // are in reverse order. Before the isotonic-regression fix this caused
+        // the source-side ports to collapse within a few pixels. The packed
+        // ports must both preserve the minimum spacing AND the remote_order
+        // monotonicity (so source fan-outs still avoid self-crossings).
+        let join = node_with_fk_columns(
+            "product_categories",
+            0.0,
+            0.0,
+            245.0,
+            &["product_id", "category_id", "is_primary", "sort_order"],
+        );
+        let categories = node("categories", 500.0, 160.0);
+        let products = node("products", 500.0, 600.0);
+        let graph = LayoutGraph {
+            nodes: Vec::new(),
+            edges: vec![
+                edge("product_categories", "products", &["product_id"], &["id"]),
+                edge(
+                    "product_categories",
+                    "categories",
+                    &["category_id"],
+                    &["id"],
+                ),
+            ],
+            groups: Vec::new(),
+            node_index: BTreeMap::new(),
+            reverse_index: BTreeMap::new(),
+        };
+        let positioned_nodes = vec![join, categories, products];
+        let config = LayoutConfig {
+            direction: LayoutDirection::LeftToRight,
+            ..Default::default()
+        };
+
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+
+        let to_products = match assignments[0].as_ref().expect("assignment") {
+            EdgePortAssignment::Regular(assignment) => assignment,
+            EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+        };
+        let to_categories = match assignments[1].as_ref().expect("assignment") {
+            EdgePortAssignment::Regular(assignment) => assignment,
+            EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+        };
+
+        assert_eq!(to_products.source_side, AttachmentSide::East);
+        assert_eq!(to_categories.source_side, AttachmentSide::East);
+
+        // The renderer computes port_y = center + slot_offset + row_offset on
+        // horizontal sides, so this sum is the quantity callers actually see.
+        let eff_products = to_products.source_slot_offset + to_products.source_row_offset;
+        let eff_categories = to_categories.source_slot_offset + to_categories.source_row_offset;
+
+        assert!(
+            (eff_products - eff_categories).abs() >= 13.5,
+            "source ports collapsed: categories={eff_categories}, products={eff_products}"
+        );
+        assert!(
+            eff_categories < eff_products,
+            "remote_order monotonicity violated: categories={eff_categories}, products={eff_products}"
+        );
+    }
+
+    #[test]
+    fn test_assign_edge_ports_vertical_side_uses_centered_distribution() {
+        // TTB with targets well below the source: the source side resolves to
+        // South (vertical). The horizontal-only packing branch must not touch
+        // these slots — slot_offsets must remain the naive centered values,
+        // independent of the column rows that each edge attaches to.
+        let top = node_with_fk_columns("top", 0.0, 0.0, 240.0, &["a_id", "b_id", "extra"]);
+        let left_target = node("left", -400.0, 600.0);
+        let right_target = node("right", 400.0, 600.0);
+        let graph = LayoutGraph {
+            nodes: Vec::new(),
+            edges: vec![
+                edge("top", "left", &["a_id"], &["id"]),
+                edge("top", "right", &["b_id"], &["id"]),
+            ],
+            groups: Vec::new(),
+            node_index: BTreeMap::new(),
+            reverse_index: BTreeMap::new(),
+        };
+        let positioned_nodes = vec![top, left_target, right_target];
+        let config = LayoutConfig {
+            direction: LayoutDirection::TopToBottom,
+            ..Default::default()
+        };
+
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+
+        let to_left = match assignments[0].as_ref().expect("assignment") {
+            EdgePortAssignment::Regular(assignment) => assignment,
+            EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+        };
+        let to_right = match assignments[1].as_ref().expect("assignment") {
+            EdgePortAssignment::Regular(assignment) => assignment,
+            EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+        };
+
+        assert_eq!(to_left.source_side, AttachmentSide::South);
+        assert_eq!(to_right.source_side, AttachmentSide::South);
+
+        // Non-zero row_offsets for the two FK columns confirm we're exercising
+        // a case the horizontal branch would have touched.
+        assert!(to_left.source_row_offset.abs() > f32::EPSILON);
+        assert!(to_right.source_row_offset.abs() > f32::EPSILON);
+
+        // On vertical sides the slot_offsets should match the centered helper
+        // exactly (no row_offset baked in).
+        assert!((to_left.source_slot_offset - centered_slot_offset(0, 2)).abs() < f32::EPSILON);
+        assert!((to_right.source_slot_offset - centered_slot_offset(1, 2)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_assign_edge_ports_ttb_cross_axis_uses_horizontal_packing() {
+        // TTB direction but the two nodes are at the same rank, so
+        // choose_regular_sides falls back to East/West. The horizontal-only
+        // packing branch must still apply here — the direction enum alone
+        // cannot be used to decide whether the new logic kicks in.
+        let source = node_with_fk_columns("source", 0.0, 0.0, 240.0, &["x_id", "y_id", "z"]);
+        let other = node_with_fk_columns("other", 400.0, 10.0, 240.0, &["x_id", "y_id", "z"]);
+        let graph = LayoutGraph {
+            nodes: Vec::new(),
+            edges: vec![
+                edge("source", "other", &["x_id"], &["y_id"]),
+                edge("source", "other", &["y_id"], &["x_id"]),
+            ],
+            groups: Vec::new(),
+            node_index: BTreeMap::new(),
+            reverse_index: BTreeMap::new(),
+        };
+        let positioned_nodes = vec![source, other];
+        let config = LayoutConfig {
+            direction: LayoutDirection::TopToBottom,
+            ..Default::default()
+        };
+
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+
+        let e0 = match assignments[0].as_ref().expect("assignment") {
+            EdgePortAssignment::Regular(assignment) => assignment,
+            EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+        };
+        let e1 = match assignments[1].as_ref().expect("assignment") {
+            EdgePortAssignment::Regular(assignment) => assignment,
+            EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+        };
+
+        assert_eq!(e0.source_side, AttachmentSide::East);
+        assert_eq!(e0.target_side, AttachmentSide::West);
+        assert_eq!(e1.source_side, AttachmentSide::East);
+        assert_eq!(e1.target_side, AttachmentSide::West);
+
+        let eff_0_src = e0.source_slot_offset + e0.source_row_offset;
+        let eff_1_src = e1.source_slot_offset + e1.source_row_offset;
+        assert!(
+            (eff_0_src - eff_1_src).abs() >= 13.5,
+            "source ports collapsed: e0={eff_0_src}, e1={eff_1_src}"
+        );
+
+        let eff_0_tgt = e0.target_slot_offset + e0.target_row_offset;
+        let eff_1_tgt = e1.target_slot_offset + e1.target_row_offset;
+        assert!(
+            (eff_0_tgt - eff_1_tgt).abs() >= 13.5,
+            "target ports collapsed: e0={eff_0_tgt}, e1={eff_1_tgt}"
+        );
     }
 
     #[test]

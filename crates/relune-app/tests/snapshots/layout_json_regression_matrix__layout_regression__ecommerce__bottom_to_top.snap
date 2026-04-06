@@ -193,8 +193,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 142.802001953125,
-          "label_y": 285.9800109863281,
+          "label_x": 148.23399353027344,
+          "label_y": 281.15899658203125,
           "nullable": false,
           "route_label_position": [
             205.0,
@@ -569,8 +569,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 142.802001953125,
-          "label_y": 285.9800109863281,
+          "label_x": 148.23399353027344,
+          "label_y": 281.15899658203125,
           "nullable": false,
           "route_label_position": [
             205.0,
@@ -945,8 +945,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 142.802001953125,
-          "label_y": 285.9800109863281,
+          "label_x": 148.23399353027344,
+          "label_y": 281.15899658203125,
           "nullable": false,
           "route_label_position": [
             205.0,
