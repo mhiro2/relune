@@ -70,8 +70,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1020.6420288085938,
-          "label_y": 136.9949951171875,
+          "label_x": 543.1669921875,
+          "label_y": 98.0,
           "nullable": false,
           "route_label_position": [
             801.5,
@@ -238,8 +238,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1020.6420288085938,
-          "label_y": 136.9949951171875,
+          "label_x": 543.1669921875,
+          "label_y": 98.0,
           "nullable": false,
           "route_label_position": [
             801.5,
@@ -406,8 +406,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1020.6420288085938,
-          "label_y": 136.9949951171875,
+          "label_x": 543.1669921875,
+          "label_y": 98.0,
           "nullable": false,
           "route_label_position": [
             801.5,

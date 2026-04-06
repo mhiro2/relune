@@ -399,7 +399,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "fk_teams_organization",
           "label_x": 667.822021484375,
-          "label_y": 220.7270050048828,
+          "label_y": 231.68699645996094,
           "nullable": false,
           "route_label_position": [
             751.7000122070313,
@@ -1035,7 +1035,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "fk_teams_organization",
           "label_x": 667.822021484375,
-          "label_y": 220.7270050048828,
+          "label_y": 231.68699645996094,
           "nullable": false,
           "route_label_position": [
             751.7000122070313,
@@ -1671,7 +1671,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "fk_teams_organization",
           "label_x": 667.822021484375,
-          "label_y": 220.7270050048828,
+          "label_y": 231.68699645996094,
           "nullable": false,
           "route_label_position": [
             751.7000122070313,

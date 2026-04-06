@@ -30,7 +30,7 @@ use crate::route::{
     rebuild_route_from_points, route_edge_with_assigned_ports, route_points,
     route_self_loop_with_offset, sample_route_obstacles, step_from_attachment,
 };
-use relune_core::layout::{EdgeRoute, RouteStyle};
+use relune_core::layout::{Cardinality, EdgeRoute, RouteStyle};
 
 /// Layout mode alias shared with `relune-core`.
 pub type LayoutMode = LayoutAlgorithm;
@@ -1747,6 +1747,12 @@ fn route_edges_with_diagnostics(
                 h: node.height,
             })
             .collect();
+        label_obstacles.extend(edge_endpoint_marker_obstacles(
+            &edge.route,
+            source_edge.kind,
+            source_edge.nullable,
+            source_edge.target_cardinality,
+        ));
         label_obstacles.extend_from_slice(&placed_labels);
         if let Some(&(x, y, w, h)) = from_pos {
             label_obstacles.push(Rect { x, y, w, h });
@@ -2895,6 +2901,12 @@ const MIN_LABEL_ROUTE_T: f32 = 0.16;
 const LABEL_ROUTE_T_STEP: f32 = 0.08;
 /// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
 const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
+/// Extra clearance reserved from a FK endpoint for Crow's Foot markers.
+const FK_MARKER_CLEARANCE: f32 = 30.0;
+/// Extra clearance reserved from a generic arrow endpoint.
+const ARROW_MARKER_CLEARANCE: f32 = 14.0;
+/// Half-thickness of the axis-aligned obstacle reserved for endpoint markers.
+const ENDPOINT_MARKER_HALF_THICKNESS: f32 = 14.0;
 
 const fn edge_route_obstacle_spacing(edge_count: usize) -> f32 {
     match edge_count {
@@ -2917,6 +2929,85 @@ fn label_rect(label_x: f32, label_y: f32, label_half_w: f32) -> Rect {
         y: label_y - LABEL_HALF_H,
         w: label_half_w * 2.0,
         h: LABEL_HALF_H * 2.0,
+    }
+}
+
+fn edge_endpoint_marker_obstacles(
+    route: &EdgeRoute,
+    kind: EdgeKind,
+    _nullable: bool,
+    target_cardinality: relune_core::layout::Cardinality,
+) -> Vec<Rect> {
+    let points = route_points(route);
+    let mut obstacles = Vec::with_capacity(2);
+
+    if kind == EdgeKind::ForeignKey {
+        if let Some(next) = distinct_route_neighbor(&points, true) {
+            obstacles.push(endpoint_marker_obstacle(
+                (route.x1, route.y1),
+                next,
+                FK_MARKER_CLEARANCE,
+            ));
+        }
+        if let Some(prev) = distinct_route_neighbor(&points, false) {
+            let target_clearance = match target_cardinality {
+                Cardinality::ZeroOrOne => FK_MARKER_CLEARANCE,
+                Cardinality::One | Cardinality::Many => FK_MARKER_CLEARANCE - 4.0,
+            };
+            obstacles.push(endpoint_marker_obstacle(
+                (route.x2, route.y2),
+                prev,
+                target_clearance,
+            ));
+        }
+        return obstacles;
+    }
+
+    if let Some(prev) = distinct_route_neighbor(&points, false) {
+        obstacles.push(endpoint_marker_obstacle(
+            (route.x2, route.y2),
+            prev,
+            ARROW_MARKER_CLEARANCE,
+        ));
+    }
+
+    obstacles
+}
+
+fn distinct_route_neighbor(points: &[(f32, f32)], from_start: bool) -> Option<(f32, f32)> {
+    if from_start {
+        let anchor = points.first().copied()?;
+        points.iter().copied().skip(1).find(|point| {
+            (point.0 - anchor.0).abs() > f32::EPSILON || (point.1 - anchor.1).abs() > f32::EPSILON
+        })
+    } else {
+        let anchor = points.last().copied()?;
+        points.iter().rev().copied().skip(1).find(|point| {
+            (point.0 - anchor.0).abs() > f32::EPSILON || (point.1 - anchor.1).abs() > f32::EPSILON
+        })
+    }
+}
+
+fn endpoint_marker_obstacle(endpoint: (f32, f32), toward: (f32, f32), clearance: f32) -> Rect {
+    let dx = toward.0 - endpoint.0;
+    let dy = toward.1 - endpoint.1;
+
+    if dx.abs() >= dy.abs() {
+        let min_x = endpoint.0.min(dx.signum().mul_add(clearance, endpoint.0));
+        Rect {
+            x: min_x,
+            y: endpoint.1 - ENDPOINT_MARKER_HALF_THICKNESS,
+            w: clearance,
+            h: ENDPOINT_MARKER_HALF_THICKNESS * 2.0,
+        }
+    } else {
+        let min_y = endpoint.1.min(dy.signum().mul_add(clearance, endpoint.1));
+        Rect {
+            x: endpoint.0 - ENDPOINT_MARKER_HALF_THICKNESS,
+            y: min_y,
+            w: ENDPOINT_MARKER_HALF_THICKNESS * 2.0,
+            h: clearance,
+        }
     }
 }
 
@@ -3034,6 +3125,17 @@ fn resolve_edge_label_collisions(
             )
         })
         .collect();
+    let endpoint_marker_obstacles: Vec<Vec<Rect>> = edges
+        .iter()
+        .map(|edge| {
+            edge_endpoint_marker_obstacles(
+                &edge.route,
+                edge.kind,
+                edge.nullable,
+                edge.target_cardinality,
+            )
+        })
+        .collect();
 
     for _ in 0..EDGE_LABEL_RELAXATION_PASSES {
         let mut changed = false;
@@ -3041,8 +3143,9 @@ fn resolve_edge_label_collisions(
         for index in 0..edges.len() {
             let label_half_w = estimate_label_half_width(&edges[index].label);
             let mut obstacles =
-                Vec::with_capacity(node_obstacles.len() + edges.len().saturating_mul(2));
+                Vec::with_capacity(node_obstacles.len() + edges.len().saturating_mul(4));
             obstacles.extend_from_slice(&node_obstacles);
+            obstacles.extend_from_slice(&endpoint_marker_obstacles[index]);
 
             for (other_index, other_edge) in edges.iter().enumerate() {
                 if other_index == index {
@@ -3055,6 +3158,7 @@ fn resolve_edge_label_collisions(
                     estimate_label_half_width(&other_edge.label),
                 ));
                 obstacles.extend_from_slice(&route_obstacles[other_index]);
+                obstacles.extend_from_slice(&endpoint_marker_obstacles[other_index]);
             }
 
             let current_t = estimate_route_parameter(
@@ -3173,6 +3277,78 @@ mod tests {
         assert!((edge_route_obstacle_spacing(128) - 14.0).abs() <= f32::EPSILON);
         assert!((edge_route_obstacle_spacing(256) - 18.0).abs() <= f32::EPSILON);
         assert!((edge_route_obstacle_spacing(512) - 24.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn test_place_label_on_route_avoids_foreign_key_endpoint_markers() {
+        let route = EdgeRoute {
+            x1: 382.0,
+            y1: 123.0,
+            x2: 637.2,
+            y2: 98.0,
+            control_points: vec![(509.6, 123.0), (509.6, 98.0)],
+            style: RouteStyle::Orthogonal,
+            label_position: (509.6, 110.5),
+        };
+        let obstacles =
+            edge_endpoint_marker_obstacles(&route, EdgeKind::ForeignKey, false, Cardinality::One);
+        let label_half_w = estimate_label_half_width("product_id");
+
+        let placed = place_label_on_route(&route, MIN_LABEL_ROUTE_T, &obstacles, 4.0, label_half_w);
+
+        assert!(
+            !rect_overlaps_any(
+                label_rect(placed.0, placed.1, label_half_w),
+                &obstacles,
+                4.0
+            ),
+            "placed label still overlaps endpoint marker clearance: {placed:?}"
+        );
+        assert!(
+            placed.0 > 450.0,
+            "label should move away from the source Crow's Foot marker, got {placed:?}"
+        );
+    }
+
+    #[test]
+    fn test_place_label_on_route_avoids_generic_arrow_endpoint_marker() {
+        let route = EdgeRoute {
+            x1: 100.0,
+            y1: 200.0,
+            x2: 320.0,
+            y2: 200.0,
+            control_points: Vec::new(),
+            style: RouteStyle::Straight,
+            label_position: (210.0, 200.0),
+        };
+        let obstacles = edge_endpoint_marker_obstacles(
+            &route,
+            EdgeKind::ViewDependency,
+            false,
+            Cardinality::One,
+        );
+        let label_half_w = estimate_label_half_width("depends_on");
+
+        let placed = place_label_on_route(
+            &route,
+            1.0 - MIN_LABEL_ROUTE_T,
+            &obstacles,
+            4.0,
+            label_half_w,
+        );
+
+        assert!(
+            !rect_overlaps_any(
+                label_rect(placed.0, placed.1, label_half_w),
+                &obstacles,
+                4.0
+            ),
+            "placed label still overlaps arrow clearance: {placed:?}"
+        );
+        assert!(
+            placed.0 < 300.0,
+            "label should move away from the end arrow marker, got {placed:?}"
+        );
     }
 
     fn make_test_schema() -> Schema {

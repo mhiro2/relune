@@ -242,8 +242,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 539.3330078125,
-          "label_y": 449.0,
+          "label_x": 531.8319702148438,
+          "label_y": 483.55499267578125,
           "nullable": false,
           "route_label_position": [
             497.6000061035156,
@@ -626,8 +626,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 539.3330078125,
-          "label_y": 449.0,
+          "label_x": 531.8319702148438,
+          "label_y": 483.55499267578125,
           "nullable": false,
           "route_label_position": [
             497.6000061035156,
@@ -1010,8 +1010,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 539.3330078125,
-          "label_y": 449.0,
+          "label_x": 531.8319702148438,
+          "label_y": 483.55499267578125,
           "nullable": false,
           "route_label_position": [
             497.6000061035156,

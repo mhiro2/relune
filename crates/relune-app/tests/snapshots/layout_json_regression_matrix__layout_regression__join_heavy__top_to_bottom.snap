@@ -226,7 +226,7 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 4653.0,
-          "label_y": 116.75,
+          "label_y": 161.0,
           "nullable": true,
           "route_label_position": [
             4641.0,
@@ -838,8 +838,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 94.83300018310547,
-          "label_y": 1000.0,
+          "label_x": 82.88200378417969,
+          "label_y": 998.9219970703125,
           "nullable": false,
           "route_label_position": [
             -16.0,
@@ -880,7 +880,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "created_by",
           "label_x": 208.5,
-          "label_y": 1001.25,
+          "label_y": 1003.0670166015625,
           "nullable": true,
           "route_label_position": [
             192.0,
@@ -1387,7 +1387,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "project_id",
           "label_x": 180.5,
-          "label_y": 697.0,
+          "label_y": 704.5,
           "nullable": false,
           "route_label_position": [
             180.5,
@@ -1853,7 +1853,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tenant_id",
           "label_x": 210.5,
-          "label_y": 1283.1669921875,
+          "label_y": 1292.75,
           "nullable": false,
           "route_label_position": [
             191.0,
@@ -2355,7 +2355,7 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 4653.0,
-          "label_y": 116.75,
+          "label_y": 161.0,
           "nullable": true,
           "route_label_position": [
             4641.0,
@@ -2967,8 +2967,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 94.83300018310547,
-          "label_y": 1000.0,
+          "label_x": 82.88200378417969,
+          "label_y": 998.9219970703125,
           "nullable": false,
           "route_label_position": [
             -16.0,
@@ -3009,7 +3009,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "created_by",
           "label_x": 208.5,
-          "label_y": 1001.25,
+          "label_y": 1003.0670166015625,
           "nullable": true,
           "route_label_position": [
             192.0,
@@ -3516,7 +3516,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "project_id",
           "label_x": 180.5,
-          "label_y": 697.0,
+          "label_y": 704.5,
           "nullable": false,
           "route_label_position": [
             180.5,
@@ -3982,7 +3982,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tenant_id",
           "label_x": 210.5,
-          "label_y": 1283.1669921875,
+          "label_y": 1292.75,
           "nullable": false,
           "route_label_position": [
             191.0,
@@ -4484,7 +4484,7 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 4653.0,
-          "label_y": 116.75,
+          "label_y": 161.0,
           "nullable": true,
           "route_label_position": [
             4641.0,
@@ -5096,8 +5096,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "tenant_id",
-          "label_x": 94.83300018310547,
-          "label_y": 1000.0,
+          "label_x": 82.88200378417969,
+          "label_y": 998.9219970703125,
           "nullable": false,
           "route_label_position": [
             -16.0,
@@ -5138,7 +5138,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "created_by",
           "label_x": 208.5,
-          "label_y": 1001.25,
+          "label_y": 1003.0670166015625,
           "nullable": true,
           "route_label_position": [
             192.0,
@@ -5645,7 +5645,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "project_id",
           "label_x": 180.5,
-          "label_y": 697.0,
+          "label_y": 704.5,
           "nullable": false,
           "route_label_position": [
             180.5,
@@ -6111,7 +6111,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tenant_id",
           "label_x": 210.5,
-          "label_y": 1283.1669921875,
+          "label_y": 1292.75,
           "nullable": false,
           "route_label_position": [
             191.0,
