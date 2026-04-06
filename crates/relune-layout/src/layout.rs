@@ -56,8 +56,10 @@ const BUNDLE_CHANNEL_TOLERANCE: f32 = 36.0;
 const ROUTE_STUB_DISTANCE: f32 = 28.0;
 /// Margin added when probing side corridors outside the endpoint nodes.
 const BYPASS_CHANNEL_MARGIN: f32 = 24.0;
-/// Additional offsets explored for bypass corridors after the first outer lane.
-const BYPASS_CHANNEL_OFFSETS: &[f32] = &[0.0, 48.0, 96.0, 144.0];
+/// Distance between adjacent outer bypass lanes.
+const BYPASS_CHANNEL_LANE_STEP: f32 = 48.0;
+/// Additional bypass lanes explored beyond the first outer lane on each side.
+const BYPASS_CHANNEL_EXTRA_LANES: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -2364,7 +2366,7 @@ fn bypass_channel_candidates(
     target_rect: Rect,
     start_order: u32,
 ) -> Vec<ObstacleAwareChannelCandidate> {
-    let mut candidates = Vec::with_capacity(BYPASS_CHANNEL_OFFSETS.len() * 2);
+    let mut candidates = Vec::with_capacity(bypass_channel_lane_count().saturating_mul(2));
 
     match direction {
         LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
@@ -2397,6 +2399,14 @@ fn bypass_channel_candidates(
     candidates
 }
 
+const fn bypass_channel_lane_count() -> usize {
+    BYPASS_CHANNEL_EXTRA_LANES + 1
+}
+
+fn bypass_channel_offsets() -> impl ExactSizeIterator<Item = f32> {
+    (0..bypass_channel_lane_count()).map(|lane_index| BYPASS_CHANNEL_LANE_STEP * lane_index as f32)
+}
+
 fn append_bypass_candidates(
     candidates: &mut Vec<ObstacleAwareChannelCandidate>,
     axis: ChannelAxis,
@@ -2404,7 +2414,7 @@ fn append_bypass_candidates(
     negative_baseline: f32,
     start_order: u32,
 ) {
-    for (offset_index, offset) in BYPASS_CHANNEL_OFFSETS.iter().copied().enumerate() {
+    for (offset_index, offset) in bypass_channel_offsets().enumerate() {
         let stable_order =
             start_order + u32::try_from(offset_index.saturating_mul(2)).expect("offset index");
         candidates.push(ObstacleAwareChannelCandidate {
@@ -5247,6 +5257,35 @@ mod tests {
             0
         );
         assert!(edge.route.control_points.len() >= 4);
+    }
+
+    #[test]
+    fn test_bypass_channel_candidates_expand_symmetrically_per_lane() {
+        let source_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 80.0,
+        };
+        let target_rect = Rect {
+            x: 0.0,
+            y: 420.0,
+            w: 100.0,
+            h: 80.0,
+        };
+
+        let candidates =
+            bypass_channel_candidates(LayoutDirection::TopToBottom, source_rect, target_rect, 7);
+
+        assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
+        for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {
+            let expected_offset = BYPASS_CHANNEL_LANE_STEP * lane_index as f32;
+            assert_eq!(pair[0].axis, ChannelAxis::X);
+            assert_eq!(pair[1].axis, ChannelAxis::X);
+            assert!((pair[0].coordinate - pair[0].baseline - expected_offset).abs() < f32::EPSILON);
+            assert!((pair[1].baseline - pair[1].coordinate - expected_offset).abs() < f32::EPSILON);
+            assert_eq!(pair[0].stable_order + 1, pair[1].stable_order);
+        }
     }
 
     #[test]
