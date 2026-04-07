@@ -20,7 +20,7 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@typescript/native-preview": "^7.0.0-dev.20260324.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260331.1",
     "esbuild": "^0.27.4",
     "oxfmt": "^0.42.0",
     "oxlint": "^1.57.0",
