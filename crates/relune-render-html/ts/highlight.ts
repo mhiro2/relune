@@ -1,14 +1,23 @@
 import { parseReluneMetadata, type TableMetadata } from './metadata';
 import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 import { createHighlightState } from './highlight_state';
-import { computeNeighborHighlights, matchesBrowserQuery } from './highlight_actions';
 import {
+  computeHoverPreview,
+  computeNeighborHighlights,
+  matchesBrowserQuery,
+} from './highlight_actions';
+import {
+  applyHoverPreviewClasses,
+  applySelectedHighlightClasses,
   clearHighlightClasses,
-  applyHighlightClasses,
+  hideHoverPopover,
   renderDrawer,
+  renderHoverPopover,
   renderObjectBrowser,
   type DrawerElements,
   type ObjectBrowserItem,
+  type HoverPopoverElements,
+  type PopoverPosition,
 } from './highlight_dom';
 
 {
@@ -23,6 +32,7 @@ import {
   const objectBrowserCount = document.getElementById('object-browser-count');
   const objectBrowserEmpty = document.getElementById('object-browser-empty');
   const drawerClose = document.getElementById('detail-close');
+  const viewport = document.getElementById('viewport');
 
   const drawerEls: DrawerElements | null = (() => {
     const drawer = document.getElementById('detail-drawer');
@@ -62,7 +72,27 @@ import {
     return null;
   })();
 
-  if (svgRoot && drawerEls) {
+  const hoverEls: HoverPopoverElements | null = (() => {
+    const popover = document.getElementById('hover-popover');
+    const kind = document.getElementById('hover-popover-kind');
+    const title = document.getElementById('hover-popover-title');
+    const subtitle = document.getElementById('hover-popover-subtitle');
+    const metrics = document.getElementById('hover-popover-metrics');
+    const badges = document.getElementById('hover-popover-badges');
+    if (
+      popover instanceof HTMLElement &&
+      kind instanceof HTMLElement &&
+      title instanceof HTMLElement &&
+      subtitle instanceof HTMLElement &&
+      metrics instanceof HTMLElement &&
+      badges instanceof HTMLElement
+    ) {
+      return { popover, kind, title, subtitle, metrics, badges };
+    }
+    return null;
+  })();
+
+  if (svgRoot && drawerEls && hoverEls) {
     const runtime = getViewerRuntime();
 
     const getNodes = (): NodeListOf<Element> =>
@@ -71,8 +101,22 @@ import {
     const getNodeId = (node: Element): string | null =>
       node.getAttribute('data-id') ?? node.getAttribute('data-table-id');
 
+    const findNode = (nodeId: string): Element | undefined =>
+      Array.from(getNodes()).find((candidate) => getNodeId(candidate) === nodeId);
+
+    const hoverPopoverPosition = (node: Element): PopoverPosition => {
+      const anchor = node.querySelector('.table-body') ?? node;
+      const rect = anchor.getBoundingClientRect();
+      const viewportRect = viewport?.getBoundingClientRect();
+      const top = Math.max(rect.top - 8, (viewportRect?.top ?? 0) + 12);
+      return {
+        left: rect.right + 14,
+        top,
+      };
+    };
+
     const centerNodeInViewport = (nodeId: string): void => {
-      const node = Array.from(getNodes()).find((c) => getNodeId(c) === nodeId);
+      const node = findNode(nodeId);
       const rect = node?.querySelector<SVGRectElement>('.table-body');
       if (rect === undefined || rect === null) return;
       const x = Number.parseFloat(rect.getAttribute('x') ?? '0');
@@ -97,7 +141,7 @@ import {
       const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
 
       const items: ObjectBrowserItem[] = visibleTables.map((table) => {
-        const node = Array.from(getNodes()).find((c) => getNodeId(c) === table.id);
+        const node = findNode(table.id);
         return {
           table,
           isSelected: state.selectedNode === table.id,
@@ -126,82 +170,126 @@ import {
 
     // ── Selection / highlight orchestration ────────────────────────────────
 
-    const applySelection = (tableId: string | null): void => {
-      if (tableId === null) {
-        clearHighlightClasses(svgRoot, getNodes);
-        renderDrawer(undefined, state, drawerEls);
-        emitViewerEvent('relune:node-cleared', undefined);
+    const renderInteraction = (): void => {
+      clearHighlightClasses(svgRoot, getNodes);
+      hideHoverPopover(hoverEls);
+
+      if (state.selectedNode !== null) {
+        const highlight = computeNeighborHighlights(state.selectedNode, state);
+        applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
+        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls);
       } else {
-        const highlight = computeNeighborHighlights(tableId, state);
-        applyHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
-        renderDrawer(state.tableById.get(tableId), state, drawerEls);
-        emitViewerEvent('relune:node-selected', { nodeId: tableId });
+        renderDrawer(undefined, state, drawerEls);
+        if (state.hoveredNode !== null) {
+          const hoveredNode = findNode(state.hoveredNode);
+          if (hoveredNode !== undefined) {
+            const preview = computeHoverPreview(state.hoveredNode, state);
+            applyHoverPreviewClasses(svgRoot, getNodes, getNodeId, preview);
+            renderHoverPopover(
+              state.tableById.get(state.hoveredNode),
+              hoverEls,
+              hoverPopoverPosition(hoveredNode),
+            );
+          } else {
+            state.hoveredNode = null;
+          }
+        }
       }
       syncObjectBrowser();
+    };
+
+    const setSelectedNode = (tableId: string | null): void => {
+      const previous = state.selectedNode;
+      state.selectedNode = tableId;
+      state.hoveredNode = null;
+      renderInteraction();
+
+      if (previous === tableId) {
+        return;
+      }
+
+      if (tableId === null) {
+        emitViewerEvent('relune:node-cleared', undefined);
+      } else {
+        emitViewerEvent('relune:node-selected', { nodeId: tableId });
+      }
+    };
+
+    const clearHoverPreview = (): void => {
+      if (state.selectedNode !== null || state.hoveredNode === null) {
+        return;
+      }
+      state.hoveredNode = null;
+      renderInteraction();
     };
 
     // ── Node event listeners ──────────────────────────────────────────────
 
     getNodes().forEach((node) => {
+      const nodeId = getNodeId(node);
+
       node.addEventListener('mouseenter', () => {
         if (state.selectedNode !== null) return;
-        const nodeId = getNodeId(node);
         if (nodeId !== null) {
-          const highlight = computeNeighborHighlights(nodeId, state);
-          applyHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
+          state.hoveredNode = nodeId;
+          renderInteraction();
         }
       });
 
       node.addEventListener('mouseleave', () => {
-        if (state.selectedNode === null) {
-          clearHighlightClasses(svgRoot, getNodes);
+        if (state.selectedNode === null && state.hoveredNode === nodeId) {
+          state.hoveredNode = null;
+          renderInteraction();
         }
       });
 
       node.addEventListener('click', (event: Event) => {
         event.stopPropagation();
-        const nodeId = getNodeId(node);
         if (nodeId === null) return;
 
         if (state.selectedNode === nodeId) {
-          state.selectedNode = null;
-          applySelection(null);
+          setSelectedNode(null);
         } else {
-          state.selectedNode = nodeId;
-          applySelection(nodeId);
+          setSelectedNode(nodeId);
         }
       });
     });
 
     svgRoot.addEventListener('click', () => {
       if (state.selectedNode !== null) {
-        state.selectedNode = null;
-        applySelection(null);
+        setSelectedNode(null);
       }
     });
 
     drawerClose?.addEventListener('click', () => {
-      state.selectedNode = null;
-      applySelection(null);
+      setSelectedNode(null);
     });
 
-    searchInput?.addEventListener('input', () => syncObjectBrowser());
-    document.addEventListener('relune:filters-changed', syncObjectBrowser);
-    document.addEventListener('relune:search-changed', syncObjectBrowser);
-    document.addEventListener('relune:groups-changed', syncObjectBrowser);
+    const handleVisibilityStateChange = (): void => {
+      if (state.selectedNode === null && state.hoveredNode !== null) {
+        state.hoveredNode = null;
+        renderInteraction();
+        return;
+      }
+      syncObjectBrowser();
+    };
+
+    searchInput?.addEventListener('input', handleVisibilityStateChange);
+    document.addEventListener('relune:filters-changed', handleVisibilityStateChange);
+    document.addEventListener('relune:search-changed', handleVisibilityStateChange);
+    document.addEventListener('relune:groups-changed', handleVisibilityStateChange);
+    document.addEventListener('relune:viewport-changed', clearHoverPreview);
 
     // ── Runtime API ───────────────────────────────────────────────────────
 
     runtime.selection = {
       clear(): void {
-        state.selectedNode = null;
-        applySelection(null);
+        setSelectedNode(null);
       },
       select(nodeId: string): void {
-        const node = Array.from(getNodes()).find((c) => getNodeId(c) === nodeId);
+        const node = findNode(nodeId);
         if (node === undefined) return;
-        state.selectedNode = nodeId;
-        applySelection(nodeId);
+        setSelectedNode(nodeId);
       },
       getSelected(): string | null {
         return state.selectedNode;
@@ -209,6 +297,6 @@ import {
     };
     markViewerModuleReady('selection');
 
-    syncObjectBrowser();
+    renderInteraction();
   }
 }

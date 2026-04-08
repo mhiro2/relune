@@ -104,6 +104,12 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         None
     };
 
+    let hover_popover = if options.enable_highlight {
+        Some(build_hover_popover_html())
+    } else {
+        None
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -121,6 +127,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 {search_panel}
 {filter_reset_bar}
 {group_panel}
+{hover_popover}
 {detail_drawer}
 {viewer_controls}
   <div class="container">
@@ -142,6 +149,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         search_panel = search_panel.unwrap_or_default(),
         filter_reset_bar = filter_reset_bar.unwrap_or_default(),
         group_panel = group_panel.unwrap_or_default(),
+        hover_popover = hover_popover.unwrap_or_default(),
         detail_drawer = detail_drawer.unwrap_or_default(),
         viewer_controls = viewer_controls.unwrap_or_default(),
         css = css,
@@ -688,6 +696,127 @@ fn build_css(
     let highlight_css = if enable_highlight {
         r"
     /* Neighbor highlight styles */
+    .hover-popover {
+      position: fixed;
+      min-width: 220px;
+      max-width: min(280px, calc(100vw - 24px));
+      padding: 12px 14px;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--panel-bg) 96%, transparent);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      z-index: 245;
+      pointer-events: none;
+    }
+
+    .hover-popover[hidden] {
+      display: none;
+    }
+
+    .hover-popover-kicker {
+      margin: 0 0 4px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent-color);
+    }
+
+    .hover-popover-title {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .hover-popover-subtitle {
+      margin: 6px 0 0;
+      font-size: 12px;
+      opacity: 0.72;
+    }
+
+    .hover-popover-metrics,
+    .hover-popover-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .hover-popover-metric,
+    .hover-popover-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.1);
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .hover-popover-metric-label {
+      opacity: 0.65;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .hover-popover-metric-value {
+      font-family: var(--mono-font);
+      font-weight: 700;
+    }
+
+    .hover-popover-badge-error { background: rgba(248, 113, 113, 0.22); color: #f87171; }
+    .hover-popover-badge-warning { background: rgba(251, 191, 36, 0.22); color: #fbbf24; }
+    .hover-popover-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
+    .hover-popover-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
+
+    .node.hover-preview-node,
+    .node.hover-preview-neighbor {
+      opacity: 1 !important;
+      transition: opacity 0.18s, filter 0.18s;
+    }
+
+    .node.hover-preview-node {
+      filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.28));
+    }
+
+    .node.hover-preview-node .table-body {
+      stroke: rgba(245, 158, 11, 0.72);
+      stroke-width: 2.05px;
+    }
+
+    .node.hover-preview-neighbor {
+      filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.18));
+    }
+
+    .node.hover-preview-neighbor .table-body {
+      stroke: rgba(245, 158, 11, 0.6);
+      stroke-width: 1.9px;
+    }
+
+    .node.hover-preview-neighbor.hover-inbound {
+      filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.18));
+    }
+
+    .node.hover-preview-neighbor.hover-inbound .table-body {
+      stroke: rgba(45, 212, 191, 0.68);
+    }
+
+    .node.hover-preview-neighbor.hover-outbound {
+      filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.2));
+    }
+
+    .node.hover-preview-neighbor.hover-outbound .table-body {
+      stroke: rgba(251, 191, 36, 0.72);
+    }
+
+    .edge.hover-preview-edge {
+      opacity: 0.92 !important;
+      stroke-width: 2.15px;
+      transition: opacity 0.18s, stroke-width 0.18s;
+    }
+
     .node.highlighted-neighbor {
       opacity: 1 !important;
       filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.35));
@@ -737,6 +866,28 @@ fn build_css(
 
     .node.selected-node {
       filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.48));
+    }
+
+    .edge.highlighted-neighbor .edge-glow-path {
+      opacity: 0.92;
+    }
+
+    .edge.highlighted-neighbor .edge-particles {
+      opacity: 0.92;
+    }
+
+    .edge.hover-preview-edge .edge-glow-path {
+      opacity: 0.76;
+    }
+
+    .edge.hover-preview-edge .edge-particles {
+      opacity: 0.72;
+    }
+
+    @media (max-width: 960px) {
+      .hover-popover {
+        width: calc(100vw - 24px);
+      }
     }"
     } else {
         ""
@@ -1232,14 +1383,6 @@ fn build_css(
       opacity: 0.34;
     }
 
-    .edge.highlighted-neighbor .edge-glow-path {
-      opacity: 0.92;
-    }
-
-    .edge.highlighted-neighbor .edge-particles {
-      opacity: 0.92;
-    }
-
     @keyframes relune-node-enter {
       from {
         opacity: 0;
@@ -1608,6 +1751,19 @@ fn build_detail_drawer_html() -> String {
       <div class="detail-empty" id="detail-issues-empty">No issues detected.</div>
       <div class="detail-issues" id="detail-issues"></div>
     </section>
+  </aside>
+"#
+    .to_string()
+}
+
+#[allow(clippy::needless_raw_string_hashes)]
+fn build_hover_popover_html() -> String {
+    r#"  <aside class="hover-popover" id="hover-popover" hidden>
+    <p class="hover-popover-kicker" id="hover-popover-kind">Preview</p>
+    <h2 class="hover-popover-title" id="hover-popover-title">Object preview</h2>
+    <p class="hover-popover-subtitle" id="hover-popover-subtitle"></p>
+    <div class="hover-popover-metrics" id="hover-popover-metrics"></div>
+    <div class="hover-popover-badges" id="hover-popover-badges"></div>
   </aside>
 "#
     .to_string()
@@ -2055,6 +2211,16 @@ mod tests {
     }
 
     #[test]
+    fn test_build_hover_popover_html() {
+        let html = build_hover_popover_html();
+
+        assert!(html.contains(r#"id="hover-popover""#));
+        assert!(html.contains(r#"id="hover-popover-title""#));
+        assert!(html.contains(r#"id="hover-popover-metrics""#));
+        assert!(html.contains(r#"id="hover-popover-badges""#));
+    }
+
+    #[test]
     fn test_build_filter_reset_bar_html() {
         let html = build_filter_reset_bar_html();
 
@@ -2097,6 +2263,9 @@ mod tests {
     fn test_highlight_css_included_when_enabled() {
         let css = build_css(Theme::Light, false, false, false, false, true);
 
+        assert!(css.contains(".hover-popover"));
+        assert!(css.contains(".hover-preview-node"));
+        assert!(css.contains(".hover-preview-edge"));
         assert!(css.contains(".highlighted-neighbor"));
         assert!(css.contains(".dimmed-by-highlight"));
         assert!(css.contains(".selected-node"));
@@ -2109,6 +2278,7 @@ mod tests {
         let css = build_css(Theme::Light, false, false, false, false, false);
 
         assert!(!css.contains("/* Neighbor highlight styles */"));
+        assert!(!css.contains(".hover-popover"));
         assert!(!css.contains(".dimmed-by-highlight"));
         assert!(!css.contains(".selected-node"));
     }
@@ -2125,9 +2295,13 @@ mod tests {
         let html = build_html_document(svg, metadata, &options);
 
         assert!(html.contains("computeNeighborHighlights"));
+        assert!(html.contains("computeHoverPreview"));
         assert!(html.contains("clearHighlightClasses"));
+        assert!(html.contains("renderHoverPopover"));
+        assert!(html.contains("hoveredNode"));
         assert!(html.contains("inboundMap"));
         assert!(html.contains("outboundMap"));
+        assert!(html.contains(r#"id="hover-popover""#));
     }
 
     #[test]
@@ -2142,9 +2316,11 @@ mod tests {
         let html = build_html_document(svg, metadata, &options);
 
         assert!(!html.contains("computeNeighborHighlights"));
+        assert!(!html.contains("computeHoverPreview"));
         assert!(!html.contains("clearHighlightClasses"));
         assert!(!html.contains("inboundMap"));
         assert!(!html.contains("outboundMap"));
+        assert!(!html.contains(r#"id="hover-popover""#));
     }
 
     #[test]
