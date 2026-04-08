@@ -14,6 +14,9 @@
       return null;
     }
   }
+  function tableDisplayName(table) {
+    return table.label || table.table_name || table.id;
+  }
 
   // ts/viewer_api.ts
   var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
@@ -70,11 +73,11 @@
       (outboundMap[edge.from] ??= []).push({ node: edge.to, edge });
       (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
     }
-    return { selectedNode: null, tableById, inboundMap, outboundMap, edges };
+    return { hoveredNode: null, selectedNode: null, tableById, inboundMap, outboundMap, edges };
   }
 
   // ts/highlight_actions.ts
-  function computeNeighborHighlights(nodeId, state) {
+  function collectNeighborhood(nodeId, state) {
     const inbound = state.inboundMap[nodeId] ?? [];
     const outbound = state.outboundMap[nodeId] ?? [];
     const neighborIds = /* @__PURE__ */ new Set();
@@ -94,7 +97,13 @@
         connectedEdgeIndices.add(index);
       }
     });
-    return { selectedId: nodeId, neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
+    return { neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
+  }
+  function computeNeighborHighlights(nodeId, state) {
+    return { selectedId: nodeId, ...collectNeighborhood(nodeId, state) };
+  }
+  function computeHoverPreview(nodeId, state) {
+    return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
   }
   function matchesBrowserQuery(table, query) {
     const needle = query.trim().toLowerCase();
@@ -134,21 +143,28 @@
     card.append(labelEl, valueEl);
     return card;
   }
+  var SELECTED_NODE_CLASSES = [
+    "highlighted-neighbor",
+    "dimmed-by-highlight",
+    "selected-node",
+    "inbound",
+    "outbound"
+  ];
+  var HOVER_NODE_CLASSES = [
+    "hover-preview-node",
+    "hover-preview-neighbor",
+    "hover-inbound",
+    "hover-outbound"
+  ];
   function clearHighlightClasses(svgRoot, getNodes) {
     getNodes().forEach((node) => {
-      node.classList.remove(
-        "highlighted-neighbor",
-        "dimmed-by-highlight",
-        "selected-node",
-        "inbound",
-        "outbound"
-      );
+      node.classList.remove(...SELECTED_NODE_CLASSES, ...HOVER_NODE_CLASSES);
     });
     svgRoot.querySelectorAll(".edge").forEach((edge) => {
-      edge.classList.remove("highlighted-neighbor", "dimmed-by-highlight");
+      edge.classList.remove("highlighted-neighbor", "dimmed-by-highlight", "hover-preview-edge");
     });
   }
-  function applyHighlightClasses(svgRoot, getNodes, getNodeId, highlight) {
+  function applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight) {
     getNodes().forEach((node) => {
       const id = getNodeId(node);
       if (id === highlight.selectedId) {
@@ -169,6 +185,23 @@
     svgRoot.querySelectorAll(".edge").forEach((edgeElement, index) => {
       edgeElement.classList.toggle("highlighted-neighbor", highlight.connectedEdgeIndices.has(index));
       edgeElement.classList.toggle("dimmed-by-highlight", !highlight.connectedEdgeIndices.has(index));
+    });
+  }
+  function applyHoverPreviewClasses(svgRoot, getNodes, getNodeId, preview) {
+    getNodes().forEach((node) => {
+      const id = getNodeId(node);
+      if (id === preview.hoveredId) {
+        node.classList.add("hover-preview-node");
+      } else if (id !== null && preview.neighborIds.has(id)) {
+        node.classList.add("hover-preview-neighbor");
+        const isInbound = preview.inboundNodeIds.has(id);
+        const isOutbound = preview.outboundNodeIds.has(id);
+        node.classList.toggle("hover-inbound", isInbound && !isOutbound);
+        node.classList.toggle("hover-outbound", isOutbound && !isInbound);
+      }
+    });
+    svgRoot.querySelectorAll(".edge").forEach((edgeElement, index) => {
+      edgeElement.classList.toggle("hover-preview-edge", preview.connectedEdgeIndices.has(index));
     });
   }
   function renderDrawer(table, state, elements) {
@@ -230,6 +263,38 @@
         }
       }
     }
+  }
+  function hideHoverPopover(elements) {
+    elements.popover.setAttribute("hidden", "");
+    elements.popover.style.removeProperty("left");
+    elements.popover.style.removeProperty("top");
+    elements.popover.style.removeProperty("visibility");
+    clearChildren(elements.metrics);
+    clearChildren(elements.badges);
+  }
+  function renderHoverPopover(table, elements, position) {
+    if (table === void 0 || position === void 0) {
+      hideHoverPopover(elements);
+      return;
+    }
+    elements.kind.textContent = table.kind;
+    elements.title.textContent = tableDisplayName(table);
+    elements.subtitle.textContent = table.schema_name ? `${table.schema_name}.${table.table_name}` : table.table_name;
+    clearChildren(elements.metrics);
+    elements.metrics.append(
+      summaryMetric("Cols", String(table.columns.length)),
+      summaryMetric("In", String(table.inbound_count)),
+      summaryMetric("Out", String(table.outbound_count))
+    );
+    clearChildren(elements.badges);
+    if (table.diff_kind) {
+      elements.badges.appendChild(diffBadge(table.diff_kind));
+    }
+    const issues = table.issues ?? [];
+    if (issues.length > 0) {
+      elements.badges.appendChild(issueCountBadge(issues));
+    }
+    placePopover(elements.popover, position);
   }
   function buildColumnElement(column) {
     const columnEl = document.createElement("div");
@@ -300,6 +365,44 @@
     }
     return issueEl;
   }
+  function summaryMetric(label, value) {
+    const metric = document.createElement("span");
+    metric.className = "hover-popover-metric";
+    const labelEl = document.createElement("span");
+    labelEl.className = "hover-popover-metric-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("span");
+    valueEl.className = "hover-popover-metric-value";
+    valueEl.textContent = value;
+    metric.append(labelEl, valueEl);
+    return metric;
+  }
+  function issueCountBadge(issues) {
+    const badge = document.createElement("span");
+    const safeSeverity = safeCssToken(highestIssueSeverity(issues), ALLOWED_SEVERITIES);
+    badge.className = safeSeverity !== "" ? `hover-popover-badge hover-popover-badge-${safeSeverity}` : "hover-popover-badge";
+    badge.textContent = `${issues.length} issue${issues.length === 1 ? "" : "s"}`;
+    return badge;
+  }
+  function highestIssueSeverity(issues) {
+    const severityRank = { error: 3, warning: 2, info: 1, hint: 0 };
+    return issues.reduce((max, issue) => {
+      return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
+    }, "hint");
+  }
+  function placePopover(popover, position) {
+    const margin = 12;
+    popover.removeAttribute("hidden");
+    popover.style.left = `${Math.round(position.left)}px`;
+    popover.style.top = `${Math.round(position.top)}px`;
+    popover.style.visibility = "hidden";
+    const rect = popover.getBoundingClientRect();
+    const left = Math.max(margin, Math.min(position.left, window.innerWidth - rect.width - margin));
+    const top = Math.max(margin, Math.min(position.top, window.innerHeight - rect.height - margin));
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+    popover.style.visibility = "visible";
+  }
   function renderObjectBrowser(items, totalCount, listEl, countEl, emptyEl, onSelect) {
     listEl.replaceChildren();
     countEl.textContent = `${items.length}/${totalCount}`;
@@ -365,6 +468,7 @@
     const objectBrowserCount = document.getElementById("object-browser-count");
     const objectBrowserEmpty = document.getElementById("object-browser-empty");
     const drawerClose = document.getElementById("detail-close");
+    const viewport = document.getElementById("viewport");
     const drawerEls = (() => {
       const drawer = document.getElementById("detail-drawer");
       const title = document.getElementById("detail-title");
@@ -392,12 +496,35 @@
       }
       return null;
     })();
-    if (svgRoot && drawerEls) {
+    const hoverEls = (() => {
+      const popover = document.getElementById("hover-popover");
+      const kind = document.getElementById("hover-popover-kind");
+      const title = document.getElementById("hover-popover-title");
+      const subtitle = document.getElementById("hover-popover-subtitle");
+      const metrics = document.getElementById("hover-popover-metrics");
+      const badges = document.getElementById("hover-popover-badges");
+      if (popover instanceof HTMLElement && kind instanceof HTMLElement && title instanceof HTMLElement && subtitle instanceof HTMLElement && metrics instanceof HTMLElement && badges instanceof HTMLElement) {
+        return { popover, kind, title, subtitle, metrics, badges };
+      }
+      return null;
+    })();
+    if (svgRoot && drawerEls && hoverEls) {
       const runtime = getViewerRuntime();
       const getNodes = () => svgRoot.querySelectorAll(".node[data-id], .table-node[data-table-id]");
       const getNodeId = (node) => node.getAttribute("data-id") ?? node.getAttribute("data-table-id");
+      const findNode = (nodeId) => Array.from(getNodes()).find((candidate) => getNodeId(candidate) === nodeId);
+      const hoverPopoverPosition = (node) => {
+        const anchor = node.querySelector(".table-body") ?? node;
+        const rect = anchor.getBoundingClientRect();
+        const viewportRect = viewport?.getBoundingClientRect();
+        const top = Math.max(rect.top - 8, (viewportRect?.top ?? 0) + 12);
+        return {
+          left: rect.right + 14,
+          top
+        };
+      };
       const centerNodeInViewport = (nodeId) => {
-        const node = Array.from(getNodes()).find((c) => getNodeId(c) === nodeId);
+        const node = findNode(nodeId);
         const rect = node?.querySelector(".table-body");
         if (rect === void 0 || rect === null) return;
         const x = Number.parseFloat(rect.getAttribute("x") ?? "0");
@@ -413,7 +540,7 @@
         const query = searchInput instanceof HTMLInputElement ? searchInput.value : "";
         const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
         const items = visibleTables.map((table) => {
-          const node = Array.from(getNodes()).find((c) => getNodeId(c) === table.id);
+          const node = findNode(table.id);
           return {
             table,
             isSelected: state.selectedNode === table.id,
@@ -438,77 +565,114 @@
           }
         );
       };
-      const applySelection = (tableId) => {
-        if (tableId === null) {
-          clearHighlightClasses(svgRoot, getNodes);
-          renderDrawer(void 0, state, drawerEls);
-          emitViewerEvent("relune:node-cleared", void 0);
+      const renderInteraction = () => {
+        clearHighlightClasses(svgRoot, getNodes);
+        hideHoverPopover(hoverEls);
+        if (state.selectedNode !== null) {
+          const highlight = computeNeighborHighlights(state.selectedNode, state);
+          applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
+          renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls);
         } else {
-          const highlight = computeNeighborHighlights(tableId, state);
-          applyHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
-          renderDrawer(state.tableById.get(tableId), state, drawerEls);
-          emitViewerEvent("relune:node-selected", { nodeId: tableId });
+          renderDrawer(void 0, state, drawerEls);
+          if (state.hoveredNode !== null) {
+            const hoveredNode = findNode(state.hoveredNode);
+            if (hoveredNode !== void 0) {
+              const preview = computeHoverPreview(state.hoveredNode, state);
+              applyHoverPreviewClasses(svgRoot, getNodes, getNodeId, preview);
+              renderHoverPopover(
+                state.tableById.get(state.hoveredNode),
+                hoverEls,
+                hoverPopoverPosition(hoveredNode)
+              );
+            } else {
+              state.hoveredNode = null;
+            }
+          }
         }
         syncObjectBrowser();
       };
+      const setSelectedNode = (tableId) => {
+        const previous = state.selectedNode;
+        state.selectedNode = tableId;
+        state.hoveredNode = null;
+        renderInteraction();
+        if (previous === tableId) {
+          return;
+        }
+        if (tableId === null) {
+          emitViewerEvent("relune:node-cleared", void 0);
+        } else {
+          emitViewerEvent("relune:node-selected", { nodeId: tableId });
+        }
+      };
+      const clearHoverPreview = () => {
+        if (state.selectedNode !== null || state.hoveredNode === null) {
+          return;
+        }
+        state.hoveredNode = null;
+        renderInteraction();
+      };
       getNodes().forEach((node) => {
+        const nodeId = getNodeId(node);
         node.addEventListener("mouseenter", () => {
           if (state.selectedNode !== null) return;
-          const nodeId = getNodeId(node);
           if (nodeId !== null) {
-            const highlight = computeNeighborHighlights(nodeId, state);
-            applyHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
+            state.hoveredNode = nodeId;
+            renderInteraction();
           }
         });
         node.addEventListener("mouseleave", () => {
-          if (state.selectedNode === null) {
-            clearHighlightClasses(svgRoot, getNodes);
+          if (state.selectedNode === null && state.hoveredNode === nodeId) {
+            state.hoveredNode = null;
+            renderInteraction();
           }
         });
         node.addEventListener("click", (event) => {
           event.stopPropagation();
-          const nodeId = getNodeId(node);
           if (nodeId === null) return;
           if (state.selectedNode === nodeId) {
-            state.selectedNode = null;
-            applySelection(null);
+            setSelectedNode(null);
           } else {
-            state.selectedNode = nodeId;
-            applySelection(nodeId);
+            setSelectedNode(nodeId);
           }
         });
       });
       svgRoot.addEventListener("click", () => {
         if (state.selectedNode !== null) {
-          state.selectedNode = null;
-          applySelection(null);
+          setSelectedNode(null);
         }
       });
       drawerClose?.addEventListener("click", () => {
-        state.selectedNode = null;
-        applySelection(null);
+        setSelectedNode(null);
       });
-      searchInput?.addEventListener("input", () => syncObjectBrowser());
-      document.addEventListener("relune:filters-changed", syncObjectBrowser);
-      document.addEventListener("relune:search-changed", syncObjectBrowser);
-      document.addEventListener("relune:groups-changed", syncObjectBrowser);
+      const handleVisibilityStateChange = () => {
+        if (state.selectedNode === null && state.hoveredNode !== null) {
+          state.hoveredNode = null;
+          renderInteraction();
+          return;
+        }
+        syncObjectBrowser();
+      };
+      searchInput?.addEventListener("input", handleVisibilityStateChange);
+      document.addEventListener("relune:filters-changed", handleVisibilityStateChange);
+      document.addEventListener("relune:search-changed", handleVisibilityStateChange);
+      document.addEventListener("relune:groups-changed", handleVisibilityStateChange);
+      document.addEventListener("relune:viewport-changed", clearHoverPreview);
       runtime.selection = {
         clear() {
-          state.selectedNode = null;
-          applySelection(null);
+          setSelectedNode(null);
         },
         select(nodeId) {
-          const node = Array.from(getNodes()).find((c) => getNodeId(c) === nodeId);
+          const node = findNode(nodeId);
           if (node === void 0) return;
-          state.selectedNode = nodeId;
-          applySelection(nodeId);
+          setSelectedNode(nodeId);
         },
         getSelected() {
           return state.selectedNode;
         }
       };
       markViewerModuleReady("selection");
-      syncObjectBrowser();
+      renderInteraction();
     }
   }
 })();

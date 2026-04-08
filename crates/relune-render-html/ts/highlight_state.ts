@@ -1,6 +1,7 @@
 import type { EdgeMetadata, TableMetadata } from './metadata';
 
 export interface HighlightState {
+  hoveredNode: string | null;
   selectedNode: string | null;
   tableById: Map<string, TableMetadata>;
   inboundMap: Record<string, { node: string; edge: EdgeMetadata }[]>;
@@ -22,5 +23,5 @@ export function createHighlightState(
     (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
   }
 
-  return { selectedNode: null, tableById, inboundMap, outboundMap, edges };
+  return { hoveredNode: null, selectedNode: null, tableById, inboundMap, outboundMap, edges };
 }

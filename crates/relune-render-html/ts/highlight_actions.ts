@@ -1,18 +1,22 @@
 import type { TableMetadata } from './metadata';
 import type { HighlightState } from './highlight_state';
 
-export interface NeighborHighlight {
-  selectedId: string;
+interface HighlightNeighborhood {
   neighborIds: Set<string>;
   connectedEdgeIndices: Set<number>;
   inboundNodeIds: Set<string>;
   outboundNodeIds: Set<string>;
 }
 
-export function computeNeighborHighlights(
-  nodeId: string,
-  state: HighlightState,
-): NeighborHighlight {
+export interface NeighborHighlight extends HighlightNeighborhood {
+  selectedId: string;
+}
+
+export interface HoverPreview extends HighlightNeighborhood {
+  hoveredId: string;
+}
+
+function collectNeighborhood(nodeId: string, state: HighlightState): HighlightNeighborhood {
   const inbound = state.inboundMap[nodeId] ?? [];
   const outbound = state.outboundMap[nodeId] ?? [];
   const neighborIds = new Set<string>();
@@ -35,7 +39,18 @@ export function computeNeighborHighlights(
     }
   });
 
-  return { selectedId: nodeId, neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
+  return { neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
+}
+
+export function computeNeighborHighlights(
+  nodeId: string,
+  state: HighlightState,
+): NeighborHighlight {
+  return { selectedId: nodeId, ...collectNeighborhood(nodeId, state) };
+}
+
+export function computeHoverPreview(nodeId: string, state: HighlightState): HoverPreview {
+  return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
 }
 
 export function matchesBrowserQuery(table: TableMetadata, query: string): boolean {

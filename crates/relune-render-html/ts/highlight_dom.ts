@@ -1,6 +1,11 @@
-import type { EdgeMetadata, IssueMetadata, TableMetadata } from './metadata';
+import {
+  tableDisplayName,
+  type EdgeMetadata,
+  type IssueMetadata,
+  type TableMetadata,
+} from './metadata';
 import type { HighlightState } from './highlight_state';
-import type { NeighborHighlight } from './highlight_actions';
+import type { HoverPreview, NeighborHighlight } from './highlight_actions';
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -45,22 +50,30 @@ function metricCard(label: string, value: string): HTMLDivElement {
 export type NodeQuery = () => NodeListOf<Element>;
 export type NodeIdFn = (node: Element) => string | null;
 
+const SELECTED_NODE_CLASSES = [
+  'highlighted-neighbor',
+  'dimmed-by-highlight',
+  'selected-node',
+  'inbound',
+  'outbound',
+];
+const HOVER_NODE_CLASSES = [
+  'hover-preview-node',
+  'hover-preview-neighbor',
+  'hover-inbound',
+  'hover-outbound',
+];
+
 export function clearHighlightClasses(svgRoot: Element, getNodes: NodeQuery): void {
   getNodes().forEach((node) => {
-    node.classList.remove(
-      'highlighted-neighbor',
-      'dimmed-by-highlight',
-      'selected-node',
-      'inbound',
-      'outbound',
-    );
+    node.classList.remove(...SELECTED_NODE_CLASSES, ...HOVER_NODE_CLASSES);
   });
   svgRoot.querySelectorAll('.edge').forEach((edge) => {
-    edge.classList.remove('highlighted-neighbor', 'dimmed-by-highlight');
+    edge.classList.remove('highlighted-neighbor', 'dimmed-by-highlight', 'hover-preview-edge');
   });
 }
 
-export function applyHighlightClasses(
+export function applySelectedHighlightClasses(
   svgRoot: Element,
   getNodes: NodeQuery,
   getNodeId: NodeIdFn,
@@ -90,6 +103,30 @@ export function applyHighlightClasses(
   });
 }
 
+export function applyHoverPreviewClasses(
+  svgRoot: Element,
+  getNodes: NodeQuery,
+  getNodeId: NodeIdFn,
+  preview: HoverPreview,
+): void {
+  getNodes().forEach((node) => {
+    const id = getNodeId(node);
+    if (id === preview.hoveredId) {
+      node.classList.add('hover-preview-node');
+    } else if (id !== null && preview.neighborIds.has(id)) {
+      node.classList.add('hover-preview-neighbor');
+      const isInbound = preview.inboundNodeIds.has(id);
+      const isOutbound = preview.outboundNodeIds.has(id);
+      node.classList.toggle('hover-inbound', isInbound && !isOutbound);
+      node.classList.toggle('hover-outbound', isOutbound && !isInbound);
+    }
+  });
+
+  svgRoot.querySelectorAll('.edge').forEach((edgeElement, index) => {
+    edgeElement.classList.toggle('hover-preview-edge', preview.connectedEdgeIndices.has(index));
+  });
+}
+
 // ── Detail drawer ───────────────────────────────────────────────────────────
 
 export interface DrawerElements {
@@ -104,6 +141,20 @@ export interface DrawerElements {
   relationsEmpty: HTMLElement;
   issues: HTMLElement | null;
   issuesEmpty: HTMLElement | null;
+}
+
+export interface HoverPopoverElements {
+  popover: HTMLElement;
+  kind: HTMLElement;
+  title: HTMLElement;
+  subtitle: HTMLElement;
+  metrics: HTMLElement;
+  badges: HTMLElement;
+}
+
+export interface PopoverPosition {
+  left: number;
+  top: number;
 }
 
 export function renderDrawer(
@@ -180,6 +231,51 @@ export function renderDrawer(
       }
     }
   }
+}
+
+export function hideHoverPopover(elements: HoverPopoverElements): void {
+  elements.popover.setAttribute('hidden', '');
+  elements.popover.style.removeProperty('left');
+  elements.popover.style.removeProperty('top');
+  elements.popover.style.removeProperty('visibility');
+  clearChildren(elements.metrics);
+  clearChildren(elements.badges);
+}
+
+export function renderHoverPopover(
+  table: TableMetadata | undefined,
+  elements: HoverPopoverElements,
+  position: PopoverPosition | undefined,
+): void {
+  if (table === undefined || position === undefined) {
+    hideHoverPopover(elements);
+    return;
+  }
+
+  elements.kind.textContent = table.kind;
+  elements.title.textContent = tableDisplayName(table);
+  elements.subtitle.textContent = table.schema_name
+    ? `${table.schema_name}.${table.table_name}`
+    : table.table_name;
+
+  clearChildren(elements.metrics);
+  elements.metrics.append(
+    summaryMetric('Cols', String(table.columns.length)),
+    summaryMetric('In', String(table.inbound_count)),
+    summaryMetric('Out', String(table.outbound_count)),
+  );
+
+  clearChildren(elements.badges);
+  if (table.diff_kind) {
+    elements.badges.appendChild(diffBadge(table.diff_kind));
+  }
+
+  const issues = table.issues ?? [];
+  if (issues.length > 0) {
+    elements.badges.appendChild(issueCountBadge(issues));
+  }
+
+  placePopover(elements.popover, position);
 }
 
 function buildColumnElement(column: {
@@ -285,6 +381,56 @@ function buildIssueElement(issue: IssueMetadata): HTMLDivElement {
   }
 
   return issueEl;
+}
+
+function summaryMetric(label: string, value: string): HTMLSpanElement {
+  const metric = document.createElement('span');
+  metric.className = 'hover-popover-metric';
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'hover-popover-metric-label';
+  labelEl.textContent = label;
+
+  const valueEl = document.createElement('span');
+  valueEl.className = 'hover-popover-metric-value';
+  valueEl.textContent = value;
+
+  metric.append(labelEl, valueEl);
+  return metric;
+}
+
+function issueCountBadge(issues: IssueMetadata[]): HTMLSpanElement {
+  const badge = document.createElement('span');
+  const safeSeverity = safeCssToken(highestIssueSeverity(issues), ALLOWED_SEVERITIES);
+  badge.className =
+    safeSeverity !== ''
+      ? `hover-popover-badge hover-popover-badge-${safeSeverity}`
+      : 'hover-popover-badge';
+  badge.textContent = `${issues.length} issue${issues.length === 1 ? '' : 's'}`;
+  return badge;
+}
+
+function highestIssueSeverity(issues: IssueMetadata[]): string {
+  const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
+  return issues.reduce((max, issue) => {
+    return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
+  }, 'hint');
+}
+
+function placePopover(popover: HTMLElement, position: PopoverPosition): void {
+  const margin = 12;
+  popover.removeAttribute('hidden');
+  popover.style.left = `${Math.round(position.left)}px`;
+  popover.style.top = `${Math.round(position.top)}px`;
+  popover.style.visibility = 'hidden';
+
+  const rect = popover.getBoundingClientRect();
+  const left = Math.max(margin, Math.min(position.left, window.innerWidth - rect.width - margin));
+  const top = Math.max(margin, Math.min(position.top, window.innerHeight - rect.height - margin));
+
+  popover.style.left = `${Math.round(left)}px`;
+  popover.style.top = `${Math.round(top)}px`;
+  popover.style.visibility = 'visible';
 }
 
 // ── Object browser ──────────────────────────────────────────────────────────

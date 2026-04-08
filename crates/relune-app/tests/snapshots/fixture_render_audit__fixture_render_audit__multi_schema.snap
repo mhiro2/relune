@@ -43,7 +43,7 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 379568,
+      "bytes": 390264,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
