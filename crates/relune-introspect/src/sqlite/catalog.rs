@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use sqlx::sqlite::SqlitePool;
 
+use crate::catalog::raw_schema;
 use crate::common::{
     RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView, parse_referential_action,
 };
@@ -53,14 +54,14 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
 
     let views = list_views(pool).await?;
 
-    Ok(RawSchema {
+    Ok(raw_schema(
         tables,
         columns,
         foreign_keys,
         indexes,
         views,
-        enums: Vec::new(),
-    })
+        Vec::new(),
+    ))
 }
 
 async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<String>, IntrospectError> {

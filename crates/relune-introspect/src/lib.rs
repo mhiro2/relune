@@ -20,7 +20,9 @@
 //! println!("Found {} tables", schema.tables.len());
 //! ```
 
+mod catalog;
 pub mod common;
+mod connect;
 pub mod error;
 pub mod mysql;
 pub mod postgres;

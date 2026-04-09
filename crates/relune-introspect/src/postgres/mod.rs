@@ -45,6 +45,7 @@ use relune_core::Schema;
 use sqlx::postgres::PgPoolOptions;
 use tracing::{debug, error, info, instrument};
 
+use crate::connect::{acquire_timeout, close_pool_when_done, postgres_connect_options};
 use crate::error::{IntrospectError, connect_error};
 
 /// Introspects a `PostgreSQL` database and extracts its schema metadata.
@@ -105,11 +106,13 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
 
     debug!("Connecting to PostgreSQL database");
 
+    let connect_options = postgres_connect_options(&database_url)?;
+
     // Create a connection pool
     let pool = PgPoolOptions::new()
         .max_connections(catalog::pool_max_connections())
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .connect(&database_url)
+        .acquire_timeout(acquire_timeout())
+        .connect_with(connect_options)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to connect to database");
@@ -118,31 +121,31 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
 
     debug!("Successfully connected to database");
 
-    // Fetch metadata from catalog
-    info!("Fetching database catalog metadata");
-    let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
+    close_pool_when_done(&pool, async {
+        // Fetch metadata from catalog
+        info!("Fetching database catalog metadata");
+        let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
 
-    debug!(
-        tables = raw_schema.tables.len(),
-        views = raw_schema.views.len(),
-        "Retrieved raw catalog data"
-    );
+        debug!(
+            tables = raw_schema.tables.len(),
+            views = raw_schema.views.len(),
+            "Retrieved raw catalog data"
+        );
 
-    // Convert raw catalog data to Schema
-    info!("Mapping catalog metadata to Schema");
-    let schema = map::map_to_schema(raw_schema)?;
+        // Convert raw catalog data to Schema
+        info!("Mapping catalog metadata to Schema");
+        let schema = map::map_to_schema(raw_schema)?;
 
-    info!(
-        tables = schema.tables.len(),
-        views = schema.views.len(),
-        enums = schema.enums.len(),
-        "Introspection completed successfully"
-    );
+        info!(
+            tables = schema.tables.len(),
+            views = schema.views.len(),
+            enums = schema.enums.len(),
+            "Introspection completed successfully"
+        );
 
-    // Pool::close() is infallible in sqlx 0.8; await it so connections drain cleanly.
-    pool.close().await;
-
-    Ok(schema)
+        Ok(schema)
+    })
+    .await
 }
 
 #[cfg(test)]
