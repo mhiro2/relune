@@ -162,15 +162,6 @@ impl DiagnosticPrinter {
         }
     }
 
-    /// Check if there are any warnings in the diagnostics.
-    pub fn has_warnings(diagnostics: &[Diagnostic]) -> bool {
-        diagnostics.iter().any(|d| d.severity == Severity::Warning)
-    }
-
-    /// Check if there are any errors in the diagnostics.
-    pub fn has_errors(diagnostics: &[Diagnostic]) -> bool {
-        diagnostics.iter().any(|d| d.severity == Severity::Error)
-    }
 }
 
 /// Print stats to stderr.
@@ -199,20 +190,38 @@ pub fn check_diagnostics(
     color: ColorWhen,
     fail_on_warning: bool,
 ) -> crate::error::CliResult<()> {
+    let threshold = if fail_on_warning {
+        Severity::Warning
+    } else {
+        Severity::Error
+    };
+    check_diagnostics_at_or_above(diagnostics, color, threshold)
+}
+
+/// Print diagnostics, then fail when any diagnostic meets the threshold.
+pub fn check_diagnostics_at_or_above(
+    diagnostics: &[Diagnostic],
+    color: ColorWhen,
+    minimum_severity: Severity,
+) -> crate::error::CliResult<()> {
     let printer = DiagnosticPrinter::new(color);
     printer.print_all(diagnostics);
 
-    if fail_on_warning && DiagnosticPrinter::has_warnings(diagnostics) {
-        return Err(crate::error::CliError::warning(anyhow::anyhow!(
-            "Warnings were emitted and --fail-on-warning is set"
-        )));
-    }
-    if DiagnosticPrinter::has_errors(diagnostics) {
-        return Err(crate::error::CliError::general(anyhow::anyhow!(
+    let highest = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.severity)
+        .filter(|severity| *severity >= minimum_severity)
+        .max();
+
+    match highest {
+        Some(Severity::Error) => Err(crate::error::CliError::general(anyhow::anyhow!(
             "Errors were encountered during processing"
-        )));
+        ))),
+        Some(_severity) => Err(crate::error::CliError::warning(anyhow::anyhow!(
+            "Diagnostics at or above {minimum_severity} were emitted"
+        ))),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Write string content to an output destination and finalise the writer.
@@ -326,8 +335,29 @@ mod tests {
             Diagnostic::error(codes::parse_error(), "err"),
         ];
 
-        assert!(DiagnosticPrinter::has_warnings(&diagnostics));
-        assert!(DiagnosticPrinter::has_errors(&diagnostics));
+        assert!(diagnostics.iter().any(|d| d.severity == Severity::Warning));
+        assert!(diagnostics.iter().any(|d| d.severity == Severity::Error));
         assert_eq!(diagnostics[0].severity, Severity::Info);
+    }
+
+    #[test]
+    fn diagnostics_threshold_respects_info_level() {
+        let diagnostics = vec![Diagnostic::info(codes::parse_skipped(), "ignored")];
+
+        let error = check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Info)
+            .expect_err("info diagnostics should trip the configured threshold");
+        assert_eq!(error.exit_code(), 3);
+        assert!(error.to_string().contains("at or above info"));
+    }
+
+    #[test]
+    fn diagnostics_threshold_keeps_errors_fatal() {
+        let diagnostics = vec![Diagnostic::error(codes::parse_error(), "syntax error")];
+
+        let error =
+            check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Warning)
+                .expect_err("errors should remain fatal");
+        assert_eq!(error.exit_code(), 1);
+        assert!(error.to_string().contains("Errors were encountered"));
     }
 }

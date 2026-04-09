@@ -2,19 +2,16 @@
 source: crates/relune-cli/tests/snapshot_tests.rs
 expression: stdout
 ---
-Compare two schemas and show differences
+Generate schema documentation as Markdown
 
-Usage: relune diff [OPTIONS] <--before <FILE>|--before-sql-text <TEXT>|--before-schema-json <FILE>> <--after <FILE>|--after-sql-text <TEXT>|--after-schema-json <FILE>>
+Usage: relune doc [OPTIONS] <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
 
 Options:
-      --before <FILE>
-          Baseline SQL or schema JSON file
-
   -c, --config <CONFIG>
           Path to configuration file (TOML; merges with CLI flags)
 
-      --before-sql-text <TEXT>
-          Baseline SQL DDL directly from a string
+      --sql <FILE>
+          Read SQL DDL from a file
 
       --color <COLOR>
           Colorize output
@@ -26,23 +23,21 @@ Options:
           
           [default: auto]
 
-      --before-schema-json <FILE>
-          Baseline normalized schema JSON file
+      --sql-text <TEXT>
+          Read SQL DDL directly from a string
+
+      --schema-json <FILE>
+          Read a normalized schema JSON file
 
   -v, --verbose...
           Increase log verbosity (can be repeated)
 
-      --after <FILE>
-          Updated SQL or schema JSON file
+      --db-url <URL>
+          Database URL for live introspection: `postgres://`, `mysql://`, `mariadb://`, or `sqlite:`
+          (no SQL file)
 
   -q, --quiet
           Reduce non-error output
-
-      --after-sql-text <TEXT>
-          Updated SQL DDL directly from a string
-
-      --after-schema-json <FILE>
-          Updated normalized schema JSON file
 
       --dialect <DIALECT>
           SQL dialect for parsing (auto-detected if omitted)
@@ -52,21 +47,11 @@ Options:
           - postgres: `PostgreSQL` dialect
           - mysql:    `MySQL` dialect
           - sqlite:   `SQLite` dialect
-
-  -f, --format <FORMAT>
-          Output format
-
-          Possible values:
-          - text: Human-readable text output
-          - json: JSON output
-          - svg:  SVG diagram with diff overlay
-          - html: Self-contained HTML with diff overlay
+          
+          [default: auto]
 
   -o, --out <FILE>
           Output file path; stdout if omitted
-
-      --stdout
-          Allow raw SVG/HTML output on stdout even when stdout is a terminal
 
       --fail-on-warning
           Exit with non-zero code if warnings are emitted

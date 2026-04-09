@@ -35,7 +35,7 @@ pub fn run_inspect(
     // Execute inspect
     let result = inspect(request).context("Failed to inspect schema")?;
 
-    check_diagnostics(&result.diagnostics, color, false)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     // Format and write output.
     let output = match merged.format {

@@ -1,6 +1,5 @@
 ---
 source: crates/relune-cli/tests/integration_tests.rs
-assertion_line: 45
 expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 2
@@ -9,4 +8,4 @@ Error: Failed to load config file '$WORKSPACE/fixtures/config/unknown_nested_key
   |
 2 | tehme = "dark"
   | ^^^^^
-unknown field `tehme`, expected one of `format`, `theme`, `layout`, `edge_style`, `direction`, `group_by`, `focus`, `depth`, `include`, `exclude`, `show_legend`, `show_stats`
+unknown field `tehme`, expected one of `format`, `theme`, `layout`, `edge_style`, `direction`, `group_by`, `focus`, `depth`, `include`, `exclude`, `show_legend`, `show_stats`, `fail_on_warning`

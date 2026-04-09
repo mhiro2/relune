@@ -6,7 +6,7 @@ use super::input::InputSelection;
 use crate::cli::{ColorWhen, LintArgs, LintFormat, LintSeverity};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
-use crate::output::{check_diagnostics, print_success, write_output};
+use crate::output::{check_diagnostics_at_or_above, print_success, write_output};
 use relune_app::{LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
 use relune_core::Severity;
 
@@ -24,12 +24,7 @@ pub fn run_lint(
     let input = InputSelection::from_lint(args).resolve(args.dialect.into(), "input")?;
 
     // Convert severity from CLI to core type
-    let fail_on = merged.deny.map(|s| match s {
-        LintSeverity::Error => Severity::Error,
-        LintSeverity::Warning => Severity::Warning,
-        LintSeverity::Info => Severity::Info,
-        LintSeverity::Hint => Severity::Hint,
-    });
+    let fail_on = merged.deny.map(lint_severity_to_core);
 
     // Build request
     let request = LintRequest {
@@ -45,7 +40,17 @@ pub fn run_lint(
     // Execute lint
     let result = lint(request).context("Failed to lint schema")?;
 
-    check_diagnostics(&result.diagnostics, color, false)?;
+    let diagnostic_threshold = merged
+        .deny
+        .map(lint_severity_to_core)
+        .or(if merged.fail_on_warning {
+            Some(Severity::Warning)
+        } else {
+            None
+        })
+        .unwrap_or(Severity::Error);
+
+    check_diagnostics_at_or_above(&result.diagnostics, color, diagnostic_threshold)?;
 
     // Format and write output.
     let output = match merged.format {
@@ -76,4 +81,13 @@ pub fn run_lint(
     }
 
     Ok(())
+}
+
+const fn lint_severity_to_core(severity: LintSeverity) -> Severity {
+    match severity {
+        LintSeverity::Error => Severity::Error,
+        LintSeverity::Warning => Severity::Warning,
+        LintSeverity::Info => Severity::Info,
+        LintSeverity::Hint => Severity::Hint,
+    }
 }

@@ -1,6 +1,5 @@
 ---
 source: crates/relune-cli/tests/snapshot_tests.rs
-assertion_line: 45
 expression: stdout
 ---
 Export schema JSON, graph JSON, layout JSON, or diagram text (Mermaid / D2 / DOT)
@@ -102,6 +101,9 @@ Options:
           - left-to-right: Left to right
           - right-to-left: Right to left
           - bottom-to-top: Bottom to top
+
+      --fail-on-warning
+          Exit with non-zero code if warnings are emitted
 
   -h, --help
           Print help (see a summary with '-h')

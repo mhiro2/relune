@@ -46,6 +46,24 @@ fn snapshot_help_export() {
 }
 
 #[test]
+fn snapshot_help_doc() {
+    let mut cmd = relune();
+    let output = cmd.arg("doc").arg("--help").assert().success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    insta::assert_snapshot!("help_doc", stdout);
+}
+
+#[test]
+fn snapshot_help_lint() {
+    let mut cmd = relune();
+    let output = cmd.arg("lint").arg("--help").assert().success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    insta::assert_snapshot!("help_lint", stdout);
+}
+
+#[test]
 fn snapshot_help_diff() {
     let mut cmd = relune();
     let output = cmd.arg("diff").arg("--help").assert().success();
