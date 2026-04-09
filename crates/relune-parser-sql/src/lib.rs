@@ -463,15 +463,15 @@ fn truncate_unsupported_debug(debug_str: &str) -> String {
 
 fn parse_mysql_enum_like_value(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-) -> Option<String> {
-    if chars.next()? != '\'' {
-        return None;
+) -> Result<String, MySqlEnumLikeParseError> {
+    if chars.next() != Some('\'') {
+        return Err(MySqlEnumLikeParseError::ExpectedQuotedValue);
     }
 
     let mut value = String::new();
     loop {
-        match chars.next()? {
-            '\'' => {
+        match chars.next() {
+            Some('\'') => {
                 if chars.peek() == Some(&'\'') {
                     value.push('\'');
                     chars.next();
@@ -479,8 +479,10 @@ fn parse_mysql_enum_like_value(
                     break;
                 }
             }
-            '\\' => {
-                let escaped = chars.next()?;
+            Some('\\') => {
+                let Some(escaped) = chars.next() else {
+                    return Err(MySqlEnumLikeParseError::TrailingEscapeSequence);
+                };
                 match escaped {
                     '\\' | '\'' => value.push(escaped),
                     other => {
@@ -489,22 +491,43 @@ fn parse_mysql_enum_like_value(
                     }
                 }
             }
-            c => value.push(c),
+            Some(c) => value.push(c),
+            None => return Err(MySqlEnumLikeParseError::UnterminatedQuotedValue),
         }
     }
 
-    Some(value)
+    Ok(value)
 }
 
-fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> {
-    let start = data_type.find('(')?;
-    let end = data_type.rfind(')')?;
+#[derive(Debug, Error, PartialEq, Eq)]
+enum MySqlEnumLikeParseError {
+    #[error("expected a quoted enum/set value")]
+    ExpectedQuotedValue,
+    #[error("enum/set value ended with an incomplete escape sequence")]
+    TrailingEscapeSequence,
+    #[error("enum/set value is missing a closing quote")]
+    UnterminatedQuotedValue,
+    #[error("enum/set definition is missing a closing parenthesis")]
+    MissingClosingParenthesis,
+    #[error("enum/set definition contains an unexpected separator")]
+    UnexpectedSeparator,
+}
+
+fn parse_mysql_enum_like_type(
+    data_type: &str,
+) -> Result<Option<(String, Vec<String>)>, MySqlEnumLikeParseError> {
+    let Some(start) = data_type.find('(') else {
+        return Ok(None);
+    };
+    let Some(end) = data_type.rfind(')') else {
+        return Err(MySqlEnumLikeParseError::MissingClosingParenthesis);
+    };
     let kind = data_type[..start].trim();
     if !kind.eq_ignore_ascii_case("enum") && !kind.eq_ignore_ascii_case("set") {
-        return None;
+        return Ok(None);
     }
     if start.saturating_add(1) > end {
-        return None;
+        return Ok(None);
     }
 
     let mut values = Vec::new();
@@ -526,35 +549,56 @@ fn parse_mysql_enum_like_type(data_type: &str) -> Option<(String, Vec<String>)> 
                 chars.next();
             }
             None => break,
-            _ => return None,
+            _ => return Err(MySqlEnumLikeParseError::UnexpectedSeparator),
         }
     }
 
-    Some((kind.to_ascii_lowercase(), values))
+    Ok(Some((kind.to_ascii_lowercase(), values)))
 }
 
-fn canonicalize_mysql_enum_like_type(data_type: &str) -> Option<String> {
-    let (kind, values) = parse_mysql_enum_like_type(data_type)?;
+fn serialize_mysql_enum_like_type(kind: &str, values: &[String]) -> String {
     let serialized_values = values
-        .into_iter()
+        .iter()
         .map(|value| {
             let escaped = value.replace('\\', "\\\\").replace('\'', "''");
             format!("'{escaped}'")
         })
         .collect::<Vec<_>>()
         .join(",");
-    Some(format!("{kind}({serialized_values})"))
+    format!("{kind}({serialized_values})")
 }
 
-fn infer_mysql_enums(tables: &[Table]) -> Vec<Enum> {
+fn canonicalize_mysql_enum_like_type(
+    data_type: &str,
+) -> Result<Option<String>, MySqlEnumLikeParseError> {
+    Ok(parse_mysql_enum_like_type(data_type)?
+        .map(|(kind, values)| serialize_mysql_enum_like_type(&kind, &values)))
+}
+
+fn infer_mysql_enums(ctx: &mut ParseContext, tables: &[Table]) -> Vec<Enum> {
     let mut enums = Vec::new();
     let mut seen = HashSet::new();
 
     for table in tables {
         for column in &table.columns {
-            let Some(enum_name) = canonicalize_mysql_enum_like_type(&column.data_type) else {
-                continue;
+            let parsed = match parse_mysql_enum_like_type(&column.data_type) {
+                Ok(Some(parsed)) => parsed,
+                Ok(None) => continue,
+                Err(error) => {
+                    ctx.diagnostics.push(Diagnostic::warning(
+                        codes::parse_unsupported(),
+                        format!(
+                            "Malformed MySQL enum/set definition on {}.{}: {} ({error})",
+                            table.qualified_name(),
+                            column.name,
+                            column.data_type
+                        ),
+                    ));
+                    continue;
+                }
             };
+            let (kind, values) = parsed;
+            let enum_name = serialize_mysql_enum_like_type(&kind, &values);
             let key = format!(
                 "{}:{}",
                 table.schema_name.as_deref().unwrap_or_default(),
@@ -564,9 +608,6 @@ fn infer_mysql_enums(tables: &[Table]) -> Vec<Enum> {
                 continue;
             }
 
-            let Some((_, values)) = parse_mysql_enum_like_type(&enum_name) else {
-                continue;
-            };
             enums.push(Enum {
                 id: normalized_stable_id(table.schema_name.as_deref(), &enum_name),
                 schema_name: table.schema_name.clone(),
@@ -921,7 +962,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     if ctx.dialect == SqlDialect::Mysql {
         let mut seen_enum_ids: HashSet<String> =
             enums.iter().map(|enum_| enum_.id.clone()).collect();
-        for enum_ in infer_mysql_enums(&tables) {
+        for enum_ in infer_mysql_enums(&mut ctx, &tables) {
             if seen_enum_ids.insert(enum_.id.clone()) {
                 enums.push(enum_);
             }
@@ -1485,8 +1526,11 @@ fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedCo
     }
 
     let column_name = normalize_identifier(&column.name.value);
-    let data_type = canonicalize_mysql_enum_like_type(&column.data_type.to_string())
-        .unwrap_or_else(|| column.data_type.to_string());
+    let raw_data_type = column.data_type.to_string();
+    let data_type = canonicalize_mysql_enum_like_type(&raw_data_type)
+        .ok()
+        .flatten()
+        .unwrap_or(raw_data_type);
     ParsedColumn {
         name: column_name,
         data_type,
@@ -2892,14 +2936,14 @@ mod tests {
 
     #[test]
     fn test_parse_mysql_enum_like_type_rejects_reversed_parentheses() {
-        assert_eq!(parse_mysql_enum_like_type(")enum("), None);
+        assert_eq!(parse_mysql_enum_like_type(")enum("), Ok(None));
     }
 
     #[test]
     fn test_parse_mysql_enum_like_type_preserves_trailing_backslash() {
         assert_eq!(
             parse_mysql_enum_like_type("enum('back\\\\')"),
-            Some(("enum".to_string(), vec!["back\\".to_string()]))
+            Ok(Some(("enum".to_string(), vec!["back\\".to_string()])))
         );
     }
 
@@ -2907,8 +2951,55 @@ mod tests {
     fn test_parse_mysql_enum_like_type_preserves_unknown_backslash_sequences() {
         assert_eq!(
             parse_mysql_enum_like_type(r"enum('line\nbreak')"),
-            Some(("enum".to_string(), vec![r"line\nbreak".to_string()]))
+            Ok(Some(("enum".to_string(), vec![r"line\nbreak".to_string()])))
         );
+    }
+
+    #[test]
+    fn test_parse_mysql_enum_like_type_rejects_incomplete_escape_sequences() {
+        assert_eq!(
+            parse_mysql_enum_like_type("enum('bad\\)"),
+            Err(MySqlEnumLikeParseError::TrailingEscapeSequence)
+        );
+    }
+
+    #[test]
+    fn test_infer_mysql_enums_warns_on_malformed_definitions() {
+        let mut ctx = ParseContext::new();
+        ctx.dialect = SqlDialect::Mysql;
+
+        let enums = infer_mysql_enums(
+            &mut ctx,
+            &[Table {
+                id: TableId(1),
+                stable_id: "users".to_string(),
+                schema_name: None,
+                name: "users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(1),
+                    name: "status".to_string(),
+                    data_type: "enum('bad\\')".to_string(),
+                    nullable: false,
+                    is_primary_key: false,
+                    comment: None,
+                }],
+                foreign_keys: vec![],
+                indexes: vec![],
+                comment: None,
+            }],
+        );
+
+        assert!(enums.is_empty());
+        assert!(
+            ctx.diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.severity == Severity::Warning })
+        );
+        assert!(ctx.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Malformed MySQL enum/set definition")
+        }));
     }
 
     #[test]
