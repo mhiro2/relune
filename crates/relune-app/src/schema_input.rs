@@ -137,7 +137,12 @@ pub async fn schema_from_db_url_async(url: &str) -> Result<Schema, AppError> {
 
     relune_introspect::introspect_database(trimmed)
         .await
-        .map_err(AppError::from)
+        .map_err(|error| sanitized_introspect_error(trimmed, error))
+}
+
+#[cfg(feature = "introspect")]
+fn sanitized_introspect_error(url: &str, error: relune_introspect::IntrospectError) -> AppError {
+    AppError::Introspect(error.sanitized_for_url(url))
 }
 
 #[cfg(test)]
@@ -158,6 +163,17 @@ mod tests {
         let input = InputSource::sql_text("THIS IS NOT VALID SQL");
         let err = schema_from_input(&input).expect_err("invalid SQL should fail");
         assert!(matches!(err, AppError::Input { .. } | AppError::Parse(_)));
+    }
+
+    #[test]
+    fn comment_only_sql_returns_empty_schema_warning() {
+        let input = InputSource::sql_text("-- comments only");
+        let (schema, diagnostics) = schema_from_input(&input).expect("schema");
+
+        assert!(schema.tables.is_empty());
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == relune_core::diagnostic::codes::parse_empty_schema()
+        }));
     }
 
     #[test]
@@ -197,5 +213,21 @@ mod tests {
             AppError::Introspect(relune_introspect::IntrospectError::InvalidDatabaseUrl(_)) => {}
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[cfg(feature = "introspect")]
+    #[test]
+    fn db_url_errors_are_sanitized_before_reaching_app_error() {
+        let url = "postgres://user:secret@localhost/db?password=hunter2&token=abc";
+        let err = sanitized_introspect_error(
+            url,
+            relune_introspect::IntrospectError::connection(format!("failed to connect to {url}")),
+        );
+
+        let message = err.to_string();
+        assert!(message.contains("postgres://***:***@localhost/db?password=***&token=***"));
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("hunter2"));
+        assert!(!message.contains("token=abc"));
     }
 }

@@ -51,7 +51,10 @@ pub use config::{
 };
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 pub use diff::{ChangeKind, SchemaDiff, diff_schemas};
-pub use graph::{EdgeKind, GraphBuildError, GraphEdge, GraphNode, NodeKind, SchemaGraph};
+pub use graph::{
+    EdgeKind, GraphBuildError, GraphEdge, GraphNode, NodeKind, SchemaGraph, SqlRelation,
+    collect_sql_relations,
+};
 pub use layout::{Cardinality, EdgeRoute, RouteStyle};
 pub use lint::{LintIssue, LintResult, LintRuleId, LintStats, lint_schema};
 pub use model::{

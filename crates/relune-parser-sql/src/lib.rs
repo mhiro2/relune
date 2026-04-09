@@ -131,6 +131,13 @@ impl ParseContext {
         );
     }
 
+    fn warn_empty_schema(&mut self) {
+        self.diagnostics.push(Diagnostic::warning(
+            codes::parse_empty_schema(),
+            "No schema objects were produced from the input. Check whether the SQL only contains comments, whitespace, or unsupported statements.",
+        ));
+    }
+
     fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()
@@ -921,17 +928,13 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
         }
     }
 
-    let schema = if tables.is_empty() && views.is_empty() && enums.is_empty() {
-        // Only return None if we have errors; empty schema is valid for no tables/views/enums
-        if ctx.has_errors() {
-            None
-        } else {
-            Some(Schema {
-                tables,
-                views,
-                enums,
-            })
-        }
+    let is_empty_schema = tables.is_empty() && views.is_empty() && enums.is_empty();
+    if is_empty_schema && !ctx.has_errors() {
+        ctx.warn_empty_schema();
+    }
+
+    let schema = if is_empty_schema && ctx.has_errors() {
+        None
     } else {
         Some(Schema {
             tables,
@@ -2225,6 +2228,20 @@ mod tests {
         };
 
         assert!(output_with_errors.has_errors());
+    }
+
+    #[test]
+    fn warns_when_input_produces_empty_schema() {
+        let output = parse_sql_to_schema_with_diagnostics("  -- comments only\n");
+
+        assert!(output.schema.is_some());
+        assert!(output.has_warnings());
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == codes::parse_empty_schema()
+                && diagnostic
+                    .message
+                    .contains("No schema objects were produced")
+        }));
     }
 
     #[test]

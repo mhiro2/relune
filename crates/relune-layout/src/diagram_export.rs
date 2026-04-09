@@ -1,19 +1,65 @@
 //! Text diagram formats for review tooling (Mermaid ER, D2, Graphviz DOT).
 
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::graph::{LayoutEdge, LayoutGraph};
 
-fn node_label_by_id<'a>(graph: &'a LayoutGraph, table_id: &str) -> Cow<'a, str> {
-    match graph
-        .nodes
+fn node_index_by_id(graph: &LayoutGraph, table_id: &str) -> Option<usize> {
+    graph.node_index.get(table_id).copied().or_else(|| {
+        graph.nodes.iter().position(|node| {
+            node.id == table_id || node.table_name == table_id || node.label == table_id
+        })
+    })
+}
+
+fn first_non_empty<'a>(values: &[&'a str]) -> Option<&'a str> {
+    values
         .iter()
-        .find(|n| n.id == table_id || n.table_name == table_id || n.label == table_id)
-    {
-        Some(n) => Cow::Borrowed(n.label.as_str()),
-        None => Cow::Owned(table_id.to_string()),
+        .copied()
+        .find(|value| !value.trim().is_empty())
+}
+
+fn node_display_name(node: &crate::graph::LayoutNode, index: usize) -> Cow<'_, str> {
+    match first_non_empty(&[
+        node.label.as_str(),
+        node.table_name.as_str(),
+        node.id.as_str(),
+    ]) {
+        Some(value) => Cow::Borrowed(value),
+        None => Cow::Owned(format!("node_{}", index + 1)),
     }
+}
+
+fn node_export_id(node: &crate::graph::LayoutNode, index: usize) -> Cow<'_, str> {
+    match first_non_empty(&[
+        node.id.as_str(),
+        node.table_name.as_str(),
+        node.label.as_str(),
+    ]) {
+        Some(value) => Cow::Borrowed(value),
+        None => Cow::Owned(format!("node_{}", index + 1)),
+    }
+}
+
+fn edge_endpoint_name(
+    graph: &LayoutGraph,
+    raw_id: &str,
+    names: &[String],
+    fallback_prefix: &str,
+) -> String {
+    if raw_id.trim().is_empty() {
+        return fallback_export_name(&[], fallback_prefix, names.len());
+    }
+    node_index_by_id(graph, raw_id).map_or_else(
+        || fallback_export_name(&[raw_id], fallback_prefix, names.len()),
+        |index| names[index].clone(),
+    )
+}
+
+fn fallback_export_name(values: &[&str], prefix: &str, index: usize) -> String {
+    first_non_empty(values).map_or_else(|| format!("{prefix}_{}", index + 1), ToOwned::to_owned)
 }
 
 fn mermaid_token_type(data_type: &str) -> String {
@@ -33,16 +79,80 @@ fn mermaid_token_type(data_type: &str) -> String {
         .collect()
 }
 
-fn mermaid_quote_entity(label: &str) -> String {
-    if label.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        label.to_string()
-    } else {
-        format!("\"{}\"", label.replace('"', "'"))
+fn mermaid_escape_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '[' | ']' | '{' | '}' | '(' | ')' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
     }
+    out
+}
+
+fn mermaid_quote_entity(label: &str, fallback_prefix: &str, index: usize) -> String {
+    let label = fallback_export_name(&[label], fallback_prefix, index);
+    format!("\"{}\"", mermaid_escape_text(&label))
+}
+
+fn mermaid_column_name(name: &str, index: usize) -> String {
+    let mut sanitized = String::with_capacity(name.len().max(8));
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            sanitized.push(ch);
+        } else {
+            sanitized.push('_');
+        }
+    }
+    if sanitized.is_empty() {
+        sanitized = format!("column_{}", index + 1);
+    } else if sanitized
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_digit())
+    {
+        sanitized.insert(0, '_');
+    }
+    sanitized
+}
+
+fn mermaid_column_names(node: &crate::graph::LayoutNode) -> Vec<String> {
+    let mut used = HashSet::new();
+    let mut next_suffix = HashMap::<String, usize>::new();
+
+    node.columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            let base = mermaid_column_name(&column.name, index);
+            let mut candidate = base.clone();
+
+            if used.contains(&candidate) {
+                let suffix = next_suffix.entry(base.clone()).or_insert(1);
+                loop {
+                    *suffix += 1;
+                    candidate = format!("{base}_{}", *suffix);
+                    if !used.contains(&candidate) {
+                        break;
+                    }
+                }
+            }
+
+            used.insert(candidate.clone());
+            candidate
+        })
+        .collect()
 }
 
 fn mermaid_escape_edge_label(label: &str) -> String {
-    label.replace('"', "'")
+    mermaid_escape_text(label)
 }
 
 fn format_edge_label(edge: &LayoutEdge) -> String {
@@ -89,20 +199,40 @@ fn dot_escape(s: &str) -> String {
 }
 
 fn d2_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Renders a [`LayoutGraph`] as a Mermaid `erDiagram` document (no markdown fence).
 #[must_use]
 pub fn layout_graph_to_mermaid(graph: &LayoutGraph) -> String {
     let mut out = String::from("erDiagram\n");
+    let node_names: Vec<String> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            mermaid_quote_entity(node_display_name(node, index).as_ref(), "node", index)
+        })
+        .collect();
 
-    for node in &graph.nodes {
-        let name = mermaid_quote_entity(node.label.as_str());
+    for (index, node) in graph.nodes.iter().enumerate() {
+        let name = &node_names[index];
+        let column_names = mermaid_column_names(node);
         let _ = writeln!(&mut out, "  {name} {{");
-        for col in &node.columns {
+        for (column_index, col) in node.columns.iter().enumerate() {
             let t = mermaid_token_type(&col.data_type);
-            let _ = write!(&mut out, "    {t} {}", col.name);
+            let column_name = &column_names[column_index];
+            let _ = write!(&mut out, "    {t} {column_name}");
             if col.is_primary_key {
                 out.push_str(" PK");
             }
@@ -112,13 +242,11 @@ pub fn layout_graph_to_mermaid(graph: &LayoutGraph) -> String {
     }
 
     for edge in &graph.edges {
-        let parent = node_label_by_id(graph, &edge.to);
-        let child = node_label_by_id(graph, &edge.from);
-        let p = mermaid_quote_entity(parent.as_ref());
-        let c = mermaid_quote_entity(child.as_ref());
+        let parent = edge_endpoint_name(graph, &edge.to, &node_names, "parent");
+        let child = edge_endpoint_name(graph, &edge.from, &node_names, "child");
         let label = mermaid_escape_edge_label(&format_edge_label(edge));
         // One referenced row, zero or more referencing rows (`||--o{`).
-        let _ = writeln!(&mut out, "  {p} ||--o{{ {c} : \"{label}\"");
+        let _ = writeln!(&mut out, "  {parent} ||--o{{ {child} : \"{label}\"");
     }
 
     out
@@ -128,14 +256,30 @@ pub fn layout_graph_to_mermaid(graph: &LayoutGraph) -> String {
 #[must_use]
 pub fn layout_graph_to_d2(graph: &LayoutGraph) -> String {
     let mut out = String::new();
-    for node in &graph.nodes {
-        let id = d2_escape(&node.label);
-        let lbl = d2_escape(&node.label);
+    let node_ids: Vec<String> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            fallback_export_name(&[node_export_id(node, index).as_ref()], "node", index)
+        })
+        .collect();
+    let node_labels: Vec<String> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            fallback_export_name(&[node_display_name(node, index).as_ref()], "node", index)
+        })
+        .collect();
+    for index in 0..graph.nodes.len() {
+        let id = d2_escape(&node_ids[index]);
+        let lbl = d2_escape(&node_labels[index]);
         let _ = writeln!(&mut out, "\"{id}\": {{ label: \"{lbl}\" }}");
     }
     for edge in &graph.edges {
-        let from = d2_escape(node_label_by_id(graph, &edge.from).as_ref());
-        let to = d2_escape(node_label_by_id(graph, &edge.to).as_ref());
+        let from = d2_escape(&edge_endpoint_name(graph, &edge.from, &node_ids, "from"));
+        let to = d2_escape(&edge_endpoint_name(graph, &edge.to, &node_ids, "to"));
         let lbl = d2_escape(&format_edge_label(edge));
         let _ = writeln!(&mut out, "\"{from}\" -> \"{to}\": \"{lbl}\"");
     }
@@ -149,15 +293,31 @@ pub fn layout_graph_to_dot(graph: &LayoutGraph) -> String {
     out.push_str("  graph [rankdir=BT];\n");
     out.push_str("  node [shape=box, fontname=\"Helvetica\"];\n");
     out.push_str("  edge [fontname=\"Helvetica\"];\n");
+    let node_ids: Vec<String> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            fallback_export_name(&[node_export_id(node, index).as_ref()], "node", index)
+        })
+        .collect();
+    let node_labels: Vec<String> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            fallback_export_name(&[node_display_name(node, index).as_ref()], "node", index)
+        })
+        .collect();
 
-    for node in &graph.nodes {
-        let id = dot_escape(&node.id);
-        let label = dot_escape(&node.label);
+    for index in 0..graph.nodes.len() {
+        let id = dot_escape(&node_ids[index]);
+        let label = dot_escape(&node_labels[index]);
         let _ = writeln!(&mut out, "  \"{id}\" [label=\"{label}\"];");
     }
     for edge in &graph.edges {
-        let from = dot_escape(&edge.from);
-        let to = dot_escape(&edge.to);
+        let from = dot_escape(&edge_endpoint_name(graph, &edge.from, &node_ids, "from"));
+        let to = dot_escape(&edge_endpoint_name(graph, &edge.to, &node_ids, "to"));
         let el = dot_escape(&format_edge_label(edge));
         let _ = writeln!(&mut out, "  \"{from}\" -> \"{to}\" [label=\"{el}\"];");
     }
@@ -257,8 +417,8 @@ mod tests {
     fn mermaid_contains_er_diagram_and_relationship() {
         let s = layout_graph_to_mermaid(&tiny_graph());
         assert!(s.starts_with("erDiagram\n"));
-        assert!(s.contains("users {"));
-        assert!(s.contains("posts {"));
+        assert!(s.contains("\"users\" {"));
+        assert!(s.contains("\"posts\" {"));
         assert!(s.contains("||--o{"));
         assert!(s.contains("posts_user_fk"));
     }
@@ -266,7 +426,7 @@ mod tests {
     #[test]
     fn d2_contains_arrow() {
         let s = layout_graph_to_d2(&tiny_graph());
-        assert!(s.contains("\"posts\" -> \"users\""));
+        assert!(s.contains("\"p1\" -> \"u1\""));
     }
 
     #[test]
@@ -274,5 +434,79 @@ mod tests {
         let s = layout_graph_to_dot(&tiny_graph());
         assert!(s.starts_with("digraph erd"));
         assert!(s.contains("\"p1\" -> \"u1\""));
+    }
+
+    #[test]
+    fn exports_escape_control_characters_and_brackets() {
+        let mut graph = tiny_graph();
+        graph.nodes[0].label = "users\n[prod]".into();
+        graph.nodes[0].columns[0].name = "user id".into();
+        graph.edges[0].name = Some("fk[\n]".into());
+
+        let mermaid = layout_graph_to_mermaid(&graph);
+        assert!(mermaid.contains("\"users\\n\\[prod\\]\" {"));
+        assert!(mermaid.contains("INT user_id PK"));
+        assert!(mermaid.contains(": \"fk\\[\\n\\] \\(user_id -> id\\)\""));
+
+        let d2 = layout_graph_to_d2(&graph);
+        assert!(d2.contains("\"users\\n[prod]\""));
+        assert!(d2.contains("\"fk[\\n] (user_id -> id)\""));
+
+        let dot = layout_graph_to_dot(&graph);
+        assert!(dot.contains("[label=\"users\\n[prod]\"]"));
+        assert!(dot.contains("[label=\"fk[\\n] (user_id -> id)\"]"));
+    }
+
+    #[test]
+    fn exports_fallback_names_for_empty_nodes() {
+        let mut graph = tiny_graph();
+        graph.nodes[0].id.clear();
+        graph.nodes[0].label.clear();
+        graph.nodes[0].table_name.clear();
+
+        let mermaid = layout_graph_to_mermaid(&graph);
+        assert!(mermaid.contains("\"node_1\" {"));
+
+        let d2 = layout_graph_to_d2(&graph);
+        assert!(d2.contains("\"node_1\": { label: \"node_1\" }"));
+
+        let dot = layout_graph_to_dot(&graph);
+        assert!(dot.contains("\"node_1\" [label=\"node_1\"]"));
+    }
+
+    #[test]
+    fn mermaid_columns_remain_unique_after_sanitizing_names() {
+        let mut graph = tiny_graph();
+        graph.nodes[0].columns = vec![
+            LayoutColumn {
+                name: "user id".into(),
+                data_type: "INT".into(),
+                nullable: false,
+                is_primary_key: false,
+                is_foreign_key: false,
+                is_indexed: false,
+            },
+            LayoutColumn {
+                name: "user-id".into(),
+                data_type: "INT".into(),
+                nullable: false,
+                is_primary_key: false,
+                is_foreign_key: false,
+                is_indexed: false,
+            },
+            LayoutColumn {
+                name: "user_id".into(),
+                data_type: "INT".into(),
+                nullable: false,
+                is_primary_key: false,
+                is_foreign_key: false,
+                is_indexed: false,
+            },
+        ];
+
+        let mermaid = layout_graph_to_mermaid(&graph);
+        assert!(mermaid.contains("INT user_id\n"));
+        assert!(mermaid.contains("INT user_id_2\n"));
+        assert!(mermaid.contains("INT user_id_3\n"));
     }
 }
