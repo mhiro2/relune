@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::ColorWhen;
 use crate::error::{CliError, CliResult};
 use relune_core::{Diagnostic, Severity};
+use tracing::warn;
 
 /// Output writer that handles both file and stdout output.
 ///
@@ -77,11 +78,48 @@ impl OutputWriter {
         match self.destination {
             OutputDestination::Stdout => Ok(()),
             OutputDestination::TempFile { file, final_path } => {
-                file.persist(&final_path).map_err(|e| e.error)?;
+                persist_output_file(file, &final_path)?;
                 Ok(())
             }
         }
     }
+}
+
+fn persist_output_file(file: tempfile::NamedTempFile, final_path: &Path) -> io::Result<()> {
+    match file.persist(final_path) {
+        Ok(_persisted_file) => Ok(()),
+        Err(error) if is_cross_device_link_error(&error.error) => {
+            warn!(
+                path = %final_path.display(),
+                "atomic rename is unavailable across devices; falling back to a non-atomic copy"
+            );
+            copy_temp_file_into_place(error.file, final_path)
+        }
+        Err(error) => Err(error.error),
+    }
+}
+
+fn copy_temp_file_into_place(
+    temp_file: tempfile::NamedTempFile,
+    final_path: &Path,
+) -> io::Result<()> {
+    let mut source = temp_file.reopen()?;
+    let temp_path = temp_file.into_temp_path();
+    let mut destination = std::fs::File::create(final_path)?;
+    io::copy(&mut source, &mut destination)?;
+    destination.flush()?;
+    destination.sync_all()?;
+    drop(temp_path);
+    Ok(())
+}
+
+#[cfg(unix)]
+const CROSS_DEVICE_LINK_ERROR_CODE: i32 = 18;
+#[cfg(windows)]
+const CROSS_DEVICE_LINK_ERROR_CODE: i32 = 17;
+
+fn is_cross_device_link_error(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(CROSS_DEVICE_LINK_ERROR_CODE)
 }
 
 /// Diagnostic printer for stderr output.
@@ -161,7 +199,6 @@ impl DiagnosticPrinter {
             format!("{severity_str}[{code}]: {message}")
         }
     }
-
 }
 
 /// Print stats to stderr.
@@ -328,8 +365,36 @@ mod tests {
     }
 
     #[test]
+    fn copy_fallback_replaces_target_contents() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let output_path = temp.path().join("diagram.svg");
+        std::fs::write(&output_path, "stale").expect("seed output");
+
+        let mut temp_file = tempfile::NamedTempFile::new_in(temp.path()).expect("create temp");
+        temp_file
+            .write_all(b"<svg>diagram</svg>")
+            .expect("write temp");
+        temp_file.flush().expect("flush temp");
+
+        copy_temp_file_into_place(temp_file, &output_path).expect("copy fallback");
+
+        let content = std::fs::read_to_string(&output_path).expect("read output");
+        assert_eq!(content, "<svg>diagram</svg>");
+    }
+
+    #[test]
+    fn cross_device_error_detection_matches_platform_code() {
+        let error = io::Error::from_raw_os_error(CROSS_DEVICE_LINK_ERROR_CODE);
+
+        assert!(is_cross_device_link_error(&error));
+        assert!(!is_cross_device_link_error(&io::Error::other(
+            "different error"
+        )));
+    }
+
+    #[test]
     fn diagnostic_helpers_detect_severity() {
-        let diagnostics = vec![
+        let diagnostics = [
             Diagnostic::info(codes::parse_skipped(), "ignored"),
             Diagnostic::warning(codes::lint_orphan_table(), "warn"),
             Diagnostic::error(codes::parse_error(), "err"),

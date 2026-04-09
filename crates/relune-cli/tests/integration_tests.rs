@@ -44,7 +44,7 @@ fn config_fixtures_dir() -> PathBuf {
         .to_path_buf()
 }
 
-fn comment_only_sql() -> &'static str {
+const fn comment_only_sql() -> &'static str {
     "/* comments only */"
 }
 
@@ -674,6 +674,21 @@ mod export_tests {
     }
 
     #[test]
+    fn export_validates_config_before_input_io() {
+        let output = relune()
+            .arg("export")
+            .arg("--sql")
+            .arg("definitely-missing.sql")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Export format must be provided"));
+        assert!(!stderr.contains("Failed to read SQL file"));
+    }
+
+    #[test]
     fn export_fail_on_warning_rejects_parse_warnings() {
         let output = relune()
             .arg("export")
@@ -1275,6 +1290,30 @@ mod diff_tests {
         assert_eq!(output.status.code(), Some(3));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("PARSE004"));
+    }
+
+    #[test]
+    fn diff_rejects_oversized_input_before_reading_contents() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let before_path = temp.path().join("oversized.sql");
+        let file = fs::File::create(&before_path).expect("create oversized input");
+        file.set_len((8 * 1024 * 1024) + 1)
+            .expect("extend oversized input");
+        drop(file);
+
+        let output = relune()
+            .arg("diff")
+            .arg("--before")
+            .arg(&before_path)
+            .arg("--after")
+            .arg(simple_blog_fixture())
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("too large"));
+        assert!(stderr.contains("8388608"));
     }
 
     #[test]

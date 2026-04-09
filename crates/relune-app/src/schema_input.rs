@@ -7,7 +7,8 @@ use tracing::info;
 use crate::error::AppError;
 use crate::request::InputSource;
 
-const MAX_INPUT_FILE_SIZE_BYTES: u64 = 8 * 1024 * 1024;
+/// Maximum size for file-based SQL and schema JSON inputs.
+pub const MAX_INPUT_FILE_SIZE_BYTES: u64 = 8 * 1024 * 1024;
 /// Maximum size for direct text/JSON input (same limit as file input for consistency).
 const MAX_TEXT_INPUT_SIZE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -104,11 +105,13 @@ fn ensure_file_size_within_limit(path: &std::path::Path) -> Result<(), AppError>
 
 #[cfg(feature = "introspect")]
 fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
+    let trimmed = normalized_db_url(url)?;
+
     // If we're already inside a Tokio runtime, use it directly via
     // spawn_blocking → block_in_place fallback instead of creating a
     // second runtime (which would panic).
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        return tokio::task::block_in_place(|| handle.block_on(schema_from_db_url_async(url)));
+        return tokio::task::block_in_place(|| handle.block_on(schema_from_db_url_impl(trimmed)));
     }
 
     tokio::runtime::Builder::new_multi_thread()
@@ -120,7 +123,7 @@ fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
                 format!("Failed to start async runtime: {e}"),
             )
         })?
-        .block_on(schema_from_db_url_async(url))
+        .block_on(schema_from_db_url_impl(trimmed))
 }
 
 /// Async version of database introspection.
@@ -130,14 +133,26 @@ fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
 /// internally and creates a runtime only when one is not already active.
 #[cfg(feature = "introspect")]
 pub async fn schema_from_db_url_async(url: &str) -> Result<Schema, AppError> {
+    let trimmed = normalized_db_url(url)?;
+
+    schema_from_db_url_impl(trimmed).await
+}
+
+#[cfg(feature = "introspect")]
+async fn schema_from_db_url_impl(url: &str) -> Result<Schema, AppError> {
+    relune_introspect::introspect_database(url)
+        .await
+        .map_err(|error| sanitized_introspect_error(url, error))
+}
+
+#[cfg(feature = "introspect")]
+fn normalized_db_url(url: &str) -> Result<&str, AppError> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return Err(AppError::input_with_type("db_url", "Database URL is empty"));
     }
 
-    relune_introspect::introspect_database(trimmed)
-        .await
-        .map_err(|error| sanitized_introspect_error(trimmed, error))
+    Ok(trimmed)
 }
 
 #[cfg(feature = "introspect")]
@@ -211,6 +226,24 @@ mod tests {
         let err = schema_from_input(&input).expect_err("expected invalid URL");
         match err {
             AppError::Introspect(relune_introspect::IntrospectError::InvalidDatabaseUrl(_)) => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "introspect")]
+    #[test]
+    fn db_url_sync_path_rejects_empty_after_trim() {
+        let input = InputSource::db_url("   ");
+        let err = schema_from_input(&input).expect_err("empty database URL should fail");
+
+        match err {
+            AppError::Input {
+                input_type,
+                message,
+            } => {
+                assert_eq!(input_type, "db_url");
+                assert!(message.contains("empty"));
+            }
             other => panic!("unexpected error: {other:?}"),
         }
     }

@@ -19,12 +19,12 @@ pub fn run_export(
     quiet: bool,
     config: &ReluneConfig,
 ) -> CliResult<()> {
-    // Resolve input source
-    let input = InputSelection::from_export(args).resolve(args.dialect.into(), "input")?;
-
     // Merge config file with CLI args
     let merged = config.merge_export_args(args)?;
     merged.validate_semantics()?;
+
+    // Resolve input source after config validation so invalid settings fail fast.
+    let input = InputSelection::from_export(args).resolve(args.dialect.into(), "input")?;
 
     // Convert merged format to app format
     let export_format = match merged.format {
