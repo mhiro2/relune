@@ -29,6 +29,7 @@ exclude = ["schema_migrations"]
 
 [inspect]
 format = "text"
+fail_on_warning = false
 
 [export]
 format = "schema-json"
@@ -38,13 +39,19 @@ edge_style = "curved"
 direction = "top-to-bottom"
 focus = "orders"
 depth = 1
+fail_on_warning = false
+
+[doc]
+fail_on_warning = false
 
 [lint]
 deny = "warning"
+fail_on_warning = false
 
 [diff]
 format = "json"
 dialect = "postgres"
+fail_on_warning = false
 ```
 
 ```bash
@@ -67,6 +74,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `depth` | Unsigned integer |
 | `include` / `exclude` | String arrays |
 | `show_legend`, `show_stats` | Booleans; `--stats` on the CLI forces `show_stats` only |
+| `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 `layout`, `edge_style`, and `direction` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
 
@@ -86,6 +94,7 @@ Semantic validation is also applied after merge:
 | Key | Values |
 |-----|--------|
 | `format` | `text`, `json` |
+| `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 ---
 
@@ -99,8 +108,17 @@ Semantic validation is also applied after merge:
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
 | `focus`, `depth` | Same as CLI |
+| `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 `export.format` can be set in the config file and overridden with `--format`. If neither config nor CLI provides a format, the command fails fast. As with `render`, `export.depth` requires `export.focus`, and focused table names must be non-empty after trimming.
+
+---
+
+## `[doc]`
+
+| Key | Values |
+|-----|--------|
+| `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 ---
 
@@ -110,6 +128,7 @@ Semantic validation is also applied after merge:
 |-----|--------|
 | `format` | `text`, `json` |
 | `deny` | `error`, `warning`, `info`, `hint` — minimum severity for a non-zero exit when not overridden by `--deny` |
+| `fail_on_warning` | Boolean; treat warning diagnostics as failures when `deny` is unset |
 
 ---
 
@@ -119,8 +138,9 @@ Semantic validation is also applied after merge:
 |-----|--------|
 | `format` | `text`, `json`, `svg`, `html` |
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
+| `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
-`diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format` and `--dialect` only, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
+`diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, and `--fail-on-warning`, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
 
 ---
 

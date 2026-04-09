@@ -79,6 +79,7 @@ Show a schema summary or details for one table.
 | `--summary` | Force summary mode |
 | `--format text\|json` | Output encoding |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
+| `--fail-on-warning` | Return exit code `3` when diagnostics include warnings |
 
 ```bash
 relune inspect --sql schema.sql
@@ -96,6 +97,7 @@ Generate Markdown documentation for a schema. Outputs a single Markdown file cov
 | Option | Description |
 |--------|-------------|
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
+| `--fail-on-warning` | Return exit code `3` when diagnostics include warnings |
 
 ```bash
 relune doc --sql schema.sql -o schema.md
@@ -121,6 +123,7 @@ Emit normalized JSON or diagram text. **`--format` is required.**
 | `dot` | Graphviz DOT source |
 
 Supports `--focus`, `--depth`, `--group-by`, `--layout`, `--direction`, and `--edge-style` like `render` for positioned exports. `export` applies the same `focus`/`depth` validation rule as `render`, so `--depth` requires `--focus`.
+`--fail-on-warning` is also available for CI flows that treat parser diagnostics as failures.
 
 `layout-json` includes graph-level `routing_debug.non_self_loop_detour_activations` and per-edge `routing_debug` fields for source/target side policy, slot indices, slot counts, row offsets, and selected channel coordinates.
 
@@ -154,6 +157,7 @@ Run built-in rules on the schema. Inputs: **`--sql`**, **`--schema-json`**, or *
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
 | `--rules <RULE>` | Repeatable; run only these rules |
 | `--deny error\|warning\|info\|hint` | Minimum severity for non-zero exit |
+| `--fail-on-warning` | Shortcut for treating warning diagnostics as failures |
 
 ```bash
 relune lint --sql schema.sql
@@ -185,6 +189,7 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
 | `--stdout` | Explicitly allow raw SVG/HTML on interactive stdout |
 | `--dialect` | For SQL parsing on both sides |
+| `--fail-on-warning` | Return exit code `3` when diagnostics include warnings |
 
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql

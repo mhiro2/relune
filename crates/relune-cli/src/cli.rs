@@ -362,6 +362,10 @@ pub struct InspectArgs {
     /// Output file path; stdout if omitted.
     #[arg(short = 'o', long = "out", value_name = "FILE")]
     pub out: Option<PathBuf>,
+
+    /// Exit with non-zero code if warnings are emitted.
+    #[arg(long = "fail-on-warning")]
+    pub fail_on_warning: bool,
 }
 
 /// Output format for inspect command.
@@ -447,6 +451,10 @@ pub struct ExportArgs {
     /// Layout direction for positioned output.
     #[arg(long = "direction", value_enum)]
     pub direction: Option<DirectionArg>,
+
+    /// Exit with non-zero code if warnings are emitted.
+    #[arg(long = "fail-on-warning")]
+    pub fail_on_warning: bool,
 }
 
 /// Export format.
@@ -512,6 +520,10 @@ pub struct DocArgs {
     /// Output file path; stdout if omitted.
     #[arg(short = 'o', long = "out", value_name = "FILE")]
     pub out: Option<PathBuf>,
+
+    /// Exit with non-zero code if warnings are emitted.
+    #[arg(long = "fail-on-warning")]
+    pub fail_on_warning: bool,
 }
 
 // ============================================================================
@@ -566,6 +578,10 @@ pub struct LintArgs {
     /// Minimum severity that causes non-zero exit.
     #[arg(long = "deny", value_name = "SEVERITY", value_enum)]
     pub deny: Option<LintSeverity>,
+
+    /// Exit with non-zero code if warnings are emitted.
+    #[arg(long = "fail-on-warning")]
+    pub fail_on_warning: bool,
 }
 
 /// Output format for lint command.
@@ -662,6 +678,10 @@ pub struct DiffArgs {
     /// Allow raw SVG/HTML output on stdout even when stdout is a terminal.
     #[arg(long = "stdout", conflicts_with = "out")]
     pub stdout: bool,
+
+    /// Exit with non-zero code if warnings are emitted.
+    #[arg(long = "fail-on-warning")]
+    pub fail_on_warning: bool,
 }
 
 /// Output format for diff command.

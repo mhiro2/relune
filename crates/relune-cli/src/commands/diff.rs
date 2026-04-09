@@ -50,7 +50,7 @@ pub fn run_diff(
     // Execute diff
     let mut result = diff(request).context("Failed to compute schema diff")?;
 
-    check_diagnostics(&result.diagnostics, color, false)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     // Format output
     let rendered = result.rendered.take();

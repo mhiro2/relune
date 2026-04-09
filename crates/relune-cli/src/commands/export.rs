@@ -19,12 +19,12 @@ pub fn run_export(
     quiet: bool,
     config: &ReluneConfig,
 ) -> CliResult<()> {
-    // Resolve input source
-    let input = InputSelection::from_export(args).resolve(args.dialect.into(), "input")?;
-
     // Merge config file with CLI args
     let merged = config.merge_export_args(args)?;
     merged.validate_semantics()?;
+
+    // Resolve input source after config validation so invalid settings fail fast.
+    let input = InputSelection::from_export(args).resolve(args.dialect.into(), "input")?;
 
     // Convert merged format to app format
     let export_format = match merged.format {
@@ -73,7 +73,7 @@ pub fn run_export(
     // Execute export
     let result = export(request).context("Failed to export schema")?;
 
-    check_diagnostics(&result.diagnostics, color, false)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
     write_output(&result.content, args.out.as_deref(), color)?;
 
     // Print success message (unless quiet)

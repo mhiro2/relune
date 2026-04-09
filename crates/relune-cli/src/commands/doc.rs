@@ -14,8 +14,10 @@ pub fn run_doc(
     args: &DocArgs,
     color: ColorWhen,
     quiet: bool,
-    _config: &ReluneConfig,
+    config: &ReluneConfig,
 ) -> CliResult<()> {
+    let merged = config.merge_doc_args(args);
+
     // Resolve input source
     let input = InputSelection::from_doc(args).resolve(args.dialect.into(), "input")?;
 
@@ -29,7 +31,7 @@ pub fn run_doc(
     // Execute doc generation
     let result = doc(request).context("Failed to generate documentation")?;
 
-    check_diagnostics(&result.diagnostics, color, false)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
     write_output(&result.content, args.out.as_deref(), color)?;
 
     // Print success message (unless quiet)

@@ -18,6 +18,7 @@
 //!
 //! [inspect]
 //! format = "text" # text, json
+//! fail_on_warning = false
 //!
 //! [export]
 //! format = "schema-json" # schema-json, graph-json, layout-json, mermaid, d2, dot
@@ -27,10 +28,15 @@
 //! direction = "top-to-bottom"
 //! focus = "table_name"
 //! depth = 1
+//! fail_on_warning = false
+//!
+//! [doc]
+//! fail_on_warning = false
 //!
 //! [diff]
 //! format = "text" # text, json
 //! dialect = "auto" # auto, postgres, mysql, sqlite
+//! fail_on_warning = false
 //! ```
 //!
 //! Config layering order (later overrides earlier):
@@ -60,6 +66,9 @@ pub struct ReluneConfig {
     /// Export command configuration.
     #[serde(default)]
     pub export: ExportConfig,
+    /// Doc command configuration.
+    #[serde(default)]
+    pub doc: DocConfig,
     /// Lint command configuration.
     #[serde(default)]
     pub lint: LintConfig,
@@ -108,6 +117,9 @@ pub struct RenderConfig {
     /// Show statistics.
     #[serde(default)]
     pub show_stats: Option<bool>,
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
 }
 
 /// Configuration for the inspect command.
@@ -117,6 +129,9 @@ pub struct InspectConfig {
     /// Output format.
     #[serde(default)]
     pub format: Option<InspectFormatConfig>,
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
 }
 
 /// Configuration for the export command.
@@ -144,6 +159,18 @@ pub struct ExportConfig {
     /// Focus depth.
     #[serde(default)]
     pub depth: Option<u32>,
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
+}
+
+/// Configuration for the doc command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocConfig {
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
 }
 
 /// Configuration for the lint command.
@@ -156,6 +183,9 @@ pub struct LintConfig {
     /// Minimum severity that causes non-zero exit.
     #[serde(default)]
     pub deny: Option<LintSeverityConfig>,
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
 }
 
 /// Configuration for the diff command.
@@ -168,6 +198,9 @@ pub struct DiffConfig {
     /// SQL dialect for parsing.
     #[serde(default)]
     pub dialect: Option<DialectArg>,
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
 }
 
 /// Inspect format configuration (mirrors CLI `InspectFormat`).
@@ -299,6 +332,7 @@ impl ReluneConfig {
             },
             show_legend: self.render.show_legend.unwrap_or(false),
             show_stats: args.stats || self.render.show_stats.unwrap_or(false),
+            fail_on_warning: args.fail_on_warning || self.render.fail_on_warning.unwrap_or(false),
         }
     }
 
@@ -311,6 +345,7 @@ impl ReluneConfig {
                 .format
                 .or_else(|| self.inspect.format.map(Into::into))
                 .unwrap_or_default(),
+            fail_on_warning: args.fail_on_warning || self.inspect.fail_on_warning.unwrap_or(false),
         }
     }
 
@@ -340,7 +375,17 @@ impl ReluneConfig {
             direction: args.direction.or(self.export.direction).unwrap_or_default(),
             focus: args.focus.clone().or_else(|| self.export.focus.clone()),
             depth: args.depth.or(self.export.depth).unwrap_or(1),
+            fail_on_warning: args.fail_on_warning || self.export.fail_on_warning.unwrap_or(false),
         })
+    }
+
+    /// Merge CLI doc args into this config.
+    #[allow(clippy::unused_self)]
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn merge_doc_args(&self, args: &crate::cli::DocArgs) -> MergedDocConfig {
+        MergedDocConfig {
+            fail_on_warning: args.fail_on_warning || self.doc.fail_on_warning.unwrap_or(false),
+        }
     }
 
     /// Merge CLI lint args into this config.
@@ -351,6 +396,7 @@ impl ReluneConfig {
                 .or_else(|| self.lint.format.map(Into::into))
                 .unwrap_or_default(),
             deny: args.deny.or_else(|| self.lint.deny.map(Into::into)),
+            fail_on_warning: args.fail_on_warning || self.lint.fail_on_warning.unwrap_or(false),
         }
     }
 
@@ -359,6 +405,7 @@ impl ReluneConfig {
         MergedDiffConfig {
             format: args.format.or(self.diff.format).unwrap_or_default(),
             dialect: args.dialect.or(self.diff.dialect).unwrap_or_default(),
+            fail_on_warning: args.fail_on_warning || self.diff.fail_on_warning.unwrap_or(false),
         }
     }
 }
@@ -445,12 +492,14 @@ pub struct MergedRenderConfig {
     pub exclude: Vec<String>,
     pub show_legend: bool,
     pub show_stats: bool,
+    pub fail_on_warning: bool,
 }
 
 /// Merged inspect configuration.
 #[derive(Debug, Clone)]
 pub struct MergedInspectConfig {
     pub format: crate::cli::InspectFormat,
+    pub fail_on_warning: bool,
 }
 
 /// Merged export configuration.
@@ -463,6 +512,13 @@ pub struct MergedExportConfig {
     pub direction: DirectionArg,
     pub focus: Option<String>,
     pub depth: u32,
+    pub fail_on_warning: bool,
+}
+
+/// Merged doc configuration.
+#[derive(Debug, Clone)]
+pub struct MergedDocConfig {
+    pub fail_on_warning: bool,
 }
 
 /// Merged lint configuration.
@@ -470,6 +526,7 @@ pub struct MergedExportConfig {
 pub struct MergedLintConfig {
     pub format: crate::cli::LintFormat,
     pub deny: Option<crate::cli::LintSeverity>,
+    pub fail_on_warning: bool,
 }
 
 /// Merged diff configuration.
@@ -477,6 +534,7 @@ pub struct MergedLintConfig {
 pub struct MergedDiffConfig {
     pub format: DiffFormat,
     pub dialect: DialectArg,
+    pub fail_on_warning: bool,
 }
 
 impl MergedRenderConfig {
@@ -802,11 +860,13 @@ mod tests {
             summary: false,
             format: Some(InspectFormat::Json),
             out: None,
+            fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
         };
 
         let merged = config.merge_inspect_args(&args);
         assert_eq!(merged.format, InspectFormat::Json);
+        assert!(!merged.fail_on_warning);
     }
 
     #[test]
@@ -831,6 +891,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -842,6 +903,7 @@ mod tests {
         assert_eq!(merged.depth, 5);
         assert_eq!(merged.layout, LayoutAlgorithmArg::ForceDirected);
         assert_eq!(merged.edge_style, EdgeStyleArg::Orthogonal);
+        assert!(!merged.fail_on_warning);
     }
 
     #[test]
@@ -860,6 +922,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
         };
 
@@ -871,6 +934,25 @@ mod tests {
                 .to_string()
                 .contains("Export format must be provided via --format or config export.format")
         );
+    }
+
+    #[test]
+    fn test_merge_doc_args() {
+        let mut config = ReluneConfig::default();
+        config.doc.fail_on_warning = Some(true);
+
+        let args = crate::cli::DocArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            out: None,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_doc_args(&args);
+        assert!(merged.fail_on_warning);
     }
 
     #[test]
@@ -888,6 +970,7 @@ mod tests {
             exclude: vec!["comments".to_string()],
             show_legend: false,
             show_stats: false,
+            fail_on_warning: false,
         };
 
         config
@@ -910,6 +993,7 @@ mod tests {
             exclude: Vec::new(),
             show_legend: false,
             show_stats: false,
+            fail_on_warning: false,
         };
 
         let error = config
@@ -933,6 +1017,7 @@ mod tests {
             exclude: vec!["posts".to_string()],
             show_legend: false,
             show_stats: false,
+            fail_on_warning: false,
         };
 
         let error = config
@@ -960,6 +1045,7 @@ mod tests {
             exclude: Vec::new(),
             show_legend: false,
             show_stats: false,
+            fail_on_warning: false,
         };
 
         let error = config
@@ -982,6 +1068,7 @@ mod tests {
             direction: DirectionArg::default(),
             focus: Some("   ".to_string()),
             depth: 1,
+            fail_on_warning: false,
         };
 
         let error = config
@@ -1004,6 +1091,7 @@ mod tests {
             direction: DirectionArg::default(),
             focus: None,
             depth: 2,
+            fail_on_warning: false,
         };
 
         let error = config
@@ -1026,12 +1114,45 @@ mod tests {
             out: None,
             rules: vec![],
             deny: None, // Not specified - should use config
+            fail_on_warning: false,
             dialect: crate::cli::DialectArg::Auto,
         };
 
         let merged = config.merge_lint_args(&args);
         assert_eq!(merged.format, LintFormat::Json);
         assert_eq!(merged.deny, Some(crate::cli::LintSeverity::Warning));
+        assert!(!merged.fail_on_warning);
+    }
+
+    #[test]
+    fn test_merge_render_args_uses_config_fail_on_warning() {
+        let mut config = ReluneConfig::default();
+        config.render.fail_on_warning = Some(true);
+
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            stdout: false,
+            focus: None,
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            theme: None,
+            layout: None,
+            edge_style: None,
+            direction: None,
+            stats: false,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config.merge_render_args(&args);
+        assert!(merged.fail_on_warning);
     }
 
     #[test]
@@ -1051,11 +1172,13 @@ mod tests {
             format: None,
             out: None,
             stdout: false,
+            fail_on_warning: false,
         };
 
         let merged = config.merge_diff_args(&args);
         assert_eq!(merged.format, DiffFormat::Json);
         assert_eq!(merged.dialect, DialectArg::Mysql);
+        assert!(!merged.fail_on_warning);
     }
 
     #[test]
@@ -1075,11 +1198,13 @@ mod tests {
             format: Some(DiffFormat::Json),
             out: None,
             stdout: false,
+            fail_on_warning: false,
         };
 
         let merged = config.merge_diff_args(&args);
         assert_eq!(merged.format, DiffFormat::Json);
         assert_eq!(merged.dialect, DialectArg::Sqlite);
+        assert!(!merged.fail_on_warning);
     }
 
     #[test]

@@ -66,5 +66,8 @@ Options:
   -o, --out <FILE>
           Output file path; stdout if omitted
 
+      --fail-on-warning
+          Exit with non-zero code if warnings are emitted
+
   -h, --help
           Print help (see a summary with '-h')

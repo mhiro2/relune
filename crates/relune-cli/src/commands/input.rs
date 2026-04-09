@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::Path;
 
+use anyhow::anyhow;
 use relune_app::InputSource;
 use relune_core::SqlDialect;
 
@@ -210,6 +211,8 @@ impl<'a> DiffInputSelection<'a> {
 }
 
 fn read_sniffed_file(path: &Path, subject: &str, dialect: SqlDialect) -> CliResult<InputSource> {
+    ensure_input_file_metadata(path, &format!("Failed to read {subject} input file"))?;
+
     let content = fs::read_to_string(path).map_err(|error| {
         CliError::usage(anyhow::anyhow!(
             "Failed to read {subject} input file: {}: {error}",
@@ -233,7 +236,17 @@ fn looks_like_schema_json(content: &str) -> bool {
 }
 
 fn ensure_input_file_metadata(path: &Path, prefix: &str) -> CliResult<()> {
-    std::fs::metadata(path)
-        .map(|_| ())
-        .map_err(|error| CliError::usage(anyhow::anyhow!("{prefix}: {}: {error}", path.display())))
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| CliError::usage(anyhow!("{prefix}: {}: {error}", path.display())))?;
+
+    if metadata.len() > relune_app::MAX_INPUT_FILE_SIZE_BYTES {
+        return Err(CliError::usage(anyhow!(
+            "Input file '{}' is too large: {} bytes exceeds the {} byte limit",
+            path.display(),
+            metadata.len(),
+            relune_app::MAX_INPUT_FILE_SIZE_BYTES
+        )));
+    }
+
+    Ok(())
 }

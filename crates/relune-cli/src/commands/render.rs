@@ -98,7 +98,7 @@ pub fn run_render(
     // Execute render
     let result = render(request).context("Failed to render schema")?;
 
-    check_diagnostics(&result.diagnostics, color, args.fail_on_warning)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     // Write output (PNG needs byte-level writer for rasterized data)
     if is_png {

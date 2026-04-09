@@ -44,6 +44,16 @@ fn config_fixtures_dir() -> PathBuf {
         .to_path_buf()
 }
 
+const fn comment_only_sql() -> &'static str {
+    "/* comments only */"
+}
+
+fn write_comment_only_sql(temp: &tempfile::TempDir) -> PathBuf {
+    let path = temp.path().join("comments_only.sql");
+    fs::write(&path, comment_only_sql()).expect("write comment-only SQL fixture");
+    path
+}
+
 fn failure_snapshot(name: &str, output: &Output) {
     let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
     let stderr = normalize_workspace_paths(stderr.trim_end());
@@ -662,6 +672,38 @@ mod export_tests {
             serde_json::from_str(&stdout).expect("Output should be valid JSON");
         assert!(parsed.is_object(), "Graph JSON should be a JSON object");
     }
+
+    #[test]
+    fn export_validates_config_before_input_io() {
+        let output = relune()
+            .arg("export")
+            .arg("--sql")
+            .arg("definitely-missing.sql")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Export format must be provided"));
+        assert!(!stderr.contains("Failed to read SQL file"));
+    }
+
+    #[test]
+    fn export_fail_on_warning_rejects_parse_warnings() {
+        let output = relune()
+            .arg("export")
+            .arg("--sql-text")
+            .arg(comment_only_sql())
+            .arg("--format")
+            .arg("schema-json")
+            .arg("--fail-on-warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("PARSE004"));
+    }
 }
 
 // ============================================================================
@@ -838,6 +880,44 @@ mod inspect_tests {
             .assert()
             .failure();
     }
+
+    #[test]
+    fn inspect_fail_on_warning_rejects_parse_warnings() {
+        let output = relune()
+            .arg("inspect")
+            .arg("--sql-text")
+            .arg(comment_only_sql())
+            .arg("--fail-on-warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("PARSE004"));
+    }
+}
+
+// ============================================================================
+// Doc Command Tests
+// ============================================================================
+
+mod doc_tests {
+    use super::*;
+
+    #[test]
+    fn doc_fail_on_warning_rejects_parse_warnings() {
+        let output = relune()
+            .arg("doc")
+            .arg("--sql-text")
+            .arg(comment_only_sql())
+            .arg("--fail-on-warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("PARSE004"));
+    }
 }
 
 // ============================================================================
@@ -924,6 +1004,25 @@ mod lint_tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&stdout).expect("Output should be valid JSON");
         assert!(parsed.is_object(), "Lint JSON should be an object");
+    }
+
+    #[test]
+    fn lint_deny_warning_rejects_parse_warnings() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = write_comment_only_sql(&temp);
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--deny")
+            .arg("warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("PARSE004"));
     }
 }
 
@@ -1174,6 +1273,47 @@ mod diff_tests {
             args.push("--stdout".to_string());
         }
         args
+    }
+
+    #[test]
+    fn diff_fail_on_warning_rejects_parse_warnings() {
+        let output = relune()
+            .arg("diff")
+            .arg("--before-sql-text")
+            .arg(comment_only_sql())
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--fail-on-warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("PARSE004"));
+    }
+
+    #[test]
+    fn diff_rejects_oversized_input_before_reading_contents() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let before_path = temp.path().join("oversized.sql");
+        let file = fs::File::create(&before_path).expect("create oversized input");
+        file.set_len((8 * 1024 * 1024) + 1)
+            .expect("extend oversized input");
+        drop(file);
+
+        let output = relune()
+            .arg("diff")
+            .arg("--before")
+            .arg(&before_path)
+            .arg("--after")
+            .arg(simple_blog_fixture())
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("too large"));
+        assert!(stderr.contains("8388608"));
     }
 
     #[test]

@@ -124,6 +124,7 @@ relune doc --db-url 'postgres://user:pass@localhost:5432/mydb' -o schema.md
 | Option | Values | Default |
 |--------|--------|---------|
 | `-o`, `--out` | Output file path | stdout |
+| `--fail-on-warning` | Non-zero exit on warnings | -- |
 
 ### inspect
 
@@ -143,6 +144,7 @@ relune inspect --db-url 'postgres://user:pass@localhost:5432/mydb'
 | `--summary` | Force summary mode | -- |
 | `--format` | `text`, `json` | `text` |
 | `-o`, `--out` | Output file path | stdout |
+| `--fail-on-warning` | Non-zero exit on warnings | -- |
 
 ### export
 
@@ -168,6 +170,7 @@ relune export --sql schema.sql --format mermaid --focus orders --depth 2 -o orde
 | `dot` | Graphviz DOT source |
 
 Supports `--layout`, `--edge-style`, `--direction`, `--focus`, `--depth`, `--group-by` for positioned exports. `layout-json` includes graph-level detour counts plus per-edge side, slot, and channel metadata, which makes route diffs easier to audit alongside SVG/HTML output.
+`--fail-on-warning` is also available when export diagnostics should fail automation.
 
 ### lint
 
@@ -188,8 +191,10 @@ relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 | `-o`, `--out` | Output file path | stdout |
 | `--rules` | Repeatable; run only these rules (kebab-case IDs) | all rules |
 | `--deny` | `error`, `warning`, `info`, `hint` -- min severity for non-zero exit | -- |
+| `--fail-on-warning` | Non-zero exit on warning diagnostics | -- |
 
 Rule categories: primary keys, orphan tables, naming conventions, FK indexes, nullable FK risks.
+`--deny` applies to lint issues and parse diagnostics together, so warning-level parser diagnostics now fail the command when the configured threshold includes warnings.
 
 ### diff
 
@@ -218,6 +223,7 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | `-o`, `--out` | Output file path | stdout (`svg`/`html` on terminals require `--stdout`) |
 | `--stdout` | Allow raw `svg`/`html` on interactive stdout | off |
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
+| `--fail-on-warning` | Non-zero exit on warnings | -- |
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
 
@@ -283,16 +289,23 @@ exclude = ["schema_migrations"]
 
 [inspect]
 format = "text"
+fail_on_warning = false
 
 [export]
 format = "schema-json"
+fail_on_warning = false
+
+[doc]
+fail_on_warning = false
 
 [lint]
 deny = "warning"
+fail_on_warning = false
 
 [diff]
 format = "json"
 dialect = "postgres"
+fail_on_warning = false
 ```
 
 Merge order: built-in defaults -> config file -> CLI arguments.
@@ -305,7 +318,7 @@ When rendering or diffing as SVG or HTML without `-o`, interactive terminals req
 
 ### Input too large
 
-Relune rejects SQL files and schema JSON larger than 8 MiB.
+Relune rejects SQL files and schema JSON files larger than 8 MiB before loading them into memory.
 
 ### Dialect detection issues
 
