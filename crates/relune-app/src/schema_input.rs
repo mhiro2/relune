@@ -166,6 +166,17 @@ mod tests {
     }
 
     #[test]
+    fn comment_only_sql_returns_empty_schema_warning() {
+        let input = InputSource::sql_text("-- comments only");
+        let (schema, diagnostics) = schema_from_input(&input).expect("schema");
+
+        assert!(schema.tables.is_empty());
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == relune_core::diagnostic::codes::parse_empty_schema()
+        }));
+    }
+
+    #[test]
     fn rejects_malformed_schema_json() {
         let input = InputSource::schema_json("{\"tables\":");
         let err = schema_from_input(&input).expect_err("malformed JSON should fail");

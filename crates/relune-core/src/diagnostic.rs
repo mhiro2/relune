@@ -174,6 +174,11 @@ pub mod codes {
     pub fn parse_skipped() -> DiagnosticCode {
         DiagnosticCode::new("PARSE", 3)
     }
+    /// Returns the code for SQL input that produced no schema objects.
+    #[must_use]
+    pub fn parse_empty_schema() -> DiagnosticCode {
+        DiagnosticCode::new("PARSE", 4)
+    }
 
     /// Returns the code for an unknown table reference.
     #[must_use]
