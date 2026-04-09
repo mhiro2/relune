@@ -59,6 +59,29 @@ impl IntrospectError {
     pub fn timeout(msg: impl Into<String>) -> Self {
         Self::Timeout(msg.into())
     }
+
+    /// Returns a copy of this error with any embedded database URL sanitized.
+    #[must_use]
+    pub fn sanitized_for_url(self, database_url: &str) -> Self {
+        match self {
+            Self::Connection(message) => {
+                Self::Connection(crate::url::sanitize_error_message(database_url, &message))
+            }
+            Self::InvalidDatabaseUrl(message) => {
+                Self::InvalidDatabaseUrl(crate::url::sanitize_error_message(database_url, &message))
+            }
+            Self::Query(message) => {
+                Self::Query(crate::url::sanitize_error_message(database_url, &message))
+            }
+            Self::MetadataMapping(message) => {
+                Self::MetadataMapping(crate::url::sanitize_error_message(database_url, &message))
+            }
+            Self::Timeout(message) => {
+                Self::Timeout(crate::url::sanitize_error_message(database_url, &message))
+            }
+            Self::Io(error) => Self::Io(error),
+        }
+    }
 }
 
 /// Convert a `sqlx` connect error into a sanitized introspection error.
@@ -82,12 +105,7 @@ pub(crate) fn connect_error(
 }
 
 fn sanitize_connect_error_message(database_url: &str, message: &str) -> String {
-    let masked_url = crate::url::mask_credentials(database_url);
-    if masked_url == database_url {
-        message.to_string()
-    } else {
-        message.replace(database_url, &masked_url)
-    }
+    crate::url::sanitize_error_message(database_url, message)
 }
 
 #[cfg(test)]
@@ -174,5 +192,22 @@ mod tests {
                 .to_string()
                 .contains("postgres://user:secret@localhost/db")
         );
+    }
+
+    #[test]
+    fn sanitized_for_url_masks_query_secrets() {
+        let error = IntrospectError::query(
+            "failed against postgres://user:secret@localhost/db?password=hunter2&token=abc",
+        )
+        .sanitized_for_url("postgres://user:secret@localhost/db?password=hunter2&token=abc");
+
+        assert!(matches!(error, IntrospectError::Query(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("postgres://***:***@localhost/db?password=***&token=***")
+        );
+        assert!(!error.to_string().contains("hunter2"));
+        assert!(!error.to_string().contains("token=abc"));
     }
 }

@@ -31,6 +31,7 @@ mod url;
 pub use mysql::introspect_mysql;
 pub use postgres::introspect_postgres;
 pub use sqlite::introspect_sqlite;
+pub use url::mask_credentials;
 
 // Re-export error types
 pub use error::IntrospectError;
