@@ -7,37 +7,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use relune_core::{
     Diagnostic, DiagnosticCode, EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec,
-    GroupingStrategy, NodeKind, Schema, Table, View, layout::Cardinality,
+    GroupingStrategy, NodeKind, Schema, Table, View, collect_sql_relations, layout::Cardinality,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-
-/// Check whether `needle` appears in `haystack` as a whole SQL identifier,
-/// i.e. not as a substring of a longer identifier.  Both strings must already
-/// be lowercased.  The check treats any character that is **not** alphanumeric,
-/// `_`, or `.` (for schema-qualified names) as an identifier boundary, which
-/// also covers quoted identifiers (`"user"` → boundary is `"`).
-fn contains_identifier(haystack: &str, needle: &str) -> bool {
-    fn is_ident_char(c: char) -> bool {
-        c.is_alphanumeric() || c == '_' || c == '.'
-    }
-
-    let h = haystack.as_bytes();
-    let n = needle.len();
-    if n == 0 || n > h.len() {
-        return false;
-    }
-
-    for (start, _) in haystack.match_indices(needle) {
-        let end = start + n;
-        let left_ok = start == 0 || !is_ident_char(haystack[..start].chars().next_back().unwrap());
-        let right_ok = end == h.len() || !is_ident_char(haystack[end..].chars().next().unwrap());
-        if left_ok && right_ok {
-            return true;
-        }
-    }
-    false
-}
 
 #[derive(Debug, Default)]
 struct EnumIndex {
@@ -517,21 +490,6 @@ impl LayoutGraphBuilder {
         views: &[&View],
         enums: &[&Enum],
     ) -> (Vec<LayoutNode>, Vec<LayoutEdge>, Vec<Diagnostic>) {
-        let table_names: BTreeSet<String> = tables
-            .iter()
-            .flat_map(|table| [table.name.to_lowercase(), table.stable_id.to_lowercase()])
-            .collect();
-        let view_ids: BTreeSet<&str> = views.iter().map(|view| view.id.as_str()).collect();
-        let view_names: BTreeSet<String> = views
-            .iter()
-            .flat_map(|view| {
-                [
-                    view.name.to_lowercase(),
-                    view.id.to_lowercase(),
-                    view.qualified_name().to_lowercase(),
-                ]
-            })
-            .collect();
         let mut enum_index = EnumIndex::default();
         for enum_type in enums {
             enum_index.insert(enum_type);
@@ -664,16 +622,13 @@ impl LayoutGraphBuilder {
             });
 
             if let Some(definition) = &view.definition {
-                let definition = definition.to_lowercase();
+                let relations = collect_sql_relations(definition);
                 let mut seen_targets = BTreeSet::new();
 
                 for table in tables {
-                    let stable_id = table.stable_id.to_lowercase();
-                    let table_name = table.name.to_lowercase();
-                    if (table_names.contains(&stable_id)
-                        && contains_identifier(&definition, &stable_id))
-                        || (table_names.contains(&table_name)
-                            && contains_identifier(&definition, &table_name))
+                    if relations
+                        .iter()
+                        .any(|relation| relation.matches_table(table))
                     {
                         seen_targets.insert(table.stable_id.clone());
                     }
@@ -684,15 +639,9 @@ impl LayoutGraphBuilder {
                         continue;
                     }
 
-                    let view_id = dependency_view.id.to_lowercase();
-                    let view_name = dependency_view.name.to_lowercase();
-                    let view_label = dependency_view.qualified_name().to_lowercase();
-                    if (view_ids.contains(dependency_view.id.as_str())
-                        && contains_identifier(&definition, &view_id))
-                        || (view_names.contains(&view_name)
-                            && contains_identifier(&definition, &view_name))
-                        || (view_names.contains(&view_label)
-                            && contains_identifier(&definition, &view_label))
+                    if relations
+                        .iter()
+                        .any(|relation| relation.matches_view(dependency_view))
                     {
                         seen_targets.insert(dependency_view.id.clone());
                     }
@@ -1176,6 +1125,134 @@ mod tests {
         assert!(graph.edges.iter().any(|edge| {
             edge.from == "active_users"
                 && edge.to == "users"
+                && edge.kind == EdgeKind::ViewDependency
+        }));
+    }
+
+    #[test]
+    fn test_view_dependency_ignores_comment_text() {
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "users".to_string(),
+                schema_name: None,
+                name: "users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(1),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                }],
+                foreign_keys: vec![],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![View {
+                id: "active_users".to_string(),
+                schema_name: None,
+                name: "active_users".to_string(),
+                columns: vec![],
+                definition: Some("SELECT 1 /* users */ AS id".to_string()),
+            }],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+
+        assert!(
+            !graph
+                .edges
+                .iter()
+                .any(|edge| edge.kind == EdgeKind::ViewDependency)
+        );
+    }
+
+    #[test]
+    fn test_view_dependency_ignores_cte_aliases() {
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "users".to_string(),
+                schema_name: None,
+                name: "users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(1),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                }],
+                foreign_keys: vec![],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![View {
+                id: "active_users".to_string(),
+                schema_name: None,
+                name: "active_users".to_string(),
+                columns: vec![],
+                definition: Some("WITH users AS (SELECT 1 AS id) SELECT * FROM users".to_string()),
+            }],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+
+        assert!(
+            !graph
+                .edges
+                .iter()
+                .any(|edge| edge.kind == EdgeKind::ViewDependency)
+        );
+    }
+
+    #[test]
+    fn test_view_dependency_includes_other_views_from_sql_ast() {
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "users".to_string(),
+                schema_name: None,
+                name: "users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(1),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                }],
+                foreign_keys: vec![],
+                indexes: vec![],
+                comment: None,
+            }],
+            views: vec![
+                View {
+                    id: "recent_users".to_string(),
+                    schema_name: None,
+                    name: "recent_users".to_string(),
+                    columns: vec![],
+                    definition: Some("SELECT id FROM users".to_string()),
+                },
+                View {
+                    id: "active_users".to_string(),
+                    schema_name: None,
+                    name: "active_users".to_string(),
+                    columns: vec![],
+                    definition: Some("SELECT * FROM recent_users".to_string()),
+                },
+            ],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+
+        assert!(graph.edges.iter().any(|edge| {
+            edge.from == "active_users"
+                && edge.to == "recent_users"
                 && edge.kind == EdgeKind::ViewDependency
         }));
     }

@@ -1,13 +1,19 @@
 //! Graph representation of a database schema.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::ControlFlow;
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::{ObjectName, ObjectNamePart, Query, Visit, Visitor};
+use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::parser::Parser;
 use thiserror::Error;
+use tracing::debug;
 
 use crate::model::{
-    Enum, ForeignKeyTargetResolution, Schema, Table, TableId, resolve_table_reference,
+    Enum, ForeignKeyTargetResolution, Schema, Table, TableId, View, normalize_identifier,
+    resolve_table_reference,
 };
 
 /// The kind of node in the schema graph.
@@ -97,37 +103,150 @@ pub enum GraphBuildError {
     },
 }
 
-const fn is_sql_identifier_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '$'
+/// A normalized relation reference extracted from SQL.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SqlRelation {
+    /// Referenced schema name, if qualified in SQL.
+    pub schema_name: Option<String>,
+    /// Referenced relation name.
+    pub name: String,
 }
 
-/// Returns `true` if `definition_lower` contains `name_lower` as a standalone SQL-style
-/// identifier token, not as a substring of a longer identifier (e.g. `user` inside `users`).
-fn definition_references_table_identifier(definition_lower: &str, name_lower: &str) -> bool {
-    if name_lower.is_empty() {
-        return false;
-    }
-    let mut start = 0usize;
-    while let Some(rel) = definition_lower
-        .get(start..)
-        .and_then(|slice| slice.find(name_lower))
-    {
-        let i = start + rel;
-        let before_ok = definition_lower[..i]
-            .chars()
-            .next_back()
-            .is_none_or(|c| !is_sql_identifier_continue(c));
-        let after_start = i + name_lower.len();
-        let after_ok = definition_lower
-            .get(after_start..)
-            .and_then(|slice| slice.chars().next())
-            .is_none_or(|c| !is_sql_identifier_continue(c));
-        if before_ok && after_ok {
-            return true;
+impl SqlRelation {
+    /// Returns `true` if this SQL relation reference resolves to `table`.
+    ///
+    /// Schema-qualified references require the schema to match; bare
+    /// references match either the table name or its stable id.
+    #[must_use]
+    pub fn matches_table(&self, table: &Table) -> bool {
+        let table_name = table.name.to_lowercase();
+        let stable_id = table.stable_id.to_lowercase();
+
+        match self.schema_name.as_deref() {
+            Some(reference_schema) => table.schema_name.as_deref().is_some_and(|table_schema| {
+                table_schema.to_lowercase() == reference_schema && table_name == self.name
+            }),
+            None => self.name == table_name || self.name == stable_id,
         }
-        start = i + 1;
     }
-    false
+
+    /// Returns `true` if this SQL relation reference resolves to `view`.
+    ///
+    /// Schema-qualified references require the schema to match; bare
+    /// references match the view name, id, or qualified name.
+    #[must_use]
+    pub fn matches_view(&self, view: &View) -> bool {
+        let view_name = view.name.to_lowercase();
+        let view_id = view.id.to_lowercase();
+        let view_label = view.qualified_name().to_lowercase();
+
+        match self.schema_name.as_deref() {
+            Some(reference_schema) => view.schema_name.as_deref().is_some_and(|view_schema| {
+                view_schema.to_lowercase() == reference_schema && view_name == self.name
+            }),
+            None => self.name == view_name || self.name == view_id || self.name == view_label,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct RelationCollector {
+    cte_scopes: Vec<HashSet<String>>,
+    references: HashSet<SqlRelation>,
+}
+
+impl Visitor for RelationCollector {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<Self::Break> {
+        let cte_names = query.with.as_ref().map_or_else(HashSet::new, |with| {
+            with.cte_tables
+                .iter()
+                .map(|cte| normalize_identifier(&cte.alias.name.value))
+                .collect()
+        });
+        self.cte_scopes.push(cte_names);
+        ControlFlow::Continue(())
+    }
+
+    fn post_visit_query(&mut self, _query: &Query) -> ControlFlow<Self::Break> {
+        let _ = self.cte_scopes.pop();
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_relation(&mut self, relation: &ObjectName) -> ControlFlow<Self::Break> {
+        if let Some(reference) = object_name_to_relation(relation)
+            && !self.is_cte_reference(&reference)
+        {
+            self.references.insert(reference);
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+impl RelationCollector {
+    fn is_cte_reference(&self, reference: &SqlRelation) -> bool {
+        reference.schema_name.is_none()
+            && self
+                .cte_scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.contains(&reference.name))
+    }
+}
+
+fn object_name_to_relation(name: &ObjectName) -> Option<SqlRelation> {
+    let parts: Vec<String> = name
+        .0
+        .iter()
+        .filter_map(object_name_identifier)
+        .map(normalize_identifier)
+        .collect();
+    match parts.as_slice() {
+        [name] => Some(SqlRelation {
+            schema_name: None,
+            name: name.clone(),
+        }),
+        [.., schema_name, name] => Some(SqlRelation {
+            schema_name: Some(schema_name.clone()),
+            name: name.clone(),
+        }),
+        [] => None,
+    }
+}
+
+const fn object_name_identifier(part: &ObjectNamePart) -> Option<&str> {
+    match part {
+        ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
+        ObjectNamePart::Function(_) => None,
+    }
+}
+
+/// Collects normalized table/view references from a SQL fragment.
+///
+/// The result excludes CTE aliases so callers can reason about actual
+/// relation dependencies without comment or alias false positives.
+#[must_use]
+pub fn collect_sql_relations(definition: &str) -> HashSet<SqlRelation> {
+    let generic = GenericDialect {};
+    let postgres = PostgreSqlDialect {};
+    let mysql = MySqlDialect {};
+    let sqlite = SQLiteDialect {};
+    let dialects: [&dyn Dialect; 4] = [&generic, &postgres, &mysql, &sqlite];
+
+    for dialect in dialects {
+        let Ok(statements) = Parser::parse_sql(dialect, definition) else {
+            continue;
+        };
+        let mut collector = RelationCollector::default();
+        let _ = statements.visit(&mut collector);
+        return collector.references;
+    }
+
+    debug!(
+        "collect_sql_relations: no dialect could parse the definition; view dependencies may be missing"
+    );
+    HashSet::new()
 }
 
 impl SchemaGraph {
@@ -313,11 +432,12 @@ impl SchemaGraph {
             });
 
             if let Some(ref definition) = view.definition {
-                let def_lower = definition.to_lowercase();
+                let references = collect_sql_relations(definition);
                 for table in &schema.tables {
-                    let tname = table.name.to_lowercase();
-                    if table_names.contains(&tname)
-                        && definition_references_table_identifier(&def_lower, &tname)
+                    if table_names.contains(&table.name.to_lowercase())
+                        && references
+                            .iter()
+                            .any(|reference| reference.matches_table(table))
                         && let Some(&table_idx) = ids.get(&table.id)
                     {
                         graph.add_edge(
@@ -760,34 +880,6 @@ mod tests {
     }
 
     #[test]
-    fn definition_references_table_identifier_respects_token_boundaries() {
-        assert!(super::definition_references_table_identifier(
-            "select * from users",
-            "users"
-        ));
-        assert!(!super::definition_references_table_identifier(
-            "select * from users",
-            "user"
-        ));
-        assert!(!super::definition_references_table_identifier(
-            "select * from user_settings",
-            "user"
-        ));
-        assert!(super::definition_references_table_identifier(
-            "select * from user",
-            "user"
-        ));
-        assert!(!super::definition_references_table_identifier(
-            "select * from user_settings",
-            "users"
-        ));
-        assert!(super::definition_references_table_identifier(
-            "select * from public.users u",
-            "users"
-        ));
-    }
-
-    #[test]
     fn view_dependency_does_not_link_prefix_table_name_in_longer_identifier() {
         let schema = Schema {
             tables: vec![
@@ -836,5 +928,120 @@ mod tests {
 
         assert_eq!(deps, vec![users]);
         assert!(!deps.contains(&user));
+    }
+
+    #[test]
+    fn view_dependency_ignores_cte_names_that_shadow_tables() {
+        let schema = Schema {
+            tables: vec![make_table(
+                1,
+                "users",
+                None,
+                vec![make_column("id", "integer", false, true)],
+                vec![],
+            )],
+            views: vec![make_view(
+                "active_users",
+                None,
+                "with users as (select 1 as id) select * from users",
+            )],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let view = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "active_users")
+            .expect("view node");
+
+        assert!(!graph.graph.edge_references().any(|edge| {
+            edge.target() == view && edge.weight().kind == EdgeKind::ViewDependency
+        }));
+    }
+
+    #[test]
+    fn view_dependency_ignores_comment_text() {
+        let schema = Schema {
+            tables: vec![make_table(
+                1,
+                "users",
+                None,
+                vec![make_column("id", "integer", false, true)],
+                vec![],
+            )],
+            views: vec![make_view(
+                "active_users",
+                None,
+                "select 1 /* users */ as id",
+            )],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let view = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "active_users")
+            .expect("view node");
+
+        assert!(!graph.graph.edge_references().any(|edge| {
+            edge.target() == view && edge.weight().kind == EdgeKind::ViewDependency
+        }));
+    }
+
+    #[test]
+    fn view_dependency_resolves_schema_qualified_relations() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "users",
+                    Some("public"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "users",
+                    Some("analytics"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+            ],
+            views: vec![make_view(
+                "active_users",
+                None,
+                "select * from public.users",
+            )],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let public_users = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "public.users")
+            .expect("public.users node");
+        let analytics_users = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "analytics.users")
+            .expect("analytics.users node");
+        let view = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "active_users")
+            .expect("view node");
+
+        let deps: Vec<_> = graph
+            .graph
+            .edge_references()
+            .filter(|edge| edge.target() == view && edge.weight().kind == EdgeKind::ViewDependency)
+            .map(|edge| edge.source())
+            .collect();
+
+        assert_eq!(deps, vec![public_users]);
+        assert!(!deps.contains(&analytics_users));
     }
 }
