@@ -336,11 +336,7 @@ fn order_by_barycenter(
         .collect();
 
     // Sort by barycenter, then by node index for determinism
-    nodes_with_barycenter.sort_by(|a, b| {
-        a.1.partial_cmp(&b.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
+    nodes_with_barycenter.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
     nodes_with_barycenter
         .into_iter()
@@ -396,11 +392,7 @@ fn order_by_median(
         .collect();
 
     // Sort by median, then by node index for determinism
-    nodes_with_median.sort_by(|a, b| {
-        a.1.partial_cmp(&b.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
+    nodes_with_median.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
     nodes_with_median.into_iter().map(|(idx, _)| idx).collect()
 }

@@ -241,7 +241,7 @@ fn nearest_intersecting_obstacle(
                 (a.w.mul_add(0.5, a.x) - seg_start.0).hypot(a.h.mul_add(0.5, a.y) - seg_start.1);
             let db =
                 (b.w.mul_add(0.5, b.x) - seg_start.0).hypot(b.h.mul_add(0.5, b.y) - seg_start.1);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            da.total_cmp(&db)
         })
 }
 
