@@ -573,6 +573,9 @@ pub struct PositionedEdgeRoutingDebug {
 pub struct PositionedGraphRoutingDebug {
     /// Number of non-self-loop edges whose final backbone still intersects padded obstacles.
     pub non_self_loop_detour_activations: usize,
+    /// Number of edges that fell back to simple backbone routing because no obstacle-aware
+    /// channel candidate satisfied hard constraints.
+    pub channel_fallback_activations: usize,
 }
 
 /// A positioned group for rendering.
@@ -707,6 +710,7 @@ pub fn build_layout_from_graph_with_config(
         height,
         routing_debug: Some(PositionedGraphRoutingDebug {
             non_self_loop_detour_activations: routing_diagnostics.non_self_loop_detour_activations,
+            channel_fallback_activations: routing_diagnostics.channel_fallback_activations,
         }),
     })
 }
@@ -1538,6 +1542,7 @@ fn route_edges(
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct RoutingDiagnostics {
     non_self_loop_detour_activations: usize,
+    channel_fallback_activations: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1585,7 +1590,8 @@ struct SingleEdgeResult {
     route: EdgeRoute,
     bundle_metadata: Option<BundleRouteMetadata>,
     routing_debug: PositionedEdgeRoutingDebug,
-    used_fallback: bool,
+    used_detour_fallback: bool,
+    used_channel_fallback: bool,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1598,6 +1604,7 @@ fn route_single_edge(
     channel_usage: &mut BTreeMap<(ChannelAxis, i32), u32>,
 ) -> Result<SingleEdgeResult, LayoutError> {
     let mut bundle_metadata = None;
+    let mut used_channel_fallback = false;
     let mut routing_debug = PositionedEdgeRoutingDebug {
         source_side: None,
         target_side: None,
@@ -1699,6 +1706,12 @@ fn route_single_edge(
                     },
                 )
             } else {
+                used_channel_fallback = true;
+                debug!(
+                    edge_from = edge.from,
+                    edge_to = edge.to,
+                    "No obstacle-aware channel candidate satisfied constraints; using simple backbone"
+                );
                 route_edge_with_assigned_ports(
                     x1,
                     y1,
@@ -1744,7 +1757,7 @@ fn route_single_edge(
         });
     };
 
-    let mut used_fallback = false;
+    let mut used_detour_fallback = false;
     let route = match edge.is_self_loop {
         true => {
             bundle_metadata = None;
@@ -1752,7 +1765,7 @@ fn route_single_edge(
         }
         false if route_needs_detour(&route, ctx.detour_obstacles) => {
             bundle_metadata = None;
-            used_fallback = true;
+            used_detour_fallback = true;
             routing_debug.detour_activation_counted = true;
             debug!(
                 edge_from = edge.from,
@@ -1768,7 +1781,8 @@ fn route_single_edge(
         route,
         bundle_metadata,
         routing_debug,
-        used_fallback,
+        used_detour_fallback,
+        used_channel_fallback,
     })
 }
 
@@ -1908,8 +1922,11 @@ fn route_edges_with_diagnostics(
             &mut channel_usage,
         )?;
 
-        if result.used_fallback {
+        if result.used_detour_fallback {
             diagnostics.non_self_loop_detour_activations += 1;
+        }
+        if result.used_channel_fallback {
+            diagnostics.channel_fallback_activations += 1;
         }
 
         let label = edge.name.clone().unwrap_or_else(|| {
@@ -5380,6 +5397,63 @@ mod tests {
             route_edges_with_diagnostics(&graph, &positioned_nodes, &LayoutConfig::default(), None)
                 .expect("unranked routing should succeed");
         assert_eq!(diagnostics.non_self_loop_detour_activations, 1);
+    }
+
+    #[test]
+    fn test_route_edges_channel_fallback_diagnostic_when_all_candidates_blocked() {
+        let graph = single_edge_graph("authors", "posts");
+        let positioned_nodes = vec![
+            PositionedNode {
+                id: "authors".to_string(),
+                label: "authors".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "posts".to_string(),
+                label: "posts".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 200.0,
+                y: 200.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "blocker".to_string(),
+                label: "blocker".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: -300.0,
+                y: 84.0,
+                width: 900.0,
+                height: 180.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+        ];
+
+        let (edges, diagnostics) = route_edges_with_diagnostics(
+            &graph,
+            &positioned_nodes,
+            &LayoutConfig::default(),
+            Some(&[0, 1, 0]),
+        )
+        .expect("ranked routing with blocked channels should succeed via fallback");
+
+        assert_eq!(diagnostics.channel_fallback_activations, 1);
+        assert!(!edges.is_empty());
     }
 
     #[test]
