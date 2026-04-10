@@ -9,6 +9,7 @@ use relune_core::{
     EdgeKind, NodeKind,
     layout::{Cardinality, RouteStyle},
 };
+use unicode_width::UnicodeWidthChar;
 
 pub mod edge;
 mod error;
@@ -423,13 +424,6 @@ fn render_node_internal(
                 node_style.separator
             )?;
         }
-        let text = if node.kind == NodeKind::Enum {
-            format!("• {}", column.name)
-        } else if column.data_type.is_empty() {
-            column.name.clone()
-        } else {
-            format!("{}: {}", column.name, column.data_type)
-        };
         let font_style = if column.flags.nullable {
             r#" font-style="italic""#
         } else {
@@ -437,7 +431,7 @@ fn render_node_internal(
         };
         write!(
             out,
-            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>{}</text>"#,
+            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>"#,
             node.x + 10.0,
             line_y - 12.5,
             column_text_width(node, column),
@@ -449,8 +443,20 @@ fn render_node_internal(
                 colors.text_secondary
             },
             font_style,
-            escape_text(&text)
         )?;
+        if node.kind == NodeKind::Enum {
+            write!(out, "• {}", escape_text(&column.name))?;
+        } else if column.data_type.is_empty() {
+            write!(out, "{}", escape_text(&column.name))?;
+        } else {
+            write!(
+                out,
+                "{}: {}",
+                escape_text(&column.name),
+                escape_text(&column.data_type)
+            )?;
+        }
+        out.push_str("</text>");
 
         let mut icon_x = node.x + node.width - 22.0;
         if column.flags.relation.is_indexed {
@@ -1091,7 +1097,11 @@ fn column_text_width(
 
 fn estimate_label_width(text: &str) -> f32 {
     text.chars()
-        .map(|ch| if ch.is_ascii() { 6.4 } else { 10.0 })
+        .map(|ch| match ch.width_cjk().or_else(|| ch.width()) {
+            Some(0) | None => 0.0,
+            Some(1) => 6.4,
+            Some(_) => 12.8,
+        })
         .sum::<f32>()
         + 18.0
 }
@@ -2341,6 +2351,21 @@ mod tests {
         let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
 
         assert!(estimated >= svg.len());
+    }
+
+    #[test]
+    fn test_estimate_label_width_cjk_wider_than_ascii() {
+        let ascii_width = estimate_label_width("abcd");
+        let cjk_width = estimate_label_width("漢字表示");
+        // CJK characters (full-width) should produce a wider estimate
+        assert!(cjk_width > ascii_width);
+    }
+
+    #[test]
+    fn test_estimate_label_width_mixed_script() {
+        let ascii_only = estimate_label_width("users");
+        let mixed = estimate_label_width("users_テーブル");
+        assert!(mixed > ascii_only);
     }
 
     #[test]
