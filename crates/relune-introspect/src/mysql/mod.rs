@@ -9,6 +9,9 @@ use relune_core::Schema;
 use sqlx::mysql::MySqlPoolOptions;
 use tracing::{debug, error, info, instrument};
 
+use crate::connect::{
+    acquire_timeout, close_pool_when_done, configure_mysql_session, mysql_connect_options,
+};
 use crate::error::{IntrospectError, connect_error};
 
 const MARIADB_SCHEME_PREFIX: &str = "mariadb://";
@@ -39,10 +42,13 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
 
     debug!("Connecting to MySQL database");
 
+    let connect_options = mysql_connect_options(&connect_url)?;
+
     let pool = MySqlPoolOptions::new()
         .max_connections(catalog::pool_max_connections())
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .connect(&connect_url)
+        .acquire_timeout(acquire_timeout())
+        .after_connect(|connection, _meta| Box::pin(configure_mysql_session(connection)))
+        .connect_with(connect_options)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to connect to database");
@@ -51,26 +57,26 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
 
     debug!("Successfully connected to database");
 
-    info!("Fetching database catalog metadata");
-    let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
+    close_pool_when_done(&pool, async {
+        info!("Fetching database catalog metadata");
+        let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
 
-    debug!(
-        tables = raw_schema.tables.len(),
-        "Retrieved raw catalog data"
-    );
+        debug!(
+            tables = raw_schema.tables.len(),
+            "Retrieved raw catalog data"
+        );
 
-    info!("Mapping catalog metadata to Schema");
-    let schema = crate::common::map_to_schema(raw_schema)?;
+        info!("Mapping catalog metadata to Schema");
+        let schema = crate::common::map_to_schema(raw_schema)?;
 
-    info!(
-        tables = schema.tables.len(),
-        "Introspection completed successfully"
-    );
+        info!(
+            tables = schema.tables.len(),
+            "Introspection completed successfully"
+        );
 
-    // Pool::close() is infallible in sqlx 0.8; await it so connections drain cleanly.
-    pool.close().await;
-
-    Ok(schema)
+        Ok(schema)
+    })
+    .await
 }
 
 /// Rewrites `mariadb://` to `mysql://` for sqlx.

@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use sqlx::MySqlPool;
+use thiserror::Error;
 
+use crate::catalog::ParallelCatalogReader;
 use crate::common::{
     RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
     parse_referential_action,
@@ -22,30 +24,7 @@ struct MySqlCatalog {
     pool: MySqlPool,
 }
 
-impl MySqlCatalog {
-    async fn fetch_all(&self) -> Result<RawSchema, IntrospectError> {
-        let (tables, columns, fk_rows, index_rows, views, enums) = tokio::try_join!(
-            self.fetch_tables(),
-            self.fetch_columns(),
-            self.fetch_foreign_key_rows(),
-            self.fetch_index_rows(),
-            self.fetch_views(),
-            self.fetch_enums(),
-        )?;
-
-        let foreign_keys = group_foreign_keys(fk_rows);
-        let indexes = group_indexes(index_rows);
-
-        Ok(RawSchema {
-            tables,
-            columns,
-            foreign_keys,
-            indexes,
-            views,
-            enums,
-        })
-    }
-
+impl ParallelCatalogReader for MySqlCatalog {
     async fn fetch_tables(&self) -> Result<Vec<RawTable>, IntrospectError> {
         let rows: Vec<RawTableRow> = sqlx::query_as(
             r"
@@ -122,73 +101,14 @@ impl MySqlCatalog {
             .collect::<Result<Vec<RawColumn>, IntrospectError>>()
     }
 
-    async fn fetch_foreign_key_rows(&self) -> Result<Vec<FkColumnRow>, IntrospectError> {
-        let rows: Vec<FkColumnRow> = sqlx::query_as(
-            r"
-            SELECT
-                CONVERT(kcu.CONSTRAINT_NAME USING utf8mb4) AS constraint_name,
-                CONVERT(kcu.TABLE_SCHEMA USING utf8mb4) AS schema_name,
-                CONVERT(kcu.TABLE_NAME USING utf8mb4) AS table_name,
-                CONVERT(kcu.COLUMN_NAME USING utf8mb4) AS column_name,
-                CONVERT(kcu.REFERENCED_TABLE_SCHEMA USING utf8mb4) AS referenced_schema,
-                CONVERT(kcu.REFERENCED_TABLE_NAME USING utf8mb4) AS referenced_table,
-                CONVERT(kcu.REFERENCED_COLUMN_NAME USING utf8mb4) AS referenced_column,
-                kcu.ORDINAL_POSITION AS ordinal_position,
-                CONVERT(rc.DELETE_RULE USING utf8mb4) AS delete_rule,
-                CONVERT(rc.UPDATE_RULE USING utf8mb4) AS update_rule
-            FROM information_schema.KEY_COLUMN_USAGE kcu
-            INNER JOIN information_schema.TABLE_CONSTRAINTS tc
-                ON kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
-                AND kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
-                AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA
-                AND kcu.TABLE_NAME = tc.TABLE_NAME
-            INNER JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
-                ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-                AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-            WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
-              AND kcu.TABLE_SCHEMA NOT IN (
-                  'information_schema', 'mysql', 'performance_schema', 'sys',
-                  'mysql_innodb_cluster_metadata'
-              )
-            ORDER BY
-                kcu.TABLE_SCHEMA,
-                kcu.TABLE_NAME,
-                kcu.CONSTRAINT_NAME,
-                kcu.ORDINAL_POSITION
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch foreign keys: {e}")))?;
-
-        Ok(rows)
+    async fn fetch_foreign_keys(&self) -> Result<Vec<RawForeignKey>, IntrospectError> {
+        let rows = self.fetch_foreign_key_rows().await?;
+        Ok(group_foreign_keys(rows))
     }
 
-    async fn fetch_index_rows(&self) -> Result<Vec<IndexColumnRow>, IntrospectError> {
-        let rows: Vec<IndexColumnRow> = sqlx::query_as(
-            r"
-            SELECT
-                CONVERT(TABLE_SCHEMA USING utf8mb4) AS schema_name,
-                CONVERT(TABLE_NAME USING utf8mb4) AS table_name,
-                CONVERT(INDEX_NAME USING utf8mb4) AS index_name,
-                CONVERT(COLUMN_NAME USING utf8mb4) AS column_name,
-                SEQ_IN_INDEX AS seq_in_index,
-                NON_UNIQUE AS non_unique,
-                IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
-            FROM information_schema.STATISTICS
-            WHERE TABLE_SCHEMA NOT IN (
-                'information_schema', 'mysql', 'performance_schema', 'sys',
-                'mysql_innodb_cluster_metadata'
-              )
-              AND COLUMN_NAME IS NOT NULL
-            ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch indexes: {e}")))?;
-
-        Ok(rows)
+    async fn fetch_indexes(&self) -> Result<Vec<RawIndex>, IntrospectError> {
+        let rows = self.fetch_index_rows().await?;
+        Ok(group_indexes(rows))
     }
 
     async fn fetch_views(&self) -> Result<Vec<RawView>, IntrospectError> {
@@ -260,6 +180,77 @@ impl MySqlCatalog {
     }
 }
 
+impl MySqlCatalog {
+    async fn fetch_foreign_key_rows(&self) -> Result<Vec<FkColumnRow>, IntrospectError> {
+        let rows: Vec<FkColumnRow> = sqlx::query_as(
+            r"
+            SELECT
+                CONVERT(kcu.CONSTRAINT_NAME USING utf8mb4) AS constraint_name,
+                CONVERT(kcu.TABLE_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(kcu.TABLE_NAME USING utf8mb4) AS table_name,
+                CONVERT(kcu.COLUMN_NAME USING utf8mb4) AS column_name,
+                CONVERT(kcu.REFERENCED_TABLE_SCHEMA USING utf8mb4) AS referenced_schema,
+                CONVERT(kcu.REFERENCED_TABLE_NAME USING utf8mb4) AS referenced_table,
+                CONVERT(kcu.REFERENCED_COLUMN_NAME USING utf8mb4) AS referenced_column,
+                kcu.ORDINAL_POSITION AS ordinal_position,
+                CONVERT(rc.DELETE_RULE USING utf8mb4) AS delete_rule,
+                CONVERT(rc.UPDATE_RULE USING utf8mb4) AS update_rule
+            FROM information_schema.KEY_COLUMN_USAGE kcu
+            INNER JOIN information_schema.TABLE_CONSTRAINTS tc
+                ON kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+                AND kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA
+                AND kcu.TABLE_NAME = tc.TABLE_NAME
+            INNER JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+                ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+                AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+            WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
+              AND kcu.TABLE_SCHEMA NOT IN (
+                  'information_schema', 'mysql', 'performance_schema', 'sys',
+                  'mysql_innodb_cluster_metadata'
+              )
+            ORDER BY
+                kcu.TABLE_SCHEMA,
+                kcu.TABLE_NAME,
+                kcu.CONSTRAINT_NAME,
+                kcu.ORDINAL_POSITION
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query(format!("Failed to fetch foreign keys: {e}")))?;
+
+        Ok(rows)
+    }
+
+    async fn fetch_index_rows(&self) -> Result<Vec<IndexColumnRow>, IntrospectError> {
+        let rows: Vec<IndexColumnRow> = sqlx::query_as(
+            r"
+            SELECT
+                CONVERT(TABLE_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(TABLE_NAME USING utf8mb4) AS table_name,
+                CONVERT(INDEX_NAME USING utf8mb4) AS index_name,
+                CONVERT(COLUMN_NAME USING utf8mb4) AS column_name,
+                SEQ_IN_INDEX AS seq_in_index,
+                NON_UNIQUE AS non_unique,
+                IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA NOT IN (
+                'information_schema', 'mysql', 'performance_schema', 'sys',
+                'mysql_innodb_cluster_metadata'
+              )
+              AND COLUMN_NAME IS NOT NULL
+            ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query(format!("Failed to fetch indexes: {e}")))?;
+
+        Ok(rows)
+    }
+}
+
 /// Returns the number of concurrent catalog queries executed for `MySQL`.
 #[must_use]
 pub(crate) const fn pool_max_connections() -> u32 {
@@ -328,11 +319,17 @@ fn raw_enum_from_mysql_column_type(
     schema_name: &str,
     column_type: &str,
 ) -> Result<RawEnum, IntrospectError> {
-    let values = parse_mysql_enum_like_values(column_type).ok_or_else(|| {
-        IntrospectError::metadata_mapping(format!(
-            "unsupported MySQL enum/set definition in {schema_name}: {column_type}"
-        ))
-    })?;
+    let values = parse_mysql_enum_like_values(column_type)
+        .map_err(|error| {
+            IntrospectError::metadata_mapping(format!(
+                "unsupported MySQL enum/set definition in {schema_name}: {column_type} ({error})"
+            ))
+        })?
+        .ok_or_else(|| {
+            IntrospectError::metadata_mapping(format!(
+                "unsupported MySQL enum/set definition in {schema_name}: {column_type}"
+            ))
+        })?;
 
     Ok(RawEnum {
         enum_name: column_type.to_string(),
@@ -341,12 +338,32 @@ fn raw_enum_from_mysql_column_type(
     })
 }
 
-fn parse_mysql_enum_like_values(column_type: &str) -> Option<Vec<String>> {
-    let start = column_type.find('(')?;
-    let end = column_type.rfind(')')?;
+#[derive(Debug, Error, PartialEq, Eq)]
+enum MySqlEnumLikeParseError {
+    #[error("expected a quoted enum/set value")]
+    ExpectedQuotedValue,
+    #[error("enum/set value ended with an incomplete escape sequence")]
+    TrailingEscapeSequence,
+    #[error("enum/set value is missing a closing quote")]
+    UnterminatedQuotedValue,
+    #[error("enum/set definition is missing a closing parenthesis")]
+    MissingClosingParenthesis,
+    #[error("enum/set definition contains an unexpected separator")]
+    UnexpectedSeparator,
+}
+
+fn parse_mysql_enum_like_values(
+    column_type: &str,
+) -> Result<Option<Vec<String>>, MySqlEnumLikeParseError> {
+    let Some(start) = column_type.find('(') else {
+        return Ok(None);
+    };
+    let Some(end) = column_type.rfind(')') else {
+        return Err(MySqlEnumLikeParseError::MissingClosingParenthesis);
+    };
     let kind = column_type[..start].trim();
     if !kind.eq_ignore_ascii_case("enum") && !kind.eq_ignore_ascii_case("set") {
-        return None;
+        return Ok(None);
     }
 
     let mut values = Vec::new();
@@ -357,14 +374,14 @@ fn parse_mysql_enum_like_values(column_type: &str) -> Option<Vec<String>> {
             chars.next();
         }
 
-        if chars.next()? != '\'' {
-            return None;
+        if chars.next() != Some('\'') {
+            return Err(MySqlEnumLikeParseError::ExpectedQuotedValue);
         }
 
         let mut value = String::new();
         loop {
-            match chars.next()? {
-                '\'' => {
+            match chars.next() {
+                Some('\'') => {
                     if chars.peek() == Some(&'\'') {
                         value.push('\'');
                         chars.next();
@@ -372,8 +389,14 @@ fn parse_mysql_enum_like_values(column_type: &str) -> Option<Vec<String>> {
                         break;
                     }
                 }
-                '\\' => value.push(chars.next()?),
-                c => value.push(c),
+                Some('\\') => {
+                    let Some(escaped) = chars.next() else {
+                        return Err(MySqlEnumLikeParseError::TrailingEscapeSequence);
+                    };
+                    value.push(escaped);
+                }
+                Some(c) => value.push(c),
+                None => return Err(MySqlEnumLikeParseError::UnterminatedQuotedValue),
             }
         }
         values.push(value);
@@ -387,11 +410,11 @@ fn parse_mysql_enum_like_values(column_type: &str) -> Option<Vec<String>> {
                 chars.next();
             }
             None => break,
-            _ => return None,
+            _ => return Err(MySqlEnumLikeParseError::UnexpectedSeparator),
         }
     }
 
-    Some(values)
+    Ok(Some(values))
 }
 
 fn group_foreign_keys(rows: Vec<FkColumnRow>) -> Vec<RawForeignKey> {
@@ -515,7 +538,7 @@ mod tests {
     fn parses_mysql_enum_values() {
         assert_eq!(
             parse_mysql_enum_like_values("enum('draft','published')"),
-            Some(vec!["draft".to_string(), "published".to_string()])
+            Ok(Some(vec!["draft".to_string(), "published".to_string()]))
         );
     }
 
@@ -523,13 +546,24 @@ mod tests {
     fn parses_mysql_set_values_with_escaped_quotes() {
         assert_eq!(
             parse_mysql_enum_like_values("set('O''Reilly','back\\\\slash')"),
-            Some(vec!["O'Reilly".to_string(), "back\\slash".to_string()])
+            Ok(Some(vec![
+                "O'Reilly".to_string(),
+                "back\\slash".to_string()
+            ]))
         );
     }
 
     #[test]
     fn rejects_non_enum_like_column_types() {
-        assert_eq!(parse_mysql_enum_like_values("varchar(255)"), None);
+        assert_eq!(parse_mysql_enum_like_values("varchar(255)"), Ok(None));
+    }
+
+    #[test]
+    fn rejects_malformed_enum_values_with_incomplete_escape_sequences() {
+        assert_eq!(
+            parse_mysql_enum_like_values("enum('bad\\)"),
+            Err(MySqlEnumLikeParseError::TrailingEscapeSequence)
+        );
     }
 
     #[test]

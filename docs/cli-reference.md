@@ -16,7 +16,7 @@ Every command requires **at least one input**. Typical inputs:
 | SQL file | `--sql <FILE>` | DDL |
 | SQL string | `--sql-text '<DDL>'` | Not available on `lint` |
 | Normalized schema JSON | `--schema-json <FILE>` | From a previous export |
-| Live DB | `--db-url <URL>` | Read-only introspection |
+| Live DB | `--db-url <URL>` | Read-only introspection; PostgreSQL/MySQL/MariaDB use a 30s statement deadline, and remote TCP connections require TLS by default |
 | SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | For SQL parsing |
 
 Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly.

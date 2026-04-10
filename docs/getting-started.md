@@ -49,6 +49,8 @@ relune render --db-url 'postgres://user:pass@localhost:5432/dbname' -o erd.svg
 ```
 
 Dialects and URL schemes follow CLI help (`relune render --help`).
+For PostgreSQL and MySQL/MariaDB, Relune applies a 30 second introspection statement deadline by default.
+Remote TCP connections also require TLS by default; Unix sockets and loopback-only local connections are left untouched.
 
 ## Next steps
 

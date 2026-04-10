@@ -6,6 +6,7 @@
 
 use sqlx::PgPool;
 
+use crate::catalog::ParallelCatalogReader;
 use crate::common::{
     RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
     parse_referential_action,
@@ -70,9 +71,11 @@ impl PostgresCatalog {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+impl ParallelCatalogReader for PostgresCatalog {
     /// Fetch all tables from the database, excluding system schemas.
-    pub async fn fetch_tables(&self) -> Result<Vec<RawTable>, IntrospectError> {
+    async fn fetch_tables(&self) -> Result<Vec<RawTable>, IntrospectError> {
         let rows: Vec<RawTableRow> = sqlx::query_as(
             r"
             SELECT
@@ -102,7 +105,7 @@ impl PostgresCatalog {
     }
 
     /// Fetch all columns from the database, excluding system schemas.
-    pub async fn fetch_columns(&self) -> Result<Vec<RawColumn>, IntrospectError> {
+    async fn fetch_columns(&self) -> Result<Vec<RawColumn>, IntrospectError> {
         let rows: Vec<RawColumnRow> = sqlx::query_as(FETCH_COLUMNS_QUERY)
             .fetch_all(&self.pool)
             .await
@@ -123,51 +126,8 @@ impl PostgresCatalog {
             .collect())
     }
 
-    /// Fetch primary key columns from the database.
-    pub async fn fetch_primary_keys(&self) -> Result<Vec<RawColumn>, IntrospectError> {
-        let rows: Vec<RawColumnRow> = sqlx::query_as(
-            r"
-            SELECT
-                t.relname AS table_name,
-                n.nspname AS schema_name,
-                a.attname AS column_name,
-                pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
-                CASE WHEN a.attnotnull THEN false ELSE true END AS is_nullable,
-                true AS is_primary_key,
-                pg_catalog.col_description(a.attrelid, a.attnum) AS column_comment,
-                a.attnum AS ordinal_position
-            FROM pg_catalog.pg_index i
-            INNER JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
-            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-            INNER JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey)
-            WHERE i.indisprimary
-                AND t.relkind = 'r'
-                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                AND n.nspname NOT LIKE 'pg_%'
-            ORDER BY n.nspname, t.relname, array_position(i.indkey, a.attnum)
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch primary keys: {e}")))?;
-
-        Ok(rows
-            .into_iter()
-            .map(|row| RawColumn {
-                table_name: row.table_name,
-                schema_name: row.schema_name,
-                column_name: row.column_name,
-                data_type: row.data_type,
-                is_nullable: row.is_nullable,
-                is_primary_key: row.is_primary_key,
-                column_comment: row.column_comment,
-                ordinal_position: row.ordinal_position,
-            })
-            .collect())
-    }
-
     /// Fetch all foreign keys from the database.
-    pub async fn fetch_foreign_keys(&self) -> Result<Vec<RawForeignKey>, IntrospectError> {
+    async fn fetch_foreign_keys(&self) -> Result<Vec<RawForeignKey>, IntrospectError> {
         let rows: Vec<RawForeignKeyRow> = sqlx::query_as(
             r"
             SELECT
@@ -218,7 +178,7 @@ impl PostgresCatalog {
     }
 
     /// Fetch all indexes from the database.
-    pub async fn fetch_indexes(&self) -> Result<Vec<RawIndex>, IntrospectError> {
+    async fn fetch_indexes(&self) -> Result<Vec<RawIndex>, IntrospectError> {
         let rows: Vec<RawIndexRow> = sqlx::query_as(
             r"
             SELECT
@@ -258,7 +218,7 @@ impl PostgresCatalog {
     }
 
     /// Fetch all views from the database.
-    pub async fn fetch_views(&self) -> Result<Vec<RawView>, IntrospectError> {
+    async fn fetch_views(&self) -> Result<Vec<RawView>, IntrospectError> {
         let rows: Vec<RawViewRow> = sqlx::query_as(FETCH_VIEWS_QUERY)
             .fetch_all(&self.pool)
             .await
@@ -276,7 +236,7 @@ impl PostgresCatalog {
     }
 
     /// Fetch all enum types from the database.
-    pub async fn fetch_enums(&self) -> Result<Vec<RawEnum>, IntrospectError> {
+    async fn fetch_enums(&self) -> Result<Vec<RawEnum>, IntrospectError> {
         let rows: Vec<RawEnumRow> = sqlx::query_as(
             r"
             SELECT
@@ -305,27 +265,6 @@ impl PostgresCatalog {
                 values: row.values.unwrap_or_default(),
             })
             .collect())
-    }
-
-    /// Fetch all catalog metadata from the database.
-    pub async fn fetch_all(&self) -> Result<RawSchema, IntrospectError> {
-        let (tables, columns, foreign_keys, indexes, views, enums) = tokio::try_join!(
-            self.fetch_tables(),
-            self.fetch_columns(),
-            self.fetch_foreign_keys(),
-            self.fetch_indexes(),
-            self.fetch_views(),
-            self.fetch_enums()
-        )?;
-
-        Ok(RawSchema {
-            tables,
-            columns,
-            foreign_keys,
-            indexes,
-            views,
-            enums,
-        })
     }
 }
 
