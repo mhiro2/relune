@@ -3,6 +3,8 @@
 //! This crate provides a self-contained HTML document wrapper around SVG output,
 //! with pan/zoom interaction and embedded graph metadata for future features.
 
+mod components;
+mod css;
 mod error;
 mod html;
 mod metadata;
