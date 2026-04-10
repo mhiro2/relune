@@ -206,6 +206,10 @@ fn d2_escape(s: &str) -> String {
             '"' => out.push_str("\\\""),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
+            '<' | '>' | '{' | '}' | '|' => {
+                out.push('\\');
+                out.push(ch);
+            }
             _ => out.push(ch),
         }
     }
@@ -450,7 +454,7 @@ mod tests {
 
         let d2 = layout_graph_to_d2(&graph);
         assert!(d2.contains("\"users\\n[prod]\""));
-        assert!(d2.contains("\"fk[\\n] (user_id -> id)\""));
+        assert!(d2.contains("\"fk[\\n] (user_id -\\> id)\""));
 
         let dot = layout_graph_to_dot(&graph);
         assert!(dot.contains("[label=\"users\\n[prod]\"]"));
@@ -472,6 +476,27 @@ mod tests {
 
         let dot = layout_graph_to_dot(&graph);
         assert!(dot.contains("\"node_1\" [label=\"node_1\"]"));
+    }
+
+    #[test]
+    fn d2_escape_handles_special_d2_characters() {
+        assert_eq!(d2_escape("<div>"), "\\<div\\>");
+        assert_eq!(d2_escape("{block}"), "\\{block\\}");
+        assert_eq!(d2_escape("a|b"), "a\\|b");
+        assert_eq!(d2_escape("a<b>c{d}e|f"), "a\\<b\\>c\\{d\\}e\\|f");
+        assert_eq!(d2_escape("plain"), "plain");
+        assert_eq!(d2_escape("line\nnewline"), "line\\nnewline");
+    }
+
+    #[test]
+    fn d2_export_escapes_special_characters_in_labels() {
+        let mut graph = tiny_graph();
+        graph.nodes[0].label = "users<admin>".into();
+        graph.edges[0].name = Some("fk{main}|ref".into());
+
+        let d2 = layout_graph_to_d2(&graph);
+        assert!(d2.contains("\\<admin\\>"));
+        assert!(d2.contains("\\{main\\}\\|ref"));
     }
 
     #[test]
