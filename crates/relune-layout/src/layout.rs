@@ -2315,7 +2315,7 @@ fn obstacle_aware_channel_for_edge(
     let mut best_score = None;
     let mut candidates = channel_candidates(search_plan, source_rank, target_rank, rank_bounds);
     if search_plan.class != ChannelCandidateClass::SameRank {
-        let start_order = u32::try_from(candidates.len()).expect("candidate count should fit u32");
+        let start_order = u32::try_from(candidates.len()).unwrap_or(u32::MAX);
         candidates.extend(bypass_channel_candidates(
             context.direction,
             source_rect,
@@ -2494,7 +2494,7 @@ const fn bypass_channel_lane_count() -> usize {
 
 fn bypass_channel_offsets() -> impl ExactSizeIterator<Item = f32> {
     (0..bypass_channel_lane_count()).map(|lane_index| {
-        BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).expect("lane index"))
+        BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).unwrap_or(u16::MAX))
     })
 }
 
@@ -2506,8 +2506,8 @@ fn append_bypass_candidates(
     start_order: u32,
 ) {
     for (offset_index, offset) in bypass_channel_offsets().enumerate() {
-        let stable_order =
-            start_order + u32::try_from(offset_index.saturating_mul(2)).expect("offset index");
+        let stable_order = start_order
+            .saturating_add(u32::try_from(offset_index.saturating_mul(2)).unwrap_or(u32::MAX));
         candidates.push(ObstacleAwareChannelCandidate {
             axis,
             coordinate: positive_baseline + offset,
@@ -5408,8 +5408,8 @@ mod tests {
 
         assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
         for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {
-            let expected_offset = BYPASS_CHANNEL_LANE_STEP
-                * f32::from(u16::try_from(lane_index).expect("lane index"));
+            let expected_offset =
+                BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).unwrap_or(u16::MAX));
             assert_eq!(pair[0].axis, ChannelAxis::X);
             assert_eq!(pair[1].axis, ChannelAxis::X);
             assert!((pair[0].coordinate - pair[0].baseline - expected_offset).abs() < f32::EPSILON);
