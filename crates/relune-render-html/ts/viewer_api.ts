@@ -52,15 +52,21 @@ export interface ViewerGroupsApi {
   getHiddenGroups(): string[];
 }
 
+export interface ViewerCollapseApi {
+  getCollapsed(): string[];
+  setCollapsed(tableIds: string[]): void;
+}
+
 export interface ViewerRuntime {
   viewport?: ViewerViewportApi;
   filters?: ViewerFiltersApi;
   search?: ViewerSearchApi;
   selection?: ViewerSelectionApi;
   groups?: ViewerGroupsApi;
+  collapse?: ViewerCollapseApi;
 }
 
-export type ViewerModule = 'viewport' | 'filters' | 'search' | 'selection' | 'groups';
+export type ViewerModule = 'viewport' | 'filters' | 'search' | 'selection' | 'groups' | 'collapse';
 
 type RuntimeWaiter = {
   modules: Set<ViewerModule>;

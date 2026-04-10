@@ -1,5 +1,10 @@
 import { parseReluneMetadata } from './metadata';
-import { reportSessionStorageError } from './viewer_api';
+import {
+  emitViewerEvent,
+  getViewerRuntime,
+  markViewerModuleReady,
+  reportSessionStorageError,
+} from './viewer_api';
 
 function setStyleCursor(el: Element, cursor: string): void {
   const styled = el as HTMLElement | SVGGraphicsElement;
@@ -183,7 +188,60 @@ interface TableNodeEntry {
         }
 
         saveState();
+        emitViewerEvent('relune:collapse-changed', undefined);
       });
     }
+
+    // ── Runtime API ────────────────────────────────────────────────────
+
+    const tableNodeMap = new Map(tableNodes.map((entry) => [entry.id, entry]));
+
+    function applyCollapseState(tableId: string, collapse: boolean): void {
+      const entry = tableNodeMap.get(tableId);
+      if (entry === undefined) return;
+      const tableNode = entry.node;
+      const isCurrentlyCollapsed = tableNode.classList.contains('collapsed');
+      if (isCurrentlyCollapsed === collapse) return;
+
+      const collapseInd = tableNode.querySelector('.collapse-indicator') as SVGTextElement | null;
+      const badge = tableNode.querySelector('.column-count-badge') as SVGTextElement | null;
+      const rows = tableNode.querySelectorAll('.column-row, .column-name, .column-text');
+
+      if (collapse) {
+        tableNode.classList.add('collapsed');
+        collapsedTables.add(tableId);
+        rows.forEach((row) => setStyleDisplay(row, 'none'));
+        if (collapseInd) collapseInd.textContent = '+';
+        if (badge) badge.style.display = '';
+      } else {
+        tableNode.classList.remove('collapsed');
+        collapsedTables.delete(tableId);
+        rows.forEach((row) => setStyleDisplay(row, ''));
+        if (collapseInd) collapseInd.textContent = '-';
+        if (badge) badge.style.display = 'none';
+      }
+    }
+
+    const runtime = getViewerRuntime();
+    runtime.collapse = {
+      getCollapsed(): string[] {
+        return Array.from(collapsedTables);
+      },
+      setCollapsed(tableIds: string[]): void {
+        const target = new Set(tableIds);
+        // Expand tables that should no longer be collapsed
+        for (const id of collapsedTables) {
+          if (!target.has(id)) {
+            applyCollapseState(id, false);
+          }
+        }
+        // Collapse tables that should be collapsed
+        for (const id of target) {
+          applyCollapseState(id, true);
+        }
+        saveState();
+      },
+    };
+    markViewerModuleReady('collapse');
   }
 }

@@ -96,7 +96,10 @@
         clearTimeout(writeTimer);
       }
       writeTimer = setTimeout(writeHash, 300);
-    }, writeHash = function() {
+    }, scheduleDiscreteWrite = function() {
+      pendingPush = true;
+      scheduleWrite();
+    }, buildHashParams = function() {
       const params = new URLSearchParams();
       const query = runtime.search?.getQuery() ?? "";
       if (query !== "") {
@@ -120,11 +123,23 @@
       if (hiddenGroups.length > 0) {
         params.set(PARAM_HIDDEN_GROUPS, hiddenGroups.join(","));
       }
-      const str = params.toString();
+      const collapsed = runtime.collapse?.getCollapsed() ?? [];
+      if (collapsed.length > 0) {
+        params.set(PARAM_COLLAPSED, collapsed.join(","));
+      }
+      return params;
+    }, writeHash = function() {
+      const str = buildHashParams().toString();
       const newHash = str === "" ? "" : `#${str}`;
       if (newHash !== location.hash && newHash !== "#") {
-        history.replaceState(null, "", newHash || location.pathname + location.search);
+        const url = newHash || location.pathname + location.search;
+        if (pendingPush && !restoringFromPopstate) {
+          history.pushState(null, "", url);
+        } else {
+          history.replaceState(null, "", url);
+        }
       }
+      pendingPush = false;
     }, restoreFromHash = function() {
       const params = readHash();
       if (params.toString() === "") {
@@ -160,6 +175,13 @@
           runtime.groups?.setVisibility(groupId, false);
         }
       }
+      const collapsedRaw = params.get(PARAM_COLLAPSED);
+      if (collapsedRaw !== null && collapsedRaw !== "") {
+        const collapsed = collapsedRaw.split(",").filter((id) => id !== "" && tableIds.has(id));
+        if (collapsed.length > 0) {
+          runtime.collapse?.setCollapsed(collapsed);
+        }
+      }
       const table = params.get(PARAM_TABLE);
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
@@ -181,9 +203,12 @@
       if ((metadata?.groups?.length ?? 0) > 0) {
         modules.push("groups");
       }
+      if (document.getElementById("canvas")?.querySelector("svg") !== null) {
+        modules.push("collapse");
+      }
       return modules;
     };
-    readHash2 = readHash, parseAllowedTypes2 = parseAllowedTypes, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
+    readHash2 = readHash, parseAllowedTypes2 = parseAllowedTypes, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, scheduleDiscreteWrite2 = scheduleDiscreteWrite, buildHashParams2 = buildHashParams, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
     const runtime = getViewerRuntime();
     const metadata = parseReluneMetadata();
     const tables = metadata?.tables ?? [];
@@ -195,16 +220,25 @@
     const PARAM_PAN_Y = "y";
     const PARAM_TYPES = "types";
     const PARAM_HIDDEN_GROUPS = "hg";
+    const PARAM_COLLAPSED = "c";
     const MIN_VIEWPORT_SCALE = 0.1;
     const MAX_VIEWPORT_SCALE = 2;
     const MIN_VIEWPORT_PAN_LIMIT = 1e4;
     let writeTimer = null;
-    document.addEventListener("relune:search-changed", scheduleWrite);
-    document.addEventListener("relune:node-selected", scheduleWrite);
-    document.addEventListener("relune:node-cleared", scheduleWrite);
+    let pendingPush = false;
+    let restoringFromPopstate = false;
+    document.addEventListener("relune:search-changed", scheduleDiscreteWrite);
+    document.addEventListener("relune:node-selected", scheduleDiscreteWrite);
+    document.addEventListener("relune:node-cleared", scheduleDiscreteWrite);
     document.addEventListener("relune:viewport-changed", scheduleWrite);
-    document.addEventListener("relune:filters-changed", scheduleWrite);
-    document.addEventListener("relune:groups-changed", scheduleWrite);
+    document.addEventListener("relune:filters-changed", scheduleDiscreteWrite);
+    document.addEventListener("relune:groups-changed", scheduleDiscreteWrite);
+    document.addEventListener("relune:collapse-changed", scheduleDiscreteWrite);
+    window.addEventListener("popstate", () => {
+      restoringFromPopstate = true;
+      restoreFromHash();
+      restoringFromPopstate = false;
+    });
     waitForViewerModules(expectedViewerModules(), restoreFromHash);
   }
   var readHash2;
@@ -214,6 +248,8 @@
   var matchesMetadataSearch2;
   var hasMetadataSearchMatch2;
   var scheduleWrite2;
+  var scheduleDiscreteWrite2;
+  var buildHashParams2;
   var writeHash2;
   var restoreFromHash2;
   var expectedViewerModules2;
