@@ -27,10 +27,6 @@ pub struct HtmlRenderOptions {
     /// Default: true
     pub enable_search: bool,
 
-    /// When search UI is enabled, whether to show column data-type filters in the same panel.
-    /// Default: true
-    pub enable_column_type_filter: bool,
-
     /// Whether to enable group toggle UI.
     /// When enabled, shows a panel with checkboxes to show/hide groups.
     /// Default: true
@@ -55,7 +51,6 @@ impl Default for HtmlRenderOptions {
             include_legend: false,
             enable_pan_zoom: true,
             enable_search: true,
-            enable_column_type_filter: true,
             enable_group_toggles: true,
             enable_collapse: true,
             enable_highlight: true,
@@ -73,7 +68,6 @@ impl HtmlRenderOptions {
             include_legend: false,
             enable_pan_zoom: true,
             enable_search: true,
-            enable_column_type_filter: true,
             enable_group_toggles: true,
             enable_collapse: true,
             enable_highlight: true,
@@ -89,7 +83,6 @@ impl HtmlRenderOptions {
             include_legend: false,
             enable_pan_zoom: true,
             enable_search: true,
-            enable_column_type_filter: true,
             enable_group_toggles: true,
             enable_collapse: true,
             enable_highlight: true,
@@ -114,13 +107,6 @@ impl HtmlRenderOptions {
     #[must_use]
     pub const fn with_search(mut self, enable: bool) -> Self {
         self.enable_search = enable;
-        self
-    }
-
-    /// Enable or disable the column type filter block (requires search UI).
-    #[must_use]
-    pub const fn with_column_type_filter(mut self, enable: bool) -> Self {
-        self.enable_column_type_filter = enable;
         self
     }
 
@@ -158,7 +144,6 @@ mod tests {
         assert!(!options.include_legend);
         assert!(options.enable_pan_zoom);
         assert!(options.enable_search);
-        assert!(options.enable_column_type_filter);
         assert!(options.enable_group_toggles);
         assert!(options.enable_collapse);
         assert!(options.enable_highlight);
@@ -211,15 +196,6 @@ mod tests {
 
         let options = HtmlRenderOptions::default().with_search(true);
         assert!(options.enable_search);
-    }
-
-    #[test]
-    fn test_with_column_type_filter() {
-        let options = HtmlRenderOptions::default().with_column_type_filter(false);
-        assert!(!options.enable_column_type_filter);
-
-        let options = HtmlRenderOptions::default().with_column_type_filter(true);
-        assert!(options.enable_column_type_filter);
     }
 
     #[test]

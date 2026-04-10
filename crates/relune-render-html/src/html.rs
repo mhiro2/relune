@@ -3,10 +3,10 @@
 //! Embedded viewer scripts are authored in `ts/` and committed as bundled assets in `src/js/`.
 
 use crate::components::{
-    build_collapse_js, build_detail_drawer_html, build_filter_reset_bar_html,
-    build_group_panel_html, build_group_toggle_js, build_highlight_js, build_hover_popover_html,
-    build_load_motion_js, build_minimap_js, build_pan_zoom_js, build_search_js,
-    build_search_panel_html, build_shortcuts_js, build_type_filter_js, build_url_state_js,
+    build_collapse_js, build_detail_drawer_html, build_filter_engine_js,
+    build_filter_reset_bar_html, build_group_panel_html, build_group_toggle_js, build_highlight_js,
+    build_hover_popover_html, build_load_motion_js, build_minimap_js, build_pan_zoom_js,
+    build_search_js, build_search_panel_html, build_shortcuts_js, build_url_state_js,
     build_viewer_controls_html,
 };
 use crate::css::build_css;
@@ -40,7 +40,6 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         options.theme,
         options.enable_group_toggles,
         options.enable_search,
-        options.enable_column_type_filter,
         options.enable_collapse,
         options.enable_highlight,
     );
@@ -56,9 +55,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     }
     if options.enable_search {
         js_parts.push(build_search_js());
-        if options.enable_column_type_filter {
-            js_parts.push(build_type_filter_js());
-        }
+        js_parts.push(build_filter_engine_js());
     }
     if options.enable_collapse {
         js_parts.push(build_collapse_js());
@@ -86,15 +83,12 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     };
 
     let search_panel = if options.enable_search {
-        Some(build_search_panel_html(
-            options.enable_column_type_filter,
-            options.enable_group_toggles,
-        ))
+        Some(build_search_panel_html(options.enable_group_toggles))
     } else {
         None
     };
 
-    let filter_reset_bar = if options.enable_search && options.enable_column_type_filter {
+    let filter_reset_bar = if options.enable_search {
         Some(build_filter_reset_bar_html())
     } else {
         None
@@ -290,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_css_dark_theme() {
-        let css = build_css(Theme::Dark, true, false, false, false, false);
+        let css = build_css(Theme::Dark, true, false, false, false);
 
         assert!(css.contains("--bg-color: #0c0f1a"));
         assert!(css.contains("color-scheme: dark"));
@@ -299,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_css_light_theme() {
-        let css = build_css(Theme::Light, true, false, false, false, false);
+        let css = build_css(Theme::Light, true, false, false, false);
 
         assert!(css.contains("--bg-color: #f7f8fc"));
         assert!(css.contains("color-scheme: light"));
@@ -343,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_group_panel_css_included_when_enabled() {
-        let css = build_css(Theme::Light, true, false, false, false, false);
+        let css = build_css(Theme::Light, true, false, false, false);
 
         assert!(css.contains(".group-panel"));
         assert!(css.contains(".group-item"));
@@ -352,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_group_panel_css_not_included_when_disabled() {
-        let css = build_css(Theme::Light, false, false, false, false, false);
+        let css = build_css(Theme::Light, false, false, false, false);
 
         assert!(!css.contains(".group-item input[type=\"checkbox\"]"));
         assert!(!css.contains(".hidden-by-group"));
@@ -403,7 +397,7 @@ mod tests {
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains(r#"id="table-search""#));
         assert!(html.contains(r#"id="object-browser-list""#));
-        assert!(html.contains("type-filter-section"));
+        assert!(html.contains("filter-section"));
         assert!(html.contains("filter-reset-bar"));
         assert!(html.contains("viewer-controls"));
         assert!(html.contains("detail-drawer"));
@@ -426,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_search_css_included_when_enabled() {
-        let css = build_css(Theme::Light, false, true, true, false, false);
+        let css = build_css(Theme::Light, false, true, false, false);
 
         assert!(css.contains(".search-panel"));
         assert!(css.contains(".search-input"));
@@ -439,16 +433,8 @@ mod tests {
     }
 
     #[test]
-    fn test_search_css_without_column_type_filter() {
-        let css = build_css(Theme::Light, false, true, false, false, false);
-
-        assert!(css.contains(".search-panel"));
-        assert!(!css.contains(".type-filter-section"));
-    }
-
-    #[test]
     fn test_search_css_not_included_when_disabled() {
-        let css = build_css(Theme::Light, false, false, false, false, false);
+        let css = build_css(Theme::Light, false, false, false, false);
 
         assert!(!css.contains("/* Explorer sidebar styles */"));
         assert!(!css.contains(".search-container"));
@@ -457,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_search_panel_html_structure() {
-        let html = build_search_panel_html(true, true);
+        let html = build_search_panel_html(true);
 
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains(r#"class="search-icon""#));
@@ -467,23 +453,19 @@ mod tests {
         assert!(html.contains(r#"id="search-clear""#));
         assert!(html.contains(r#"class="search-results""#));
         assert!(html.contains(r#"id="search-results""#));
-        assert!(html.contains("type-filter-section"));
-        assert!(html.contains("Filter by type"));
-        assert!(html.contains("type-filter-select-visible"));
-        assert!(html.contains("type-filter-clear"));
-        assert!(html.contains(">All<"));
-        assert!(html.contains(">None<"));
+        assert!(html.contains("filter-section"));
+        assert!(html.contains("filter-facets"));
         assert!(html.contains(r#"id="object-browser-list""#));
         assert!(html.contains(r#"id="object-browser-count""#));
         assert!(html.contains(r#"id="group-panel""#));
     }
 
     #[test]
-    fn test_search_panel_html_without_column_type_filter() {
-        let html = build_search_panel_html(false, false);
+    fn test_search_panel_html_without_groups() {
+        let html = build_search_panel_html(false);
 
         assert!(html.contains(r#"class="search-panel""#));
-        assert!(!html.contains("type-filter-section"));
+        assert!(html.contains("filter-section"));
         assert!(!html.contains(r#"id="group-panel""#));
     }
 
@@ -503,7 +485,7 @@ mod tests {
         assert!(html.contains("table-search"));
         assert!(html.contains("search-clear"));
         assert!(html.contains("search-results"));
-        assert!(html.contains("tableMatchesAnySelectedType"));
+        assert!(html.contains("filter-section"));
         assert!(html.contains("detail-drawer"));
         assert!(html.contains("minimap"));
         assert!(html.contains("zoom-fit"));
@@ -527,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_viewer_controls_svg_icons_in_css() {
-        let css = build_css(Theme::Dark, false, true, false, false, true);
+        let css = build_css(Theme::Dark, false, true, false, true);
 
         assert!(css.contains(".viewer-control-button svg"));
         assert!(css.contains("width: 16px"));
@@ -562,22 +544,6 @@ mod tests {
     }
 
     #[test]
-    fn test_column_type_filter_js_omitted_when_disabled() {
-        let svg = "<svg></svg>";
-        let metadata = "{}";
-        let options = HtmlRenderOptions {
-            enable_search: true,
-            enable_column_type_filter: false,
-            ..Default::default()
-        };
-
-        let html = build_html_document(svg, metadata, &options);
-
-        assert!(html.contains("performSearch"));
-        assert!(!html.contains("tableMatchesAnySelectedType"));
-    }
-
-    #[test]
     fn test_search_js_not_included_when_disabled() {
         let svg = "<svg></svg>";
         let metadata = "{}";
@@ -594,7 +560,7 @@ mod tests {
 
     #[test]
     fn test_highlight_css_included_when_enabled() {
-        let css = build_css(Theme::Light, false, false, false, false, true);
+        let css = build_css(Theme::Light, false, false, false, true);
 
         assert!(css.contains(".hover-popover"));
         assert!(css.contains(".hover-preview-node"));
@@ -608,7 +574,7 @@ mod tests {
 
     #[test]
     fn test_highlight_css_not_included_when_disabled() {
-        let css = build_css(Theme::Light, false, false, false, false, false);
+        let css = build_css(Theme::Light, false, false, false, false);
 
         assert!(!css.contains("/* Neighbor highlight styles */"));
         assert!(!css.contains(".hover-popover"));
@@ -658,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_detail_drawer_pill_css() {
-        let css = build_css(Theme::Dark, false, false, false, false, true);
+        let css = build_css(Theme::Dark, false, false, false, true);
 
         assert!(css.contains(".detail-column-pills"));
         assert!(css.contains(".detail-column-pill"));
@@ -667,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_panel_radius_consistency() {
-        let css = build_css(Theme::Dark, true, true, false, false, true);
+        let css = build_css(Theme::Dark, true, true, false, true);
 
         // All major panels use 22px radius
         assert!(css.contains(".search-panel"));
@@ -679,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_minimap_enhanced_visibility() {
-        let css = build_css(Theme::Dark, false, true, false, false, true);
+        let css = build_css(Theme::Dark, false, true, false, true);
 
         assert!(css.contains(".minimap-node.selected"));
         assert!(css.contains("drop-shadow"));

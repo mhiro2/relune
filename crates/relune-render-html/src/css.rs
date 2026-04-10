@@ -10,7 +10,6 @@ pub(crate) fn build_css(
     theme: Theme,
     enable_group_toggles: bool,
     enable_search: bool,
-    enable_column_type_filter: bool,
     _enable_collapse: bool,
     enable_highlight: bool,
 ) -> String {
@@ -281,7 +280,7 @@ pub(crate) fn build_css(
         ""
     };
 
-    let type_filter_css = if enable_search && enable_column_type_filter {
+    let type_filter_css = if enable_search {
         r"
     .type-filter-section {
       border-top: 1px solid var(--panel-border);
