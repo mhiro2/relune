@@ -2353,4 +2353,31 @@ mod tests {
         assert!(css.contains("stroke-dasharray"));
         assert!(css.contains(".minimap-frame"));
     }
+
+    #[test]
+    fn test_render_html_title_escapes_special_chars() {
+        let special_title = r#"<img src=x onerror=alert(1)> & "quotes" 'apos'"#;
+        let svg = "<svg></svg>";
+        let metadata = "{}";
+        let options = HtmlRenderOptions {
+            title: Some(special_title.to_string()),
+            ..Default::default()
+        };
+
+        let html = build_html_document(svg, metadata, &options);
+
+        // The raw payload must never appear unescaped
+        assert!(!html.contains(special_title));
+        // <title> must contain the escaped form
+        let escaped = "&lt;img src=x onerror=alert(1)&gt; &amp; &quot;quotes&quot; &#39;apos&#39;";
+        assert!(
+            html.contains(&format!("<title>{escaped}</title>")),
+            "title tag should contain escaped special characters"
+        );
+        // <h1> heading must also be escaped
+        assert!(
+            html.contains(&format!("<h1>{escaped}</h1>")),
+            "h1 heading should contain escaped special characters"
+        );
+    }
 }
