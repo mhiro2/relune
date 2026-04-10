@@ -573,6 +573,9 @@ pub struct PositionedEdgeRoutingDebug {
 pub struct PositionedGraphRoutingDebug {
     /// Number of non-self-loop edges whose final backbone still intersects padded obstacles.
     pub non_self_loop_detour_activations: usize,
+    /// Number of edges that fell back to simple backbone routing because no obstacle-aware
+    /// channel candidate satisfied hard constraints.
+    pub channel_fallback_activations: usize,
 }
 
 /// A positioned group for rendering.
@@ -707,6 +710,7 @@ pub fn build_layout_from_graph_with_config(
         height,
         routing_debug: Some(PositionedGraphRoutingDebug {
             non_self_loop_detour_activations: routing_diagnostics.non_self_loop_detour_activations,
+            channel_fallback_activations: routing_diagnostics.channel_fallback_activations,
         }),
     })
 }
@@ -1538,6 +1542,7 @@ fn route_edges(
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct RoutingDiagnostics {
     non_self_loop_detour_activations: usize,
+    channel_fallback_activations: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1573,7 +1578,289 @@ struct BundleClusterStats {
     anchor_distance: f32,
 }
 
+struct SingleEdgeRoutingContext<'a> {
+    graph: &'a LayoutGraph,
+    config: &'a LayoutConfig,
+    node_ranks: Option<&'a [usize]>,
+    rank_bounds: Option<&'a [RankAxisBounds]>,
+    detour_obstacles: &'a [Rect],
+}
+
+struct SingleEdgeResult {
+    route: EdgeRoute,
+    bundle_metadata: Option<BundleRouteMetadata>,
+    routing_debug: PositionedEdgeRoutingDebug,
+    used_detour_fallback: bool,
+    used_channel_fallback: bool,
+}
+
 #[allow(clippy::too_many_lines)]
+fn route_single_edge(
+    ctx: &SingleEdgeRoutingContext<'_>,
+    edge: &crate::graph::LayoutEdge,
+    port_assignment: &EdgePortAssignment,
+    from_pos: Option<&(f32, f32, f32, f32)>,
+    to_pos: Option<&(f32, f32, f32, f32)>,
+    channel_usage: &mut BTreeMap<(ChannelAxis, i32), u32>,
+) -> Result<SingleEdgeResult, LayoutError> {
+    let mut bundle_metadata = None;
+    let mut used_channel_fallback = false;
+    let mut routing_debug = PositionedEdgeRoutingDebug {
+        source_side: None,
+        target_side: None,
+        source_slot_index: None,
+        source_slot_count: None,
+        target_slot_index: None,
+        target_slot_count: None,
+        source_row_offset: None,
+        target_row_offset: None,
+        channel_axis: None,
+        channel_coordinate: None,
+        detour_activation_counted: false,
+        self_loop_radius_offset: None,
+    };
+
+    let route = if let EdgePortAssignment::SelfLoop(assignment) = port_assignment {
+        routing_debug.self_loop_radius_offset = Some(assignment.radius_offset);
+        let Some(&(x, y, w, h)) = from_pos else {
+            return Err(LayoutError::RoutingInvariant {
+                from: edge.from.clone(),
+                to: edge.to.clone(),
+                detail: "source node position missing for self-loop",
+            });
+        };
+        route_self_loop_with_offset(x, y, w, h, ctx.config.edge_style, assignment.radius_offset)
+    } else if let (
+        EdgePortAssignment::Regular(assignment),
+        Some(&(x1, y1, w1, h1)),
+        Some(&(x2, y2, w2, h2)),
+    ) = (port_assignment, from_pos, to_pos)
+    {
+        routing_debug = build_regular_edge_debug(*assignment);
+
+        if let Some(ranks) = ctx.node_ranks {
+            let Some(source_rank) =
+                node_rank_for_edge_endpoint(ctx.graph, ranks, edge.from.as_str())
+            else {
+                return Err(LayoutError::RoutingInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    detail: "source node rank missing",
+                });
+            };
+            let Some(target_rank) = node_rank_for_edge_endpoint(ctx.graph, ranks, edge.to.as_str())
+            else {
+                return Err(LayoutError::RoutingInvariant {
+                    from: edge.from.clone(),
+                    to: edge.to.clone(),
+                    detail: "target node rank missing",
+                });
+            };
+            let source_rect = Rect {
+                x: x1,
+                y: y1,
+                w: w1,
+                h: h1,
+            };
+            let target_rect = Rect {
+                x: x2,
+                y: y2,
+                w: w2,
+                h: h2,
+            };
+            if let Some(candidate) = obstacle_aware_channel_for_edge(
+                ObstacleRoutingContext {
+                    graph: ctx.graph,
+                    edge,
+                    node_ranks: ranks,
+                    rank_bounds: ctx.rank_bounds,
+                    direction: ctx.config.direction,
+                    assignment,
+                    obstacles: ctx.detour_obstacles,
+                    channel_usage,
+                    style: ctx.config.edge_style,
+                },
+                source_rect,
+                target_rect,
+            ) {
+                record_channel_usage(channel_usage, candidate.axis, candidate.coordinate);
+                bundle_metadata = Some(BundleRouteMetadata {
+                    axis: candidate.axis,
+                    coordinate: candidate.coordinate,
+                    source_side: assignment.source_side,
+                    target_side: assignment.target_side,
+                });
+                routing_debug.channel_axis = Some(channel_axis_name(candidate.axis).to_string());
+                routing_debug.channel_coordinate = Some(candidate.coordinate);
+                route_edge_with_candidate_channel(
+                    source_rect,
+                    target_rect,
+                    ctx.config.edge_style,
+                    assignment,
+                    candidate,
+                    RankedChannelContext {
+                        direction: ctx.config.direction,
+                        source_rank,
+                        target_rank,
+                        rank_bounds: ctx.rank_bounds,
+                    },
+                )
+            } else {
+                used_channel_fallback = true;
+                debug!(
+                    edge_from = edge.from,
+                    edge_to = edge.to,
+                    "No obstacle-aware channel candidate satisfied constraints; using simple backbone"
+                );
+                route_edge_with_assigned_ports(
+                    x1,
+                    y1,
+                    w1,
+                    h1,
+                    x2,
+                    y2,
+                    w2,
+                    h2,
+                    ctx.config.edge_style,
+                    assignment.source_side,
+                    assignment.target_side,
+                    assignment.source_slot_offset,
+                    assignment.target_slot_offset,
+                    assignment.source_row_offset,
+                    assignment.target_row_offset,
+                )
+            }
+        } else {
+            route_edge_with_assigned_ports(
+                x1,
+                y1,
+                w1,
+                h1,
+                x2,
+                y2,
+                w2,
+                h2,
+                ctx.config.edge_style,
+                assignment.source_side,
+                assignment.target_side,
+                assignment.source_slot_offset,
+                assignment.target_slot_offset,
+                assignment.source_row_offset,
+                assignment.target_row_offset,
+            )
+        }
+    } else {
+        return Err(LayoutError::RoutingInvariant {
+            from: edge.from.clone(),
+            to: edge.to.clone(),
+            detail: "edge endpoint position missing",
+        });
+    };
+
+    let mut used_detour_fallback = false;
+    let route = match edge.is_self_loop {
+        true => {
+            bundle_metadata = None;
+            detour_around_obstacles(&route, ctx.detour_obstacles)
+        }
+        false if route_needs_detour(&route, ctx.detour_obstacles) => {
+            bundle_metadata = None;
+            used_detour_fallback = true;
+            routing_debug.detour_activation_counted = true;
+            debug!(
+                edge_from = edge.from,
+                edge_to = edge.to,
+                "Obstacle-aware channel still intersects padded obstacle corridor"
+            );
+            route
+        }
+        false => route,
+    };
+
+    Ok(SingleEdgeResult {
+        route,
+        bundle_metadata,
+        routing_debug,
+        used_detour_fallback,
+        used_channel_fallback,
+    })
+}
+
+fn finalize_routed_edge(
+    draft: &RoutedEdgeDraft,
+    source_edge: &crate::graph::LayoutEdge,
+    node_positions: &BTreeMap<&str, (f32, f32, f32, f32)>,
+    positioned_nodes: &[PositionedNode],
+    lane_index: usize,
+    lane_total: usize,
+    placed_labels: &mut Vec<Rect>,
+) -> PositionedEdge {
+    let from_pos = node_positions.get(source_edge.from.as_str());
+    let to_pos = node_positions.get(source_edge.to.as_str());
+
+    let mut label_obstacles: Vec<Rect> = positioned_nodes
+        .iter()
+        .filter(|node| node.id != source_edge.from && node.id != source_edge.to)
+        .map(|node| Rect {
+            x: node.x,
+            y: node.y,
+            w: node.width,
+            h: node.height,
+        })
+        .collect();
+    label_obstacles.extend(edge_endpoint_marker_obstacles(
+        &draft.route,
+        source_edge.kind,
+        source_edge.nullable,
+        source_edge.target_cardinality,
+    ));
+    label_obstacles.extend_from_slice(placed_labels);
+    if let Some(&(x, y, w, h)) = from_pos {
+        label_obstacles.push(Rect { x, y, w, h });
+    }
+    if !source_edge.is_self_loop
+        && let Some(&(x, y, w, h)) = to_pos
+    {
+        label_obstacles.push(Rect { x, y, w, h });
+    }
+
+    let lhw = estimate_label_half_width(&draft.label);
+    let label_pos = if lane_total > 1 && !source_edge.is_self_loop {
+        let t =
+            parallel_label_parameter(&source_edge.from, &source_edge.to, lane_index, lane_total);
+        point_along_route(&draft.route, t)
+    } else {
+        draft.route.label_position
+    };
+
+    let preferred_t = if lane_total > 1 && !source_edge.is_self_loop {
+        parallel_label_parameter(&source_edge.from, &source_edge.to, lane_index, lane_total)
+    } else {
+        estimate_route_parameter(&draft.route, label_pos)
+    };
+    let (label_x, label_y) =
+        place_label_on_route(&draft.route, preferred_t, &label_obstacles, 4.0, lhw);
+    placed_labels.push(label_rect(label_x, label_y, lhw));
+
+    PositionedEdge {
+        from: source_edge.from.clone(),
+        to: source_edge.to.clone(),
+        label: draft.label.clone(),
+        kind: draft.kind,
+        route: draft.route.clone(),
+        is_self_loop: source_edge.is_self_loop,
+        nullable: source_edge.nullable,
+        target_cardinality: source_edge.target_cardinality,
+        from_columns: source_edge.from_columns.clone(),
+        to_columns: source_edge.to_columns.clone(),
+        is_collapsed_join: source_edge.is_collapsed_join,
+        collapsed_join_table: source_edge.collapsed_join_table.clone(),
+        label_x,
+        label_y,
+        routing_debug: Some(draft.routing_debug.clone()),
+    }
+}
+
 fn route_edges_with_diagnostics(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
@@ -1599,22 +1886,6 @@ fn route_edges_with_diagnostics(
         let from_pos = node_positions.get(edge.from.as_str());
         let to_pos = node_positions.get(edge.to.as_str());
 
-        let mut bundle_metadata = None;
-        let mut routing_debug = PositionedEdgeRoutingDebug {
-            source_side: None,
-            target_side: None,
-            source_slot_index: None,
-            source_slot_count: None,
-            target_slot_index: None,
-            target_slot_count: None,
-            source_row_offset: None,
-            target_row_offset: None,
-            channel_axis: None,
-            channel_coordinate: None,
-            detour_activation_counted: false,
-            self_loop_radius_offset: None,
-        };
-
         let Some(port_assignment) = port_assignments.get(edge_index).and_then(Option::as_ref)
         else {
             return Err(LayoutError::RoutingInvariant {
@@ -1635,164 +1906,28 @@ fn route_edges_with_diagnostics(
             })
             .collect();
 
-        let route = if let EdgePortAssignment::SelfLoop(assignment) = port_assignment {
-            routing_debug.self_loop_radius_offset = Some(assignment.radius_offset);
-            let Some(&(x, y, w, h)) = from_pos else {
-                return Err(LayoutError::RoutingInvariant {
-                    from: edge.from.clone(),
-                    to: edge.to.clone(),
-                    detail: "source node position missing for self-loop",
-                });
-            };
-            route_self_loop_with_offset(x, y, w, h, config.edge_style, assignment.radius_offset)
-        } else if let (
-            EdgePortAssignment::Regular(assignment),
-            Some(&(x1, y1, w1, h1)),
-            Some(&(x2, y2, w2, h2)),
-        ) = (port_assignment, from_pos, to_pos)
-        {
-            routing_debug = build_regular_edge_debug(*assignment);
-
-            if let Some(ranks) = node_ranks {
-                let Some(source_rank) =
-                    node_rank_for_edge_endpoint(graph, ranks, edge.from.as_str())
-                else {
-                    return Err(LayoutError::RoutingInvariant {
-                        from: edge.from.clone(),
-                        to: edge.to.clone(),
-                        detail: "source node rank missing",
-                    });
-                };
-                let Some(target_rank) = node_rank_for_edge_endpoint(graph, ranks, edge.to.as_str())
-                else {
-                    return Err(LayoutError::RoutingInvariant {
-                        from: edge.from.clone(),
-                        to: edge.to.clone(),
-                        detail: "target node rank missing",
-                    });
-                };
-                if let Some(candidate) = obstacle_aware_channel_for_edge(
-                    ObstacleRoutingContext {
-                        graph,
-                        edge,
-                        node_ranks: ranks,
-                        rank_bounds: rank_bounds.as_deref(),
-                        direction: config.direction,
-                        assignment,
-                        obstacles: &detour_obstacles,
-                        channel_usage: &channel_usage,
-                        style: config.edge_style,
-                    },
-                    Rect {
-                        x: x1,
-                        y: y1,
-                        w: w1,
-                        h: h1,
-                    },
-                    Rect {
-                        x: x2,
-                        y: y2,
-                        w: w2,
-                        h: h2,
-                    },
-                ) {
-                    record_channel_usage(&mut channel_usage, candidate.axis, candidate.coordinate);
-                    bundle_metadata = Some(BundleRouteMetadata {
-                        axis: candidate.axis,
-                        coordinate: candidate.coordinate,
-                        source_side: assignment.source_side,
-                        target_side: assignment.target_side,
-                    });
-                    routing_debug.channel_axis =
-                        Some(channel_axis_name(candidate.axis).to_string());
-                    routing_debug.channel_coordinate = Some(candidate.coordinate);
-                    route_edge_with_candidate_channel(
-                        Rect {
-                            x: x1,
-                            y: y1,
-                            w: w1,
-                            h: h1,
-                        },
-                        Rect {
-                            x: x2,
-                            y: y2,
-                            w: w2,
-                            h: h2,
-                        },
-                        config.edge_style,
-                        assignment,
-                        candidate,
-                        RankedChannelContext {
-                            direction: config.direction,
-                            source_rank,
-                            target_rank,
-                            rank_bounds: rank_bounds.as_deref(),
-                        },
-                    )
-                } else {
-                    route_edge_with_assigned_ports(
-                        x1,
-                        y1,
-                        w1,
-                        h1,
-                        x2,
-                        y2,
-                        w2,
-                        h2,
-                        config.edge_style,
-                        assignment.source_side,
-                        assignment.target_side,
-                        assignment.source_slot_offset,
-                        assignment.target_slot_offset,
-                        assignment.source_row_offset,
-                        assignment.target_row_offset,
-                    )
-                }
-            } else {
-                route_edge_with_assigned_ports(
-                    x1,
-                    y1,
-                    w1,
-                    h1,
-                    x2,
-                    y2,
-                    w2,
-                    h2,
-                    config.edge_style,
-                    assignment.source_side,
-                    assignment.target_side,
-                    assignment.source_slot_offset,
-                    assignment.target_slot_offset,
-                    assignment.source_row_offset,
-                    assignment.target_row_offset,
-                )
-            }
-        } else {
-            return Err(LayoutError::RoutingInvariant {
-                from: edge.from.clone(),
-                to: edge.to.clone(),
-                detail: "edge endpoint position missing",
-            });
+        let ctx = SingleEdgeRoutingContext {
+            graph,
+            config,
+            node_ranks,
+            rank_bounds: rank_bounds.as_deref(),
+            detour_obstacles: &detour_obstacles,
         };
+        let result = route_single_edge(
+            &ctx,
+            edge,
+            port_assignment,
+            from_pos,
+            to_pos,
+            &mut channel_usage,
+        )?;
 
-        let route = match edge.is_self_loop {
-            true => {
-                bundle_metadata = None;
-                detour_around_obstacles(&route, &detour_obstacles)
-            }
-            false if route_needs_detour(&route, &detour_obstacles) => {
-                bundle_metadata = None;
-                diagnostics.non_self_loop_detour_activations += 1;
-                routing_debug.detour_activation_counted = true;
-                debug!(
-                    edge_from = edge.from,
-                    edge_to = edge.to,
-                    "Obstacle-aware channel still intersects padded obstacle corridor"
-                );
-                route
-            }
-            false => route,
-        };
+        if result.used_detour_fallback {
+            diagnostics.non_self_loop_detour_activations += 1;
+        }
+        if result.used_channel_fallback {
+            diagnostics.channel_fallback_activations += 1;
+        }
 
         let label = edge.name.clone().unwrap_or_else(|| {
             if edge.from_columns.is_empty() {
@@ -1806,9 +1941,9 @@ fn route_edges_with_diagnostics(
             edge_index,
             label,
             kind: edge.kind,
-            route,
-            bundle_metadata,
-            routing_debug,
+            route: result.route,
+            bundle_metadata: result.bundle_metadata,
+            routing_debug: result.routing_debug,
         });
     }
 
@@ -1818,81 +1953,23 @@ fn route_edges_with_diagnostics(
     let mut placed_labels: Vec<Rect> = Vec::new();
 
     for &edge_index in &routing_order {
-        let Some(edge) = routed_edges[edge_index].as_ref() else {
+        let Some(draft) = routed_edges[edge_index].as_ref() else {
             continue;
         };
-        let source_edge = &graph.edges[edge.edge_index];
+        let source_edge = &graph.edges[draft.edge_index];
         let lane_key = canonical_edge_pair(&source_edge.from, &source_edge.to);
         let lane_index = lane_indices[edge_index];
         let lane_total = edge_counts.get(&lane_key).copied().unwrap_or(1);
-        let from_pos = node_positions.get(source_edge.from.as_str());
-        let to_pos = node_positions.get(source_edge.to.as_str());
 
-        let mut label_obstacles: Vec<Rect> = positioned_nodes
-            .iter()
-            .filter(|node| node.id != source_edge.from && node.id != source_edge.to)
-            .map(|node| Rect {
-                x: node.x,
-                y: node.y,
-                w: node.width,
-                h: node.height,
-            })
-            .collect();
-        label_obstacles.extend(edge_endpoint_marker_obstacles(
-            &edge.route,
-            source_edge.kind,
-            source_edge.nullable,
-            source_edge.target_cardinality,
+        edges[edge_index] = Some(finalize_routed_edge(
+            draft,
+            source_edge,
+            &node_positions,
+            positioned_nodes,
+            lane_index,
+            lane_total,
+            &mut placed_labels,
         ));
-        label_obstacles.extend_from_slice(&placed_labels);
-        if let Some(&(x, y, w, h)) = from_pos {
-            label_obstacles.push(Rect { x, y, w, h });
-        }
-        if !source_edge.is_self_loop
-            && let Some(&(x, y, w, h)) = to_pos
-        {
-            label_obstacles.push(Rect { x, y, w, h });
-        }
-
-        let lhw = estimate_label_half_width(&edge.label);
-        let label_pos = if lane_total > 1 && !source_edge.is_self_loop {
-            let t = parallel_label_parameter(
-                &source_edge.from,
-                &source_edge.to,
-                lane_index,
-                lane_total,
-            );
-            point_along_route(&edge.route, t)
-        } else {
-            edge.route.label_position
-        };
-
-        let preferred_t = if lane_total > 1 && !source_edge.is_self_loop {
-            parallel_label_parameter(&source_edge.from, &source_edge.to, lane_index, lane_total)
-        } else {
-            estimate_route_parameter(&edge.route, label_pos)
-        };
-        let (label_x, label_y) =
-            place_label_on_route(&edge.route, preferred_t, &label_obstacles, 4.0, lhw);
-        placed_labels.push(label_rect(label_x, label_y, lhw));
-
-        edges[edge_index] = Some(PositionedEdge {
-            from: source_edge.from.clone(),
-            to: source_edge.to.clone(),
-            label: edge.label.clone(),
-            kind: edge.kind,
-            route: edge.route.clone(),
-            is_self_loop: source_edge.is_self_loop,
-            nullable: source_edge.nullable,
-            target_cardinality: source_edge.target_cardinality,
-            from_columns: source_edge.from_columns.clone(),
-            to_columns: source_edge.to_columns.clone(),
-            is_collapsed_join: source_edge.is_collapsed_join,
-            collapsed_join_table: source_edge.collapsed_join_table.clone(),
-            label_x,
-            label_y,
-            routing_debug: Some(edge.routing_debug.clone()),
-        });
     }
 
     let mut edges: Vec<_> = edges.into_iter().flatten().collect();
@@ -2315,7 +2392,7 @@ fn obstacle_aware_channel_for_edge(
     let mut best_score = None;
     let mut candidates = channel_candidates(search_plan, source_rank, target_rank, rank_bounds);
     if search_plan.class != ChannelCandidateClass::SameRank {
-        let start_order = u32::try_from(candidates.len()).expect("candidate count should fit u32");
+        let start_order = u32::try_from(candidates.len()).unwrap_or(u32::MAX);
         candidates.extend(bypass_channel_candidates(
             context.direction,
             source_rect,
@@ -2494,7 +2571,7 @@ const fn bypass_channel_lane_count() -> usize {
 
 fn bypass_channel_offsets() -> impl ExactSizeIterator<Item = f32> {
     (0..bypass_channel_lane_count()).map(|lane_index| {
-        BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).expect("lane index"))
+        BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).unwrap_or(u16::MAX))
     })
 }
 
@@ -2506,8 +2583,8 @@ fn append_bypass_candidates(
     start_order: u32,
 ) {
     for (offset_index, offset) in bypass_channel_offsets().enumerate() {
-        let stable_order =
-            start_order + u32::try_from(offset_index.saturating_mul(2)).expect("offset index");
+        let stable_order = start_order
+            .saturating_add(u32::try_from(offset_index.saturating_mul(2)).unwrap_or(u32::MAX));
         candidates.push(ObstacleAwareChannelCandidate {
             axis,
             coordinate: positive_baseline + offset,
@@ -5323,6 +5400,63 @@ mod tests {
     }
 
     #[test]
+    fn test_route_edges_channel_fallback_diagnostic_when_all_candidates_blocked() {
+        let graph = single_edge_graph("authors", "posts");
+        let positioned_nodes = vec![
+            PositionedNode {
+                id: "authors".to_string(),
+                label: "authors".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "posts".to_string(),
+                label: "posts".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: 200.0,
+                y: 200.0,
+                width: 100.0,
+                height: 80.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+            PositionedNode {
+                id: "blocker".to_string(),
+                label: "blocker".to_string(),
+                kind: NodeKind::Table,
+                columns: Vec::new(),
+                x: -300.0,
+                y: 84.0,
+                width: 900.0,
+                height: 180.0,
+                is_join_table_candidate: false,
+                has_self_loop: false,
+                group_index: None,
+            },
+        ];
+
+        let (edges, diagnostics) = route_edges_with_diagnostics(
+            &graph,
+            &positioned_nodes,
+            &LayoutConfig::default(),
+            Some(&[0, 1, 0]),
+        )
+        .expect("ranked routing with blocked channels should succeed via fallback");
+
+        assert_eq!(diagnostics.channel_fallback_activations, 1);
+        assert!(!edges.is_empty());
+    }
+
+    #[test]
     fn test_route_edges_bypass_intermediate_obstacle_for_skipped_vertical_rank() {
         let graph = single_edge_graph("comments", "users");
         let positioned_nodes = vec![
@@ -5408,8 +5542,8 @@ mod tests {
 
         assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
         for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {
-            let expected_offset = BYPASS_CHANNEL_LANE_STEP
-                * f32::from(u16::try_from(lane_index).expect("lane index"));
+            let expected_offset =
+                BYPASS_CHANNEL_LANE_STEP * f32::from(u16::try_from(lane_index).unwrap_or(u16::MAX));
             assert_eq!(pair[0].axis, ChannelAxis::X);
             assert_eq!(pair[1].axis, ChannelAxis::X);
             assert!((pair[0].coordinate - pair[0].baseline - expected_offset).abs() < f32::EPSILON);
