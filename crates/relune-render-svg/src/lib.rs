@@ -5,11 +5,7 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{
-    EdgeKind, NodeKind,
-    layout::{Cardinality, RouteStyle},
-};
-use unicode_width::UnicodeWidthChar;
+use relune_core::{EdgeKind, layout::RouteStyle};
 
 pub mod edge;
 mod error;
@@ -17,6 +13,8 @@ pub mod escape;
 pub mod geometry;
 pub mod group;
 pub mod legend;
+mod markers;
+mod node;
 mod options;
 mod theme;
 
@@ -84,7 +82,7 @@ pub fn render_svg_with_overlay(
     // Render nodes
     for (index, node) in graph.nodes.iter().enumerate() {
         let node_overlay = overlay.and_then(|o| o.node(&node.id));
-        render_node_internal(
+        node::render_node_internal(
             &mut out,
             node,
             &colors,
@@ -267,222 +265,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
     Ok(())
 }
 
-/// Node rendering for relune-layout `PositionedNode`.
-#[allow(clippy::cast_precision_loss)] // Entry animation indices are presentation-only.
-#[allow(clippy::too_many_lines)] // SVG node markup is easier to audit in one place.
-fn render_node_internal(
-    out: &mut String,
-    node: &relune_layout::PositionedNode,
-    colors: &ThemeColors,
-    show_tooltips: bool,
-    index: usize,
-    overlay: Option<&relune_layout::NodeOverlay>,
-) -> fmt::Result {
-    let kind = node_kind_name(node.kind);
-    let node_style = node_style(node.kind, colors);
-    let node_label = node_kind_label(node.kind);
-    let max_severity = overlay.and_then(relune_layout::NodeOverlay::max_severity);
-
-    // Add overlay severity CSS class if present
-    let severity_class = match max_severity {
-        Some(relune_layout::OverlaySeverity::Error) => " overlay-error",
-        Some(relune_layout::OverlaySeverity::Warning) => " overlay-warning",
-        Some(relune_layout::OverlaySeverity::Info) => " overlay-info",
-        Some(relune_layout::OverlaySeverity::Hint) => " overlay-hint",
-        None => "",
-    };
-
-    write!(
-        out,
-        r#"<g class="table-node node node-kind-{}{}" data-table-id="{}" data-id="{}" data-node-kind="{}" style="--enter-delay:{:.3}s">"#,
-        kind,
-        severity_class,
-        escape_attribute(&node.id),
-        escape_attribute(&node.id),
-        kind,
-        index as f32 * 0.022
-    )?;
-
-    // Add tooltip if enabled (with overlay annotations appended)
-    if show_tooltips {
-        let column_count = node.columns.len();
-        let pk_count = node
-            .columns
-            .iter()
-            .filter(|c| c.flags.relation.is_primary_key)
-            .count();
-        let mut tooltip_parts = vec![
-            format!("{} {}", node.label, node_label),
-            format!(
-                "{} column{}",
-                column_count,
-                if column_count == 1 { "" } else { "s" }
-            ),
-        ];
-        if pk_count > 0 {
-            tooltip_parts.push(format!(
-                "{} primary key{}",
-                pk_count,
-                if pk_count == 1 { "" } else { "s" }
-            ));
-        }
-        if let Some(node_overlay) = overlay
-            && !node_overlay.annotations.is_empty()
-        {
-            tooltip_parts.push(String::new());
-            for annotation in &node_overlay.annotations {
-                let severity_label = overlay_severity_label(annotation.severity);
-                tooltip_parts.push(format!("[{}] {}", severity_label, annotation.message));
-                if let Some(ref hint) = annotation.hint {
-                    tooltip_parts.push(format!("  → {hint}"));
-                }
-            }
-        }
-        write!(
-            out,
-            r"<title>{}</title>",
-            escape_text(&tooltip_parts.join("\n"))
-        )?;
-    }
-
-    // Node border: override stroke color when overlay severity is present
-    let (stroke_color, stroke_width) = match max_severity {
-        Some(severity) => (overlay_severity_color(severity, colors), "2.4"),
-        None => (node_style.stroke, "1.6"),
-    };
-
-    write!(
-        out,
-        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" stroke="{}" stroke-width="{}" filter="url(#node-shadow)"/>"#,
-        node.x, node.y, node.width, node.height, node_style.body_fill, stroke_color, stroke_width
-    )?;
-    write!(
-        out,
-        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="32" rx="16" ry="16" fill="{}"/>"#,
-        node.x, node.y, node.width, node_style.header_fill
-    )?;
-    // Gradient transition from header to body — eliminates the hard underlay band
-    write!(
-        out,
-        r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{index})"/>"#,
-        node_style.header_fill,
-        node_style.header_fill,
-        node.x,
-        node.y + 16.0,
-        node.width
-    )?;
-    write!(
-        out,
-        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
-        node.x + 10.0,
-        node.y + 8.0,
-        (node.width - 54.0).max(40.0),
-        node.x + 10.0,
-        node.y + 21.0,
-        colors.text_primary,
-        escape_text(&node.label)
-    )?;
-    write!(
-        out,
-        r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="9" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
-        node.x + node.width - 10.0,
-        node.y + 21.0,
-        colors.text_muted,
-        escape_text(&kind.to_ascii_uppercase())
-    )?;
-
-    // Render severity badge when overlay has annotations
-    if let Some(severity) = max_severity {
-        let annotation_count = overlay.map_or(0, |o| o.annotations.len());
-        render_severity_badge(
-            out,
-            node.x + node.width - 12.0,
-            node.y - 6.0,
-            severity,
-            annotation_count,
-            colors,
-        )?;
-    }
-
-    let mut line_y = node.y + 46.0;
-    for (column_index, column) in node.columns.iter().enumerate() {
-        write!(
-            out,
-            r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
-            escape_attribute(&column.name),
-            column.flags.nullable
-        )?;
-        if index > 0 {
-            let separator_y = line_y - 12.0;
-            write!(
-                out,
-                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.38" stroke-width="1"/>"#,
-                node.x + 10.0,
-                separator_y,
-                node.x + node.width - 10.0,
-                separator_y,
-                node_style.separator
-            )?;
-        }
-        let font_style = if column.flags.nullable {
-            r#" font-style="italic""#
-        } else {
-            ""
-        };
-        write!(
-            out,
-            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>"#,
-            node.x + 10.0,
-            line_y - 12.5,
-            column_text_width(node, column),
-            node.x + 10.0,
-            line_y,
-            if column.flags.nullable {
-                colors.text_muted
-            } else {
-                colors.text_secondary
-            },
-            font_style,
-        )?;
-        if node.kind == NodeKind::Enum {
-            write!(out, "• {}", escape_text(&column.name))?;
-        } else if column.data_type.is_empty() {
-            write!(out, "{}", escape_text(&column.name))?;
-        } else {
-            write!(
-                out,
-                "{}: {}",
-                escape_text(&column.name),
-                escape_text(&column.data_type)
-            )?;
-        }
-        out.push_str("</text>");
-
-        let mut icon_x = node.x + node.width - 22.0;
-        if column.flags.relation.is_indexed {
-            render_idx_indicator(out, icon_x, line_y - 9.0)?;
-            icon_x -= 24.0;
-        }
-        if column.flags.relation.is_foreign_key {
-            render_fk_indicator(out, icon_x, line_y - 9.0)?;
-            icon_x -= 24.0;
-        }
-        if column.flags.relation.is_primary_key {
-            render_pk_indicator(out, icon_x, line_y - 8.5)?;
-        }
-
-        out.push_str("</g>");
-        line_y += 18.0;
-    }
-    write!(
-        out,
-        r#"<rect class="type-filter-overlay" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="url(#type-filter-hatch)" opacity="0"/>"#,
-        node.x, node.y, node.width, node.height
-    )?;
-    out.push_str("</g>");
-    Ok(())
-}
-
 /// Edge rendering for relune-layout `PositionedEdge`.
 #[allow(clippy::cast_precision_loss)] // Entry animation indices are presentation-only.
 #[allow(clippy::suboptimal_flops)] // Render-time coordinate math favors readability here.
@@ -605,7 +387,7 @@ fn render_edge_internal(
     // For curved FK edges, draw Crow's Foot symbols as inline SVG
     // elements positioned along the actual curve path.
     if use_inline_markers {
-        render_inline_crow_markers(
+        markers::render_inline_crow_markers(
             out,
             &edge.route,
             edge.nullable,
@@ -641,38 +423,6 @@ fn render_edge_internal(
 
     out.push_str("</g>");
     Ok(())
-}
-
-/// Unified column-metadata badge renderer.
-///
-/// All indicators share the same rounded-rect + label form-factor so they are
-/// instantly distinguishable at a glance regardless of density.
-fn render_column_badge(
-    out: &mut String,
-    x: f32,
-    y: f32,
-    label: &str,
-    bg: &str,
-    fg: &str,
-) -> fmt::Result {
-    write!(
-        out,
-        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="20" height="13" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
-        x + 2.5,
-        y + 9.5,
-    )
-}
-
-fn render_pk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    render_column_badge(out, x, y, "PK", "#fbbf24", "#fbbf24")
-}
-
-fn render_fk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    render_column_badge(out, x, y, "FK", "#38bdf8", "#38bdf8")
-}
-
-fn render_idx_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    render_column_badge(out, x, y, "IX", "#f59e0b", "#f59e0b")
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -713,77 +463,43 @@ fn generate_edge_tooltip(edge: &relune_layout::PositionedEdge) -> String {
     lines.join("\n")
 }
 
-struct NodeStyle {
-    body_fill: &'static str,
-    header_fill: &'static str,
-    stroke: &'static str,
-    separator: &'static str,
-}
-
 struct EdgeStyle {
     stroke: &'static str,
     dasharray: Option<&'static str>,
     label_fill: Option<&'static str>,
 }
 
-fn is_light_theme(colors: &ThemeColors) -> bool {
+pub(crate) fn is_light_theme(colors: &ThemeColors) -> bool {
     colors.background == "#f7f8fc"
 }
 
-const fn node_kind_name(kind: NodeKind) -> &'static str {
-    match kind {
-        NodeKind::Table => "table",
-        NodeKind::View => "view",
-        NodeKind::Enum => "enum",
+/// Returns a display-friendly label for an overlay severity level.
+pub(crate) const fn overlay_severity_label(
+    severity: relune_layout::OverlaySeverity,
+) -> &'static str {
+    match severity {
+        relune_layout::OverlaySeverity::Error => "error",
+        relune_layout::OverlaySeverity::Warning => "warning",
+        relune_layout::OverlaySeverity::Info => "info",
+        relune_layout::OverlaySeverity::Hint => "hint",
     }
 }
 
-const fn node_kind_label(kind: NodeKind) -> &'static str {
-    match kind {
-        NodeKind::Table => "table",
-        NodeKind::View => "view",
-        NodeKind::Enum => "enum",
-    }
-}
-
-fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
-    match (kind, is_light_theme(colors)) {
-        (NodeKind::Table, false) => NodeStyle {
-            body_fill: "#151926",
-            header_fill: "#8b5e1a",
-            stroke: "#fbbf24",
-            separator: "#4a3415",
-        },
-        (NodeKind::Table, true) => NodeStyle {
-            body_fill: "#fffaf0",
-            header_fill: "#f59e0b",
-            stroke: "#d97706",
-            separator: "#fed7aa",
-        },
-        (NodeKind::View, false) => NodeStyle {
-            body_fill: "#10232a",
-            header_fill: "#0f766e",
-            stroke: "#2dd4bf",
-            separator: "#134e4a",
-        },
-        (NodeKind::View, true) => NodeStyle {
-            body_fill: "#f0fdfa",
-            header_fill: "#14b8a6",
-            stroke: "#0f766e",
-            separator: "#99f6e4",
-        },
-        (NodeKind::Enum, false) => NodeStyle {
-            body_fill: "#241533",
-            header_fill: "#7c3aed",
-            stroke: "#c084fc",
-            separator: "#4c1d95",
-        },
-        (NodeKind::Enum, true) => NodeStyle {
-            body_fill: "#faf5ff",
-            header_fill: "#a855f7",
-            stroke: "#7e22ce",
-            separator: "#e9d5ff",
-        },
+/// Returns the stroke/fill color for an overlay severity, themed for light/dark.
+pub(crate) fn overlay_severity_color(
+    severity: relune_layout::OverlaySeverity,
+    colors: &ThemeColors,
+) -> &'static str {
+    let light = is_light_theme(colors);
+    match (severity, light) {
+        (relune_layout::OverlaySeverity::Error, false) => "#f87171",
+        (relune_layout::OverlaySeverity::Error, true) => "#dc2626",
+        (relune_layout::OverlaySeverity::Warning, false) => "#fbbf24",
+        (relune_layout::OverlaySeverity::Warning, true) => "#d97706",
+        (relune_layout::OverlaySeverity::Info, false) => "#38bdf8",
+        (relune_layout::OverlaySeverity::Info, true) => "#0284c7",
+        (relune_layout::OverlaySeverity::Hint, false) => "#94a3b8",
+        (relune_layout::OverlaySeverity::Hint, true) => "#64748b",
     }
 }
 
@@ -829,350 +545,14 @@ fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Inline Crow's Foot markers for curved FK edges
-// ---------------------------------------------------------------------------
-//
-// SVG `<marker>` elements are oriented along the tangent at the path endpoint.
-// Once the visible path is smoothed, composite markers (circle + crow's foot)
-// can appear disconnected. These helpers draw the same symbols as regular SVG
-// elements positioned along the rendered backbone instead.
-
-/// Sample the route at an approximate arc-length `dist` from the **start**.
-/// Returns `(point, unit_tangent)`.
-fn sample_route_from_start(
-    route: &relune_core::layout::EdgeRoute,
-    dist: f32,
-) -> ((f32, f32), (f32, f32)) {
-    let p0 = (route.x1, route.y1);
-    let next = route
-        .control_points
-        .first()
-        .copied()
-        .unwrap_or((route.x2, route.y2));
-    sample_line(p0, next, dist)
-}
-
-/// Sample the route at an approximate arc-length `dist` from the **end**.
-/// The returned tangent points *toward* the endpoint.
-fn sample_route_from_end(
-    route: &relune_core::layout::EdgeRoute,
-    dist: f32,
-) -> ((f32, f32), (f32, f32)) {
-    let p3 = (route.x2, route.y2);
-    let prev = route
-        .control_points
-        .last()
-        .copied()
-        .unwrap_or((route.x1, route.y1));
-    let (pt, tang) = sample_line(p3, prev, dist);
-    // Flip tangent so it points toward the endpoint.
-    (pt, (-tang.0, -tang.1))
-}
-
-fn perp_vec(v: (f32, f32)) -> (f32, f32) {
-    (-v.1, v.0)
-}
-
-/// Sample a point along a straight line at `dist` pixels from `from`.
-fn sample_line(from: (f32, f32), to: (f32, f32), dist: f32) -> ((f32, f32), (f32, f32)) {
-    let dx = to.0 - from.0;
-    let dy = to.1 - from.1;
-    let len = dx.hypot(dy);
-    let unit = if len > 0.001 {
-        (dx / len, dy / len)
-    } else {
-        (1.0, 0.0)
-    };
-    let t = if len > 0.001 { dist / len } else { 0.0 };
-    let t = t.clamp(0.0, 1.0);
-    ((dx.mul_add(t, from.0), dy.mul_add(t, from.1)), unit)
-}
-
-const fn offset_point(point: (f32, f32), direction: (f32, f32), distance: f32) -> (f32, f32) {
-    (
-        direction.0.mul_add(distance, point.0),
-        direction.1.mul_add(distance, point.1),
-    )
-}
-
-// Marker geometry constants (matching the SVG `<marker>` definitions).
-const CROW_PRONG_LEN: f32 = 14.0;
-const CROW_SPREAD: f32 = 7.0;
-const BAR_HALF: f32 = 7.0;
-const CIRCLE_RADIUS: f32 = 3.4;
-/// Distance from endpoint to the secondary symbol in compound markers.
-const COMPOUND_SECONDARY: f32 = 19.0;
-
-/// Render Crow's Foot cardinality symbols for a curved FK edge as inline SVG
-/// elements positioned along the actual curve path.
-#[allow(clippy::too_many_lines)]
-fn render_inline_crow_markers(
-    out: &mut String,
-    route: &relune_core::layout::EdgeRoute,
-    nullable: bool,
-    target_cardinality: Cardinality,
-    marker_color: &str,
-) -> fmt::Result {
-    let start = (route.x1, route.y1);
-    let end = (route.x2, route.y2);
-
-    // --- Start side (source / child): crow's foot + circle|bar ---
-    {
-        // Crow's foot prongs: base along the curve at CROW_PRONG_LEN, tip at start.
-        let (base, tang) = sample_route_from_start(route, CROW_PRONG_LEN);
-        let prp = perp_vec(tang);
-        let upper = offset_point(base, prp, CROW_SPREAD);
-        let lower = offset_point(base, prp, -CROW_SPREAD);
-        write!(
-            out,
-            r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision"/>"#,
-            upper.0,
-            upper.1,
-            start.0,
-            start.1,
-            base.0,
-            base.1,
-            start.0,
-            start.1,
-            lower.0,
-            lower.1,
-            start.0,
-            start.1,
-            marker_color,
-        )?;
-
-        // Secondary symbol behind the crow's foot.
-        if nullable {
-            // Circle (zero indicator).
-            let (c, _) = sample_route_from_start(route, COMPOUND_SECONDARY);
-            write!(
-                out,
-                r#"<circle class="crow-inline" cx="{:.1}" cy="{:.1}" r="{CIRCLE_RADIUS}" fill="none" stroke="{}" stroke-width="1.2" shape-rendering="geometricPrecision"/>"#,
-                c.0, c.1, marker_color,
-            )?;
-        } else {
-            // Bar (mandatory indicator).
-            let (c, t) = sample_route_from_start(route, COMPOUND_SECONDARY);
-            let prp = perp_vec(t);
-            let upper = offset_point(c, prp, BAR_HALF);
-            let lower = offset_point(c, prp, -BAR_HALF);
-            write!(
-                out,
-                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
-                upper.0, upper.1, lower.0, lower.1, marker_color,
-            )?;
-        }
-    }
-
-    // --- End side (target / parent) ---
-    match target_cardinality {
-        Cardinality::One => {
-            // Single bar.
-            let (c, t) = sample_route_from_end(route, 4.0);
-            let prp = perp_vec(t);
-            let upper = offset_point(c, prp, BAR_HALF);
-            let lower = offset_point(c, prp, -BAR_HALF);
-            write!(
-                out,
-                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
-                upper.0, upper.1, lower.0, lower.1, marker_color,
-            )?;
-        }
-        Cardinality::Many => {
-            // Crow's foot converging at endpoint.
-            let (base, tang) = sample_route_from_end(route, CROW_PRONG_LEN);
-            let prp = perp_vec(tang);
-            let upper = offset_point(base, prp, CROW_SPREAD);
-            let lower = offset_point(base, prp, -CROW_SPREAD);
-            write!(
-                out,
-                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1} M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision"/>"#,
-                upper.0,
-                upper.1,
-                end.0,
-                end.1,
-                base.0,
-                base.1,
-                end.0,
-                end.1,
-                lower.0,
-                lower.1,
-                end.0,
-                end.1,
-                marker_color,
-            )?;
-        }
-        Cardinality::ZeroOrOne => {
-            // Bar near endpoint.
-            let (b, bt) = sample_route_from_end(route, 4.0);
-            let bp = perp_vec(bt);
-            let upper = offset_point(b, bp, BAR_HALF);
-            let lower = offset_point(b, bp, -BAR_HALF);
-            write!(
-                out,
-                r#"<path class="crow-inline" d="M{:.1} {:.1} L{:.1} {:.1}" stroke="{}" stroke-width="1.5" stroke-linecap="round" fill="none" shape-rendering="geometricPrecision"/>"#,
-                upper.0, upper.1, lower.0, lower.1, marker_color,
-            )?;
-            // Circle further back.
-            let (c, _) = sample_route_from_end(route, COMPOUND_SECONDARY);
-            write!(
-                out,
-                r#"<circle class="crow-inline" cx="{:.1}" cy="{:.1}" r="{CIRCLE_RADIUS}" fill="none" stroke="{}" stroke-width="1.2" shape-rendering="geometricPrecision"/>"#,
-                c.0, c.1, marker_color,
-            )?;
-        }
-    }
-    Ok(())
-}
-
-/// Choose Crow's Foot SVG markers for a FK edge.
-///
-/// ## Semantics of each end (Crow's Foot / IE notation)
-///
-/// **marker-start (source / child side — the table that owns the FK column):**
-///   - Crow's foot (three-pronged fork) = "many": each parent can be
-///     referenced by multiple child rows.
-///   - Bar prefix  (`one-many`)  = mandatory participation: the FK column is
-///     NOT NULL, so every child row *must* reference a parent.
-///   - Circle prefix (`zero-many`) = optional participation: the FK column is
-///     nullable, so a child row *may* have no parent.
-///
-/// **marker-end (target / parent side — the referenced table):**
-///   - `one`       = the referenced columns form a unique / PK constraint,
-///     so each FK value resolves to exactly one parent row.
-///   - `zero-one`  = unique but the relationship can be absent (`ZeroOrOne`).
-///   - `many`      = the referenced columns are *not* unique, so multiple
-///     parent rows could match (rare in practice).
-const fn edge_marker_attributes(
-    uses_crow_markers: bool,
-    nullable: bool,
-    target_cardinality: Cardinality,
-) -> &'static str {
-    if uses_crow_markers {
-        match (nullable, target_cardinality) {
-            // Nullable FK (optional participation): circle + crow's foot on source side.
-            (true, Cardinality::Many) => {
-                r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-many)""#
-            }
-            (true, Cardinality::One) => {
-                r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-one)""#
-            }
-            (true, Cardinality::ZeroOrOne) => {
-                r#" marker-start="url(#cardinality-zero-many)" marker-end="url(#cardinality-zero-one)""#
-            }
-            // Required FK (mandatory participation): bar + crow's foot on source side.
-            (false, Cardinality::Many) => {
-                r#" marker-start="url(#cardinality-one-many)" marker-end="url(#cardinality-many)""#
-            }
-            (false, Cardinality::One) => {
-                r#" marker-start="url(#cardinality-one-many)" marker-end="url(#cardinality-one)""#
-            }
-            (false, Cardinality::ZeroOrOne) => {
-                r#" marker-start="url(#cardinality-one-many)" marker-end="url(#cardinality-zero-one)""#
-            }
-        }
-    } else {
-        r#" marker-end="url(#arrow)""#
-    }
-}
-
-fn column_text_width(
-    node: &relune_layout::PositionedNode,
-    column: &relune_layout::PositionedColumn,
-) -> f32 {
-    let icon_slots = usize::from(column.flags.relation.is_indexed)
-        + usize::from(column.flags.relation.is_foreign_key)
-        + usize::from(column.flags.relation.is_primary_key);
-    if icon_slots == 0 {
-        (node.width - 20.0).max(18.0)
-    } else {
-        // Badges start at node.width - 22, spaced 24px apart (left edge to left edge).
-        // Reserve space for all badges plus a small gap before the leftmost one.
-        #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
-        let badge_area = (icon_slots as f32 - 1.0).mul_add(24.0, 28.0);
-        (node.width - 10.0 - badge_area).max(18.0)
-    }
-}
-
-fn estimate_label_width(text: &str) -> f32 {
-    text.chars()
-        .map(|ch| match ch.width_cjk().or_else(|| ch.width()) {
-            Some(0) | None => 0.0,
-            Some(1) => 6.4,
-            Some(_) => 12.8,
-        })
-        .sum::<f32>()
-        + 18.0
-}
-
-fn node_label_background(colors: &ThemeColors) -> &'static str {
-    if is_light_theme(colors) {
-        "#ffffff"
-    } else {
-        "#111827"
-    }
-}
-
-/// Returns a display-friendly label for an overlay severity level.
-const fn overlay_severity_label(severity: relune_layout::OverlaySeverity) -> &'static str {
-    match severity {
-        relune_layout::OverlaySeverity::Error => "error",
-        relune_layout::OverlaySeverity::Warning => "warning",
-        relune_layout::OverlaySeverity::Info => "info",
-        relune_layout::OverlaySeverity::Hint => "hint",
-    }
-}
-
-/// Returns the stroke/fill color for an overlay severity, themed for light/dark.
-fn overlay_severity_color(
-    severity: relune_layout::OverlaySeverity,
-    colors: &ThemeColors,
-) -> &'static str {
-    let light = is_light_theme(colors);
-    match (severity, light) {
-        (relune_layout::OverlaySeverity::Error, false) => "#f87171",
-        (relune_layout::OverlaySeverity::Error, true) => "#dc2626",
-        (relune_layout::OverlaySeverity::Warning, false) => "#fbbf24",
-        (relune_layout::OverlaySeverity::Warning, true) => "#d97706",
-        (relune_layout::OverlaySeverity::Info, false) => "#38bdf8",
-        (relune_layout::OverlaySeverity::Info, true) => "#0284c7",
-        (relune_layout::OverlaySeverity::Hint, false) => "#94a3b8",
-        (relune_layout::OverlaySeverity::Hint, true) => "#64748b",
-    }
-}
-
-/// Renders a small badge at the top-right corner of a node showing issue count.
-fn render_severity_badge(
-    out: &mut String,
-    x: f32,
-    y: f32,
-    severity: relune_layout::OverlaySeverity,
-    count: usize,
-    colors: &ThemeColors,
-) -> fmt::Result {
-    let fill = overlay_severity_color(severity, colors);
-    let text_fill = if is_light_theme(colors) {
-        "#ffffff"
-    } else {
-        "#0c0f1a"
-    };
-    let label = count.to_string();
-    let badge_width = if count >= 10 { 22.0 } else { 18.0 };
-    let badge_x = x - badge_width / 2.0;
-    write!(
-        out,
-        r#"<rect class="overlay-badge" x="{badge_x:.1}" y="{y:.1}" width="{badge_width:.1}" height="18" rx="9" fill="{fill}"/><text x="{:.1}" y="{:.1}" font-family="'Inter', system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle" fill="{text_fill}">{label}</text>"#,
-        badge_x + badge_width / 2.0,
-        y + 13.0,
-    )
-}
-
 use escape::{escape_attribute, escape_text};
+use markers::edge_marker_attributes;
+use node::{estimate_label_width, node_label_background};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use relune_core::layout::Cardinality;
     use relune_core::{EdgeKind, NodeKind};
     use relune_layout::{
         ColumnFlags, ColumnRelationFlags, EdgeRoute, PositionedColumn, PositionedEdge,
