@@ -14,6 +14,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   const PARAM_PAN_Y = 'y';
   const PARAM_TYPES = 'types';
   const PARAM_HIDDEN_GROUPS = 'hg';
+  const PARAM_COLLAPSED = 'c';
   const MIN_VIEWPORT_SCALE = 0.1;
   const MAX_VIEWPORT_SCALE = 2;
   const MIN_VIEWPORT_PAN_LIMIT = 10_000;
@@ -86,6 +87,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   // ---------------------------------------------------------------------------
 
   let writeTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingPush = false;
+  let restoringFromPopstate = false;
 
   function scheduleWrite(): void {
     if (writeTimer !== null) {
@@ -94,7 +97,12 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     writeTimer = setTimeout(writeHash, 300);
   }
 
-  function writeHash(): void {
+  function scheduleDiscreteWrite(): void {
+    pendingPush = true;
+    scheduleWrite();
+  }
+
+  function buildHashParams(): URLSearchParams {
     const params = new URLSearchParams();
 
     const query = runtime.search?.getQuery() ?? '';
@@ -124,11 +132,26 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       params.set(PARAM_HIDDEN_GROUPS, hiddenGroups.join(','));
     }
 
-    const str = params.toString();
+    const collapsed = runtime.collapse?.getCollapsed() ?? [];
+    if (collapsed.length > 0) {
+      params.set(PARAM_COLLAPSED, collapsed.join(','));
+    }
+
+    return params;
+  }
+
+  function writeHash(): void {
+    const str = buildHashParams().toString();
     const newHash = str === '' ? '' : `#${str}`;
     if (newHash !== location.hash && newHash !== '#') {
-      history.replaceState(null, '', newHash || location.pathname + location.search);
+      const url = newHash || location.pathname + location.search;
+      if (pendingPush && !restoringFromPopstate) {
+        history.pushState(null, '', url);
+      } else {
+        history.replaceState(null, '', url);
+      }
     }
+    pendingPush = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -179,6 +202,15 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       }
     }
 
+    // Restore collapsed tables
+    const collapsedRaw = params.get(PARAM_COLLAPSED);
+    if (collapsedRaw !== null && collapsedRaw !== '') {
+      const collapsed = collapsedRaw.split(',').filter((id) => id !== '' && tableIds.has(id));
+      if (collapsed.length > 0) {
+        runtime.collapse?.setCollapsed(collapsed);
+      }
+    }
+
     // Restore selected table (last, so it can center on restored viewport scale)
     const table = params.get(PARAM_TABLE);
     if (table !== null && table !== '' && tableIds.has(table)) {
@@ -203,6 +235,9 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     if ((metadata?.groups?.length ?? 0) > 0) {
       modules.push('groups');
     }
+    if (document.getElementById('canvas')?.querySelector('svg') !== null) {
+      modules.push('collapse');
+    }
     return modules;
   }
 
@@ -210,12 +245,23 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   // Listen for state changes and update URL
   // ---------------------------------------------------------------------------
 
-  document.addEventListener('relune:search-changed', scheduleWrite);
-  document.addEventListener('relune:node-selected', scheduleWrite);
-  document.addEventListener('relune:node-cleared', scheduleWrite);
+  document.addEventListener('relune:search-changed', scheduleDiscreteWrite);
+  document.addEventListener('relune:node-selected', scheduleDiscreteWrite);
+  document.addEventListener('relune:node-cleared', scheduleDiscreteWrite);
   document.addEventListener('relune:viewport-changed', scheduleWrite);
-  document.addEventListener('relune:filters-changed', scheduleWrite);
-  document.addEventListener('relune:groups-changed', scheduleWrite);
+  document.addEventListener('relune:filters-changed', scheduleDiscreteWrite);
+  document.addEventListener('relune:groups-changed', scheduleDiscreteWrite);
+  document.addEventListener('relune:collapse-changed', scheduleDiscreteWrite);
+
+  // ---------------------------------------------------------------------------
+  // popstate: re-apply state when the user navigates back/forward or edits hash
+  // ---------------------------------------------------------------------------
+
+  window.addEventListener('popstate', () => {
+    restoringFromPopstate = true;
+    restoreFromHash();
+    restoringFromPopstate = false;
+  });
 
   // ---------------------------------------------------------------------------
   // Init: restore state after all modules have initialised
