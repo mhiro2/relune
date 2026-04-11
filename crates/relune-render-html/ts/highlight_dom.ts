@@ -439,7 +439,7 @@ export interface ObjectBrowserItem {
   table: TableMetadata;
   isSelected: boolean;
   isDimmedBySearch: boolean;
-  isDimmedByTypeFilter: boolean;
+  isExcludedByFilter: boolean;
   isHiddenByGroup: boolean;
 }
 
@@ -469,7 +469,7 @@ function buildObjectBrowserButton(
   button.type = 'button';
   button.className = 'object-browser-item';
   button.classList.toggle('selected', item.isSelected);
-  button.classList.toggle('filtered-out', item.isDimmedBySearch || item.isDimmedByTypeFilter);
+  button.classList.toggle('filtered-out', item.isDimmedBySearch || item.isExcludedByFilter);
   button.classList.toggle('hidden-item', item.isHiddenByGroup);
 
   const header = document.createElement('div');

@@ -221,6 +221,15 @@
           panY = result.panY;
           updateTransform();
         };
+        const fitToRect = (rect) => {
+          const available = getAvailableViewport(viewportEl);
+          const result = computeFit(rect, available);
+          if (result === null) return;
+          scale = result.scale;
+          panX = result.panX;
+          panY = result.panY;
+          updateTransform();
+        };
         const centerOnContent = (contentX, contentY) => {
           const available = getAvailableViewport(viewportEl);
           panX = available.left + available.width / 2 - (contentX - diagram.x) * scale;
@@ -238,6 +247,9 @@
           },
           fit() {
             fitToScreen();
+          },
+          fitToRect(rect) {
+            fitToRect(rect);
           },
           center(contentX, contentY) {
             centerOnContent(contentX, contentY);

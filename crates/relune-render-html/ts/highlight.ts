@@ -140,16 +140,25 @@ import {
       const query = searchInput instanceof HTMLInputElement ? searchInput.value : '';
       const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
 
-      const items: ObjectBrowserItem[] = visibleTables.map((table) => {
-        const node = findNode(table.id);
-        return {
-          table,
-          isSelected: state.selectedNode === table.id,
-          isDimmedBySearch: node?.classList.contains('dimmed-by-search') === true,
-          isDimmedByTypeFilter: node?.classList.contains('dimmed-by-type-filter') === true,
-          isHiddenByGroup: node?.classList.contains('hidden-by-group') === true,
-        };
-      });
+      const filterMode = runtime.filters?.getMode() ?? 'dim';
+      const isHideOrFocus = filterMode === 'hide' || filterMode === 'focus';
+
+      const items: ObjectBrowserItem[] = visibleTables
+        .filter((table) => {
+          if (!isHideOrFocus) return true;
+          const node = findNode(table.id);
+          return node?.classList.contains('hidden-by-filter') !== true;
+        })
+        .map((table) => {
+          const node = findNode(table.id);
+          return {
+            table,
+            isSelected: state.selectedNode === table.id,
+            isDimmedBySearch: node?.classList.contains('dimmed-by-search') === true,
+            isExcludedByFilter: node?.classList.contains('dimmed-by-filter') === true,
+            isHiddenByGroup: node?.classList.contains('hidden-by-group') === true,
+          };
+        });
 
       renderObjectBrowser(
         items,

@@ -22,16 +22,17 @@ export function syncEdgeDimming(svgRoot: Element): void {
     const fromEl = nodeById.get(fromId);
     const toEl = nodeById.get(toId);
 
+    const endpointHidden =
+      fromEl?.classList.contains('hidden-by-filter') === true ||
+      toEl?.classList.contains('hidden-by-filter') === true;
+
     const endpointDimmed =
       fromEl?.classList.contains('dimmed-by-search') === true ||
       toEl?.classList.contains('dimmed-by-search') === true ||
-      fromEl?.classList.contains('dimmed-by-type-filter') === true ||
-      toEl?.classList.contains('dimmed-by-type-filter') === true;
+      fromEl?.classList.contains('dimmed-by-filter') === true ||
+      toEl?.classList.contains('dimmed-by-filter') === true;
 
-    if (endpointDimmed) {
-      edge.classList.add('dimmed-by-edge-filter');
-    } else {
-      edge.classList.remove('dimmed-by-edge-filter');
-    }
+    edge.classList.toggle('hidden-by-filter', endpointHidden);
+    edge.classList.toggle('dimmed-by-edge-filter', !endpointHidden && endpointDimmed);
   });
 }

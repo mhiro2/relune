@@ -35,9 +35,9 @@ pub(crate) const fn build_search_js() -> &'static str {
     include_str!("js/search.js")
 }
 
-/// Build the column type filter JavaScript.
-pub(crate) const fn build_type_filter_js() -> &'static str {
-    include_str!("js/type_filter.js")
+/// Build the filter engine JavaScript.
+pub(crate) const fn build_filter_engine_js() -> &'static str {
+    include_str!("js/filter_engine.js")
 }
 
 /// Build the collapse JavaScript.
@@ -146,27 +146,13 @@ pub(crate) fn build_hover_popover_html() -> String {
 
 /// Build the search panel HTML structure.
 #[allow(clippy::needless_raw_string_hashes)]
-pub(crate) fn build_search_panel_html(
-    enable_column_type_filter: bool,
-    enable_group_toggles: bool,
-) -> String {
-    let type_block = if enable_column_type_filter {
-        r#"    <section class="type-filter-section" id="type-filter-section" hidden aria-label="Column type filter">
-      <div class="type-filter-header">
-        <span>Filter by type</span>
-        <div class="type-filter-actions">
-          <button type="button" class="type-filter-action" id="type-filter-select-visible">All</button>
-          <button type="button" class="type-filter-action" id="type-filter-clear">None</button>
-        </div>
-      </div>
-      <input type="search" id="type-filter-query" class="type-filter-query" placeholder="Narrow type list..." autocomplete="off">
-      <div class="type-filter-list" id="type-filter-list"></div>
-      <div class="type-filter-summary" id="type-filter-summary"></div>
+pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
+    let filter_block = r#"    <section class="filter-section" id="filter-section" aria-label="Filters">
+      <div class="filter-section-header" id="filter-section-header"></div>
+      <div class="filter-active-summary" id="filter-active-summary"></div>
+      <div class="filter-facets" id="filter-facets"></div>
     </section>
-"#
-    } else {
-        ""
-    };
+"#;
 
     let group_block = if enable_group_toggles {
         r#"    <section class="group-panel" id="group-panel">
@@ -202,7 +188,7 @@ pub(crate) fn build_search_panel_html(
       <button type="button" class="search-clear" id="search-clear" title="Clear search">&times;</button>
     </div>
     <div class="search-results" id="search-results"></div>
-{type_block}    <section class="object-browser-section" aria-label="Schema objects">
+{filter_block}    <section class="object-browser-section" aria-label="Schema objects">
       <div class="object-browser-header">
         <span>Objects</span>
         <span class="object-browser-count" id="object-browser-count"></span>

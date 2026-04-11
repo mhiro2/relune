@@ -417,7 +417,7 @@
     button.type = "button";
     button.className = "object-browser-item";
     button.classList.toggle("selected", item.isSelected);
-    button.classList.toggle("filtered-out", item.isDimmedBySearch || item.isDimmedByTypeFilter);
+    button.classList.toggle("filtered-out", item.isDimmedBySearch || item.isExcludedByFilter);
     button.classList.toggle("hidden-item", item.isHiddenByGroup);
     const header = document.createElement("div");
     header.className = "object-browser-item-header";
@@ -539,13 +539,19 @@
         }
         const query = searchInput instanceof HTMLInputElement ? searchInput.value : "";
         const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
-        const items = visibleTables.map((table) => {
+        const filterMode = runtime.filters?.getMode() ?? "dim";
+        const isHideOrFocus = filterMode === "hide" || filterMode === "focus";
+        const items = visibleTables.filter((table) => {
+          if (!isHideOrFocus) return true;
+          const node = findNode(table.id);
+          return node?.classList.contains("hidden-by-filter") !== true;
+        }).map((table) => {
           const node = findNode(table.id);
           return {
             table,
             isSelected: state.selectedNode === table.id,
             isDimmedBySearch: node?.classList.contains("dimmed-by-search") === true,
-            isDimmedByTypeFilter: node?.classList.contains("dimmed-by-type-filter") === true,
+            isExcludedByFilter: node?.classList.contains("dimmed-by-filter") === true,
             isHiddenByGroup: node?.classList.contains("hidden-by-group") === true
           };
         });

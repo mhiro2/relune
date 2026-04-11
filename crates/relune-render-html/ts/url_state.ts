@@ -12,9 +12,23 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   const PARAM_SCALE = 's';
   const PARAM_PAN_X = 'x';
   const PARAM_PAN_Y = 'y';
-  const PARAM_TYPES = 'types';
+  const PARAM_FILTER_SCHEMA = 'fs';
+  const PARAM_FILTER_KIND = 'fk';
+  const PARAM_FILTER_TYPE = 'ft';
+  const PARAM_FILTER_SEVERITY = 'fi';
+  const PARAM_FILTER_DIFF = 'fd';
+  const PARAM_FILTER_MODE = 'fm';
   const PARAM_HIDDEN_GROUPS = 'hg';
   const PARAM_COLLAPSED = 'c';
+
+  type FacetUrlParam = { param: string; facetId: string };
+  const FACET_PARAMS: FacetUrlParam[] = [
+    { param: PARAM_FILTER_SCHEMA, facetId: 'schema' },
+    { param: PARAM_FILTER_KIND, facetId: 'kind' },
+    { param: PARAM_FILTER_TYPE, facetId: 'columnType' },
+    { param: PARAM_FILTER_SEVERITY, facetId: 'severity' },
+    { param: PARAM_FILTER_DIFF, facetId: 'diffKind' },
+  ];
   const MIN_VIEWPORT_SCALE = 0.1;
   const MAX_VIEWPORT_SCALE = 2;
   const MIN_VIEWPORT_PAN_LIMIT = 10_000;
@@ -26,17 +40,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   function readHash(): URLSearchParams {
     const raw = location.hash.replace(/^#/, '');
     return new URLSearchParams(raw);
-  }
-
-  function parseAllowedTypes(typesRaw: string, allowedTypes: ReadonlySet<string>): string[] {
-    const selected = new Set<string>();
-    for (const type of typesRaw.split(',')) {
-      const candidate = type.trim();
-      if (candidate !== '' && allowedTypes.has(candidate)) {
-        selected.add(candidate);
-      }
-    }
-    return [...selected];
   }
 
   function maxViewportPanMagnitude(): number {
@@ -122,9 +125,16 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       params.set(PARAM_PAN_Y, viewport.panY.toFixed(1));
     }
 
-    const types = runtime.filters?.getSelectedTypes() ?? [];
-    if (types.length > 0) {
-      params.set(PARAM_TYPES, types.join(','));
+    for (const { param, facetId } of FACET_PARAMS) {
+      const selection = runtime.filters?.getFacetSelection(facetId as any) ?? [];
+      if (selection.length > 0) {
+        params.set(param, selection.join(','));
+      }
+    }
+
+    const filterMode = runtime.filters?.getMode();
+    if (filterMode !== undefined && filterMode !== 'dim') {
+      params.set(PARAM_FILTER_MODE, filterMode);
     }
 
     const hiddenGroups = runtime.groups?.getHiddenGroups() ?? [];
@@ -183,13 +193,20 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       runtime.search?.setQuery(query);
     }
 
-    // Restore type filters
-    const typesRaw = params.get(PARAM_TYPES);
-    if (typesRaw !== null && typesRaw !== '') {
-      const allowedTypes = new Set(runtime.filters?.getAvailableTypes() ?? []);
-      const types = parseAllowedTypes(typesRaw, allowedTypes);
-      if (types.length > 0) {
-        runtime.filters?.setSelectedTypes(types);
+    // Restore filter mode
+    const fmRaw = params.get(PARAM_FILTER_MODE);
+    if (fmRaw === 'hide' || fmRaw === 'focus') {
+      runtime.filters?.setMode(fmRaw);
+    }
+
+    // Restore facet selections
+    for (const { param, facetId } of FACET_PARAMS) {
+      const raw = params.get(param);
+      if (raw !== null && raw !== '') {
+        const values = raw.split(',').filter((v) => v !== '');
+        if (values.length > 0) {
+          runtime.filters?.setFacetSelection(facetId as any, values);
+        }
       }
     }
 
@@ -226,7 +243,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     if (document.getElementById('table-search') instanceof HTMLInputElement) {
       modules.push('search');
     }
-    if (document.getElementById('type-filter-section') !== null) {
+    if (document.getElementById('filter-section') !== null) {
       modules.push('filters');
     }
     if (document.getElementById('detail-drawer') !== null) {
