@@ -19,18 +19,24 @@ export interface ViewerViewportApi {
   zoomIn(): void;
   zoomOut(): void;
   fit(): void;
+  fitToRect(rect: DiagramBounds): void;
   center(contentX: number, contentY: number): void;
   getState(): ViewportState | null;
   getDiagramBounds(): DiagramBounds | null;
   setState(scale: number, panX: number, panY: number): void;
 }
 
+export type FacetId = 'schema' | 'kind' | 'columnType' | 'severity' | 'diffKind';
+export type FilterMode = 'dim' | 'hide' | 'focus';
+
 export interface ViewerFiltersApi {
   reset(): void;
   hasActiveFilters(): boolean;
-  setSelectedTypes(types: string[]): void;
-  getSelectedTypes(): string[];
-  getAvailableTypes(): string[];
+  getMode(): FilterMode;
+  setMode(mode: FilterMode): void;
+  getFacetSelection(facetId: FacetId): string[];
+  setFacetSelection(facetId: FacetId, values: string[]): void;
+  getAvailableFacets(): FacetId[];
 }
 
 export interface ViewerSearchApi {

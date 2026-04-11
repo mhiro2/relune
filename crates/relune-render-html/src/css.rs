@@ -263,13 +263,18 @@ pub(crate) fn build_css(
       transition: opacity 0.2s;
     }
 
-    .node.dimmed-by-type-filter {
+    .node.dimmed-by-filter {
       opacity: 0.2;
       transition: opacity 0.2s;
     }
 
-    .node.dimmed-by-search.dimmed-by-type-filter {
+    .node.dimmed-by-search.dimmed-by-filter {
       opacity: 0.08;
+    }
+
+    .node.hidden-by-filter,
+    .edge.hidden-by-filter {
+      display: none !important;
     }
 
     .edge.dimmed-by-edge-filter {
@@ -280,50 +285,190 @@ pub(crate) fn build_css(
         ""
     };
 
-    let type_filter_css = if enable_search {
+    let filter_section_css = if enable_search {
         r"
-    .type-filter-section {
+    /* ── Filter section ─────────────────────────────────────────────── */
+
+    .filter-section {
       border-top: 1px solid var(--panel-border);
     }
 
-    .type-filter-header {
+    .filter-section-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
       padding: 10px 14px 6px;
       font-size: 12px;
       font-weight: 600;
       opacity: 0.9;
     }
 
-    .type-filter-actions {
-      display: flex;
-      gap: 6px;
+    .filter-section-header > span {
+      flex-shrink: 0;
     }
 
-    .type-filter-action {
+    .filter-mode-switcher {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .filter-mode-button {
+      background: transparent;
+      border: none;
+      color: var(--text-color);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 3px 10px;
+      opacity: 0.6;
+      transition: background-color 0.16s, opacity 0.16s;
+    }
+
+    .filter-mode-button:hover {
+      opacity: 0.9;
+      background-color: var(--accent-soft);
+    }
+
+    .filter-mode-button.active {
+      opacity: 1;
+      background-color: var(--accent-soft);
+    }
+
+    .filter-section-reset {
       background: transparent;
       border: 1px solid var(--panel-border);
       color: var(--text-color);
       font-size: 11px;
       cursor: pointer;
-      padding: 4px 8px;
+      padding: 3px 8px;
       border-radius: 999px;
-      opacity: 0.84;
+      opacity: 0.7;
       transition: background-color 0.16s, border-color 0.16s, opacity 0.16s;
     }
 
-    .type-filter-action:hover {
+    .filter-section-reset:hover {
       opacity: 1;
       border-color: var(--accent-color);
       background-color: var(--accent-soft);
     }
 
-    .type-filter-query {
+    .filter-section-reset[hidden] {
+      display: none;
+    }
+
+    .filter-active-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 0 14px 8px;
+    }
+
+    .filter-active-summary[hidden] {
+      display: none;
+    }
+
+    .filter-summary-chip {
+      background: var(--accent-soft);
+      border: none;
+      color: var(--text-color);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background-color 0.16s;
+    }
+
+    .filter-summary-chip:hover {
+      background: var(--accent-color);
+      color: white;
+    }
+
+    /* ── Facet sections ─────────────────────────────────────────────── */
+
+    .filter-facet {
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .filter-facet-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      opacity: 0.9;
+    }
+
+    .filter-facet-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .filter-facet-summary::before {
+      content: '\25B6';
+      font-size: 8px;
+      transition: transform 0.16s;
+    }
+
+    .filter-facet[open] > .filter-facet-summary::before {
+      transform: rotate(90deg);
+    }
+
+    .filter-facet-label {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .filter-facet-badge {
+      min-width: 18px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--accent-color);
+      color: white;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .filter-facet-badge[hidden] {
+      display: none;
+    }
+
+    .filter-facet-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .filter-facet-action {
+      background: transparent;
+      border: 1px solid var(--panel-border);
+      color: var(--text-color);
+      font-size: 10px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 999px;
+      opacity: 0.7;
+      transition: background-color 0.16s, border-color 0.16s, opacity 0.16s;
+    }
+
+    .filter-facet-action:hover {
+      opacity: 1;
+      border-color: var(--accent-color);
+      background-color: var(--accent-soft);
+    }
+
+    .filter-facet-search {
       display: block;
       width: calc(100% - 28px);
-      margin: 0 14px 10px;
-      padding: 8px 10px;
+      margin: 0 14px 6px;
+      padding: 6px 10px;
       font-size: 12px;
       border: 1px solid var(--panel-border);
       border-radius: 10px;
@@ -331,53 +476,41 @@ pub(crate) fn build_css(
       color: var(--text-color);
     }
 
-    .type-filter-list {
-      max-height: min(220px, 28vh);
+    .filter-facet-list {
+      max-height: min(180px, 24vh);
       overflow-y: auto;
-      padding: 4px 0 10px;
+      padding: 2px 0 8px;
     }
 
-    .type-filter-item {
+    .filter-facet-item {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 7px 14px;
+      padding: 5px 14px;
       font-size: 12px;
       cursor: pointer;
       transition: background-color 0.16s;
     }
 
-    .type-filter-item:hover {
+    .filter-facet-item:hover {
       background-color: var(--accent-soft);
     }
 
-    .type-filter-item span {
+    .filter-facet-item span {
       word-break: break-word;
       font-family: var(--mono-font);
     }
 
-    .type-filter-item-count {
+    .filter-facet-item-count {
       margin-left: auto;
-      min-width: 28px;
-      padding: 2px 8px;
+      min-width: 24px;
+      padding: 1px 6px;
       border-radius: 999px;
       background: var(--accent-soft);
       text-align: center;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       font-family: var(--ui-font);
-    }
-
-    .type-filter-summary {
-      display: none;
-      padding: 8px 14px 12px;
-      font-size: 11px;
-      opacity: 0.7;
-      border-top: 1px solid var(--panel-border);
-    }
-
-    .type-filter-summary.visible {
-      display: block;
     }"
     } else {
         ""
@@ -1220,7 +1353,7 @@ pub(crate) fn build_css(
       animation-name: relune-edge-enter;
     }
 
-    .node.dimmed-by-type-filter .type-filter-overlay {
+    .node.dimmed-by-filter .type-filter-overlay {
       opacity: 0.34;
     }
 
@@ -1442,7 +1575,7 @@ pub(crate) fn build_css(
     .viewport:hover::after {{
       opacity: 0.8;
     }}
-{search_css}{type_filter_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
+{search_css}{filter_section_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
         bg_color = colors.background,
         color_scheme = if matches!(theme, Theme::Dark) {
             "dark"

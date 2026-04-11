@@ -429,7 +429,7 @@ mod tests {
         assert!(css.contains(".dimmed-by-search"));
         assert!(css.contains(".highlighted-by-search"));
         assert!(css.contains(".dimmed-by-edge-filter"));
-        assert!(css.contains(".type-filter-section"));
+        assert!(css.contains(".filter-section"));
     }
 
     #[test]

@@ -63,6 +63,16 @@ import { getAvailableViewport, applyTransform } from './pan_zoom_dom';
         updateTransform();
       };
 
+      const fitToRect = (rect: { x: number; y: number; width: number; height: number }): void => {
+        const available = getAvailableViewport(viewportEl);
+        const result = computeFit(rect, available);
+        if (result === null) return;
+        scale = result.scale;
+        panX = result.panX;
+        panY = result.panY;
+        updateTransform();
+      };
+
       const centerOnContent = (contentX: number, contentY: number): void => {
         const available = getAvailableViewport(viewportEl);
         panX = available.left + available.width / 2 - (contentX - diagram.x) * scale;
@@ -81,6 +91,9 @@ import { getAvailableViewport, applyTransform } from './pan_zoom_dom';
         },
         fit(): void {
           fitToScreen();
+        },
+        fitToRect(rect: { x: number; y: number; width: number; height: number }): void {
+          fitToRect(rect);
         },
         center(contentX: number, contentY: number): void {
           centerOnContent(contentX, contentY);

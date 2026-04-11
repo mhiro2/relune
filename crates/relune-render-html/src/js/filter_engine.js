@@ -87,28 +87,83 @@
     document.dispatchEvent(new CustomEvent(name, { detail }));
   }
 
-  // ts/type_filter_state.ts
-  function createTypeFilterState(tables) {
-    const typeSet = /* @__PURE__ */ new Set();
-    const selectedTypes = /* @__PURE__ */ new Set();
-    const typeTableCounts = /* @__PURE__ */ new Map();
-    for (const table of tables) {
-      const tableTypes = /* @__PURE__ */ new Set();
-      for (const column of table.columns ?? []) {
-        const dataType = (column.data_type ?? "").trim();
-        if (dataType !== "") {
-          typeSet.add(dataType);
-          tableTypes.add(dataType);
-        }
+  // ts/filter_engine_state.ts
+  var DEFAULT_SCHEMA = "(default)";
+  function extractSchemaValues(table) {
+    return [table.schema_name ?? DEFAULT_SCHEMA];
+  }
+  function extractKindValues(table) {
+    return [table.kind];
+  }
+  function extractColumnTypeValues(table) {
+    const types = /* @__PURE__ */ new Set();
+    for (const col of table.columns ?? []) {
+      const dt = (col.data_type ?? "").trim();
+      if (dt !== "") {
+        types.add(dt);
       }
-      tableTypes.forEach((dataType) => {
-        typeTableCounts.set(dataType, (typeTableCounts.get(dataType) ?? 0) + 1);
-      });
     }
-    const allTypes = Array.from(typeSet).sort(
-      (left, right) => left.localeCompare(right, void 0, { sensitivity: "base" })
+    return [...types];
+  }
+  function extractSeverityValues(table) {
+    const issues = table.issues ?? [];
+    if (issues.length === 0) return ["none"];
+    const severities = /* @__PURE__ */ new Set();
+    for (const issue of issues) {
+      severities.add(issue.severity);
+    }
+    return [...severities];
+  }
+  function extractDiffKindValues(table) {
+    return [table.diff_kind ?? "unchanged"];
+  }
+  function buildFacet(id, label, tables, extractValues, hasSearch) {
+    const valueSet = /* @__PURE__ */ new Set();
+    const counts = /* @__PURE__ */ new Map();
+    for (const table of tables) {
+      const tableValues = new Set(extractValues(table));
+      for (const v of tableValues) {
+        valueSet.add(v);
+        counts.set(v, (counts.get(v) ?? 0) + 1);
+      }
+    }
+    const allValues = [...valueSet].sort(
+      (a, b) => a.localeCompare(b, void 0, { sensitivity: "base" })
     );
-    return { typeSet, allTypes, selectedTypes, typeTableCounts };
+    return {
+      id,
+      label,
+      allValues,
+      selectedValues: /* @__PURE__ */ new Set(),
+      counts,
+      extractValues,
+      hasSearch
+    };
+  }
+  function createFilterEngineState(tables) {
+    const facets = /* @__PURE__ */ new Map();
+    const schemaFacet = buildFacet("schema", "Schema", tables, extractSchemaValues);
+    if (schemaFacet.allValues.length > 1) {
+      facets.set("schema", schemaFacet);
+    }
+    const kindFacet = buildFacet("kind", "Kind", tables, extractKindValues);
+    if (kindFacet.allValues.length > 1) {
+      facets.set("kind", kindFacet);
+    }
+    const typeFacet = buildFacet("columnType", "Column Type", tables, extractColumnTypeValues, true);
+    if (typeFacet.allValues.length > 0) {
+      facets.set("columnType", typeFacet);
+    }
+    const severityFacet = buildFacet("severity", "Issues", tables, extractSeverityValues);
+    if (severityFacet.allValues.length > 1) {
+      facets.set("severity", severityFacet);
+    }
+    const diffFacet = buildFacet("diffKind", "Changes", tables, extractDiffKindValues);
+    const hasDiffData = tables.some((t) => t.diff_kind != null);
+    if (hasDiffData) {
+      facets.set("diffKind", diffFacet);
+    }
+    return { facets, mode: "dim" };
   }
   function columnMatchesSelectedType(columnType, selectedType) {
     const column = columnType.trim().toLowerCase();
@@ -123,208 +178,440 @@
     const startsWithTypeToken = (value, token) => value === token || value.startsWith(`${token}(`) || value.startsWith(`${token} `) || value.startsWith(`${token}[`) || value.startsWith(`${token},`);
     return baseColumn === baseSelected || startsWithTypeToken(column, selected) || startsWithTypeToken(selected, column);
   }
-  function tableMatchesAnySelectedType(table, selectedTypes) {
-    return (table.columns ?? []).some(
-      (column) => Array.from(selectedTypes).some(
-        (selectedType) => columnMatchesSelectedType(column.data_type ?? "", selectedType)
-      )
-    );
+  function tableMatchesFacet(table, facet) {
+    if (facet.selectedValues.size === 0) return true;
+    if (facet.id === "columnType") {
+      return (table.columns ?? []).some(
+        (col) => [...facet.selectedValues].some((sel) => columnMatchesSelectedType(col.data_type ?? "", sel))
+      );
+    }
+    const tableValues = facet.extractValues(table);
+    return tableValues.some((v) => facet.selectedValues.has(v));
+  }
+  function tableMatchesAllFacets(table, state) {
+    for (const facet of state.facets.values()) {
+      if (!tableMatchesFacet(table, facet)) return false;
+    }
+    return true;
+  }
+  function hasActiveFilters(state) {
+    for (const facet of state.facets.values()) {
+      if (facet.selectedValues.size > 0) return true;
+    }
+    return false;
+  }
+  function activeFilterSummary(state) {
+    const items = [];
+    for (const facet of state.facets.values()) {
+      if (facet.selectedValues.size > 0) {
+        items.push({
+          facetId: facet.id,
+          label: facet.label,
+          count: facet.selectedValues.size,
+          values: [...facet.selectedValues].sort()
+        });
+      }
+    }
+    return items;
   }
   function visibleTypesForQuery(allTypes, query) {
     const needle = query.trim().toLowerCase();
     if (needle === "") return allTypes;
-    return allTypes.filter((dataType) => dataType.toLowerCase().includes(needle));
-  }
-  function selectedTypeList(selectedTypes) {
-    return Array.from(selectedTypes).sort(
-      (left, right) => left.localeCompare(right, void 0, { sensitivity: "base" })
-    );
-  }
-  function activeTypes(selectedTypes, allTypes, query) {
-    if (selectedTypes.size > 0) return selectedTypeList(selectedTypes);
-    return query.trim() === "" ? [] : visibleTypesForQuery(allTypes, query);
+    return allTypes.filter((t) => t.toLowerCase().includes(needle));
   }
 
-  // ts/type_filter_dom.ts
-  function rebuildFilterList(visibleTypes, selectedTypes, typeTableCounts, container, onChange) {
-    container.innerHTML = "";
-    for (const dataType of visibleTypes) {
+  // ts/filter_engine_dom.ts
+  function buildFilterModeSwitcher(currentMode, onChange) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "filter-mode-switcher";
+    const modes = [
+      { id: "dim", label: "Dim" },
+      { id: "hide", label: "Hide" },
+      { id: "focus", label: "Focus" }
+    ];
+    for (const { id, label } of modes) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "filter-mode-button";
+      btn.classList.toggle("active", id === currentMode);
+      btn.textContent = label;
+      btn.dataset.mode = id;
+      btn.addEventListener("click", () => {
+        onChange(id);
+      });
+      wrapper.appendChild(btn);
+    }
+    return wrapper;
+  }
+  function syncModeSwitcher(container, activeMode) {
+    for (const btn of container.querySelectorAll(".filter-mode-button")) {
+      const mode = btn.dataset.mode;
+      btn.classList.toggle("active", mode === activeMode);
+    }
+  }
+  function buildFacetSection(facet, onChange, onSearchInput) {
+    const details = document.createElement("details");
+    details.className = "filter-facet";
+    details.dataset.facetId = facet.id;
+    const summary = document.createElement("summary");
+    summary.className = "filter-facet-summary";
+    const label = document.createElement("span");
+    label.className = "filter-facet-label";
+    label.textContent = facet.label;
+    const badge = document.createElement("span");
+    badge.className = "filter-facet-badge";
+    badge.hidden = true;
+    const actions = document.createElement("span");
+    actions.className = "filter-facet-actions";
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.className = "filter-facet-action";
+    allBtn.textContent = "All";
+    allBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const listEl = details.querySelector(".filter-facet-list");
+      if (!listEl) return;
+      for (const cb of listEl.querySelectorAll('input[type="checkbox"]')) {
+        if (!cb.checked) {
+          cb.checked = true;
+          onChange(cb.value, true);
+        }
+      }
+    });
+    const noneBtn = document.createElement("button");
+    noneBtn.type = "button";
+    noneBtn.className = "filter-facet-action";
+    noneBtn.textContent = "None";
+    noneBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const listEl = details.querySelector(".filter-facet-list");
+      if (!listEl) return;
+      for (const cb of listEl.querySelectorAll('input[type="checkbox"]')) {
+        if (cb.checked) {
+          cb.checked = false;
+          onChange(cb.value, false);
+        }
+      }
+    });
+    actions.append(allBtn, noneBtn);
+    summary.append(label, badge, actions);
+    details.appendChild(summary);
+    if (facet.hasSearch === true) {
+      const searchInput = document.createElement("input");
+      searchInput.type = "search";
+      searchInput.className = "filter-facet-search";
+      searchInput.placeholder = "Narrow type list...";
+      searchInput.autocomplete = "off";
+      searchInput.addEventListener("input", () => {
+        onSearchInput?.(searchInput.value);
+      });
+      details.appendChild(searchInput);
+    }
+    const list = document.createElement("div");
+    list.className = "filter-facet-list";
+    details.appendChild(list);
+    return details;
+  }
+  function rebuildFacetCheckboxes(details, values, selectedValues, counts, onChange) {
+    const list = details.querySelector(".filter-facet-list");
+    if (!list) return;
+    list.replaceChildren();
+    for (const value of values) {
       const row = document.createElement("label");
-      row.className = "type-filter-item";
+      row.className = "filter-facet-item";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.value = dataType;
-      checkbox.checked = selectedTypes.has(dataType);
+      checkbox.value = value;
+      checkbox.checked = selectedValues.has(value);
       checkbox.addEventListener("change", () => {
-        onChange(dataType, checkbox.checked);
+        onChange(value, checkbox.checked);
       });
-      const label = document.createElement("span");
-      label.textContent = dataType;
+      const text = document.createElement("span");
+      text.textContent = value;
       const count = document.createElement("span");
-      count.className = "type-filter-item-count";
-      count.textContent = String(typeTableCounts.get(dataType) ?? 0);
-      row.appendChild(checkbox);
-      row.appendChild(label);
-      row.appendChild(count);
-      container.appendChild(row);
+      count.className = "filter-facet-item-count";
+      count.textContent = String(counts.get(value) ?? 0);
+      row.append(checkbox, text, count);
+      list.appendChild(row);
     }
   }
-  function syncFilterChrome(hasActiveFilter, hasExplicitSelection, selected, activeTypeList, query, summaryEl, resetBar, resetCopy) {
-    if (summaryEl) {
-      if (!hasActiveFilter) {
-        summaryEl.textContent = "";
-        summaryEl.classList.remove("visible");
-      } else {
-        summaryEl.textContent = hasExplicitSelection ? `${selected.length} type(s) selected across the schema` : `${activeTypeList.length} matching type(s) for "${query}"`;
-        summaryEl.classList.add("visible");
-      }
+  function syncFacetBadge(details, selectedCount) {
+    const badge = details.querySelector(".filter-facet-badge");
+    if (badge instanceof HTMLElement) {
+      badge.hidden = selectedCount === 0;
+      badge.textContent = String(selectedCount);
     }
-    if (resetBar && resetCopy) {
-      resetBar.toggleAttribute("hidden", !hasActiveFilter);
-      if (hasExplicitSelection) {
-        const preview = selected.slice(0, 3).join(", ");
-        const suffix = selected.length > 3 ? ` +${selected.length - 3} more` : "";
-        resetCopy.textContent = `${selected.length} type filter(s): ${preview}${suffix}`;
-      } else if (hasActiveFilter) {
-        const preview = activeTypeList.slice(0, 3).join(", ");
-        const suffix = activeTypeList.length > 3 ? ` +${activeTypeList.length - 3} more` : "";
-        resetCopy.textContent = `Type query "${query}": ${preview}${suffix}`;
-      } else {
-        resetCopy.textContent = "";
-      }
+  }
+  function renderActiveFilterSummary(container, items, onClickFacet) {
+    container.replaceChildren();
+    if (items.length === 0) {
+      container.hidden = true;
+      return;
     }
+    container.hidden = false;
+    for (const item of items) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "filter-summary-chip";
+      const preview = item.values.slice(0, 2).join(", ");
+      const suffix = item.count > 2 ? ` +${item.count - 2}` : "";
+      chip.textContent = `${item.label}: ${preview}${suffix}`;
+      chip.title = item.values.join(", ");
+      chip.addEventListener("click", () => {
+        onClickFacet(item.facetId);
+      });
+      container.appendChild(chip);
+    }
+  }
+  function syncFilterResetBar(active, items, mode, resetBar, resetCopy) {
+    if (!resetBar || !resetCopy) return;
+    resetBar.toggleAttribute("hidden", !active);
+    if (!active) {
+      resetCopy.textContent = "";
+      return;
+    }
+    const parts = items.map((item) => {
+      const preview = item.values.slice(0, 2).join(", ");
+      const suffix = item.count > 2 ? ` +${item.count - 2}` : "";
+      return `${item.label}: ${preview}${suffix}`;
+    });
+    const modeLabel = mode !== "dim" ? ` [${mode}]` : "";
+    resetCopy.textContent = parts.join(" / ") + modeLabel;
+  }
+  function rebuildColumnTypeFacet(details, facet, query, onChange) {
+    const visible = visibleTypesForQuery(facet.allValues, query);
+    rebuildFacetCheckboxes(details, visible, facet.selectedValues, facet.counts, onChange);
   }
 
-  // ts/type_filter.ts
+  // ts/filter_engine.ts
   {
-    const section = document.getElementById("type-filter-section");
-    const listEl = document.getElementById("type-filter-list");
+    const sectionEl = document.getElementById("filter-section");
+    const headerEl = document.getElementById("filter-section-header");
+    const summaryEl = document.getElementById("filter-active-summary");
+    const facetsEl = document.getElementById("filter-facets");
     const svgEl = document.querySelector(".canvas svg");
-    if (section === null || listEl === null || svgEl === null) {
+    const resetBar = document.getElementById("filter-reset-bar");
+    const resetCopy = document.getElementById("filter-reset-copy");
+    const resetButton = document.getElementById("filter-reset-button");
+    if (sectionEl === null || headerEl === null || summaryEl === null || facetsEl === null || svgEl === null) {
     } else {
-      let rebuild = function() {
-        const visible = visibleTypesForQuery(state.allTypes, getQuery());
-        rebuildFilterList(
-          visible,
-          state.selectedTypes,
-          state.typeTableCounts,
-          listRoot,
-          (dataType, checked) => {
-            if (checked) {
-              state.selectedTypes.add(dataType);
-            } else {
-              state.selectedTypes.delete(dataType);
-            }
-            applyTypeFilter();
-          }
-        );
-      }, applyTypeFilter = function() {
+      let applyFilter = function() {
         const nodes = svgRoot.querySelectorAll(".node");
-        const effective = new Set(activeTypes(state.selectedTypes, state.allTypes, getQuery()));
-        if (effective.size === 0) {
+        const active = hasActiveFilters(state);
+        if (!active) {
           nodes.forEach((node) => {
-            node.classList.remove("dimmed-by-type-filter", "excluded-by-type-filter");
+            node.classList.remove("dimmed-by-filter", "hidden-by-filter");
           });
         } else {
+          const dimClass = state.mode === "dim" ? "dimmed-by-filter" : "hidden-by-filter";
+          const removeClass = state.mode === "dim" ? "hidden-by-filter" : "dimmed-by-filter";
           nodes.forEach((node) => {
             const tableId = node.getAttribute("data-id") ?? node.getAttribute("data-table-id") ?? "";
-            const table = tables.find((c) => c.id === tableId);
-            const matches = table !== void 0 && tableMatchesAnySelectedType(table, effective);
-            node.classList.toggle("dimmed-by-type-filter", !matches);
-            node.classList.toggle("excluded-by-type-filter", !matches);
+            const table = tables.find((t) => t.id === tableId);
+            const matches = table !== void 0 && tableMatchesAllFacets(table, state);
+            node.classList.toggle(dimClass, !matches);
+            node.classList.remove(removeClass);
           });
         }
-        const effectiveList = Array.from(effective);
-        const selected = selectedTypeList(state.selectedTypes);
-        const query = getQuery().trim();
-        syncFilterChrome(
-          effectiveList.length > 0,
-          selected.length > 0,
-          selected,
-          effectiveList,
-          query,
-          summaryEl,
-          resetBar,
-          resetCopy
-        );
         syncEdgeDimming(svgRoot);
-        emitViewerEvent("relune:filters-changed", {
-          active: effectiveList.length > 0,
-          selectedTypes: selected.length > 0 ? selected : effectiveList,
-          query: selected.length > 0 ? "" : query
-        });
-      }, clearSelection = function() {
-        state.selectedTypes.clear();
-        if (queryInput instanceof HTMLInputElement) {
-          queryInput.value = "";
+        if (active && state.mode === "focus") {
+          fitToVisibleNodes();
         }
-        rebuild();
-        applyTypeFilter();
+        const summaryItems = activeFilterSummary(state);
+        for (const [facetId, details] of facetDetails) {
+          const facet = state.facets.get(facetId);
+          if (facet) {
+            syncFacetBadge(details, facet.selectedValues.size);
+          }
+        }
+        renderActiveFilterSummary(summaryRoot, summaryItems, (facetId) => {
+          const details = facetDetails.get(facetId);
+          if (details) {
+            details.open = true;
+            details.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        });
+        resetAllBtn.hidden = !active;
+        syncFilterResetBar(active, summaryItems, state.mode, resetBar, resetCopy);
+        emitViewerEvent("relune:filters-changed", {
+          active,
+          mode: state.mode,
+          facets: summaryItems
+        });
+      }, clearAll = function() {
+        for (const facet of state.facets.values()) {
+          facet.selectedValues.clear();
+        }
+        columnTypeQuery.value = "";
+        for (const [facetId, details] of facetDetails) {
+          const facet = state.facets.get(facetId);
+          if (!facet) continue;
+          const searchInput = details.querySelector(".filter-facet-search");
+          if (searchInput) {
+            searchInput.value = "";
+          }
+          const onChange = (value, checked) => {
+            if (checked) {
+              facet.selectedValues.add(value);
+            } else {
+              facet.selectedValues.delete(value);
+            }
+            applyFilter();
+          };
+          if (facetId === "columnType") {
+            rebuildColumnTypeFacet(details, facet, "", onChange);
+          } else {
+            rebuildFacetCheckboxes(
+              details,
+              facet.allValues,
+              facet.selectedValues,
+              facet.counts,
+              onChange
+            );
+          }
+        }
+        applyFilter();
+      }, fitToVisibleNodes = function() {
+        const nodes = svgRoot.querySelectorAll(".node:not(.hidden-by-filter)");
+        if (nodes.length === 0) {
+          runtime.viewport?.fit();
+          return;
+        }
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const node of nodes) {
+          if (node instanceof SVGGraphicsElement) {
+            const bbox = node.getBBox();
+            minX = Math.min(minX, bbox.x);
+            minY = Math.min(minY, bbox.y);
+            maxX = Math.max(maxX, bbox.x + bbox.width);
+            maxY = Math.max(maxY, bbox.y + bbox.height);
+          }
+        }
+        if (minX < maxX && minY < maxY) {
+          runtime.viewport?.fitToRect({ x: minX, y: minY, width: maxX - minX, height: maxY - minY });
+        }
       };
-      rebuild2 = rebuild, applyTypeFilter2 = applyTypeFilter, clearSelection2 = clearSelection;
+      applyFilter2 = applyFilter, clearAll2 = clearAll, fitToVisibleNodes2 = fitToVisibleNodes;
       const runtime = getViewerRuntime();
-      const listRoot = listEl;
       const svgRoot = svgEl;
-      const summaryEl = document.getElementById("type-filter-summary");
-      const clearBtn = document.getElementById("type-filter-clear");
-      const selectVisibleBtn = document.getElementById("type-filter-select-visible");
-      const queryInput = document.getElementById("type-filter-query");
-      const resetBar = document.getElementById("filter-reset-bar");
-      const resetCopy = document.getElementById("filter-reset-copy");
-      const resetButton = document.getElementById("filter-reset-button");
+      const summaryRoot = summaryEl;
       const metadata = parseReluneMetadata();
       const tables = metadata?.tables ?? [];
-      const state = createTypeFilterState(tables);
-      if (state.allTypes.length === 0) {
-        section.setAttribute("hidden", "");
+      const state = createFilterEngineState(tables);
+      if (state.facets.size === 0) {
+        sectionEl.hidden = true;
       } else {
-        section.removeAttribute("hidden");
+        sectionEl.hidden = false;
       }
-      const getQuery = () => queryInput instanceof HTMLInputElement ? queryInput.value : "";
+      const titleSpan = document.createElement("span");
+      titleSpan.textContent = "Filters";
+      const modeSwitcher = buildFilterModeSwitcher(state.mode, (mode) => {
+        state.mode = mode;
+        syncModeSwitcher(modeSwitcher, mode);
+        applyFilter();
+      });
+      const resetAllBtn = document.createElement("button");
+      resetAllBtn.type = "button";
+      resetAllBtn.className = "filter-section-reset";
+      resetAllBtn.textContent = "Reset";
+      resetAllBtn.hidden = true;
+      resetAllBtn.addEventListener("click", clearAll);
+      headerEl.append(titleSpan, modeSwitcher, resetAllBtn);
+      const columnTypeQuery = { value: "" };
+      const facetDetails = /* @__PURE__ */ new Map();
+      for (const facet of state.facets.values()) {
+        const onChange = (value, checked) => {
+          if (checked) {
+            facet.selectedValues.add(value);
+          } else {
+            facet.selectedValues.delete(value);
+          }
+          applyFilter();
+        };
+        const onSearchInput = facet.id === "columnType" ? (query) => {
+          columnTypeQuery.value = query;
+          rebuildColumnTypeFacet(details, facet, query, onChange);
+        } : void 0;
+        const details = buildFacetSection(facet, onChange, onSearchInput);
+        facetDetails.set(facet.id, details);
+        if (facet.id === "columnType") {
+          rebuildColumnTypeFacet(details, facet, "", onChange);
+        } else {
+          rebuildFacetCheckboxes(
+            details,
+            facet.allValues,
+            facet.selectedValues,
+            facet.counts,
+            onChange
+          );
+        }
+        facetsEl.appendChild(details);
+      }
+      resetButton?.addEventListener("click", clearAll);
       runtime.filters = {
         reset() {
-          clearSelection();
+          clearAll();
         },
         hasActiveFilters() {
-          return activeTypes(state.selectedTypes, state.allTypes, getQuery()).length > 0;
+          return hasActiveFilters(state);
         },
-        setSelectedTypes(types) {
-          state.selectedTypes.clear();
-          for (const t of types) {
-            if (state.typeSet.has(t)) {
-              state.selectedTypes.add(t);
+        getMode() {
+          return state.mode;
+        },
+        setMode(mode) {
+          state.mode = mode;
+          syncModeSwitcher(modeSwitcher, mode);
+          applyFilter();
+        },
+        getFacetSelection(facetId) {
+          const facet = state.facets.get(facetId);
+          return facet ? [...facet.selectedValues].sort() : [];
+        },
+        setFacetSelection(facetId, values) {
+          const facet = state.facets.get(facetId);
+          if (!facet) return;
+          facet.selectedValues.clear();
+          for (const v of values) {
+            if (facet.allValues.includes(v)) {
+              facet.selectedValues.add(v);
             }
           }
-          rebuild();
-          applyTypeFilter();
+          const details = facetDetails.get(facetId);
+          if (details) {
+            const onChange = (value, checked) => {
+              if (checked) {
+                facet.selectedValues.add(value);
+              } else {
+                facet.selectedValues.delete(value);
+              }
+              applyFilter();
+            };
+            if (facetId === "columnType") {
+              rebuildColumnTypeFacet(details, facet, columnTypeQuery.value, onChange);
+            } else {
+              rebuildFacetCheckboxes(
+                details,
+                facet.allValues,
+                facet.selectedValues,
+                facet.counts,
+                onChange
+              );
+            }
+          }
+          applyFilter();
         },
-        getSelectedTypes() {
-          return selectedTypeList(state.selectedTypes);
-        },
-        getAvailableTypes() {
-          return [...state.allTypes];
+        getAvailableFacets() {
+          return [...state.facets.keys()];
         }
       };
       markViewerModuleReady("filters");
-      queryInput?.addEventListener("input", () => {
-        rebuild();
-        applyTypeFilter();
-      });
-      clearBtn?.addEventListener("click", clearSelection);
-      resetButton?.addEventListener("click", clearSelection);
-      selectVisibleBtn?.addEventListener("click", () => {
-        const query = getQuery();
-        for (const dataType of visibleTypesForQuery(state.allTypes, query)) {
-          state.selectedTypes.add(dataType);
-        }
-        rebuild();
-        applyTypeFilter();
-      });
-      rebuild();
-      applyTypeFilter();
+      applyFilter();
     }
   }
-  var rebuild2;
-  var applyTypeFilter2;
-  var clearSelection2;
+  var applyFilter2;
+  var clearAll2;
+  var fitToVisibleNodes2;
 })();

@@ -57,15 +57,6 @@
     let readHash = function() {
       const raw = location.hash.replace(/^#/, "");
       return new URLSearchParams(raw);
-    }, parseAllowedTypes = function(typesRaw, allowedTypes) {
-      const selected = /* @__PURE__ */ new Set();
-      for (const type of typesRaw.split(",")) {
-        const candidate = type.trim();
-        if (candidate !== "" && allowedTypes.has(candidate)) {
-          selected.add(candidate);
-        }
-      }
-      return [...selected];
     }, maxViewportPanMagnitude = function() {
       const bounds = runtime.viewport?.getDiagramBounds();
       if (bounds === null || bounds === void 0) {
@@ -115,9 +106,15 @@
         params.set(PARAM_PAN_X, viewport.panX.toFixed(1));
         params.set(PARAM_PAN_Y, viewport.panY.toFixed(1));
       }
-      const types = runtime.filters?.getSelectedTypes() ?? [];
-      if (types.length > 0) {
-        params.set(PARAM_TYPES, types.join(","));
+      for (const { param, facetId } of FACET_PARAMS) {
+        const selection = runtime.filters?.getFacetSelection(facetId) ?? [];
+        if (selection.length > 0) {
+          params.set(param, selection.join(","));
+        }
+      }
+      const filterMode = runtime.filters?.getMode();
+      if (filterMode !== void 0 && filterMode !== "dim") {
+        params.set(PARAM_FILTER_MODE, filterMode);
       }
       const hiddenGroups = runtime.groups?.getHiddenGroups() ?? [];
       if (hiddenGroups.length > 0) {
@@ -160,12 +157,17 @@
       if (query !== null && query !== "" && hasMetadataSearchMatch(query)) {
         runtime.search?.setQuery(query);
       }
-      const typesRaw = params.get(PARAM_TYPES);
-      if (typesRaw !== null && typesRaw !== "") {
-        const allowedTypes = new Set(runtime.filters?.getAvailableTypes() ?? []);
-        const types = parseAllowedTypes(typesRaw, allowedTypes);
-        if (types.length > 0) {
-          runtime.filters?.setSelectedTypes(types);
+      const fmRaw = params.get(PARAM_FILTER_MODE);
+      if (fmRaw === "hide" || fmRaw === "focus") {
+        runtime.filters?.setMode(fmRaw);
+      }
+      for (const { param, facetId } of FACET_PARAMS) {
+        const raw = params.get(param);
+        if (raw !== null && raw !== "") {
+          const values = raw.split(",").filter((v) => v !== "");
+          if (values.length > 0) {
+            runtime.filters?.setFacetSelection(facetId, values);
+          }
         }
       }
       const hgRaw = params.get(PARAM_HIDDEN_GROUPS);
@@ -194,7 +196,7 @@
       if (document.getElementById("table-search") instanceof HTMLInputElement) {
         modules.push("search");
       }
-      if (document.getElementById("type-filter-section") !== null) {
+      if (document.getElementById("filter-section") !== null) {
         modules.push("filters");
       }
       if (document.getElementById("detail-drawer") !== null) {
@@ -208,7 +210,7 @@
       }
       return modules;
     };
-    readHash2 = readHash, parseAllowedTypes2 = parseAllowedTypes, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, scheduleDiscreteWrite2 = scheduleDiscreteWrite, buildHashParams2 = buildHashParams, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
+    readHash2 = readHash, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, scheduleDiscreteWrite2 = scheduleDiscreteWrite, buildHashParams2 = buildHashParams, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
     const runtime = getViewerRuntime();
     const metadata = parseReluneMetadata();
     const tables = metadata?.tables ?? [];
@@ -218,9 +220,21 @@
     const PARAM_SCALE = "s";
     const PARAM_PAN_X = "x";
     const PARAM_PAN_Y = "y";
-    const PARAM_TYPES = "types";
+    const PARAM_FILTER_SCHEMA = "fs";
+    const PARAM_FILTER_KIND = "fk";
+    const PARAM_FILTER_TYPE = "ft";
+    const PARAM_FILTER_SEVERITY = "fi";
+    const PARAM_FILTER_DIFF = "fd";
+    const PARAM_FILTER_MODE = "fm";
     const PARAM_HIDDEN_GROUPS = "hg";
     const PARAM_COLLAPSED = "c";
+    const FACET_PARAMS = [
+      { param: PARAM_FILTER_SCHEMA, facetId: "schema" },
+      { param: PARAM_FILTER_KIND, facetId: "kind" },
+      { param: PARAM_FILTER_TYPE, facetId: "columnType" },
+      { param: PARAM_FILTER_SEVERITY, facetId: "severity" },
+      { param: PARAM_FILTER_DIFF, facetId: "diffKind" }
+    ];
     const MIN_VIEWPORT_SCALE = 0.1;
     const MAX_VIEWPORT_SCALE = 2;
     const MIN_VIEWPORT_PAN_LIMIT = 1e4;
@@ -242,7 +256,6 @@
     waitForViewerModules(expectedViewerModules(), restoreFromHash);
   }
   var readHash2;
-  var parseAllowedTypes2;
   var maxViewportPanMagnitude2;
   var hasValidViewportState2;
   var matchesMetadataSearch2;
