@@ -223,16 +223,17 @@
     const wrapper = document.createElement("div");
     wrapper.className = "filter-mode-switcher";
     const modes = [
-      { id: "dim", label: "Dim" },
-      { id: "hide", label: "Hide" },
-      { id: "focus", label: "Focus" }
+      { id: "dim", label: "Dim", title: "Reduce opacity of non-matching objects" },
+      { id: "hide", label: "Hide", title: "Hide non-matching objects" },
+      { id: "focus", label: "Focus", title: "Hide non-matching objects and zoom to fit" }
     ];
-    for (const { id, label } of modes) {
+    for (const { id, label, title } of modes) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "filter-mode-button";
       btn.classList.toggle("active", id === currentMode);
       btn.textContent = label;
+      btn.title = title;
       btn.dataset.mode = id;
       btn.addEventListener("click", () => {
         onChange(id);
@@ -264,7 +265,7 @@
     const allBtn = document.createElement("button");
     allBtn.type = "button";
     allBtn.className = "filter-facet-action";
-    allBtn.textContent = "All";
+    allBtn.textContent = "Select All";
     allBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       const listEl = details.querySelector(".filter-facet-list");
@@ -279,7 +280,7 @@
     const noneBtn = document.createElement("button");
     noneBtn.type = "button";
     noneBtn.className = "filter-facet-action";
-    noneBtn.textContent = "None";
+    noneBtn.textContent = "Clear";
     noneBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       const listEl = details.querySelector(".filter-facet-list");
@@ -534,6 +535,9 @@
           rebuildColumnTypeFacet(details, facet, query, onChange);
         } : void 0;
         const details = buildFacetSection(facet, onChange, onSearchInput);
+        if (facet.allValues.length <= 5) {
+          details.open = true;
+        }
         facetDetails.set(facet.id, details);
         if (facet.id === "columnType") {
           rebuildColumnTypeFacet(details, facet, "", onChange);

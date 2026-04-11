@@ -99,6 +99,9 @@ import {
           : undefined;
 
       const details = buildFacetSection(facet, onChange, onSearchInput);
+      if (facet.allValues.length <= 5) {
+        details.open = true;
+      }
       facetDetails.set(facet.id, details);
 
       // Initial checkbox build

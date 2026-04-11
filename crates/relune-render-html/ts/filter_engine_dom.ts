@@ -10,18 +10,19 @@ export function buildFilterModeSwitcher(
   const wrapper = document.createElement('div');
   wrapper.className = 'filter-mode-switcher';
 
-  const modes: { id: FilterMode; label: string }[] = [
-    { id: 'dim', label: 'Dim' },
-    { id: 'hide', label: 'Hide' },
-    { id: 'focus', label: 'Focus' },
+  const modes: { id: FilterMode; label: string; title: string }[] = [
+    { id: 'dim', label: 'Dim', title: 'Reduce opacity of non-matching objects' },
+    { id: 'hide', label: 'Hide', title: 'Hide non-matching objects' },
+    { id: 'focus', label: 'Focus', title: 'Hide non-matching objects and zoom to fit' },
   ];
 
-  for (const { id, label } of modes) {
+  for (const { id, label, title } of modes) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'filter-mode-button';
     btn.classList.toggle('active', id === currentMode);
     btn.textContent = label;
+    btn.title = title;
     btn.dataset.mode = id;
     btn.addEventListener('click', () => {
       onChange(id);
@@ -67,7 +68,7 @@ export function buildFacetSection(
   const allBtn = document.createElement('button');
   allBtn.type = 'button';
   allBtn.className = 'filter-facet-action';
-  allBtn.textContent = 'All';
+  allBtn.textContent = 'Select All';
   allBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const listEl = details.querySelector('.filter-facet-list');
@@ -83,7 +84,7 @@ export function buildFacetSection(
   const noneBtn = document.createElement('button');
   noneBtn.type = 'button';
   noneBtn.className = 'filter-facet-action';
-  noneBtn.textContent = 'None';
+  noneBtn.textContent = 'Clear';
   noneBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const listEl = details.querySelector('.filter-facet-list');
