@@ -169,6 +169,11 @@ export function showViewerNotice(message: string, severity: 'warning' | 'info' =
 }
 
 export function reportSessionStorageError(action: string, error: unknown): void {
+  const isSecurityError = error instanceof DOMException && error.name === 'SecurityError';
+  if (isSecurityError) {
+    return;
+  }
+
   const isQuotaExceeded =
     error instanceof DOMException &&
     (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
@@ -180,6 +185,15 @@ export function reportSessionStorageError(action: string, error: unknown): void 
     return;
   }
   console.warn(`Session storage error while ${action}`, error);
+}
+
+export function getSessionStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch (error: unknown) {
+    reportSessionStorageError('accessing session storage', error);
+    return null;
+  }
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {

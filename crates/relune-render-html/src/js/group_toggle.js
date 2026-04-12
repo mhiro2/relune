@@ -82,6 +82,10 @@
     }, 4500);
   }
   function reportSessionStorageError(action, error) {
+    const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
+    if (isSecurityError) {
+      return;
+    }
     const isQuotaExceeded = error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
     if (isQuotaExceeded) {
       showViewerNotice(
@@ -91,6 +95,14 @@
       return;
     }
     console.warn(`Session storage error while ${action}`, error);
+  }
+  function getSessionStorage() {
+    try {
+      return window.sessionStorage;
+    } catch (error) {
+      reportSessionStorageError("accessing session storage", error);
+      return null;
+    }
   }
 
   // ts/group_toggle_dom.ts
@@ -198,17 +210,21 @@
         applyPanelCollapsed2 = applyPanelCollapsed, isNodeHidden2 = isNodeHidden, toggleGroup2 = toggleGroup, showAllGroups2 = showAllGroups, hideAllGroups2 = hideAllGroups;
         const collapseBtn = document.getElementById("group-panel-collapse");
         const COLLAPSE_KEY = "relune-group-panel-collapsed";
+        const sessionStorageRef = getSessionStorage();
         collapseBtn?.addEventListener("click", () => {
           const next = !groupPanel?.classList.contains("group-panel-collapsed");
           applyPanelCollapsed(next);
+          if (sessionStorageRef === null) {
+            return;
+          }
           try {
-            sessionStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+            sessionStorageRef.setItem(COLLAPSE_KEY, next ? "1" : "0");
           } catch (error) {
             reportSessionStorageError("saving the group panel state", error);
           }
         });
         try {
-          if (sessionStorage.getItem(COLLAPSE_KEY) === "1") {
+          if (sessionStorageRef?.getItem(COLLAPSE_KEY) === "1") {
             applyPanelCollapsed(true);
           }
         } catch (error) {

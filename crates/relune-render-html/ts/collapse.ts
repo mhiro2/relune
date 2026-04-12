@@ -2,6 +2,7 @@ import { parseReluneMetadata } from './metadata';
 import {
   emitViewerEvent,
   getViewerRuntime,
+  getSessionStorage,
   markViewerModuleReady,
   reportSessionStorageError,
 } from './viewer_api';
@@ -32,9 +33,10 @@ interface TableNodeEntry {
   }
 
   const collapsedTables = new Set<string>();
+  const sessionStorageRef = getSessionStorage();
 
   try {
-    const saved = sessionStorage.getItem('relune-collapsed-tables');
+    const saved = sessionStorageRef?.getItem('relune-collapsed-tables');
     if (saved) {
       const arr: unknown = JSON.parse(saved);
       if (Array.isArray(arr)) {
@@ -50,8 +52,12 @@ interface TableNodeEntry {
   }
 
   function saveState(): void {
+    if (sessionStorageRef === null) {
+      return;
+    }
+
     try {
-      sessionStorage.setItem(
+      sessionStorageRef.setItem(
         'relune-collapsed-tables',
         JSON.stringify(Array.from(collapsedTables)),
       );

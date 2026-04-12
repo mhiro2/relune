@@ -2,6 +2,7 @@ import { parseReluneMetadata, type GroupMetadata } from './metadata';
 import {
   emitViewerEvent,
   getViewerRuntime,
+  getSessionStorage,
   markViewerModuleReady,
   reportSessionStorageError,
 } from './viewer_api';
@@ -26,6 +27,7 @@ import {
     } else {
       const collapseBtn = document.getElementById('group-panel-collapse');
       const COLLAPSE_KEY = 'relune-group-panel-collapsed';
+      const sessionStorageRef = getSessionStorage();
 
       function applyPanelCollapsed(collapsed: boolean): void {
         if (!groupPanel || !collapseBtn) return;
@@ -37,15 +39,19 @@ import {
       collapseBtn?.addEventListener('click', () => {
         const next = !groupPanel?.classList.contains('group-panel-collapsed');
         applyPanelCollapsed(next);
+        if (sessionStorageRef === null) {
+          return;
+        }
+
         try {
-          sessionStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
+          sessionStorageRef.setItem(COLLAPSE_KEY, next ? '1' : '0');
         } catch (error: unknown) {
           reportSessionStorageError('saving the group panel state', error);
         }
       });
 
       try {
-        if (sessionStorage.getItem(COLLAPSE_KEY) === '1') {
+        if (sessionStorageRef?.getItem(COLLAPSE_KEY) === '1') {
           applyPanelCollapsed(true);
         }
       } catch (error: unknown) {
