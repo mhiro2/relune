@@ -855,6 +855,30 @@ fn apply_repulsion_pair(
 ) {
     let dx = positions[i].0 - positions[j].0;
     let dy = positions[i].1 - positions[j].1;
+
+    // Compute axis-aware minimum separation for rectangular nodes.
+    let half_w = (node_sizes[i].width + node_sizes[j].width).mul_add(0.5, config.node_padding);
+    let half_h = (node_sizes[i].height + node_sizes[j].height).mul_add(0.5, config.node_padding);
+
+    let overlap_x = half_w - dx.abs();
+    let overlap_y = half_h - dy.abs();
+
+    if overlap_x > 0.0 && overlap_y > 0.0 {
+        // Nodes overlap — apply a strong separation impulse along the axis of
+        // least penetration so the simulation can resolve it quickly.
+        let push = repulsion_strength * 0.002;
+        if overlap_x < overlap_y {
+            let sign = if dx >= 0.0 { 1.0 } else { -1.0 };
+            forces[i].0 += push * sign * overlap_x;
+            forces[j].0 -= push * sign * overlap_x;
+        } else {
+            let sign = if dy >= 0.0 { 1.0 } else { -1.0 };
+            forces[i].1 += push * sign * overlap_y;
+            forces[j].1 -= push * sign * overlap_y;
+        }
+    }
+
+    // Standard distance-based repulsion (keeps non-overlapping nodes apart).
     let min_gap = node_pair_spacing(node_sizes[i], node_sizes[j], config);
     let dist_sq = dx * dx + dy * dy + min_distance + min_gap * min_gap * 0.25;
     let dist = dist_sq.sqrt();
@@ -1062,7 +1086,7 @@ fn apply_force_layout(
             let dy = positions[to_idx].1 - positions[from_idx].1;
             let dist = (dx * dx + dy * dy).sqrt().max(min_distance);
             let target_distance =
-                node_pair_spacing(node_sizes[from_idx], node_sizes[to_idx], config);
+                edge_target_distance(node_sizes[from_idx], node_sizes[to_idx], dx, dy, config);
 
             // Attractive force: F = k * d
             let force = attraction_strength * (dist - target_distance);
@@ -1094,6 +1118,14 @@ fn apply_force_layout(
             positions[i].1 += velocities[i].1;
         }
     }
+
+    // Post-simulation overlap resolution: iteratively push apart any
+    // remaining overlapping node pairs.
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+
+    // Compact: pull connected nodes closer to remove excess space introduced
+    // by the overlap resolution cascade.
+    compact_toward_neighbours(&mut positions, node_sizes, &edges, config);
 
     // Calculate bounding box and shift to positive coordinates
     let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
@@ -1495,6 +1527,165 @@ fn node_pair_spacing(left: NodeSize, right: NodeSize, config: &LayoutConfig) -> 
     let left_radius = left.width.max(left.height) * 0.5;
     let right_radius = right.width.max(right.height) * 0.5;
     config.node_padding.mul_add(2.0, left_radius + right_radius)
+}
+
+/// Direction-aware target distance for edge attraction.
+///
+/// Uses the actual width/height projected along the centre-to-centre axis
+/// instead of the conservative `max(w,h)` used for repulsion.  This keeps
+/// connected nodes closer together and produces shorter edges.
+#[allow(clippy::similar_names)]
+fn edge_target_distance(a: NodeSize, b: NodeSize, dx: f32, dy: f32, config: &LayoutConfig) -> f32 {
+    let abs_dx = dx.abs();
+    let abs_dy = dy.abs();
+    // Blend between width-based and height-based separation according to
+    // the direction between the two centres.
+    let sum = abs_dx + abs_dy;
+    if sum < 1.0 {
+        // Nearly coincident — fall back to average half-extent.
+        let avg = (a.width + a.height + b.width + b.height) * 0.25;
+        return config.node_padding.mul_add(2.0, avg);
+    }
+    let wx = abs_dx / sum; // weight towards horizontal
+    let wy = abs_dy / sum; // weight towards vertical
+    let half_a = (wx * a.width).mul_add(0.5, wy * a.height * 0.5);
+    let half_b = (wx * b.width).mul_add(0.5, wy * b.height * 0.5);
+    // Add directional spacing so edges remain visible between nodes.
+    let edge_gap =
+        (wx * config.horizontal_spacing).mul_add(0.4, wy * config.vertical_spacing * 0.4);
+    config.node_padding.mul_add(2.0, half_a + half_b) + edge_gap
+}
+
+/// Push apart any overlapping node pairs after force simulation.
+///
+/// Iteratively resolves rectangle-rectangle overlaps by displacing each
+/// pair along the axis of minimum penetration.
+#[allow(clippy::cast_precision_loss, clippy::similar_names)]
+fn resolve_force_overlaps(positions: &mut [(f32, f32)], node_sizes: &[NodeSize], padding: f32) {
+    let n = positions.len();
+    if n <= 1 {
+        return;
+    }
+    let max_passes = 80;
+    for _ in 0..max_passes {
+        let mut moved = false;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = positions[j].0 - positions[i].0;
+                let dy = positions[j].1 - positions[i].1;
+
+                let min_dx = (node_sizes[i].width + node_sizes[j].width).mul_add(0.5, padding);
+                let min_dy = (node_sizes[i].height + node_sizes[j].height).mul_add(0.5, padding);
+
+                let overlap_x = min_dx - dx.abs();
+                let overlap_y = min_dy - dy.abs();
+
+                if overlap_x > 0.0 && overlap_y > 0.0 {
+                    // Push apart along the axis of least overlap.
+                    if overlap_x < overlap_y {
+                        let push = overlap_x * 0.5 + 0.5;
+                        let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
+                        positions[i].0 -= push * sign;
+                        positions[j].0 += push * sign;
+                    } else {
+                        let push = overlap_y * 0.5 + 0.5;
+                        let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
+                        positions[i].1 -= push * sign;
+                        positions[j].1 += push * sign;
+                    }
+                    moved = true;
+                }
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+}
+
+/// Pull connected nodes closer after overlap resolution.
+///
+/// The overlap cascade can push nodes far from their neighbours. This pass
+/// moves each node toward the centroid of its connected neighbours, then
+/// re-runs overlap resolution to guarantee no new overlaps are introduced.
+#[allow(clippy::cast_precision_loss)]
+fn compact_toward_neighbours(
+    positions: &mut [(f32, f32)],
+    node_sizes: &[NodeSize],
+    edges: &[(usize, usize)],
+    config: &LayoutConfig,
+) {
+    let n = positions.len();
+    if n <= 1 || edges.is_empty() {
+        return;
+    }
+
+    // Build adjacency: for each node, collect its neighbours.
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for &(a, b) in edges {
+        adj[a].push(b);
+        adj[b].push(a);
+    }
+
+    let step = 0.25_f32; // fraction of the gap to close per pass
+    let passes = 15;
+    // Minimum centre-to-centre distance to preserve between connected nodes
+    // so that edges remain clearly visible.
+    let min_edge_gap = config.horizontal_spacing.min(config.vertical_spacing) * 0.35;
+
+    for _ in 0..passes {
+        let mut any_moved = false;
+        let old_positions = positions.to_vec();
+
+        for i in 0..n {
+            if adj[i].is_empty() {
+                continue;
+            }
+            // Centroid of neighbours.
+            let mut cx = 0.0_f32;
+            let mut cy = 0.0_f32;
+            for &j in &adj[i] {
+                cx += old_positions[j].0;
+                cy += old_positions[j].1;
+            }
+            cx /= adj[i].len() as f32;
+            cy /= adj[i].len() as f32;
+
+            let dx = cx - positions[i].0;
+            let dy = cy - positions[i].1;
+
+            // Only pull toward centroid if we are far enough from all
+            // neighbours; otherwise compaction squeezes edges too short.
+            let too_close = adj[i].iter().any(|&j| {
+                let ndx = old_positions[j].0 - positions[i].0;
+                let ndy = old_positions[j].1 - positions[i].1;
+                let half_w = (node_sizes[i].width + node_sizes[j].width) * 0.5;
+                let half_h = (node_sizes[i].height + node_sizes[j].height) * 0.5;
+                let clear_x = ndx.abs() - half_w;
+                let clear_y = ndy.abs() - half_h;
+                clear_x.max(clear_y) < min_edge_gap
+            });
+            if too_close {
+                continue;
+            }
+
+            let move_x = dx * step;
+            let move_y = dy * step;
+
+            if move_x.abs() > 1.0 || move_y.abs() > 1.0 {
+                positions[i].0 += move_x;
+                positions[i].1 += move_y;
+                any_moved = true;
+            }
+        }
+
+        if !any_moved {
+            break;
+        }
+
+        // Re-resolve any overlaps introduced by compaction.
+        resolve_force_overlaps(positions, node_sizes, config.node_padding);
+    }
 }
 
 fn display_column_text(kind: NodeKind, name: &str, data_type: &str) -> String {
@@ -4575,6 +4766,86 @@ mod tests {
         assert!(node.y.is_finite());
         assert!(node.width > 0.0);
         assert!(node.height > 0.0);
+    }
+
+    #[test]
+    fn test_force_layout_avoids_overlap() {
+        let schema = make_test_schema();
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            ..Default::default()
+        };
+        let graph = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+
+        for (i, node) in graph.nodes.iter().enumerate() {
+            for other in graph.nodes.iter().skip(i + 1) {
+                assert!(
+                    !nodes_overlap(node, other),
+                    "force layout: nodes {} and {} overlap",
+                    node.id,
+                    other.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_force_layout_avoids_overlap_many_tables() {
+        // Stress test with more nodes to exercise the overlap resolution pass.
+        let tables: Vec<_> = (0_u64..10)
+            .map(|i| Table {
+                id: TableId(i + 1),
+                stable_id: format!("t{i}"),
+                schema_name: None,
+                name: format!("table_{i}"),
+                columns: (0_u64..5)
+                    .map(|c| Column {
+                        id: ColumnId(i * 10 + c + 1),
+                        name: format!("col_{c}"),
+                        data_type: "text".to_string(),
+                        nullable: false,
+                        is_primary_key: c == 0,
+                        comment: None,
+                    })
+                    .collect(),
+                foreign_keys: if i > 0 {
+                    vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["col_1".to_string()],
+                        to_schema: None,
+                        to_table: format!("table_{}", i - 1),
+                        to_columns: vec!["col_0".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }]
+                } else {
+                    vec![]
+                },
+                indexes: vec![],
+                comment: None,
+            })
+            .collect();
+        let schema = Schema {
+            tables,
+            views: vec![],
+            enums: vec![],
+        };
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            ..Default::default()
+        };
+        let graph = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+
+        for (i, node) in graph.nodes.iter().enumerate() {
+            for other in graph.nodes.iter().skip(i + 1) {
+                assert!(
+                    !nodes_overlap(node, other),
+                    "force layout: nodes {} and {} overlap",
+                    node.id,
+                    other.id
+                );
+            }
+        }
     }
 
     #[test]
