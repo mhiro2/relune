@@ -66,8 +66,12 @@ const GROUP_PADDING: f32 = 20.0;
 const GROUP_TOP_PADDING: f32 = 44.0;
 /// Minimum gap preserved between packed force-directed groups.
 const FORCE_GROUP_GAP: f32 = 28.0;
-/// Minimum visible gap preserved between connected nodes in force-directed mode.
-const FORCE_CONNECTED_NODE_GAP: f32 = 56.0;
+/// Minimum visible gap preserved between connected node rectangles in force-directed mode.
+///
+/// Applied on **both** axes between endpoints so orthogonal edge stubs stay long enough for
+/// Crow's Foot SVG markers (roughly 24–26px along the path from each vertex).  Hierarchical
+/// layout never uses this constant.
+const FORCE_CONNECTED_NODE_GAP: f32 = 64.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -1718,6 +1722,40 @@ fn compact_toward_neighbours(
     }
 }
 
+/// Axis-aligned separation between two node rectangles (`x`, `y`, `width`, `height`).
+///
+/// Positive `gap_x` / `gap_y` mean the boxes are separated on that axis; negative values
+/// mean overlap along that axis (projection overlap).
+#[allow(clippy::similar_names, clippy::too_many_arguments)] // Eight floats are clearer than a bespoke rect pair type here.
+fn force_pair_axis_gaps(
+    ax: f32,
+    ay: f32,
+    aw: f32,
+    ah: f32,
+    bx: f32,
+    by: f32,
+    bw: f32,
+    bh: f32,
+) -> (f32, f32) {
+    let gap_x = if ax + aw <= bx {
+        bx - (ax + aw)
+    } else if bx + bw <= ax {
+        ax - (bx + bw)
+    } else {
+        -((ax + aw).min(bx + bw) - ax.max(bx))
+    };
+
+    let gap_y = if ay + ah <= by {
+        by - (ay + ah)
+    } else if by + bh <= ay {
+        ay - (by + bh)
+    } else {
+        -((ay + ah).min(by + bh) - ay.max(by))
+    };
+
+    (gap_x, gap_y)
+}
+
 #[allow(clippy::cast_precision_loss, clippy::similar_names)]
 fn enforce_force_edge_clearance(
     positions: &mut [(f32, f32)],
@@ -1728,7 +1766,8 @@ fn enforce_force_edge_clearance(
         return;
     }
 
-    let passes = 6;
+    // Separating one axis can tighten the other; a few extra passes stabilise diagonals.
+    let passes = 12;
     for _ in 0..passes {
         let mut moved = false;
 
@@ -1745,34 +1784,47 @@ fn enforce_force_edge_clearance(
             let dx = to_center_x - from_center_x;
             let dy = to_center_y - from_center_y;
 
-            if dx.abs() >= dy.abs() {
+            let aw = node_sizes[from_idx].width;
+            let ah = node_sizes[from_idx].height;
+            let bw = node_sizes[to_idx].width;
+            let bh = node_sizes[to_idx].height;
+
+            let (gap_x, gap_y) = force_pair_axis_gaps(
+                positions[from_idx].0,
+                positions[from_idx].1,
+                aw,
+                ah,
+                positions[to_idx].0,
+                positions[to_idx].1,
+                bw,
+                bh,
+            );
+
+            if gap_x < FORCE_CONNECTED_NODE_GAP {
                 let gap = if dx >= 0.0 {
-                    positions[to_idx].0 - (positions[from_idx].0 + node_sizes[from_idx].width)
+                    positions[to_idx].0 - (positions[from_idx].0 + aw)
                 } else {
-                    positions[from_idx].0 - (positions[to_idx].0 + node_sizes[to_idx].width)
+                    positions[from_idx].0 - (positions[to_idx].0 + bw)
                 };
+                let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
+                let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
+                positions[from_idx].0 -= push * sign;
+                positions[to_idx].0 += push * sign;
+                moved = true;
+            }
 
-                if gap < FORCE_CONNECTED_NODE_GAP {
-                    let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
-                    let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
-                    positions[from_idx].0 -= push * sign;
-                    positions[to_idx].0 += push * sign;
-                    moved = true;
-                }
-            } else {
+            // Horizontal nudges do not change `gap_y`, so the initial `gap_y` stays valid here.
+            if gap_y < FORCE_CONNECTED_NODE_GAP {
                 let gap = if dy >= 0.0 {
-                    positions[to_idx].1 - (positions[from_idx].1 + node_sizes[from_idx].height)
+                    positions[to_idx].1 - (positions[from_idx].1 + ah)
                 } else {
-                    positions[from_idx].1 - (positions[to_idx].1 + node_sizes[to_idx].height)
+                    positions[from_idx].1 - (positions[to_idx].1 + bh)
                 };
-
-                if gap < FORCE_CONNECTED_NODE_GAP {
-                    let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
-                    let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
-                    positions[from_idx].1 -= push * sign;
-                    positions[to_idx].1 += push * sign;
-                    moved = true;
-                }
+                let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
+                let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
+                positions[from_idx].1 -= push * sign;
+                positions[to_idx].1 += push * sign;
+                moved = true;
             }
         }
 

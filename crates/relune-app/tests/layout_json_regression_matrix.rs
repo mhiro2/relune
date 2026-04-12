@@ -22,7 +22,10 @@ const EDGE_STYLES: &[(RouteStyle, &str)] = &[
     (RouteStyle::Curved, "curved"),
 ];
 
-const MIN_FORCE_CONNECTED_NODE_GAP: f32 = 56.0;
+/// Must match `FORCE_CONNECTED_NODE_GAP` in `relune-layout` force-directed packing.
+const MIN_FORCE_CONNECTED_NODE_GAP: f32 = 64.0;
+/// Layout uses `f32` positions; allow sub-pixel drift vs the ideal gap target.
+const FORCE_GAP_EPS: f32 = 0.05;
 
 fn export_layout_fixture(
     fixture_name: &str,
@@ -303,8 +306,8 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
         ),
     );
     assert!(
-        orders_gap_y >= MIN_FORCE_CONNECTED_NODE_GAP
-            || orders_gap_x >= MIN_FORCE_CONNECTED_NODE_GAP,
+        orders_gap_y + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP
+            && orders_gap_x + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP,
         "orders and order_items are too close: gap_x={orders_gap_x}, gap_y={orders_gap_y}"
     );
 
@@ -323,8 +326,8 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
         (addresses.x, addresses.y, addresses.width, addresses.height),
     );
     assert!(
-        customers_gap_y >= MIN_FORCE_CONNECTED_NODE_GAP
-            || customers_gap_x >= MIN_FORCE_CONNECTED_NODE_GAP,
+        customers_gap_y + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP
+            && customers_gap_x + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP,
         "customers and addresses are too close: gap_x={customers_gap_x}, gap_y={customers_gap_y}"
     );
 }
