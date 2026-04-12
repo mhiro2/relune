@@ -1,4 +1,4 @@
-.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js test test-rust test-update test-coverage test-wasm test-ci build-frontend build license-check
+.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-update test-coverage test-wasm test-playground test-ci build-frontend build license-check
 
 .DEFAULT_GOAL := help
 
@@ -17,15 +17,18 @@ setup-tools: ## Install required toolchains and development tools.
 fmt: ## Format all code.
 	cargo fmt --all
 	cd crates/relune-render-html && pnpm fmt
+	cd playground && pnpm fmt
 
 fmt-check: ## Check formatting without modifying files.
 	cargo fmt --all -- --check
 	cd crates/relune-render-html && pnpm fmt:check
+	cd playground && pnpm fmt:check
 
 lint: ## Run Rust linting plus frontend lint and type checks.
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo clippy -p relune-wasm --target $(WASM_TARGET) -- -D warnings
 	cd crates/relune-render-html && pnpm lint && pnpm typecheck
+	cd playground && pnpm lint && pnpm typecheck
 	$(MAKE) check-generated-html-js
 
 check-generated-html-js: ## Verify committed HTML viewer bundles match TypeScript sources.
@@ -33,7 +36,11 @@ check-generated-html-js: ## Verify committed HTML viewer bundles match TypeScrip
 	git diff --exit-code -- crates/relune-render-html/src/js
 	test -z "$$(git ls-files --others --exclude-standard -- crates/relune-render-html/src/js)"
 
-test: test-rust test-wasm ## Run local Rust and wasm tests.
+build-playground: ## Build the public WASM playground.
+	cd crates/relune-wasm && wasm-pack build --target web --release --out-dir ../../playground/dist/pkg
+	cd playground && pnpm build
+
+test: test-rust test-wasm test-playground ## Run local Rust, wasm, and playground checks.
 
 test-rust: ## Run workspace Rust tests.
 	cargo test --workspace
@@ -46,6 +53,9 @@ test-coverage: ## Run workspace Rust tests with coverage and write lcov.info.
 
 test-wasm: ## Run relune-wasm tests in Node.js.
 	cd crates/relune-wasm && wasm-pack test --node
+
+test-playground: ## Build the public WASM playground as a smoke test.
+	$(MAKE) build-playground
 
 test-ci: test-coverage test-wasm ## Run CI coverage and wasm tests.
 

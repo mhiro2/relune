@@ -63,6 +63,9 @@ pub fn init() {
 /// - `edgeStyle`: Edge rendering style - "straight", "orthogonal", or "curved"
 /// - `horizontalSpacing`: Horizontal spacing hint (default: 320)
 /// - `verticalSpacing`: Vertical spacing hint (default: 80)
+/// - `theme`: Render theme - "light" or "dark" (default: "dark")
+/// - `showLegend`: Whether to show the legend (default: true)
+/// - `showStats`: Whether to show render statistics inside the output (default: true)
 ///
 /// Returns a JSON result object with:
 /// - `content`: The rendered content (SVG, HTML, or JSON string)
@@ -185,6 +188,9 @@ pub fn render_svg_from_sql(sql: &str) -> Result<String, JsValue> {
         edge_style: None,
         horizontal_spacing: None,
         vertical_spacing: None,
+        theme: None,
+        show_legend: None,
+        show_stats: None,
     };
 
     let render_req = req.to_render_request().map_err(WasmError::input)?;
@@ -214,6 +220,9 @@ pub fn render_html_from_sql(sql: &str) -> Result<String, JsValue> {
         edge_style: None,
         horizontal_spacing: None,
         vertical_spacing: None,
+        theme: None,
+        show_legend: None,
+        show_stats: None,
     };
 
     let render_req = req.to_render_request().map_err(WasmError::input)?;

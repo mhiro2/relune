@@ -6,7 +6,7 @@
 use relune_app::{
     ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy,
     InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection,
-    LayoutSpec, OutputFormat, RenderOptions, RenderRequest, RouteStyle,
+    LayoutSpec, OutputFormat, RenderOptions, RenderRequest, RenderTheme, RouteStyle,
 };
 use serde::{Deserialize, Serialize};
 
@@ -98,6 +98,15 @@ pub struct WasmRenderRequest {
     /// Vertical spacing hint.
     #[serde(default)]
     pub vertical_spacing: Option<f32>,
+    /// Render theme.
+    #[serde(default)]
+    pub theme: Option<RenderTheme>,
+    /// Whether to show a legend in rendered outputs.
+    #[serde(default)]
+    pub show_legend: Option<bool>,
+    /// Whether to show render statistics in rendered outputs.
+    #[serde(default)]
+    pub show_stats: Option<bool>,
 }
 
 impl WasmRenderRequest {
@@ -145,6 +154,7 @@ impl WasmRenderRequest {
             compaction: LayoutCompactionSpec::default(),
             ..Default::default()
         };
+        let default_options = RenderOptions::default();
 
         Ok(RenderRequest {
             input,
@@ -153,7 +163,11 @@ impl WasmRenderRequest {
             focus,
             grouping,
             layout,
-            options: RenderOptions::default(),
+            options: RenderOptions {
+                theme: self.theme.unwrap_or(default_options.theme),
+                show_legend: self.show_legend.unwrap_or(default_options.show_legend),
+                show_stats: self.show_stats.unwrap_or(default_options.show_stats),
+            },
             output_path: None, // Not applicable in WASM
             overlay: None,
         })
@@ -305,6 +319,9 @@ mod tests {
             edge_style: None,
             horizontal_spacing: None,
             vertical_spacing: None,
+            theme: None,
+            show_legend: None,
+            show_stats: None,
         };
 
         let render_req = req.to_render_request().unwrap();
@@ -327,6 +344,9 @@ mod tests {
             edge_style: Some(RouteStyle::Orthogonal),
             horizontal_spacing: None,
             vertical_spacing: None,
+            theme: Some(RenderTheme::Light),
+            show_legend: Some(false),
+            show_stats: Some(false),
         };
 
         let render_req = req.to_render_request().unwrap();
@@ -336,6 +356,9 @@ mod tests {
         assert_eq!(focus.depth, 2);
         assert_eq!(render_req.layout.algorithm, LayoutAlgorithm::ForceDirected);
         assert_eq!(render_req.layout.edge_style, RouteStyle::Orthogonal);
+        assert_eq!(render_req.options.theme, RenderTheme::Light);
+        assert!(!render_req.options.show_legend);
+        assert!(!render_req.options.show_stats);
     }
 
     #[test]
@@ -354,6 +377,9 @@ mod tests {
             edge_style: None,
             horizontal_spacing: None,
             vertical_spacing: None,
+            theme: None,
+            show_legend: None,
+            show_stats: None,
         };
 
         assert!(req.to_render_request().is_err());
@@ -375,6 +401,9 @@ mod tests {
             edge_style: None,
             horizontal_spacing: None,
             vertical_spacing: None,
+            theme: None,
+            show_legend: None,
+            show_stats: None,
         };
 
         assert!(req.to_render_request().is_err());
@@ -431,6 +460,9 @@ mod tests {
             edge_style: None,
             horizontal_spacing: Some(0.0),
             vertical_spacing: Some(80.0),
+            theme: None,
+            show_legend: None,
+            show_stats: None,
         };
 
         let err = req
