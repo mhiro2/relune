@@ -15,6 +15,7 @@ export function buildGroupListDOM(
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.id = `group-${group.id}`;
+    checkbox.name = 'relune-group-visibility';
     checkbox.checked = true;
 
     const label = document.createElement('label');

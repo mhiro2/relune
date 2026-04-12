@@ -1,6 +1,16 @@
 import type { FacetDefinition, FacetId, FacetSummaryItem, FilterMode } from './filter_engine_state';
 import { visibleTypesForQuery } from './filter_engine_state';
 
+function buildFacetControlId(facetId: string, value: string, index: number): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '');
+  const suffix = normalized === '' ? 'value' : normalized;
+  return `filter-${facetId}-${suffix}-${index}`;
+}
+
 // ── Mode switcher ──────────────────────────────────────────────────────
 
 export function buildFilterModeSwitcher(
@@ -69,8 +79,7 @@ export function buildFacetSection(
   allBtn.type = 'button';
   allBtn.className = 'filter-facet-action';
   allBtn.textContent = 'Select All';
-  allBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
+  allBtn.addEventListener('click', () => {
     const listEl = details.querySelector('.filter-facet-list');
     if (!listEl) return;
     for (const cb of listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
@@ -85,8 +94,7 @@ export function buildFacetSection(
   noneBtn.type = 'button';
   noneBtn.className = 'filter-facet-action';
   noneBtn.textContent = 'Clear';
-  noneBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
+  noneBtn.addEventListener('click', () => {
     const listEl = details.querySelector('.filter-facet-list');
     if (!listEl) return;
     for (const cb of listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
@@ -98,14 +106,17 @@ export function buildFacetSection(
   });
 
   actions.append(allBtn, noneBtn);
-  summary.append(label, badge, actions);
-  details.appendChild(summary);
+  summary.append(label, badge);
+  details.append(summary, actions);
 
   if (facet.hasSearch === true) {
     const searchInput = document.createElement('input');
     searchInput.type = 'search';
+    searchInput.id = `filter-facet-search-${facet.id}`;
+    searchInput.name = `filter-facet-search-${facet.id}`;
     searchInput.className = 'filter-facet-search';
     searchInput.placeholder = 'Narrow type list...';
+    searchInput.setAttribute('aria-label', `${facet.label} filter search`);
     searchInput.autocomplete = 'off';
     searchInput.addEventListener('input', () => {
       onSearchInput?.(searchInput.value);
@@ -131,13 +142,16 @@ export function rebuildFacetCheckboxes(
   if (!list) return;
 
   list.replaceChildren();
+  const facetId = details.dataset.facetId ?? 'facet';
 
-  for (const value of values) {
+  for (const [index, value] of values.entries()) {
     const row = document.createElement('label');
     row.className = 'filter-facet-item';
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
+    checkbox.id = buildFacetControlId(facetId, value, index);
+    checkbox.name = `filter-${facetId}`;
     checkbox.value = value;
     checkbox.checked = selectedValues.has(value);
     checkbox.addEventListener('change', () => {
