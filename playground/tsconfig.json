@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "strict": true,
+    "noEmit": true,
+    "allowJs": false,
+    "allowArbitraryExtensions": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "pkg/**/*.d.ts"]
+}

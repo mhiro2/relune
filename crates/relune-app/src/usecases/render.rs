@@ -1,6 +1,6 @@
 //! Render use case implementation.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use relune_core::SchemaStats;
 use relune_layout::{

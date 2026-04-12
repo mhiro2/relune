@@ -3,7 +3,12 @@ name = "relune-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
+description = "WebAssembly bindings for relune"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

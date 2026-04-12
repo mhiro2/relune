@@ -82,6 +82,10 @@
     }, 4500);
   }
   function reportSessionStorageError(action, error) {
+    const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
+    if (isSecurityError) {
+      return;
+    }
     const isQuotaExceeded = error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
     if (isQuotaExceeded) {
       showViewerNotice(
@@ -91,6 +95,14 @@
       return;
     }
     console.warn(`Session storage error while ${action}`, error);
+  }
+  function getSessionStorage() {
+    try {
+      return window.sessionStorage;
+    } catch (error) {
+      reportSessionStorageError("accessing session storage", error);
+      return null;
+    }
   }
 
   // ts/collapse.ts
@@ -104,8 +116,11 @@
   }
   {
     let saveState = function() {
+      if (sessionStorageRef === null) {
+        return;
+      }
       try {
-        sessionStorage.setItem(
+        sessionStorageRef.setItem(
           "relune-collapsed-tables",
           JSON.stringify(Array.from(collapsedTables))
         );
@@ -122,8 +137,9 @@
       }
     }
     const collapsedTables = /* @__PURE__ */ new Set();
+    const sessionStorageRef = getSessionStorage();
     try {
-      const saved = sessionStorage.getItem("relune-collapsed-tables");
+      const saved = sessionStorageRef?.getItem("relune-collapsed-tables");
       if (saved) {
         const arr = JSON.parse(saved);
         if (Array.isArray(arr)) {

@@ -155,10 +155,14 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     const newHash = str === '' ? '' : `#${str}`;
     if (newHash !== location.hash && newHash !== '#') {
       const url = newHash || location.pathname + location.search;
-      if (pendingPush && !restoringFromPopstate) {
-        history.pushState(null, '', url);
-      } else {
-        history.replaceState(null, '', url);
+      try {
+        if (pendingPush && !restoringFromPopstate) {
+          history.pushState(null, '', url);
+        } else {
+          history.replaceState(null, '', url);
+        }
+      } catch {
+        // Silently ignore in sandboxed iframes (e.g. srcdoc)
       }
     }
     pendingPush = false;

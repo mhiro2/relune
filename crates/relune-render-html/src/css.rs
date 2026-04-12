@@ -391,6 +391,7 @@ pub(crate) fn build_css(
     /* ── Facet sections ─────────────────────────────────────────────── */
 
     .filter-facet {
+      position: relative;
       border-top: 1px solid var(--panel-border);
     }
 
@@ -398,7 +399,7 @@ pub(crate) fn build_css(
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 14px;
+      padding: 8px 128px 8px 14px;
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
@@ -428,6 +429,7 @@ pub(crate) fn build_css(
 
     .filter-facet-badge {
       min-width: 18px;
+      flex-shrink: 0;
       padding: 1px 6px;
       border-radius: 999px;
       background: var(--accent-color);
@@ -442,8 +444,13 @@ pub(crate) fn build_css(
     }
 
     .filter-facet-actions {
+      position: absolute;
+      top: 8px;
+      right: 14px;
       display: flex;
       gap: 4px;
+      align-items: center;
+      z-index: 1;
     }
 
     .filter-facet-action {

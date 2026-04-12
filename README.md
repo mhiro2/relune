@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://mhiro2.github.io/relune/">Playground</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#installation">Installation</a> ·
   <a href="docs/getting-started.md">Getting started</a> ·
@@ -133,6 +134,8 @@ Use whichever input fits your workflow:
   - SQLite
 
 ## Quick start
+
+Try the [public browser playground](https://mhiro2.github.io/relune/) first — no install required.
 
 ```bash
 # Render an SVG diagram from SQL

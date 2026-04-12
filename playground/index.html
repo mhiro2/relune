@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Relune Playground</title>
+    <meta
+      name="description"
+      content="Public WASM playground for Relune. Render deterministic ERDs in the browser with the same Rust engine as the CLI."
+    />
+    <link rel="icon" href="./assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <script type="module" src="./assets/main.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <!-- Top bar -->
+      <header class="topbar">
+        <div class="topbar__brand">
+          <img
+            class="topbar__logo"
+            src="./assets/logo.png"
+            alt="Relune"
+            width="52"
+            height="52"
+          />
+          <div class="topbar__brand-text">
+            <span class="topbar__tag">Playground</span>
+            <span class="topbar__badge" id="version-pill">Loading…</span>
+          </div>
+        </div>
+        <div class="topbar__right">
+          <span id="render-status" class="topbar__status">Preparing…</span>
+          <a
+            class="topbar__link"
+            href="https://github.com/mhiro2/relune"
+            target="_blank"
+            rel="noopener"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+            </svg>
+            GitHub
+          </a>
+          <a
+            class="topbar__link"
+            href="https://github.com/mhiro2/relune/blob/main/docs/cli-reference.md"
+            target="_blank"
+            rel="noopener"
+            >Docs</a
+          >
+        </div>
+      </header>
+
+      <!-- Main workspace -->
+      <div class="workspace">
+        <!-- Sidebar: Controls -->
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar__head">
+            <span class="sidebar__label">Controls</span>
+            <button
+              class="sidebar__collapse"
+              id="sidebar-collapse"
+              type="button"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="8,2 3,7 8,12" />
+                <polyline points="13,2 8,7 13,12" />
+              </svg>
+            </button>
+          </div>
+          <div class="sidebar__scroll">
+            <!-- Example + Render -->
+            <div class="ctrl-section">
+              <div class="ctrl-row ctrl-row--actions">
+                <label class="ctrl">
+                  <span class="ctrl__label">Example</span>
+                  <select id="example-select" aria-label="Example schema"></select>
+                </label>
+                <button id="render-now" class="btn btn--primary" type="button">
+                  Render
+                </button>
+              </div>
+            </div>
+
+            <!-- Appearance -->
+            <details class="ctrl-section" open>
+              <summary class="ctrl-section__title">Appearance</summary>
+              <div class="ctrl-row">
+                <label class="ctrl">
+                  <span class="ctrl__label">Theme</span>
+                  <select id="theme-select" aria-label="Render theme">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </label>
+                <label class="ctrl">
+                  <span class="ctrl__label">Edges</span>
+                  <select id="edge-style-select" aria-label="Edge style">
+                    <option value="curved">Curved</option>
+                    <option value="orthogonal">Orthogonal</option>
+                    <option value="straight">Straight</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+
+            <!-- Layout -->
+            <details class="ctrl-section" open>
+              <summary class="ctrl-section__title">Layout</summary>
+              <div class="ctrl-row">
+                <label class="ctrl">
+                  <span class="ctrl__label">Algorithm</span>
+                  <select id="layout-select" aria-label="Layout algorithm">
+                    <option value="hierarchical">Hierarchical</option>
+                    <option value="force-directed">Force directed</option>
+                  </select>
+                </label>
+                <label class="ctrl">
+                  <span class="ctrl__label">Direction</span>
+                  <select id="direction-select" aria-label="Layout direction">
+                    <option value="top-to-bottom">Top → Bottom</option>
+                    <option value="left-to-right">Left → Right</option>
+                    <option value="right-to-left">Right → Left</option>
+                    <option value="bottom-to-top">Bottom → Top</option>
+                  </select>
+                </label>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl">
+                  <span class="ctrl__label">Group by</span>
+                  <select id="group-by-select" aria-label="Grouping strategy">
+                    <option value="none">None</option>
+                    <option value="schema">Schema</option>
+                    <option value="prefix">Prefix</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+
+            <!-- Filter -->
+            <details class="ctrl-section">
+              <summary class="ctrl-section__title">Filter</summary>
+              <div class="ctrl-row">
+                <label class="ctrl">
+                  <span class="ctrl__label">Focus table</span>
+                  <input
+                    id="focus-table-input"
+                    type="text"
+                    placeholder="orders"
+                    aria-label="Focus table"
+                  />
+                </label>
+                <label class="ctrl">
+                  <span class="ctrl__label">Depth</span>
+                  <input
+                    id="depth-input"
+                    type="number"
+                    min="1"
+                    max="8"
+                    step="1"
+                    value="1"
+                    aria-label="Focus depth"
+                  />
+                </label>
+              </div>
+              <div class="ctrl-row ctrl-row--stack">
+                <label class="ctrl">
+                  <span class="ctrl__label">Include tables</span>
+                  <input
+                    id="include-tables-input"
+                    type="text"
+                    placeholder="public.*, orders"
+                    aria-label="Include table globs"
+                  />
+                </label>
+                <label class="ctrl">
+                  <span class="ctrl__label">Exclude tables</span>
+                  <input
+                    id="exclude-tables-input"
+                    type="text"
+                    placeholder="audit_*"
+                    aria-label="Exclude table globs"
+                  />
+                </label>
+              </div>
+            </details>
+
+            <!-- SQL Editor -->
+            <div class="ctrl-section ctrl-section--editor">
+              <div class="ctrl-section__title ctrl-section__title--static">
+                SQL DDL
+              </div>
+              <textarea
+                id="sql-input"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                aria-label="SQL input"
+              ></textarea>
+            </div>
+
+            <!-- Actions -->
+            <div class="sidebar__actions">
+              <button id="reset-example" class="btn btn--ghost" type="button">
+                Reset
+              </button>
+              <button id="download-html" class="btn btn--ghost" type="button">
+                HTML
+              </button>
+              <button id="download-svg" class="btn btn--ghost" type="button">
+                SVG
+              </button>
+            </div>
+
+            <p class="sidebar__note" id="state-note">
+              Options are synced to URL. Custom SQL is stored in this browser.
+            </p>
+          </div>
+        </aside>
+
+        <!-- Expand button (visible only when collapsed) -->
+        <button
+          class="sidebar-expand"
+          id="sidebar-expand"
+          type="button"
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6,2 11,7 6,12" />
+            <polyline points="1,2 6,7 1,12" />
+          </svg>
+        </button>
+
+        <!-- Sidebar resize handle -->
+        <div class="sidebar-handle" id="sidebar-handle">
+          <span class="sidebar-handle__grip"></span>
+        </div>
+
+        <!-- Main: Preview -->
+        <main class="preview">
+          <div id="error-box" class="error-box" hidden></div>
+
+          <!-- Stats ribbon -->
+          <div class="stats-ribbon" id="stats-grid" aria-live="polite"></div>
+
+          <!-- Diagnostics -->
+          <details class="diagnostics" id="diagnostics-panel">
+            <summary class="diagnostics__header">
+              <span class="diagnostics__label">Diagnostics</span>
+              <span id="diagnostic-count" class="diagnostics__count">0</span>
+            </summary>
+            <ul id="diagnostic-list" class="diagnostics__list"></ul>
+          </details>
+
+          <!-- Preview viewport -->
+          <div class="viewport">
+            <iframe
+              id="preview-frame"
+              title="Relune HTML preview"
+              sandbox="allow-scripts"
+              referrerpolicy="no-referrer"
+            ></iframe>
+          </div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
