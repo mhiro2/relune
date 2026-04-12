@@ -2,6 +2,8 @@
 
 ## Install
 
+[Browser playground](https://mhiro2.github.io/relune/) — no install required.
+
 macOS:
 
 ```bash
@@ -56,3 +58,4 @@ Remote TCP connections also require TLS by default; Unix sockets and loopback-on
 
 - [CLI reference](cli-reference.md) — all commands and flags
 - [Configuration](configuration.md) — shared defaults in `relune.toml`
+- [Public playground](https://mhiro2.github.io/relune/) — run the WASM build in your browser
