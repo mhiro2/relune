@@ -746,11 +746,13 @@ fn assert_side_policy(
 }
 
 const fn expected_primary_sides(direction: LayoutDirection) -> (EndpointSide, EndpointSide) {
+    // FK edges go from child to parent (against the hierarchy direction),
+    // so the source exits on the side facing the parent (upstream).
     match direction {
-        LayoutDirection::TopToBottom => (EndpointSide::South, EndpointSide::North),
-        LayoutDirection::BottomToTop => (EndpointSide::North, EndpointSide::South),
-        LayoutDirection::LeftToRight => (EndpointSide::East, EndpointSide::West),
-        LayoutDirection::RightToLeft => (EndpointSide::West, EndpointSide::East),
+        LayoutDirection::TopToBottom => (EndpointSide::North, EndpointSide::South),
+        LayoutDirection::BottomToTop => (EndpointSide::South, EndpointSide::North),
+        LayoutDirection::LeftToRight => (EndpointSide::West, EndpointSide::East),
+        LayoutDirection::RightToLeft => (EndpointSide::East, EndpointSide::West),
     }
 }
 
@@ -823,9 +825,11 @@ fn assert_route_monotonicity(graph: &PositionedGraph, direction: LayoutDirection
 
         for sample in samples.iter().skip(1) {
             let current = axis_value(*sample, direction);
+            // FK edges flow from child to parent (against the hierarchy direction),
+            // so coordinates move opposite to the layout direction.
             match direction {
                 LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => assert!(
-                    current + MONOTONICITY_TOLERANCE >= previous,
+                    current - MONOTONICITY_TOLERANCE <= previous,
                     "edge {} -> {} backtracks for {:?}: {} -> {}",
                     edge.from,
                     edge.to,
@@ -834,7 +838,7 @@ fn assert_route_monotonicity(graph: &PositionedGraph, direction: LayoutDirection
                     round_f32(current),
                 ),
                 LayoutDirection::BottomToTop | LayoutDirection::RightToLeft => assert!(
-                    current - MONOTONICITY_TOLERANCE <= previous,
+                    current + MONOTONICITY_TOLERANCE >= previous,
                     "edge {} -> {} backtracks for {:?}: {} -> {}",
                     edge.from,
                     edge.to,

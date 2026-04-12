@@ -6,17 +6,17 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
   "fixture": "multi_schema.sql",
   "layout": {
     "edge_count": 6,
-    "height": 830.0,
+    "height": 866.0,
     "node_count": 7,
-    "width": 2114.60009765625
+    "width": 1578.4000244140625
   },
   "patterns": {
     "long_detours": {
       "count_over_1_8x": 0,
       "worst_examples": [
-        "public.posts[author_id] -> public.users[id] (1.24x)",
+        "sales.order_items[product_id] -> inventory.products[id] (1.40x)",
         "inventory.stock[product_id] -> inventory.products[id] (1.00x)",
-        "sales.order_items[order_id] -> sales.orders[id] (1.00x)"
+        "public.posts[author_id] -> public.users[id] (1.00x)"
       ]
     },
     "parallel_groups": {
@@ -25,8 +25,12 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
       "max_size": 0
     },
     "reverse_edges": {
-      "count": 0,
-      "examples": []
+      "count": 6,
+      "examples": [
+        "inventory.stock[product_id] -> inventory.products[id] (rank 1 -> 0, bends 2)",
+        "public.posts[author_id] -> public.users[id] (rank 1 -> 0, bends 2)",
+        "sales.order_items[order_id] -> sales.orders[id] (rank 2 -> 1, bends 2)"
+      ]
     },
     "same_rank_edges": {
       "count": 0,
@@ -35,21 +39,21 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
     "tight_clearance": {
       "count_under_24px": 1,
       "worst_examples": [
-        "sales.order_items[order_id] -> sales.orders[id] (16.0px)",
-        "public.posts[author_id] -> public.users[id] (52.0px)",
-        "inventory.stock[product_id] -> inventory.products[id] (76.0px)"
+        "public.posts[author_id] -> public.users[id] (16.0px)",
+        "sales.order_items[product_id] -> inventory.products[id] (24.0px)",
+        "sales.shipments[order_id] -> sales.orders[id] (34.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 411029,
+      "bytes": 411111,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 56769,
+      "bytes": 56851,
       "edge_groups": 48,
       "node_groups": 7
     }

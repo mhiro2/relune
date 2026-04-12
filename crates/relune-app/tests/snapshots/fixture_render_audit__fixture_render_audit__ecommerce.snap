@@ -6,17 +6,17 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
   "fixture": "ecommerce.sql",
   "layout": {
     "edge_count": 7,
-    "height": 956.0,
+    "height": 938.0,
     "node_count": 7,
-    "width": 1531.4000244140625
+    "width": 1503.4000244140625
   },
   "patterns": {
     "long_detours": {
       "count_over_1_8x": 0,
       "worst_examples": [
-        "addresses[customer_id] -> customers[id] (1.24x)",
-        "order_items[order_id] -> orders[id] (1.00x)",
-        "order_items[product_id] -> products[id] (1.00x)"
+        "order_items[product_id] -> products[id] (1.23x)",
+        "addresses[customer_id] -> customers[id] (1.00x)",
+        "order_items[order_id] -> orders[id] (1.00x)"
       ]
     },
     "parallel_groups": {
@@ -25,33 +25,37 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
       "max_size": 0
     },
     "reverse_edges": {
-      "count": 0,
-      "examples": []
+      "count": 6,
+      "examples": [
+        "addresses[customer_id] -> customers[id] (rank 1 -> 0, bends 2)",
+        "order_items[order_id] -> orders[id] (rank 2 -> 1, bends 2)",
+        "order_items[product_id] -> products[id] (rank 2 -> 0, bends 4)"
+      ]
     },
     "same_rank_edges": {
       "count": 1,
       "examples": [
-        "categories[parent_id] -> categories[id] (rank 1 -> 1, bends 2)"
+        "categories[parent_id] -> categories[id] (rank 0 -> 0, bends 2)"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 1,
+      "count_under_24px": 0,
       "worst_examples": [
-        "order_items[product_id] -> products[id] (16.0px)",
-        "addresses[customer_id] -> customers[id] (24.0px)",
-        "product_categories[product_id] -> products[id] (40.0px)"
+        "addresses[customer_id] -> customers[id] (40.0px)",
+        "product_categories[product_id] -> products[id] (40.0px)",
+        "order_items[product_id] -> products[id] (42.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 417251,
+      "bytes": 417255,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 62240,
+      "bytes": 62244,
       "edge_groups": 56,
       "node_groups": 7
     }

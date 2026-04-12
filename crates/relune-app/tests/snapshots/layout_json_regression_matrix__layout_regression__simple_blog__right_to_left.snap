@@ -11,16 +11,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1112.0,
+              491.0,
               139.0
             ],
             [
-              1112.0,
+              491.0,
               105.0
             ]
           ],
           "end": [
-            970.0,
+            633.0,
             105.0
           ],
           "from": "comments",
@@ -29,21 +29,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1103.926025390625,
+          "label_x": 499.0740051269531,
           "label_y": 93.08499908447266,
           "nullable": false,
           "route_label_position": [
-            1112.0,
+            491.0,
             122.0
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1254.0,
+            349.0,
             139.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "posts",
           "to_columns": [
             "id"
@@ -61,7 +61,7 @@ expression: snapshot
             ]
           ],
           "end": [
-            349.0,
+            1254.0,
             98.0
           ],
           "from": "comments",
@@ -70,21 +70,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 543.1669921875,
-          "label_y": 98.0,
+          "label_x": 1020.6420288085938,
+          "label_y": 86.00499725341797,
           "nullable": false,
           "route_label_position": [
             801.5,
             111.5
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1254.0,
+            349.0,
             125.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "users",
           "to_columns": [
             "id"
@@ -93,16 +93,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              491.0,
+              1112.0,
               123.0
             ],
             [
-              491.0,
+              1112.0,
               112.0
             ]
           ],
           "end": [
-            349.0,
+            1254.0,
             112.0
           ],
           "from": "posts",
@@ -111,21 +111,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 510.0830078125,
+          "label_x": 1092.9169921875,
           "label_y": 123.0,
           "nullable": false,
           "route_label_position": [
-            491.0,
+            1112.0,
             117.5
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            633.0,
+            970.0,
             123.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "users",
           "to_columns": [
             "id"
@@ -141,7 +141,7 @@ expression: snapshot
           "id": "comments",
           "kind": "Table",
           "width": 291.0,
-          "x": 1256.0,
+          "x": 56.0,
           "y": 56.0
         },
         {
@@ -163,7 +163,7 @@ expression: snapshot
           "id": "users",
           "kind": "Table",
           "width": 291.0,
-          "x": 56.0,
+          "x": 1256.0,
           "y": 56.0
         }
       ],
@@ -179,16 +179,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1112.0,
+              491.0,
               139.0
             ],
             [
-              1112.0,
+              491.0,
               105.0
             ]
           ],
           "end": [
-            970.0,
+            633.0,
             105.0
           ],
           "from": "comments",
@@ -197,21 +197,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1103.926025390625,
+          "label_x": 499.0740051269531,
           "label_y": 93.08499908447266,
           "nullable": false,
           "route_label_position": [
-            1112.0,
+            491.0,
             122.0
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1254.0,
+            349.0,
             139.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "posts",
           "to_columns": [
             "id"
@@ -229,7 +229,7 @@ expression: snapshot
             ]
           ],
           "end": [
-            349.0,
+            1254.0,
             98.0
           ],
           "from": "comments",
@@ -238,21 +238,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 543.1669921875,
-          "label_y": 98.0,
+          "label_x": 1020.6420288085938,
+          "label_y": 86.00499725341797,
           "nullable": false,
           "route_label_position": [
             801.5,
             111.5
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1254.0,
+            349.0,
             125.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "users",
           "to_columns": [
             "id"
@@ -261,16 +261,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              491.0,
+              1112.0,
               123.0
             ],
             [
-              491.0,
+              1112.0,
               112.0
             ]
           ],
           "end": [
-            349.0,
+            1254.0,
             112.0
           ],
           "from": "posts",
@@ -279,21 +279,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 510.0830078125,
+          "label_x": 1092.9169921875,
           "label_y": 123.0,
           "nullable": false,
           "route_label_position": [
-            491.0,
+            1112.0,
             117.5
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            633.0,
+            970.0,
             123.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "users",
           "to_columns": [
             "id"
@@ -309,7 +309,7 @@ expression: snapshot
           "id": "comments",
           "kind": "Table",
           "width": 291.0,
-          "x": 1256.0,
+          "x": 56.0,
           "y": 56.0
         },
         {
@@ -331,7 +331,7 @@ expression: snapshot
           "id": "users",
           "kind": "Table",
           "width": 291.0,
-          "x": 56.0,
+          "x": 1256.0,
           "y": 56.0
         }
       ],
@@ -347,7 +347,7 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            970.0,
+            633.0,
             105.0
           ],
           "from": "comments",
@@ -356,21 +356,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1180.14697265625,
+          "label_x": 422.8529968261719,
           "label_y": 154.3300018310547,
           "nullable": false,
           "route_label_position": [
-            1112.0,
+            491.0,
             122.0
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1254.0,
+            349.0,
             139.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "posts",
           "to_columns": [
             "id"
@@ -379,7 +379,7 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            349.0,
+            1254.0,
             98.0
           ],
           "from": "comments",
@@ -388,21 +388,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 537.9000244140625,
+          "label_x": 1065.1009521484375,
           "label_y": 91.62999725341797,
           "nullable": false,
           "route_label_position": [
             801.5,
             111.5
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1254.0,
+            349.0,
             125.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "users",
           "to_columns": [
             "id"
@@ -411,7 +411,7 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            349.0,
+            1254.0,
             112.0
           ],
           "from": "posts",
@@ -420,21 +420,21 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 561.5360107421875,
+          "label_x": 1041.4649658203125,
           "label_y": 132.24099731445313,
           "nullable": false,
           "route_label_position": [
-            491.0,
+            1112.0,
             117.5
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            633.0,
+            970.0,
             123.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "users",
           "to_columns": [
             "id"
@@ -450,7 +450,7 @@ expression: snapshot
           "id": "comments",
           "kind": "Table",
           "width": 291.0,
-          "x": 1256.0,
+          "x": 56.0,
           "y": 56.0
         },
         {
@@ -472,7 +472,7 @@ expression: snapshot
           "id": "users",
           "kind": "Table",
           "width": 291.0,
-          "x": 56.0,
+          "x": 1256.0,
           "y": 56.0
         }
       ],

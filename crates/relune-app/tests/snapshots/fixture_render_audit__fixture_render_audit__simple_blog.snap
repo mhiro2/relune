@@ -25,8 +25,12 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
       "max_size": 0
     },
     "reverse_edges": {
-      "count": 0,
-      "examples": []
+      "count": 3,
+      "examples": [
+        "comments[post_id] -> posts[id] (rank 2 -> 1, bends 2)",
+        "comments[user_id] -> users[id] (rank 2 -> 0, bends 4)",
+        "posts[user_id] -> users[id] (rank 1 -> 0, bends 2)"
+      ]
     },
     "same_rank_edges": {
       "count": 0,
@@ -43,13 +47,13 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 372048,
+      "bytes": 372050,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 23743,
+      "bytes": 23745,
       "edge_groups": 24,
       "node_groups": 3
     }
