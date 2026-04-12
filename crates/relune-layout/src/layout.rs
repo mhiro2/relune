@@ -66,6 +66,8 @@ const GROUP_PADDING: f32 = 20.0;
 const GROUP_TOP_PADDING: f32 = 44.0;
 /// Minimum gap preserved between packed force-directed groups.
 const FORCE_GROUP_GAP: f32 = 28.0;
+/// Minimum visible gap preserved between connected nodes in force-directed mode.
+const FORCE_CONNECTED_NODE_GAP: f32 = 56.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -1133,8 +1135,21 @@ fn apply_force_layout(
     // by the overlap resolution cascade.
     compact_toward_neighbours(&mut positions, node_sizes, &edges, config);
 
+    // Preserve a visible corridor between connected nodes so short orthogonal
+    // routes do not collapse into barely-visible edge stubs.
+    enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+
+    // Re-resolve any overlaps introduced while widening connected node gaps.
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+
     // Grouped force-directed layouts need an explicit packing pass so schema
     // containers do not overlap and cover each other's label bands.
+    separate_force_groups(graph, &mut positions, node_sizes, config);
+
+    // Group packing can tighten connected pairs again, especially in
+    // left-to-right layouts where ungrouped nodes share the same column.
+    enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
     separate_force_groups(graph, &mut positions, node_sizes, config);
 
     // Calculate bounding box and shift to positive coordinates
@@ -1584,11 +1599,16 @@ fn resolve_force_overlaps(positions: &mut [(f32, f32)], node_sizes: &[NodeSize],
                 let dx = positions[j].0 - positions[i].0;
                 let dy = positions[j].1 - positions[i].1;
 
-                let min_dx = (node_sizes[i].width + node_sizes[j].width).mul_add(0.5, padding);
-                let min_dy = (node_sizes[i].height + node_sizes[j].height).mul_add(0.5, padding);
-
-                let overlap_x = min_dx - dx.abs();
-                let overlap_y = min_dy - dy.abs();
+                let overlap_x = if dx >= 0.0 {
+                    positions[i].0 + node_sizes[i].width + padding - positions[j].0
+                } else {
+                    positions[j].0 + node_sizes[j].width + padding - positions[i].0
+                };
+                let overlap_y = if dy >= 0.0 {
+                    positions[i].1 + node_sizes[i].height + padding - positions[j].1
+                } else {
+                    positions[j].1 + node_sizes[j].height + padding - positions[i].1
+                };
 
                 if overlap_x > 0.0 && overlap_y > 0.0 {
                     // Push apart along the axis of least overlap.
@@ -1698,12 +1718,82 @@ fn compact_toward_neighbours(
     }
 }
 
+#[allow(clippy::cast_precision_loss, clippy::similar_names)]
+fn enforce_force_edge_clearance(
+    positions: &mut [(f32, f32)],
+    node_sizes: &[NodeSize],
+    edges: &[(usize, usize)],
+) {
+    if edges.is_empty() {
+        return;
+    }
+
+    let passes = 6;
+    for _ in 0..passes {
+        let mut moved = false;
+
+        for &(from_idx, to_idx) in edges {
+            let from_center_x = node_sizes[from_idx]
+                .width
+                .mul_add(0.5, positions[from_idx].0);
+            let from_center_y = node_sizes[from_idx]
+                .height
+                .mul_add(0.5, positions[from_idx].1);
+            let to_center_x = node_sizes[to_idx].width.mul_add(0.5, positions[to_idx].0);
+            let to_center_y = node_sizes[to_idx].height.mul_add(0.5, positions[to_idx].1);
+
+            let dx = to_center_x - from_center_x;
+            let dy = to_center_y - from_center_y;
+
+            if dx.abs() >= dy.abs() {
+                let gap = if dx >= 0.0 {
+                    positions[to_idx].0 - (positions[from_idx].0 + node_sizes[from_idx].width)
+                } else {
+                    positions[from_idx].0 - (positions[to_idx].0 + node_sizes[to_idx].width)
+                };
+
+                if gap < FORCE_CONNECTED_NODE_GAP {
+                    let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
+                    let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
+                    positions[from_idx].0 -= push * sign;
+                    positions[to_idx].0 += push * sign;
+                    moved = true;
+                }
+            } else {
+                let gap = if dy >= 0.0 {
+                    positions[to_idx].1 - (positions[from_idx].1 + node_sizes[from_idx].height)
+                } else {
+                    positions[from_idx].1 - (positions[to_idx].1 + node_sizes[to_idx].height)
+                };
+
+                if gap < FORCE_CONNECTED_NODE_GAP {
+                    let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
+                    let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
+                    positions[from_idx].1 -= push * sign;
+                    positions[to_idx].1 += push * sign;
+                    moved = true;
+                }
+            }
+        }
+
+        if !moved {
+            break;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-struct GroupBounds {
+struct PackedBounds {
     min_x: f32,
     max_x: f32,
     min_y: f32,
     max_y: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ForcePackItem {
+    Group(usize),
+    UngroupedNode(usize),
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -1721,20 +1811,34 @@ fn separate_force_groups(
         config.direction,
         LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
     );
-    let mut packed_groups = graph
+    let mut packed_items = graph
         .groups
         .iter()
         .enumerate()
         .filter_map(|(group_idx, group)| {
-            force_group_bounds(group, positions, node_sizes).map(|bounds| (group_idx, bounds))
+            force_group_bounds(group, positions, node_sizes)
+                .map(|bounds| (ForcePackItem::Group(group_idx), bounds))
         })
+        .chain(
+            graph
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, node)| node.group_index.is_none())
+                .map(|(node_idx, _)| {
+                    (
+                        ForcePackItem::UngroupedNode(node_idx),
+                        force_node_bounds(node_idx, positions, node_sizes),
+                    )
+                }),
+        )
         .collect::<Vec<_>>();
 
-    if packed_groups.len() < 2 {
+    if packed_items.len() < 2 {
         return;
     }
 
-    packed_groups.sort_by(|(left_idx, left_bounds), (right_idx, right_bounds)| {
+    packed_items.sort_by(|(left_item, left_bounds), (right_item, right_bounds)| {
         let left_min = if is_horizontal {
             left_bounds.min_y
         } else {
@@ -1745,27 +1849,28 @@ fn separate_force_groups(
         } else {
             right_bounds.min_x
         };
-        left_min
-            .total_cmp(&right_min)
-            .then_with(|| left_idx.cmp(right_idx))
+        left_min.total_cmp(&right_min).then_with(|| {
+            force_pack_item_order(*left_item).cmp(&force_pack_item_order(*right_item))
+        })
     });
 
+    let mut previous_item = packed_items[0].0;
     let mut previous_end = if is_horizontal {
-        packed_groups[0].1.max_y
+        packed_items[0].1.max_y
     } else {
-        packed_groups[0].1.max_x
+        packed_items[0].1.max_x
     };
 
-    for &(group_idx, bounds) in packed_groups.iter().skip(1) {
+    for &(item, bounds) in packed_items.iter().skip(1) {
         let current_min = if is_horizontal {
             bounds.min_y
         } else {
             bounds.min_x
         };
-        let required_min = previous_end + FORCE_GROUP_GAP;
+        let required_min = previous_end + force_pack_gap(graph, previous_item, item);
         if current_min < required_min {
             let delta = required_min - current_min;
-            shift_force_group(graph, positions, group_idx, delta, is_horizontal);
+            shift_force_pack_item(graph, positions, item, delta, is_horizontal);
             previous_end = if is_horizontal {
                 bounds.max_y + delta
             } else {
@@ -1778,14 +1883,63 @@ fn separate_force_groups(
                 bounds.max_x
             };
         }
+        previous_item = item;
     }
+}
+
+fn force_pack_gap(graph: &LayoutGraph, left: ForcePackItem, right: ForcePackItem) -> f32 {
+    if force_pack_items_are_connected(graph, left, right) {
+        FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP)
+    } else {
+        FORCE_GROUP_GAP
+    }
+}
+
+fn force_pack_items_are_connected(
+    graph: &LayoutGraph,
+    left: ForcePackItem,
+    right: ForcePackItem,
+) -> bool {
+    match (left, right) {
+        (ForcePackItem::UngroupedNode(left_idx), ForcePackItem::UngroupedNode(right_idx)) => {
+            force_nodes_are_connected(graph, left_idx, right_idx)
+        }
+        (ForcePackItem::Group(group_idx), ForcePackItem::UngroupedNode(node_idx))
+        | (ForcePackItem::UngroupedNode(node_idx), ForcePackItem::Group(group_idx)) => graph.groups
+            [group_idx]
+            .node_indices
+            .iter()
+            .any(|&group_node_idx| force_nodes_are_connected(graph, group_node_idx, node_idx)),
+        (ForcePackItem::Group(left_group_idx), ForcePackItem::Group(right_group_idx)) => graph
+            .groups[left_group_idx]
+            .node_indices
+            .iter()
+            .any(|&left_node_idx| {
+                graph.groups[right_group_idx]
+                    .node_indices
+                    .iter()
+                    .any(|&right_node_idx| {
+                        force_nodes_are_connected(graph, left_node_idx, right_node_idx)
+                    })
+            }),
+    }
+}
+
+fn force_nodes_are_connected(graph: &LayoutGraph, left_idx: usize, right_idx: usize) -> bool {
+    let left_id = &graph.nodes[left_idx].id;
+    let right_id = &graph.nodes[right_idx].id;
+
+    graph.edges.iter().any(|edge| {
+        (edge.from == *left_id && edge.to == *right_id)
+            || (edge.from == *right_id && edge.to == *left_id)
+    })
 }
 
 fn force_group_bounds(
     group: &crate::graph::LayoutGroup,
     positions: &[(f32, f32)],
     node_sizes: &[NodeSize],
-) -> Option<GroupBounds> {
+) -> Option<PackedBounds> {
     let mut min_x = f32::MAX;
     let mut min_y = f32::MAX;
     let mut max_x = f32::MIN;
@@ -1806,7 +1960,7 @@ fn force_group_bounds(
         max_y = max_y.max(y + size.height);
     }
 
-    has_nodes.then_some(GroupBounds {
+    has_nodes.then_some(PackedBounds {
         min_x: min_x - GROUP_PADDING,
         max_x: max_x + GROUP_PADDING,
         min_y: min_y - GROUP_TOP_PADDING,
@@ -1814,19 +1968,54 @@ fn force_group_bounds(
     })
 }
 
-fn shift_force_group(
+fn force_node_bounds(
+    node_idx: usize,
+    positions: &[(f32, f32)],
+    node_sizes: &[NodeSize],
+) -> PackedBounds {
+    let (x, y) = positions[node_idx];
+    let size = node_sizes[node_idx];
+    PackedBounds {
+        min_x: x,
+        max_x: x + size.width,
+        min_y: y,
+        max_y: y + size.height,
+    }
+}
+
+const fn force_pack_item_order(item: ForcePackItem) -> (u8, usize) {
+    match item {
+        ForcePackItem::Group(index) => (0, index),
+        ForcePackItem::UngroupedNode(index) => (1, index),
+    }
+}
+
+fn shift_force_pack_item(
     graph: &LayoutGraph,
     positions: &mut [(f32, f32)],
-    group_idx: usize,
+    item: ForcePackItem,
     delta: f32,
     is_horizontal: bool,
 ) {
-    for &node_idx in &graph.groups[group_idx].node_indices {
-        if let Some((x, y)) = positions.get_mut(node_idx) {
-            if is_horizontal {
-                *y += delta;
-            } else {
-                *x += delta;
+    match item {
+        ForcePackItem::Group(group_idx) => {
+            for &node_idx in &graph.groups[group_idx].node_indices {
+                if let Some((x, y)) = positions.get_mut(node_idx) {
+                    if is_horizontal {
+                        *y += delta;
+                    } else {
+                        *x += delta;
+                    }
+                }
+            }
+        }
+        ForcePackItem::UngroupedNode(node_idx) => {
+            if let Some((x, y)) = positions.get_mut(node_idx) {
+                if is_horizontal {
+                    *y += delta;
+                } else {
+                    *x += delta;
+                }
             }
         }
     }
@@ -4230,6 +4419,60 @@ mod tests {
         }
     }
 
+    fn make_prefix_grouping_schema() -> Schema {
+        let mk_table = |id: u64, name: &str, fk: Option<&str>| Table {
+            id: TableId(id),
+            stable_id: name.to_string(),
+            schema_name: None,
+            name: name.to_string(),
+            columns: vec![
+                Column {
+                    id: ColumnId(id * 10),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                },
+                Column {
+                    id: ColumnId(id * 10 + 1),
+                    name: "ref".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: true,
+                    is_primary_key: false,
+                    comment: None,
+                },
+            ],
+            foreign_keys: fk
+                .map(|target_table| {
+                    vec![ForeignKey {
+                        name: Some(format!("fk_{name}")),
+                        from_columns: vec!["ref".to_string()],
+                        to_table: target_table.to_string(),
+                        to_schema: None,
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }]
+                })
+                .unwrap_or_default(),
+            indexes: vec![],
+            comment: None,
+        };
+
+        Schema {
+            tables: vec![
+                mk_table(1, "product", None),
+                mk_table(2, "product_categories", Some("product")),
+                mk_table(3, "orders", Some("product")),
+                mk_table(4, "order_items", Some("orders")),
+                mk_table(5, "user_profile", None),
+                mk_table(6, "user_preferences", Some("user_profile")),
+            ],
+            ..Schema::default()
+        }
+    }
+
     #[test]
     fn swimlane_layout_produces_disjoint_group_bboxes() {
         use relune_core::{GroupingSpec, GroupingStrategy};
@@ -4359,6 +4602,66 @@ mod tests {
                 assert!(
                     !overlap,
                     "force-grouped layout produced overlapping X ranges for {} and {}",
+                    a.id, b.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_y() {
+        use relune_core::{GroupingSpec, GroupingStrategy};
+
+        let schema = make_prefix_grouping_schema();
+        let request = LayoutRequest {
+            grouping: GroupingSpec {
+                strategy: GroupingStrategy::ByPrefix,
+            },
+            ..LayoutRequest::default()
+        };
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::LeftToRight,
+            ..LayoutConfig::default()
+        };
+        let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+
+        for (i, a) in positioned.groups.iter().enumerate() {
+            for b in positioned.groups.iter().skip(i + 1) {
+                let overlap = a.y < b.y + b.height && b.y < a.y + a.height;
+                assert!(
+                    !overlap,
+                    "force-grouped prefix layout produced overlapping Y ranges for {} and {}",
+                    a.id, b.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_x() {
+        use relune_core::{GroupingSpec, GroupingStrategy};
+
+        let schema = make_prefix_grouping_schema();
+        let request = LayoutRequest {
+            grouping: GroupingSpec {
+                strategy: GroupingStrategy::ByPrefix,
+            },
+            ..LayoutRequest::default()
+        };
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::TopToBottom,
+            ..LayoutConfig::default()
+        };
+        let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+
+        for (i, a) in positioned.groups.iter().enumerate() {
+            for b in positioned.groups.iter().skip(i + 1) {
+                let overlap = a.x < b.x + b.width && b.x < a.x + a.width;
+                assert!(
+                    !overlap,
+                    "force-grouped prefix layout produced overlapping X ranges for {} and {}",
                     a.id, b.id
                 );
             }
@@ -5045,6 +5348,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_resolve_force_overlaps_with_asymmetric_node_sizes() {
+        let mut positions = vec![(364.75726, 1350.5088), (320.7149, 1578.5088)];
+        let node_sizes = vec![
+            NodeSize {
+                width: 319.0,
+                height: 264.0,
+            },
+            NodeSize {
+                width: 291.0,
+                height: 174.0,
+            },
+        ];
+
+        resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
+
+        let left = PositionedNode {
+            id: "orders".to_string(),
+            label: "orders".to_string(),
+            kind: relune_core::NodeKind::Table,
+            columns: vec![],
+            x: positions[0].0,
+            y: positions[0].1,
+            width: node_sizes[0].width,
+            height: node_sizes[0].height,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        };
+        let right = PositionedNode {
+            id: "order_items".to_string(),
+            label: "order_items".to_string(),
+            kind: relune_core::NodeKind::Table,
+            columns: vec![],
+            x: positions[1].0,
+            y: positions[1].1,
+            width: node_sizes[1].width,
+            height: node_sizes[1].height,
+            is_join_table_candidate: false,
+            has_self_loop: false,
+            group_index: None,
+        };
+
+        assert!(!nodes_overlap(&left, &right));
     }
 
     #[test]

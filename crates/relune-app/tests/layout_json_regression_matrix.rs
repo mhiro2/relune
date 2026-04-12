@@ -3,6 +3,7 @@
 use relune_app::{
     ExportFormat, ExportRequest, InputSource, LayoutDirection, LayoutSpec, RouteStyle, export,
 };
+use relune_core::{GroupingSpec, GroupingStrategy, LayoutAlgorithm};
 use relune_testkit::{
     assert_directional_layout_invariants, assert_layout_geometry, compact_layout_snapshot,
     layout_regression_fixture_names, parse_layout_json, sql_fixture_path,
@@ -20,6 +21,8 @@ const EDGE_STYLES: &[(RouteStyle, &str)] = &[
     (RouteStyle::Orthogonal, "orthogonal"),
     (RouteStyle::Curved, "curved"),
 ];
+
+const MIN_FORCE_CONNECTED_NODE_GAP: f32 = 56.0;
 
 fn export_layout_fixture(
     fixture_name: &str,
@@ -74,6 +77,33 @@ fn export_layout_request(request: ExportRequest) -> relune_layout::PositionedGra
     });
 
     parse_layout_json(&result.content)
+}
+
+fn rects_overlap(left: (f32, f32, f32, f32), right: (f32, f32, f32, f32)) -> bool {
+    left.0 < right.0 + right.2
+        && left.0 + left.2 > right.0
+        && left.1 < right.1 + right.3
+        && left.1 + left.3 > right.1
+}
+
+fn rect_axis_gap(left: (f32, f32, f32, f32), right: (f32, f32, f32, f32)) -> (f32, f32) {
+    let gap_x = if left.0 + left.2 <= right.0 {
+        right.0 - (left.0 + left.2)
+    } else if right.0 + right.2 <= left.0 {
+        left.0 - (right.0 + right.2)
+    } else {
+        -((left.0 + left.2).min(right.0 + right.2) - left.0.max(right.0))
+    };
+
+    let gap_y = if left.1 + left.3 <= right.1 {
+        right.1 - (left.1 + left.3)
+    } else if right.1 + right.3 <= left.1 {
+        left.1 - (right.1 + right.3)
+    } else {
+        -((left.1 + left.3).min(right.1 + right.3) - left.1.max(right.1))
+    };
+
+    (gap_x, gap_y)
 }
 
 fn fixture_slug(fixture_name: &str) -> &str {
@@ -205,6 +235,108 @@ fn layout_parallel_edge_spacing_holds_for_matrix() {
             assert_directional_layout_invariants(&graph, *direction);
         }
     }
+}
+
+fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirection) {
+    let graph = export_layout_request(ExportRequest {
+        input: InputSource::sql_file(sql_fixture_path("ecommerce.sql")),
+        format: ExportFormat::LayoutJson,
+        grouping: GroupingSpec {
+            strategy: GroupingStrategy::ByPrefix,
+        },
+        layout: LayoutSpec {
+            algorithm: LayoutAlgorithm::ForceDirected,
+            direction,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    for (index, node) in graph.nodes.iter().enumerate() {
+        for other in graph.nodes.iter().skip(index + 1) {
+            assert!(
+                !rects_overlap(
+                    (node.x, node.y, node.width, node.height),
+                    (other.x, other.y, other.width, other.height),
+                ),
+                "force-directed ecommerce nodes overlap: {} and {}",
+                node.id,
+                other.id
+            );
+        }
+    }
+
+    for (group_idx, group) in graph.groups.iter().enumerate() {
+        for node in &graph.nodes {
+            if node.group_index == Some(group_idx) {
+                continue;
+            }
+            assert!(
+                !rects_overlap(
+                    (group.x, group.y, group.width, group.height),
+                    (node.x, node.y, node.width, node.height),
+                ),
+                "force-directed ecommerce group {} overlaps node {}",
+                group.label,
+                node.id
+            );
+        }
+    }
+
+    let orders = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "orders")
+        .expect("orders node");
+    let order_items = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "order_items")
+        .expect("order_items node");
+    let (orders_gap_x, orders_gap_y) = rect_axis_gap(
+        (orders.x, orders.y, orders.width, orders.height),
+        (
+            order_items.x,
+            order_items.y,
+            order_items.width,
+            order_items.height,
+        ),
+    );
+    assert!(
+        orders_gap_y >= MIN_FORCE_CONNECTED_NODE_GAP
+            || orders_gap_x >= MIN_FORCE_CONNECTED_NODE_GAP,
+        "orders and order_items are too close: gap_x={orders_gap_x}, gap_y={orders_gap_y}"
+    );
+
+    let customers = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "customers")
+        .expect("customers node");
+    let addresses = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "addresses")
+        .expect("addresses node");
+    let (customers_gap_x, customers_gap_y) = rect_axis_gap(
+        (customers.x, customers.y, customers.width, customers.height),
+        (addresses.x, addresses.y, addresses.width, addresses.height),
+    );
+    assert!(
+        customers_gap_y >= MIN_FORCE_CONNECTED_NODE_GAP
+            || customers_gap_x >= MIN_FORCE_CONNECTED_NODE_GAP,
+        "customers and addresses are too close: gap_x={customers_gap_x}, gap_y={customers_gap_y}"
+    );
+}
+
+#[test]
+fn layout_force_directed_prefix_grouping_ecommerce_avoids_overlaps() {
+    assert_force_directed_prefix_grouping_ecommerce_layout(LayoutDirection::TopToBottom);
+}
+
+#[test]
+fn layout_force_directed_prefix_grouping_ecommerce_left_to_right_preserves_edge_margin() {
+    assert_force_directed_prefix_grouping_ecommerce_layout(LayoutDirection::LeftToRight);
 }
 
 #[test]

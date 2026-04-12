@@ -964,23 +964,20 @@ impl LayoutGraphBuilder {
     /// Group nodes by table name prefix.
     #[allow(clippy::unused_self)]
     fn group_by_prefix(&self, nodes: &[LayoutNode]) -> Vec<LayoutGroup> {
-        // Extract common prefixes (e.g., "user_", "order_", etc.)
-        let mut prefix_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-
-        for (idx, node) in nodes.iter().enumerate() {
-            let prefix = extract_prefix(&node.table_name);
-            prefix_groups.entry(prefix).or_default().push(idx);
-        }
-
-        prefix_groups
-            .into_iter()
-            .enumerate()
-            .map(|(group_idx, (prefix, node_indices))| LayoutGroup {
-                id: format!("prefix_{group_idx}"),
-                label: prefix,
-                node_indices,
-            })
-            .collect()
+        build_prefix_groups(
+            &nodes
+                .iter()
+                .map(|node| node.table_name.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .into_iter()
+        .enumerate()
+        .map(|(group_idx, (label, node_indices))| LayoutGroup {
+            id: format!("prefix_{group_idx}"),
+            label,
+            node_indices,
+        })
+        .collect()
     }
 }
 
@@ -1002,21 +999,149 @@ fn matches_pattern(pattern: &str, value: &str) -> bool {
     value == pattern
 }
 
-/// Extract a prefix from a table name (e.g., "`user_profile`" -> "user_").
-fn extract_prefix(name: &str) -> String {
-    // Try to find common delimiter patterns
-    if let Some(underscore_pos) = name.find('_')
-        && underscore_pos > 0
-    {
-        return format!("{}_", &name[..underscore_pos]);
+fn build_prefix_groups(names: &[&str]) -> Vec<(String, Vec<usize>)> {
+    if names.len() < 2 {
+        return Vec::new();
     }
 
-    // Fall back to first 3 characters or full name
-    if name.len() > 6 {
-        format!("{}...", &name[..3])
-    } else {
-        name.to_string()
+    let mut adjacency = vec![Vec::new(); names.len()];
+    for left in 0..names.len() {
+        for right in (left + 1)..names.len() {
+            if shared_group_prefix(names[left], names[right]).is_some() {
+                adjacency[left].push(right);
+                adjacency[right].push(left);
+            }
+        }
     }
+
+    let mut visited = vec![false; names.len()];
+    let mut groups = Vec::new();
+
+    for start in 0..names.len() {
+        if visited[start] || adjacency[start].is_empty() {
+            continue;
+        }
+
+        let mut stack = vec![start];
+        let mut component = Vec::new();
+
+        while let Some(current) = stack.pop() {
+            if visited[current] {
+                continue;
+            }
+            visited[current] = true;
+            component.push(current);
+            for &next in &adjacency[current] {
+                if !visited[next] {
+                    stack.push(next);
+                }
+            }
+        }
+
+        component.sort_unstable();
+
+        let component_names = component
+            .iter()
+            .map(|&index| names[index])
+            .collect::<Vec<_>>();
+        if let Some(label) = component_group_prefix(&component_names) {
+            groups.push((label, component));
+        }
+    }
+
+    groups.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    groups
+}
+
+fn shared_group_prefix(left: &str, right: &str) -> Option<String> {
+    let raw_prefix = common_prefix(left, right);
+    if raw_prefix.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<String> = trim_prefix_to_boundary(raw_prefix);
+    if is_terminal_group_prefix(raw_prefix, left, right) {
+        best = match best {
+            Some(candidate) if candidate.len() >= raw_prefix.len() => Some(candidate),
+            _ => Some(raw_prefix.to_string()),
+        };
+    }
+
+    best.filter(|prefix| is_meaningful_group_prefix(prefix))
+}
+
+fn component_group_prefix(names: &[&str]) -> Option<String> {
+    let (first, rest) = names.split_first()?;
+    let mut raw_prefix = (*first).to_string();
+
+    for name in rest {
+        let common_len = common_prefix(raw_prefix.as_str(), name).len();
+        raw_prefix.truncate(common_len);
+        if raw_prefix.is_empty() {
+            return None;
+        }
+    }
+
+    let mut best = trim_prefix_to_boundary(&raw_prefix);
+    if names
+        .iter()
+        .all(|name| matches_group_prefix(name, raw_prefix.as_str()))
+    {
+        best = match best {
+            Some(candidate) if candidate.len() >= raw_prefix.len() => Some(candidate),
+            _ => Some(raw_prefix),
+        };
+    }
+
+    best.filter(|prefix| is_meaningful_group_prefix(prefix))
+}
+
+fn common_prefix<'a>(left: &'a str, right: &str) -> &'a str {
+    let mut end = 0;
+    let mut right_chars = right.chars();
+
+    for (idx, ch) in left.char_indices() {
+        match right_chars.next() {
+            Some(other) if other == ch => {
+                end = idx + ch.len_utf8();
+            }
+            _ => break,
+        }
+    }
+
+    &left[..end]
+}
+
+fn trim_prefix_to_boundary(prefix: &str) -> Option<String> {
+    prefix
+        .rfind('_')
+        .and_then(|index| (index > 0).then(|| prefix[..=index].to_string()))
+}
+
+fn matches_group_prefix(name: &str, prefix: &str) -> bool {
+    if let Some(rest) = name.strip_prefix(prefix) {
+        return has_group_boundary(rest);
+    }
+
+    false
+}
+
+fn is_terminal_group_prefix(prefix: &str, left: &str, right: &str) -> bool {
+    matches_group_prefix(left, prefix) && matches_group_prefix(right, prefix)
+}
+
+fn has_group_boundary(rest: &str) -> bool {
+    match rest.chars().next() {
+        None | Some('_') => true,
+        Some('s') => rest
+            .strip_prefix('s')
+            .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('_')),
+        Some(_) => false,
+    }
+}
+
+fn is_meaningful_group_prefix(prefix: &str) -> bool {
+    prefix.chars().filter(|ch| ch.is_alphanumeric()).count() >= 2
 }
 
 #[cfg(test)]
@@ -1035,10 +1160,46 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_prefix() {
-        assert_eq!(extract_prefix("user_profile"), "user_");
-        assert_eq!(extract_prefix("order_items"), "order_");
-        assert_eq!(extract_prefix("abc"), "abc");
+    fn test_shared_group_prefix() {
+        assert_eq!(
+            shared_group_prefix("product", "product_categories"),
+            Some("product".to_string())
+        );
+        assert_eq!(
+            shared_group_prefix("orders", "order_items"),
+            Some("order".to_string())
+        );
+        assert_eq!(
+            shared_group_prefix("user_profile", "user_preferences"),
+            Some("user_".to_string())
+        );
+        assert_eq!(shared_group_prefix("product", "program"), None);
+    }
+
+    #[test]
+    fn test_build_prefix_groups_uses_shared_prefix_components() {
+        let groups = build_prefix_groups(&[
+            "product",
+            "product_categories",
+            "orders",
+            "order_items",
+            "audit_logs",
+        ]);
+
+        assert_eq!(
+            groups,
+            vec![
+                ("order".to_string(), vec![2, 3]),
+                ("product".to_string(), vec![0, 1]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_prefix_groups_keeps_broader_shared_component() {
+        let groups = build_prefix_groups(&["users", "user_profile", "user_preferences"]);
+
+        assert_eq!(groups, vec![("user".to_string(), vec![0, 1, 2])]);
     }
 
     #[test]
