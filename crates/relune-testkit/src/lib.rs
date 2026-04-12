@@ -221,11 +221,15 @@ pub fn assert_layout_geometry(graph: &PositionedGraph) {
         assert_endpoint_on_perimeter(source, (edge.route.x1, edge.route.y1), "source", edge);
         assert_endpoint_on_perimeter(target, (edge.route.x2, edge.route.y2), "target", edge);
 
-        for node in &graph.nodes {
-            if node.id == edge.from || node.id == edge.to {
-                continue;
+        // Straight-style routes are direct lines that may naturally cross
+        // through intermediate nodes; only check orthogonal/curved routes.
+        if edge.route.style != relune_core::layout::RouteStyle::Straight {
+            for node in &graph.nodes {
+                if node.id == edge.from || node.id == edge.to {
+                    continue;
+                }
+                assert_route_stays_outside_node(edge, node, "non-endpoint");
             }
-            assert_route_stays_outside_node(edge, node, "non-endpoint");
         }
 
         if edge.is_self_loop {

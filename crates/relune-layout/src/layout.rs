@@ -119,7 +119,7 @@ impl Default for LayoutConfig {
             header_height: 32.0,
             node_padding: 8.0,
             direction: LayoutDirection::TopToBottom,
-            edge_style: RouteStyle::Straight,
+            edge_style: RouteStyle::Orthogonal,
             show_columns: true,
             mode: LayoutAlgorithm::default(),
             force_iterations: default_force_iterations(),

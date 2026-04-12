@@ -263,22 +263,42 @@ fn build_backbone_route(
     target_side: AttachmentSide,
     style: RouteStyle,
 ) -> EdgeRoute {
-    let (control_points, _) = orthogonal_control_points(source, target, source_side, target_side);
+    match style {
+        RouteStyle::Straight => {
+            // Direct line from source to target — no intermediate control points.
+            EdgeRoute {
+                x1: source.0,
+                y1: source.1,
+                x2: target.0,
+                y2: target.1,
+                control_points: Vec::new(),
+                style,
+                label_position: (
+                    f32::midpoint(source.0, target.0),
+                    f32::midpoint(source.1, target.1),
+                ),
+            }
+        }
+        RouteStyle::Orthogonal | RouteStyle::Curved => {
+            let (control_points, _) =
+                orthogonal_control_points(source, target, source_side, target_side);
 
-    let mut points = Vec::with_capacity(control_points.len() + 2);
-    points.push(source);
-    points.extend(control_points);
-    points.push(target);
-    let points = simplify_orthogonal_path(&points);
+            let mut points = Vec::with_capacity(control_points.len() + 2);
+            points.push(source);
+            points.extend(control_points);
+            points.push(target);
+            let points = simplify_orthogonal_path(&points);
 
-    EdgeRoute {
-        x1: points[0].0,
-        y1: points[0].1,
-        x2: points[points.len() - 1].0,
-        y2: points[points.len() - 1].1,
-        control_points: points[1..points.len() - 1].to_vec(),
-        style,
-        label_position: polyline_midpoint(&points),
+            EdgeRoute {
+                x1: points[0].0,
+                y1: points[0].1,
+                x2: points[points.len() - 1].0,
+                y2: points[points.len() - 1].1,
+                control_points: points[1..points.len() - 1].to_vec(),
+                style,
+                label_position: polyline_midpoint(&points),
+            }
+        }
     }
 }
 
@@ -502,7 +522,8 @@ mod tests {
         );
 
         assert_eq!(route.style, RouteStyle::Straight);
-        assert_eq!(route.control_points.len(), 2);
+        // Straight routes are direct lines with no intermediate control points.
+        assert!(route.control_points.is_empty());
         assert_eq!(route.x1, 100.0 + BORDER_OUTSET); // Right edge of source + outset
         assert_eq!(route.x2, 200.0 - BORDER_OUTSET); // Left edge of target - outset
     }
@@ -1021,6 +1042,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_route_geometries_match_across_render_styles() {
         let straight = route_edge(
             0.0,
@@ -1056,10 +1078,16 @@ mod tests {
             RouteStyle::Curved,
         );
 
-        assert_eq!(straight.control_points, orthogonal.control_points);
+        // Straight is a direct line (no control points), while orthogonal and
+        // curved share the same underlying backbone control points.
+        assert!(straight.control_points.is_empty());
         assert_eq!(orthogonal.control_points, curved.control_points);
-        assert_eq!(straight.label_position, orthogonal.label_position);
-        assert_eq!(orthogonal.label_position, curved.label_position);
+        assert!(!orthogonal.control_points.is_empty());
+        // Endpoints are the same across all three styles.
+        assert_eq!(straight.x1, orthogonal.x1);
+        assert_eq!(straight.x2, orthogonal.x2);
+        assert_eq!(orthogonal.x1, curved.x1);
+        assert_eq!(orthogonal.x2, curved.x2);
     }
 
     #[test]

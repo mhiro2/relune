@@ -213,17 +213,18 @@ fn layout_route_backbone_is_consistent_across_edge_styles() {
 
     for fixture_name in fixtures {
         for (direction, _) in DIRECTIONS {
-            let baseline = export_layout_fixture(fixture_name, *direction, RouteStyle::Straight);
+            // Orthogonal and Curved share the same backbone control points;
+            // Straight uses direct lines (no control points) so it is
+            // intentionally different.
+            let baseline = export_layout_fixture(fixture_name, *direction, RouteStyle::Orthogonal);
             let baseline = layout_snapshot_without_route_style(&baseline);
 
-            for (edge_style, _) in &EDGE_STYLES[1..] {
-                let candidate = export_layout_fixture(fixture_name, *direction, *edge_style);
-                let candidate = layout_snapshot_without_route_style(&candidate);
-                assert_eq!(
-                    baseline, candidate,
-                    "route backbone changed for fixture {fixture_name} in direction {direction:?} when rendering as {edge_style:?}"
-                );
-            }
+            let curved = export_layout_fixture(fixture_name, *direction, RouteStyle::Curved);
+            let curved = layout_snapshot_without_route_style(&curved);
+            assert_eq!(
+                baseline, curved,
+                "route backbone changed for fixture {fixture_name} in direction {direction:?} when rendering as Curved"
+            );
         }
     }
 }

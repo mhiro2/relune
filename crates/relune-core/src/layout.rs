@@ -29,10 +29,10 @@ impl Cardinality {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RouteStyle {
-    /// Prefer a single segment when the routed backbone has no bends.
-    #[default]
+    /// Direct line from source to target with no intermediate control points.
     Straight,
     /// Render the routed backbone as an axis-aligned polyline.
+    #[default]
     Orthogonal,
     /// Render the routed backbone as a smoothed path.
     Curved,

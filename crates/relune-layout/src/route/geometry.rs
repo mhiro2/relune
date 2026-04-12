@@ -23,14 +23,25 @@ pub(crate) fn rebuild_route_from_points(points: &[(f32, f32)], style: RouteStyle
     let start = points.first().copied().unwrap_or((0.0, 0.0));
     let end = points.last().copied().unwrap_or(start);
 
-    EdgeRoute {
-        x1: start.0,
-        y1: start.1,
-        x2: end.0,
-        y2: end.1,
-        control_points: points[1..points.len().saturating_sub(1)].to_vec(),
-        style,
-        label_position: polyline_midpoint(&points),
+    match style {
+        RouteStyle::Straight => EdgeRoute {
+            x1: start.0,
+            y1: start.1,
+            x2: end.0,
+            y2: end.1,
+            control_points: Vec::new(),
+            style,
+            label_position: (f32::midpoint(start.0, end.0), f32::midpoint(start.1, end.1)),
+        },
+        RouteStyle::Orthogonal | RouteStyle::Curved => EdgeRoute {
+            x1: start.0,
+            y1: start.1,
+            x2: end.0,
+            y2: end.1,
+            control_points: points[1..points.len().saturating_sub(1)].to_vec(),
+            style,
+            label_position: polyline_midpoint(&points),
+        },
     }
 }
 

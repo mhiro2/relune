@@ -345,16 +345,7 @@ expression: snapshot
     "straight": {
       "edges": [
         {
-          "control_points": [
-            [
-              1112.0,
-              139.0
-            ],
-            [
-              1112.0,
-              105.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             970.0,
             105.0
@@ -365,8 +356,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1103.926025390625,
-          "label_y": 93.08499908447266,
+          "label_x": 1180.14697265625,
+          "label_y": 154.3300018310547,
           "nullable": false,
           "route_label_position": [
             1112.0,
@@ -386,16 +377,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              801.5,
-              125.0
-            ],
-            [
-              801.5,
-              98.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             349.0,
             98.0
@@ -406,8 +388,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 543.1669921875,
-          "label_y": 98.0,
+          "label_x": 537.9000244140625,
+          "label_y": 91.62999725341797,
           "nullable": false,
           "route_label_position": [
             801.5,
@@ -427,16 +409,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              491.0,
-              123.0
-            ],
-            [
-              491.0,
-              112.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             349.0,
             112.0
@@ -447,8 +420,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 510.0830078125,
-          "label_y": 123.0,
+          "label_x": 561.5360107421875,
+          "label_y": 132.24099731445313,
           "nullable": false,
           "route_label_position": [
             491.0,
