@@ -36,7 +36,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install wasm-pack
-        uses: taiki-e/install-action@899b013517f9e7774591216672bf75a46bb9a481 # v2.9.4
+        uses: taiki-e/install-action@0abfcd587b70a713fdaa7fb502c885e2112acb15 # v2.75.7
         with:
           tool: wasm-pack
       - name: Install pnpm
