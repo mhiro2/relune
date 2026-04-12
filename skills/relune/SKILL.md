@@ -94,7 +94,7 @@ relune render --db-url 'postgres://user:pass@localhost:5432/mydb' -o erd.svg
 | `-f`, `--format` | `svg`, `html`, `graph-json`, `schema-json` | `svg` |
 | `-o`, `--out` | Output file path | stdout (requires `--stdout` on terminals) |
 | `--layout` | `hierarchical`, `force-directed` | `hierarchical` |
-| `--edge-style` | `straight`, `orthogonal`, `curved` | `straight` |
+| `--edge-style` | `straight`, `orthogonal`, `curved` | `orthogonal` |
 | `--direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` | `top-to-bottom` |
 | `--theme` | `light`, `dark` | `light` |
 | `--focus` | Table name to center on | -- |
