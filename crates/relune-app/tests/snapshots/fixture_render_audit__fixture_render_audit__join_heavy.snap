@@ -6,17 +6,17 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   "fixture": "join_heavy.sql",
   "layout": {
     "edge_count": 40,
-    "height": 1590.0,
+    "height": 1482.0,
     "node_count": 23,
-    "width": 6905.0
+    "width": 4228.0
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 2,
+      "count_over_1_8x": 1,
       "worst_examples": [
-        "projects[tenant_id] -> tenants[id] (1.89x)",
-        "tasks[assignee_id] -> users[id] (1.83x)",
-        "tasks[reporter_id] -> users[id] (1.76x)"
+        "project_watchers[user_id] -> users[id] (1.85x)",
+        "project_teams[team_id] -> teams[id] (1.70x)",
+        "projects[tenant_id] -> tenants[id] (1.65x)"
       ]
     },
     "parallel_groups": {
@@ -29,33 +29,37 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       "max_size": 2
     },
     "reverse_edges": {
-      "count": 0,
-      "examples": []
+      "count": 39,
+      "examples": [
+        "activities[actor_id] -> users[id] (rank 2 -> 1, bends 2)",
+        "activities[tenant_id] -> tenants[id] (rank 2 -> 0, bends 4)",
+        "attachments[tenant_id] -> tenants[id] (rank 2 -> 0, bends 4)"
+      ]
     },
     "same_rank_edges": {
       "count": 1,
       "examples": [
-        "comments[parent_id] -> comments[id] (rank 0 -> 0, bends 2)"
+        "comments[parent_id] -> comments[id] (rank 2 -> 2, bends 2)"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 2,
+      "count_under_24px": 6,
       "worst_examples": [
-        "role_permissions[permission_id] -> permissions[id] (16.0px)",
-        "task_watchers[task_id] -> tasks[id] (16.0px)",
-        "project_integrations[project_id] -> projects[id] (24.0px)"
+        "attachments[uploader_id] -> users[id] (16.0px)",
+        "comments[author_id] -> users[id] (16.0px)",
+        "project_watchers[project_id] -> projects[id] (16.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 585683,
+      "bytes": 585399,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 211880,
+      "bytes": 211596,
       "edge_groups": 320,
       "node_groups": 23
     }

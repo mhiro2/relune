@@ -21,7 +21,7 @@ mod theme;
 pub use edge::{EdgeRenderOptions, render_edge};
 pub use error::SvgRenderError;
 pub use geometry::{Point, Rect, clamp, compute_column_y, compute_node_height, lerp};
-pub use group::render_group;
+pub use group::{render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
@@ -63,9 +63,9 @@ pub fn render_svg_with_overlay(
     )?;
     out.push_str(r#"<rect width="100%" height="100%" fill="url(#canvas-grid)" opacity="0.92"/>"#);
 
-    // Render groups FIRST (behind nodes and edges)
+    // Render group shells behind nodes and edges.
     for group in &graph.groups {
-        render_group(&mut out, group, &colors)?;
+        render_group_background(&mut out, group, &colors)?;
     }
 
     // Render edges with enhanced options
@@ -90,6 +90,12 @@ pub fn render_svg_with_overlay(
             index,
             node_overlay,
         )?;
+    }
+
+    // Render group labels after nodes so schema titles remain readable even
+    // when force-directed groups pack tightly.
+    for group in &graph.groups {
+        render_group_label(&mut out, group, &colors)?;
     }
 
     // Render legend if requested
@@ -1529,6 +1535,24 @@ mod tests {
         assert!(
             group_pos < node_pos,
             "Groups should be rendered before nodes"
+        );
+    }
+
+    #[test]
+    fn test_render_svg_group_labels_after_nodes() {
+        let graph = layout_graph_with_groups();
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+
+        let node_pos = svg
+            .find("data-table-id=\"users\"")
+            .expect("Node should exist");
+        let label_pos = svg
+            .rfind("class=\"group-label\"")
+            .expect("Group label should exist");
+
+        assert!(
+            node_pos < label_pos,
+            "Group labels should be rendered after nodes"
         );
     }
 

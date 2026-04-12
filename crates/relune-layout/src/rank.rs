@@ -150,10 +150,10 @@ fn assign_ranks_via_components(graph: &LayoutGraph) -> RankAssignment {
         ) {
             let from_component = scc.component_of[from_idx];
             let to_component = scc.component_of[to_idx];
-            if from_component != to_component && !adjacency[from_component].contains(&to_component)
+            if from_component != to_component && !adjacency[to_component].contains(&from_component)
             {
-                adjacency[from_component].push(to_component);
-                in_degree[to_component] += 1;
+                adjacency[to_component].push(from_component);
+                in_degree[from_component] += 1;
             }
         }
     }
@@ -387,16 +387,16 @@ mod tests {
             .map(|(idx, node)| (node.id.as_str(), ranks.node_rank[idx]))
             .collect();
 
-        // The FK chain is: c -> b -> a (FK edges point from source to referenced table)
-        // Topological sort gives rank 0 to nodes with no incoming edges
-        // So c has rank 0, b has rank 1, a has rank 2
+        // The FK chain is: c -> b -> a (FK edges point from child to referenced parent)
+        // Parent tables get lower ranks so they appear first in the layout direction.
+        // So a has rank 0, b has rank 1, c has rank 2
         let a_rank = *node_ranks.get("a").unwrap();
         let b_rank = *node_ranks.get("b").unwrap();
         let c_rank = *node_ranks.get("c").unwrap();
 
-        assert_eq!(c_rank, 0); // c has no incoming FK edges
-        assert_eq!(b_rank, 1); // b is referenced by c
-        assert_eq!(a_rank, 2); // a is referenced by b
+        assert_eq!(a_rank, 0); // a is the root parent
+        assert_eq!(b_rank, 1); // b references a
+        assert_eq!(c_rank, 2); // c references b
         assert_eq!(ranks.num_ranks, 3);
     }
 

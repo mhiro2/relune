@@ -1,6 +1,5 @@
 ---
 source: crates/relune-cli/tests/snapshot_tests.rs
-assertion_line: 27
 expression: stdout
 ---
 Render an ERD from SQL, schema JSON, or database metadata
@@ -105,7 +104,7 @@ Options:
           Edge routing style
 
           Possible values:
-          - straight:   Single straight segment between nodes
+          - straight:   Direct line from source to target
           - orthogonal: Axis-aligned orthogonal polyline
           - curved:     Cubic curved edge
 

@@ -261,10 +261,10 @@ impl From<LayoutAlgorithmArg> for relune_core::LayoutAlgorithm {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EdgeStyleArg {
-    /// Single straight segment between nodes.
-    #[default]
+    /// Direct line from source to target.
     Straight,
     /// Axis-aligned orthogonal polyline.
+    #[default]
     Orthogonal,
     /// Cubic curved edge.
     Curved,

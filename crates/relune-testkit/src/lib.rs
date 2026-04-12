@@ -221,11 +221,15 @@ pub fn assert_layout_geometry(graph: &PositionedGraph) {
         assert_endpoint_on_perimeter(source, (edge.route.x1, edge.route.y1), "source", edge);
         assert_endpoint_on_perimeter(target, (edge.route.x2, edge.route.y2), "target", edge);
 
-        for node in &graph.nodes {
-            if node.id == edge.from || node.id == edge.to {
-                continue;
+        // Straight-style routes are direct lines that may naturally cross
+        // through intermediate nodes; only check orthogonal/curved routes.
+        if edge.route.style != relune_core::layout::RouteStyle::Straight {
+            for node in &graph.nodes {
+                if node.id == edge.from || node.id == edge.to {
+                    continue;
+                }
+                assert_route_stays_outside_node(edge, node, "non-endpoint");
             }
-            assert_route_stays_outside_node(edge, node, "non-endpoint");
         }
 
         if edge.is_self_loop {
@@ -742,11 +746,13 @@ fn assert_side_policy(
 }
 
 const fn expected_primary_sides(direction: LayoutDirection) -> (EndpointSide, EndpointSide) {
+    // FK edges go from child to parent (against the hierarchy direction),
+    // so the source exits on the side facing the parent (upstream).
     match direction {
-        LayoutDirection::TopToBottom => (EndpointSide::South, EndpointSide::North),
-        LayoutDirection::BottomToTop => (EndpointSide::North, EndpointSide::South),
-        LayoutDirection::LeftToRight => (EndpointSide::East, EndpointSide::West),
-        LayoutDirection::RightToLeft => (EndpointSide::West, EndpointSide::East),
+        LayoutDirection::TopToBottom => (EndpointSide::North, EndpointSide::South),
+        LayoutDirection::BottomToTop => (EndpointSide::South, EndpointSide::North),
+        LayoutDirection::LeftToRight => (EndpointSide::West, EndpointSide::East),
+        LayoutDirection::RightToLeft => (EndpointSide::East, EndpointSide::West),
     }
 }
 
@@ -819,9 +825,11 @@ fn assert_route_monotonicity(graph: &PositionedGraph, direction: LayoutDirection
 
         for sample in samples.iter().skip(1) {
             let current = axis_value(*sample, direction);
+            // FK edges flow from child to parent (against the hierarchy direction),
+            // so coordinates move opposite to the layout direction.
             match direction {
                 LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => assert!(
-                    current + MONOTONICITY_TOLERANCE >= previous,
+                    current - MONOTONICITY_TOLERANCE <= previous,
                     "edge {} -> {} backtracks for {:?}: {} -> {}",
                     edge.from,
                     edge.to,
@@ -830,7 +838,7 @@ fn assert_route_monotonicity(graph: &PositionedGraph, direction: LayoutDirection
                     round_f32(current),
                 ),
                 LayoutDirection::BottomToTop | LayoutDirection::RightToLeft => assert!(
-                    current - MONOTONICITY_TOLERANCE <= previous,
+                    current + MONOTONICITY_TOLERANCE >= previous,
                     "edge {} -> {} backtracks for {:?}: {} -> {}",
                     edge.from,
                     edge.to,
