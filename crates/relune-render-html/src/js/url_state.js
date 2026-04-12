@@ -130,10 +130,13 @@
       const newHash = str === "" ? "" : `#${str}`;
       if (newHash !== location.hash && newHash !== "#") {
         const url = newHash || location.pathname + location.search;
-        if (pendingPush && !restoringFromPopstate) {
-          history.pushState(null, "", url);
-        } else {
-          history.replaceState(null, "", url);
+        try {
+          if (pendingPush && !restoringFromPopstate) {
+            history.pushState(null, "", url);
+          } else {
+            history.replaceState(null, "", url);
+          }
+        } catch {
         }
       }
       pendingPush = false;
