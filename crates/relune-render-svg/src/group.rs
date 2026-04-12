@@ -17,6 +17,16 @@ pub fn render_group(
     group: &PositionedGroup,
     colors: &ThemeColors,
 ) -> fmt::Result {
+    render_group_background(out, group, colors)?;
+    render_group_label(out, group, colors)
+}
+
+/// Renders the background shell for a group.
+pub fn render_group_background(
+    out: &mut String,
+    group: &PositionedGroup,
+    colors: &ThemeColors,
+) -> fmt::Result {
     // Skip rendering if group has zero dimensions
     if group.width <= 0.0 || group.height <= 0.0 {
         return Ok(());
@@ -44,7 +54,20 @@ pub fn render_group(
         colors.group_stroke
     )?;
 
-    // Render the group label at top-left inside the group
+    Ok(())
+}
+
+/// Renders the foreground label for a group.
+pub fn render_group_label(
+    out: &mut String,
+    group: &PositionedGroup,
+    colors: &ThemeColors,
+) -> fmt::Result {
+    if group.width <= 0.0 || group.height <= 0.0 {
+        return Ok(());
+    }
+
+    // Render the group label at top-left inside the group.
     if !group.label.is_empty() {
         write!(
             out,
@@ -66,6 +89,16 @@ mod tests {
 
     fn render_group_ok(out: &mut String, group: &PositionedGroup, colors: &ThemeColors) {
         render_group(out, group, colors).expect("group rendering should succeed in tests");
+    }
+
+    fn render_group_background_ok(out: &mut String, group: &PositionedGroup, colors: &ThemeColors) {
+        render_group_background(out, group, colors)
+            .expect("group background rendering should succeed in tests");
+    }
+
+    fn render_group_label_ok(out: &mut String, group: &PositionedGroup, colors: &ThemeColors) {
+        render_group_label(out, group, colors)
+            .expect("group label rendering should succeed in tests");
     }
 
     fn test_colors() -> ThemeColors {
@@ -131,6 +164,44 @@ mod tests {
 
         assert!(out.contains("class=\"group-box\""));
         assert!(!out.contains("class=\"group-label\""));
+    }
+
+    #[test]
+    fn test_render_group_background_omits_label() {
+        let group = PositionedGroup {
+            id: "background_only".to_string(),
+            label: "Background Only".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+
+        let colors = test_colors();
+        let mut out = String::new();
+        render_group_background_ok(&mut out, &group, &colors);
+
+        assert!(out.contains("class=\"group-box\""));
+        assert!(!out.contains("class=\"group-label\""));
+    }
+
+    #[test]
+    fn test_render_group_label_only_emits_text() {
+        let group = PositionedGroup {
+            id: "label_only".to_string(),
+            label: "Label Only".to_string(),
+            x: 10.0,
+            y: 10.0,
+            width: 120.0,
+            height: 80.0,
+        };
+
+        let colors = test_colors();
+        let mut out = String::new();
+        render_group_label_ok(&mut out, &group, &colors);
+
+        assert!(out.contains("class=\"group-label\""));
+        assert!(!out.contains("class=\"group-box\""));
     }
 
     #[test]

@@ -60,6 +60,12 @@ const BYPASS_CHANNEL_MARGIN: f32 = 24.0;
 const BYPASS_CHANNEL_LANE_STEP: f32 = 48.0;
 /// Additional bypass lanes explored beyond the first outer lane on each side.
 const BYPASS_CHANNEL_EXTRA_LANES: usize = 3;
+/// Horizontal padding around grouped nodes.
+const GROUP_PADDING: f32 = 20.0;
+/// Extra top inset reserved for the rendered group label band.
+const GROUP_TOP_PADDING: f32 = 44.0;
+/// Minimum gap preserved between packed force-directed groups.
+const FORCE_GROUP_GAP: f32 = 28.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -1127,6 +1133,10 @@ fn apply_force_layout(
     // by the overlap resolution cascade.
     compact_toward_neighbours(&mut positions, node_sizes, &edges, config);
 
+    // Grouped force-directed layouts need an explicit packing pass so schema
+    // containers do not overlap and cover each other's label bands.
+    separate_force_groups(graph, &mut positions, node_sizes, config);
+
     // Calculate bounding box and shift to positive coordinates
     let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
     let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);
@@ -1685,6 +1695,140 @@ fn compact_toward_neighbours(
 
         // Re-resolve any overlaps introduced by compaction.
         resolve_force_overlaps(positions, node_sizes, config.node_padding);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GroupBounds {
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn separate_force_groups(
+    graph: &LayoutGraph,
+    positions: &mut [(f32, f32)],
+    node_sizes: &[NodeSize],
+    config: &LayoutConfig,
+) {
+    if graph.groups.len() < 2 {
+        return;
+    }
+
+    let is_horizontal = matches!(
+        config.direction,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+    );
+    let mut packed_groups = graph
+        .groups
+        .iter()
+        .enumerate()
+        .filter_map(|(group_idx, group)| {
+            force_group_bounds(group, positions, node_sizes).map(|bounds| (group_idx, bounds))
+        })
+        .collect::<Vec<_>>();
+
+    if packed_groups.len() < 2 {
+        return;
+    }
+
+    packed_groups.sort_by(|(left_idx, left_bounds), (right_idx, right_bounds)| {
+        let left_min = if is_horizontal {
+            left_bounds.min_y
+        } else {
+            left_bounds.min_x
+        };
+        let right_min = if is_horizontal {
+            right_bounds.min_y
+        } else {
+            right_bounds.min_x
+        };
+        left_min
+            .total_cmp(&right_min)
+            .then_with(|| left_idx.cmp(right_idx))
+    });
+
+    let mut previous_end = if is_horizontal {
+        packed_groups[0].1.max_y
+    } else {
+        packed_groups[0].1.max_x
+    };
+
+    for &(group_idx, bounds) in packed_groups.iter().skip(1) {
+        let current_min = if is_horizontal {
+            bounds.min_y
+        } else {
+            bounds.min_x
+        };
+        let required_min = previous_end + FORCE_GROUP_GAP;
+        if current_min < required_min {
+            let delta = required_min - current_min;
+            shift_force_group(graph, positions, group_idx, delta, is_horizontal);
+            previous_end = if is_horizontal {
+                bounds.max_y + delta
+            } else {
+                bounds.max_x + delta
+            };
+        } else {
+            previous_end = if is_horizontal {
+                bounds.max_y
+            } else {
+                bounds.max_x
+            };
+        }
+    }
+}
+
+fn force_group_bounds(
+    group: &crate::graph::LayoutGroup,
+    positions: &[(f32, f32)],
+    node_sizes: &[NodeSize],
+) -> Option<GroupBounds> {
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    let mut has_nodes = false;
+
+    for &node_idx in &group.node_indices {
+        let Some(&(x, y)) = positions.get(node_idx) else {
+            continue;
+        };
+        let Some(size) = node_sizes.get(node_idx) else {
+            continue;
+        };
+        has_nodes = true;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x + size.width);
+        max_y = max_y.max(y + size.height);
+    }
+
+    has_nodes.then_some(GroupBounds {
+        min_x: min_x - GROUP_PADDING,
+        max_x: max_x + GROUP_PADDING,
+        min_y: min_y - GROUP_TOP_PADDING,
+        max_y: max_y + GROUP_PADDING,
+    })
+}
+
+fn shift_force_group(
+    graph: &LayoutGraph,
+    positions: &mut [(f32, f32)],
+    group_idx: usize,
+    delta: f32,
+    is_horizontal: bool,
+) {
+    for &node_idx in &graph.groups[group_idx].node_indices {
+        if let Some((x, y)) = positions.get_mut(node_idx) {
+            if is_horizontal {
+                *y += delta;
+            } else {
+                *x += delta;
+            }
+        }
     }
 }
 
@@ -3566,11 +3710,6 @@ fn position_groups(
         return Vec::new();
     }
 
-    let padding = 20.0;
-    // Top padding reserves room for the group label band rendered by SVG/HTML
-    // backends so the band never overlaps the topmost node row.
-    let top_padding = 44.0;
-
     groups
         .iter()
         .map(|group| {
@@ -3619,10 +3758,10 @@ fn position_groups(
             PositionedGroup {
                 id: group.id.clone(),
                 label: group.label.clone(),
-                x: min_x - padding,
-                y: min_y - top_padding,
-                width: max_x - min_x + padding * 2.0,
-                height: max_y - min_y + top_padding + padding,
+                x: min_x - GROUP_PADDING,
+                y: min_y - GROUP_TOP_PADDING,
+                width: GROUP_PADDING.mul_add(2.0, max_x - min_x),
+                height: max_y - min_y + GROUP_TOP_PADDING + GROUP_PADDING,
             }
         })
         .collect()
@@ -4161,6 +4300,66 @@ mod tests {
                     !overlap,
                     "groups {} and {} overlap on X axis: [{:.1},{:.1}] vs [{:.1},{:.1}]",
                     a.id, b.id, a_left, a_right, b_left, b_right
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn force_grouped_layout_produces_disjoint_group_bboxes_on_y() {
+        use relune_core::{GroupingSpec, GroupingStrategy};
+
+        let schema = make_multi_schema_for_grouping();
+        let request = LayoutRequest {
+            grouping: GroupingSpec {
+                strategy: GroupingStrategy::BySchema,
+            },
+            ..LayoutRequest::default()
+        };
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::LeftToRight,
+            ..LayoutConfig::default()
+        };
+        let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+
+        for (i, a) in positioned.groups.iter().enumerate() {
+            for b in positioned.groups.iter().skip(i + 1) {
+                let overlap = a.y < b.y + b.height && b.y < a.y + a.height;
+                assert!(
+                    !overlap,
+                    "force-grouped layout produced overlapping Y ranges for {} and {}",
+                    a.id, b.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn force_grouped_layout_produces_disjoint_group_bboxes_on_x() {
+        use relune_core::{GroupingSpec, GroupingStrategy};
+
+        let schema = make_multi_schema_for_grouping();
+        let request = LayoutRequest {
+            grouping: GroupingSpec {
+                strategy: GroupingStrategy::BySchema,
+            },
+            ..LayoutRequest::default()
+        };
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::TopToBottom,
+            ..LayoutConfig::default()
+        };
+        let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+
+        for (i, a) in positioned.groups.iter().enumerate() {
+            for b in positioned.groups.iter().skip(i + 1) {
+                let overlap = a.x < b.x + b.width && b.x < a.x + a.width;
+                assert!(
+                    !overlap,
+                    "force-grouped layout produced overlapping X ranges for {} and {}",
+                    a.id, b.id
                 );
             }
         }
