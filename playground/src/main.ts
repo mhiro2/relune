@@ -99,6 +99,8 @@ const sidebar = getElement<HTMLElement>("sidebar");
 const sidebarHandle = getElement<HTMLElement>("sidebar-handle");
 const sidebarCollapseButton = getElement<HTMLButtonElement>("sidebar-collapse");
 const sidebarExpandButton = getElement<HTMLButtonElement>("sidebar-expand");
+const editorExpandButton = getElement<HTMLButtonElement>("editor-expand");
+const sidebarScroll = document.querySelector<HTMLElement>(".sidebar__scroll")!;
 
 const exampleSql = new Map<Exclude<ExampleId, "custom">, string>();
 
@@ -212,11 +214,18 @@ function attachEventListeners(): void {
 
   sidebarCollapseButton.addEventListener("click", collapseSidebar);
   sidebarExpandButton.addEventListener("click", expandSidebar);
+  editorExpandButton.addEventListener("click", toggleEditorExpand);
   initSidebarResize();
 }
 
 function collapseSidebar(): void {
   sidebar.classList.add("is-collapsed");
+}
+
+function toggleEditorExpand(): void {
+  const expanded = sidebarScroll.classList.toggle("is-editor-expanded");
+  editorExpandButton.setAttribute("aria-label", expanded ? "Collapse editor" : "Expand editor");
+  editorExpandButton.setAttribute("title", expanded ? "Collapse editor" : "Expand editor");
 }
 
 function expandSidebar(): void {

@@ -529,6 +529,46 @@ details[open] > .ctrl-section__title::before {
   flex-direction: column;
 }
 
+.ctrl-section--editor .ctrl-section__title {
+  justify-content: space-between;
+}
+
+.editor-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.editor-expand:hover {
+  color: var(--text);
+  background: var(--accent-glow);
+  border-color: var(--border);
+}
+
+.editor-expand__icon--collapse {
+  display: none;
+}
+
+.is-editor-expanded .editor-expand__icon--expand {
+  display: none;
+}
+
+.is-editor-expanded .editor-expand__icon--collapse {
+  display: block;
+}
+
 .ctrl-section--editor #sql-input {
   width: 100%;
   height: 320px;
@@ -544,6 +584,22 @@ details[open] > .ctrl-section__title::before {
 
 .ctrl-section--editor .cm-editor.cm-focused {
   outline: none;
+}
+
+/* Editor expanded state */
+.sidebar__scroll.is-editor-expanded > :not(.ctrl-section--editor) {
+  display: none;
+}
+
+.sidebar__scroll.is-editor-expanded .ctrl-section--editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar__scroll.is-editor-expanded .ctrl-section--editor #sql-input {
+  height: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- Sidebar actions ------------------------------------------- */
