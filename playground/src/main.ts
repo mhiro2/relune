@@ -8,6 +8,7 @@ import initWasm, {
   type WasmRenderRequest,
   type WasmRenderStats,
 } from "../pkg/relune_wasm.js";
+import { createSqlEditor } from "./editor.js";
 
 type ExampleId = "simple-blog" | "ecommerce" | "multi-schema" | "custom";
 type Theme = "light" | "dark";
@@ -81,7 +82,8 @@ const focusTableInput = getElement<HTMLInputElement>("focus-table-input");
 const depthInput = getElement<HTMLInputElement>("depth-input");
 const includeTablesInput = getElement<HTMLInputElement>("include-tables-input");
 const excludeTablesInput = getElement<HTMLInputElement>("exclude-tables-input");
-const sqlInput = getElement<HTMLTextAreaElement>("sql-input");
+const sqlEditorMount = getElement<HTMLDivElement>("sql-input");
+const sqlEditor = createSqlEditor(sqlEditorMount);
 const resetExampleButton = getElement<HTMLButtonElement>("reset-example");
 const renderNowButton = getElement<HTMLButtonElement>("render-now");
 const downloadHtmlButton = getElement<HTMLButtonElement>("download-html");
@@ -203,7 +205,7 @@ function attachEventListeners(): void {
     control.addEventListener("input", handleControlChange);
   }
 
-  sqlInput.addEventListener("input", () => {
+  sqlEditor.onUpdate(() => {
     syncExampleSelectionWithEditor();
     handleControlChange();
   });
@@ -290,7 +292,7 @@ function handleExampleChange(): void {
 
   const sql = exampleSql.get(exampleSelect.value as Exclude<ExampleId, "custom">);
   if (sql) {
-    sqlInput.value = sql;
+    sqlEditor.setValue(sql);
   }
 
   persistState();
@@ -301,7 +303,7 @@ function resetExample(): void {
   const selectedExample = exampleSelect.value as ExampleId;
   const effectiveExample = toBuiltinExampleId(selectedExample);
   exampleSelect.value = effectiveExample;
-  sqlInput.value = exampleSql.get(effectiveExample) ?? "";
+  sqlEditor.setValue(exampleSql.get(effectiveExample) ?? "");
   persistState();
   scheduleRender(0);
 }
@@ -318,7 +320,7 @@ function syncExampleSelectionWithEditor(): void {
   }
 
   const selectedSql = exampleSql.get(toBuiltinExampleId(exampleSelect.value as ExampleId));
-  if (selectedSql && sqlInput.value.trim() !== selectedSql.trim()) {
+  if (selectedSql && sqlEditor.getValue().trim() !== selectedSql.trim()) {
     exampleSelect.value = CUSTOM_EXAMPLE_ID;
   }
 }
@@ -334,7 +336,7 @@ function applyState(state: PersistedState): void {
   depthInput.value = state.depth;
   includeTablesInput.value = state.includeTables;
   excludeTablesInput.value = state.excludeTables;
-  sqlInput.value = state.sql;
+  sqlEditor.setValue(state.sql);
   applyTheme(state.theme);
 }
 
@@ -350,7 +352,7 @@ function scheduleRender(delay = 250): void {
 }
 
 async function renderDiagram(): Promise<void> {
-  const sql = sqlInput.value.trim();
+  const sql = sqlEditor.getValue().trim();
   if (!sql) {
     showError({ message: "SQL input is empty." });
     setStatus("Waiting for SQL");
@@ -393,7 +395,7 @@ function buildRenderRequest(format: WasmRenderRequest["format"]): WasmRenderRequ
   const depth = parsePositiveInteger(depthInput.value);
 
   return {
-    sql: sqlInput.value,
+    sql: sqlEditor.getValue(),
     format,
     theme: themeSelect.value as Theme,
     layoutAlgorithm: layoutSelect.value as LayoutAlgorithm,
@@ -650,7 +652,7 @@ function collectState(): PersistedState {
     depth: depthInput.value.trim(),
     includeTables: includeTablesInput.value.trim(),
     excludeTables: excludeTablesInput.value.trim(),
-    sql: sqlInput.value,
+    sql: sqlEditor.getValue(),
   };
 }
 

@@ -15,11 +15,12 @@ await mkdir(examplesDir, { recursive: true });
 await esbuild.build({
   absWorkingDir: __dirname,
   entryPoints: [join(__dirname, "src", "main.ts")],
-  bundle: false,
+  bundle: true,
   format: "esm",
   outdir: assetsDir,
   platform: "browser",
   target: ["chrome120", "firefox120", "safari17"],
+  external: ["../pkg/relune_wasm.js"],
 });
 
 await cp(join(__dirname, "index.html"), join(distDir, "index.html"));
