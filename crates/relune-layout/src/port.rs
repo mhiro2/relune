@@ -60,6 +60,7 @@ pub(crate) fn assign_edge_ports(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
     config: &LayoutConfig,
+    node_ranks: Option<&[usize]>,
 ) -> Vec<Option<EdgePortAssignment>> {
     let node_by_id: BTreeMap<&str, &PositionedNode> = positioned_nodes
         .iter()
@@ -90,7 +91,24 @@ pub(crate) fn assign_edge_ports(
             continue;
         };
 
-        let (source_side, target_side) = choose_regular_sides(source_node, target_node, config);
+        let source_rank = node_ranks
+            .and_then(|ranks| {
+                graph
+                    .node_index
+                    .get(edge.from.as_str())
+                    .and_then(|&idx| ranks.get(idx))
+            })
+            .copied();
+        let target_rank = node_ranks
+            .and_then(|ranks| {
+                graph
+                    .node_index
+                    .get(edge.to.as_str())
+                    .and_then(|&idx| ranks.get(idx))
+            })
+            .copied();
+        let (source_side, target_side) =
+            choose_regular_sides(source_node, target_node, source_rank, target_rank, config);
         let source_row_offset =
             column_y_offset_from_center(source_node, &edge.from_columns, config);
         let target_row_offset = column_y_offset_from_center(target_node, &edge.to_columns, config);
@@ -248,8 +266,20 @@ pub(crate) fn column_y_offset_from_center(
 fn choose_regular_sides(
     source: &PositionedNode,
     target: &PositionedNode,
+    source_rank: Option<usize>,
+    target_rank: Option<usize>,
     config: &LayoutConfig,
 ) -> (AttachmentSide, AttachmentSide) {
+    if let (Some(source_rank), Some(target_rank)) = (source_rank, target_rank)
+        && source_rank != target_rank
+    {
+        return if source_rank > target_rank {
+            opposite_primary_sides(config.direction)
+        } else {
+            preferred_primary_sides(config.direction)
+        };
+    }
+
     let source_center = node_center(source);
     let target_center = node_center(target);
     let dx = target_center.0 - source_center.0;
@@ -521,7 +551,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (source_side, target_side) = choose_regular_sides(&source, &target, &config);
+        let (source_side, target_side) =
+            choose_regular_sides(&source, &target, None, None, &config);
 
         assert_eq!(source_side, AttachmentSide::South);
         assert_eq!(target_side, AttachmentSide::North);
@@ -536,7 +567,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (source_side, target_side) = choose_regular_sides(&source, &target, &config);
+        let (source_side, target_side) =
+            choose_regular_sides(&source, &target, None, None, &config);
 
         assert_eq!(source_side, AttachmentSide::East);
         assert_eq!(target_side, AttachmentSide::West);
@@ -551,7 +583,24 @@ mod tests {
             ..Default::default()
         };
 
-        let (source_side, target_side) = choose_regular_sides(&source, &target, &config);
+        let (source_side, target_side) =
+            choose_regular_sides(&source, &target, None, None, &config);
+
+        assert_eq!(source_side, AttachmentSide::North);
+        assert_eq!(target_side, AttachmentSide::South);
+    }
+
+    #[test]
+    fn test_choose_regular_sides_prefers_rank_guided_primary_sides() {
+        let source = node("child", 0.0, 0.0);
+        let target = node("parent", 320.0, 10.0);
+        let config = LayoutConfig {
+            direction: LayoutDirection::TopToBottom,
+            ..Default::default()
+        };
+
+        let (source_side, target_side) =
+            choose_regular_sides(&source, &target, Some(2), Some(0), &config);
 
         assert_eq!(source_side, AttachmentSide::North);
         assert_eq!(target_side, AttachmentSide::South);
@@ -579,7 +628,7 @@ mod tests {
             ..Default::default()
         };
 
-        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config, None);
 
         let left_assignment = match assignments[0].as_ref().expect("assignment") {
             EdgePortAssignment::Regular(assignment) => assignment,
@@ -611,8 +660,8 @@ mod tests {
             ..Default::default()
         };
 
-        let first = assign_edge_ports(&graph, &positioned_nodes, &config);
-        let second = assign_edge_ports(&graph, &positioned_nodes, &config);
+        let first = assign_edge_ports(&graph, &positioned_nodes, &config, None);
+        let second = assign_edge_ports(&graph, &positioned_nodes, &config, None);
 
         assert_eq!(
             format!("{:?}", first.iter().collect::<Vec<_>>()),
@@ -752,7 +801,7 @@ mod tests {
             ..Default::default()
         };
 
-        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config, None);
 
         let to_products = match assignments[0].as_ref().expect("assignment") {
             EdgePortAssignment::Regular(assignment) => assignment,
@@ -806,7 +855,7 @@ mod tests {
             ..Default::default()
         };
 
-        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config, None);
 
         let to_left = match assignments[0].as_ref().expect("assignment") {
             EdgePortAssignment::Regular(assignment) => assignment,
@@ -855,7 +904,7 @@ mod tests {
             ..Default::default()
         };
 
-        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config);
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config, None);
 
         let e0 = match assignments[0].as_ref().expect("assignment") {
             EdgePortAssignment::Regular(assignment) => assignment,
@@ -899,7 +948,8 @@ mod tests {
         };
         let positioned_nodes = vec![node("users", 0.0, 0.0)];
 
-        let assignments = assign_edge_ports(&graph, &positioned_nodes, &LayoutConfig::default());
+        let assignments =
+            assign_edge_ports(&graph, &positioned_nodes, &LayoutConfig::default(), None);
 
         match assignments[0].as_ref().expect("assignment") {
             EdgePortAssignment::SelfLoop(assignment) => {

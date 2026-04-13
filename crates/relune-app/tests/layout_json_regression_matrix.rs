@@ -330,6 +330,8 @@ fn assert_force_directed_ecommerce_layout(direction: LayoutDirection, grouping: 
             && customers_gap_x + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP,
         "customers and addresses are too close: gap_x={customers_gap_x}, gap_y={customers_gap_y}"
     );
+
+    assert_directional_layout_invariants(&graph, direction);
 }
 
 #[test]
@@ -364,6 +366,40 @@ fn layout_force_directed_ecommerce_by_schema_preserves_connected_gaps() {
         LayoutDirection::LeftToRight,
         GroupingStrategy::BySchema,
     );
+}
+
+#[test]
+fn layout_force_directed_directional_invariants_hold_for_linear_schema_matrix() {
+    let sql = r"
+        CREATE TABLE users (
+            id SERIAL PRIMARY KEY
+        );
+        CREATE TABLE posts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id)
+        );
+        CREATE TABLE comments (
+            id SERIAL PRIMARY KEY,
+            post_id INTEGER NOT NULL REFERENCES posts(id)
+        );
+    ";
+
+    for (direction, _) in DIRECTIONS {
+        for (edge_style, _) in EDGE_STYLES {
+            let graph = export_layout_request(
+                ExportRequest::from_sql(sql)
+                    .with_format(ExportFormat::LayoutJson)
+                    .with_layout(LayoutSpec {
+                        algorithm: LayoutAlgorithm::ForceDirected,
+                        direction: *direction,
+                        edge_style: *edge_style,
+                        ..Default::default()
+                    }),
+            );
+            assert_layout_geometry(&graph);
+            assert_directional_layout_invariants(&graph, *direction);
+        }
+    }
 }
 
 #[test]
