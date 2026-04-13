@@ -1149,6 +1149,8 @@ fn apply_force_layout(
     resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
     restore_force_primary_axis_positions(&mut positions, &primary_targets);
     resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
 
     if matches!(
         config.direction,
@@ -1231,10 +1233,18 @@ fn build_positioned_node(
 }
 
 fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConfig {
-    LayoutConfig {
-        direction: LayoutDirection::TopToBottom,
-        ..config.clone()
+    let mut canonical = config.clone();
+    canonical.direction = LayoutDirection::TopToBottom;
+    if matches!(
+        config.direction,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+    ) {
+        std::mem::swap(
+            &mut canonical.horizontal_spacing,
+            &mut canonical.vertical_spacing,
+        );
     }
+    canonical
 }
 
 fn force_layout_seed_nodes(
@@ -3423,6 +3433,7 @@ fn node_rank_for_edge_endpoint(
         .copied()
 }
 
+#[allow(clippy::too_many_arguments)] // Channel scoring stays clearer with explicit ranking and routing inputs.
 fn score_channel_candidate(
     route: &EdgeRoute,
     obstacles: &[Rect],
@@ -4945,6 +4956,67 @@ mod tests {
             !by_id_tb.is_empty(),
             "expected BT to differ from TB on Y for make_test_schema"
         );
+    }
+
+    #[test]
+    fn test_force_layout_keeps_connected_nodes_clear_after_primary_axis_restore() {
+        let schema = make_test_schema();
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::TopToBottom,
+            horizontal_spacing: 320.0,
+            vertical_spacing: 8.0,
+            compaction: LayoutCompactionSpec {
+                min_horizontal_spacing: 220.0,
+                min_vertical_spacing: 8.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let graph = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+        let users = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "users")
+            .expect("users node");
+        let posts = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "posts")
+            .expect("posts node");
+        let (_, gap_y) = force_pair_axis_gaps(
+            users.x,
+            users.y,
+            users.width,
+            users.height,
+            posts.x,
+            posts.y,
+            posts.width,
+            posts.height,
+        );
+
+        assert!(
+            gap_y >= FORCE_CONNECTED_NODE_GAP,
+            "expected force layout to preserve vertical clearance after restoring rank-guided primary positions, got {gap_y}"
+        );
+    }
+
+    #[test]
+    fn test_force_layout_canonical_config_preserves_screen_spacing_semantics_for_lr() {
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::LeftToRight,
+            horizontal_spacing: 480.0,
+            vertical_spacing: 120.0,
+            ..Default::default()
+        };
+
+        let canonical = force_layout_canonical_config(&config);
+
+        assert_eq!(canonical.direction, LayoutDirection::TopToBottom);
+        assert!((canonical.vertical_spacing - 480.0).abs() < f32::EPSILON);
+        assert!((canonical.horizontal_spacing - 120.0).abs() < f32::EPSILON);
     }
 
     #[test]
