@@ -1,9 +1,11 @@
-//! Inline Crow's Foot markers for curved FK edges.
+//! Inline Crow's Foot markers for FK edges where SVG `<marker>` placement fails.
 //!
 //! SVG `<marker>` elements are oriented along the tangent at the path endpoint.
 //! Once the visible path is smoothed, composite markers (circle + crow's foot)
-//! can appear disconnected. These helpers draw the same symbols as regular SVG
-//! elements positioned along the rendered backbone instead.
+//! can appear disconnected.  Short orthogonal polyline legs can also be shorter
+//! than the marker's refX footprint, so glyphs appear to float mid-edge.
+//! These helpers draw the same symbols as regular SVG elements positioned along
+//! the rendered backbone instead.
 
 use std::fmt::{self, Write};
 

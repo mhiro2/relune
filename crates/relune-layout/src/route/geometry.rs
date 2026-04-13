@@ -85,6 +85,26 @@ pub(crate) fn approximate_route_length(route: &EdgeRoute) -> f32 {
         .sum()
 }
 
+/// Shortest polyline segment length along the routed backbone (endpoints included).
+///
+/// Renderers use this to decide when SVG `<marker>` Crow's Foot glyphs would extend
+/// past elbows on short orthogonal legs.
+#[must_use]
+pub fn shortest_backbone_segment_length(route: &EdgeRoute) -> f32 {
+    let points = route_points(route);
+    if points.len() < 2 {
+        return 0.0;
+    }
+    points
+        .windows(2)
+        .map(|segment| {
+            let dx = segment[1].0 - segment[0].0;
+            let dy = segment[1].1 - segment[0].1;
+            dx.hypot(dy)
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
 /// Simplify an orthogonal path by removing collinear and backtracking points.
 ///
 /// Pass 1: remove intermediate points that are collinear with their neighbors
@@ -226,4 +246,25 @@ fn point_along_polyline(points: &[(f32, f32)], t: f32) -> (f32, f32) {
     }
 
     *points.last().unwrap()
+}
+
+#[cfg(test)]
+mod shortest_segment_tests {
+    use super::{EdgeRoute, shortest_backbone_segment_length};
+    use relune_core::layout::RouteStyle;
+
+    #[test]
+    fn shortest_backbone_segment_length_min_leg() {
+        let route = EdgeRoute {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 100.0,
+            y2: 0.0,
+            control_points: vec![(50.0, 40.0)],
+            style: RouteStyle::Orthogonal,
+            label_position: (0.0, 0.0),
+        };
+        let leg = 50.0_f32.hypot(40.0);
+        assert!((shortest_backbone_segment_length(&route) - leg).abs() < 0.01);
+    }
 }

@@ -39,4 +39,6 @@ pub use overlay::{
 };
 pub use rank::{RankAssignmentStrategy, assign_ranks};
 pub use relune_core::layout::{EdgeRoute, RouteStyle};
-pub use route::{Rect, detour_around_obstacles, nudge_label, route_edge};
+pub use route::{
+    Rect, detour_around_obstacles, nudge_label, route_edge, shortest_backbone_segment_length,
+};

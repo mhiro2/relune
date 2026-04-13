@@ -22,7 +22,10 @@ const EDGE_STYLES: &[(RouteStyle, &str)] = &[
     (RouteStyle::Curved, "curved"),
 ];
 
-const MIN_FORCE_CONNECTED_NODE_GAP: f32 = 56.0;
+/// Must match `FORCE_CONNECTED_NODE_GAP` in `relune-layout` force-directed packing.
+const MIN_FORCE_CONNECTED_NODE_GAP: f32 = 64.0;
+/// Layout uses `f32` positions; allow sub-pixel drift vs the ideal gap target.
+const FORCE_GAP_EPS: f32 = 0.05;
 
 fn export_layout_fixture(
     fixture_name: &str,
@@ -237,13 +240,11 @@ fn layout_parallel_edge_spacing_holds_for_matrix() {
     }
 }
 
-fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirection) {
+fn assert_force_directed_ecommerce_layout(direction: LayoutDirection, grouping: GroupingStrategy) {
     let graph = export_layout_request(ExportRequest {
         input: InputSource::sql_file(sql_fixture_path("ecommerce.sql")),
         format: ExportFormat::LayoutJson,
-        grouping: GroupingSpec {
-            strategy: GroupingStrategy::ByPrefix,
-        },
+        grouping: GroupingSpec { strategy: grouping },
         layout: LayoutSpec {
             algorithm: LayoutAlgorithm::ForceDirected,
             direction,
@@ -266,20 +267,22 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
         }
     }
 
-    for (group_idx, group) in graph.groups.iter().enumerate() {
-        for node in &graph.nodes {
-            if node.group_index == Some(group_idx) {
-                continue;
+    if !graph.groups.is_empty() {
+        for (group_idx, group) in graph.groups.iter().enumerate() {
+            for node in &graph.nodes {
+                if node.group_index == Some(group_idx) {
+                    continue;
+                }
+                assert!(
+                    !rects_overlap(
+                        (group.x, group.y, group.width, group.height),
+                        (node.x, node.y, node.width, node.height),
+                    ),
+                    "force-directed ecommerce group {} overlaps node {}",
+                    group.label,
+                    node.id
+                );
             }
-            assert!(
-                !rects_overlap(
-                    (group.x, group.y, group.width, group.height),
-                    (node.x, node.y, node.width, node.height),
-                ),
-                "force-directed ecommerce group {} overlaps node {}",
-                group.label,
-                node.id
-            );
         }
     }
 
@@ -303,8 +306,8 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
         ),
     );
     assert!(
-        orders_gap_y >= MIN_FORCE_CONNECTED_NODE_GAP
-            || orders_gap_x >= MIN_FORCE_CONNECTED_NODE_GAP,
+        orders_gap_y + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP
+            && orders_gap_x + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP,
         "orders and order_items are too close: gap_x={orders_gap_x}, gap_y={orders_gap_y}"
     );
 
@@ -323,20 +326,80 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
         (addresses.x, addresses.y, addresses.width, addresses.height),
     );
     assert!(
-        customers_gap_y >= MIN_FORCE_CONNECTED_NODE_GAP
-            || customers_gap_x >= MIN_FORCE_CONNECTED_NODE_GAP,
+        customers_gap_y + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP
+            && customers_gap_x + FORCE_GAP_EPS >= MIN_FORCE_CONNECTED_NODE_GAP,
         "customers and addresses are too close: gap_x={customers_gap_x}, gap_y={customers_gap_y}"
     );
+
+    assert_directional_layout_invariants(&graph, direction);
 }
 
 #[test]
 fn layout_force_directed_prefix_grouping_ecommerce_avoids_overlaps() {
-    assert_force_directed_prefix_grouping_ecommerce_layout(LayoutDirection::TopToBottom);
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::TopToBottom,
+        GroupingStrategy::ByPrefix,
+    );
 }
 
 #[test]
 fn layout_force_directed_prefix_grouping_ecommerce_left_to_right_preserves_edge_margin() {
-    assert_force_directed_prefix_grouping_ecommerce_layout(LayoutDirection::LeftToRight);
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::LeftToRight,
+        GroupingStrategy::ByPrefix,
+    );
+}
+
+#[test]
+fn layout_force_directed_ecommerce_none_grouping_preserves_connected_gaps() {
+    assert_force_directed_ecommerce_layout(LayoutDirection::TopToBottom, GroupingStrategy::None);
+    assert_force_directed_ecommerce_layout(LayoutDirection::LeftToRight, GroupingStrategy::None);
+}
+
+#[test]
+fn layout_force_directed_ecommerce_by_schema_preserves_connected_gaps() {
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::TopToBottom,
+        GroupingStrategy::BySchema,
+    );
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::LeftToRight,
+        GroupingStrategy::BySchema,
+    );
+}
+
+#[test]
+fn layout_force_directed_directional_invariants_hold_for_linear_schema_matrix() {
+    let sql = r"
+        CREATE TABLE users (
+            id SERIAL PRIMARY KEY
+        );
+        CREATE TABLE posts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id)
+        );
+        CREATE TABLE comments (
+            id SERIAL PRIMARY KEY,
+            post_id INTEGER NOT NULL REFERENCES posts(id)
+        );
+    ";
+
+    for (direction, _) in DIRECTIONS {
+        for (edge_style, _) in EDGE_STYLES {
+            let graph = export_layout_request(
+                ExportRequest::from_sql(sql)
+                    .with_format(ExportFormat::LayoutJson)
+                    .with_layout(LayoutSpec {
+                        algorithm: LayoutAlgorithm::ForceDirected,
+                        direction: *direction,
+                        edge_style: *edge_style,
+                        ..Default::default()
+                    }),
+            );
+            assert_layout_geometry(&graph);
+            assert_directional_layout_invariants(&graph, *direction);
+        }
+    }
 }
 
 #[test]

@@ -53,13 +53,13 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 443206,
+      "bytes": 445612,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 85552,
+      "bytes": 87958,
       "edge_groups": 96,
       "node_groups": 12
     }

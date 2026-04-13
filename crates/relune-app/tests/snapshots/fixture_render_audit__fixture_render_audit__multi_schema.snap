@@ -47,13 +47,13 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 411111,
+      "bytes": 413087,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 56851,
+      "bytes": 58827,
       "edge_groups": 48,
       "node_groups": 7
     }

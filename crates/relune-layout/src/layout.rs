@@ -66,8 +66,12 @@ const GROUP_PADDING: f32 = 20.0;
 const GROUP_TOP_PADDING: f32 = 44.0;
 /// Minimum gap preserved between packed force-directed groups.
 const FORCE_GROUP_GAP: f32 = 28.0;
-/// Minimum visible gap preserved between connected nodes in force-directed mode.
-const FORCE_CONNECTED_NODE_GAP: f32 = 56.0;
+/// Minimum visible gap preserved between connected node rectangles in force-directed mode.
+///
+/// Applied on **both** axes between endpoints so orthogonal edge stubs stay long enough for
+/// Crow's Foot SVG markers (roughly 24–26px along the path from each vertex).  Hierarchical
+/// layout never uses this constant.
+const FORCE_CONNECTED_NODE_GAP: f32 = 64.0;
 
 #[derive(Debug, Clone, Copy)]
 struct NodeSize {
@@ -678,19 +682,28 @@ pub fn build_layout_from_graph_with_config(
 
     // Step 3: Assign coordinates based on layout mode
     let node_sizes = measure_node_sizes(graph, &effective_config);
-    let mut node_ranks = None;
-    let (positioned_nodes, width, height) = match effective_config.mode {
+    let (positioned_nodes, width, height, node_ranks) = match effective_config.mode {
         LayoutAlgorithm::Hierarchical => {
             // Hierarchical layout: assign ranks and order
             let ranks = assign_ranks(graph, RankAssignmentStrategy::LongestPath);
             debug!("Assigned {} ranks", ranks.num_ranks);
             let ordered_nodes = order_nodes_within_layers(graph, &ranks);
-            node_ranks = Some(ranks.node_rank);
-            assign_coordinates(graph, &ordered_nodes, &effective_config, &node_sizes)?
+            let node_ranks = ranks.node_rank;
+            let (positioned_nodes, width, height) =
+                assign_coordinates(graph, &ordered_nodes, &effective_config, &node_sizes)?;
+            (positioned_nodes, width, height, Some(node_ranks))
         }
         LayoutAlgorithm::ForceDirected => {
-            // Force-directed layout
-            apply_force_layout(graph, &effective_config, &node_sizes)
+            let ranks = assign_ranks(graph, RankAssignmentStrategy::LongestPath);
+            debug!(
+                "Assigned {} ranks for force-directed directional guidance",
+                ranks.num_ranks
+            );
+            let ordered_nodes = order_nodes_within_layers(graph, &ranks);
+            let node_ranks = ranks.node_rank;
+            let (positioned_nodes, width, height) =
+                apply_force_layout(graph, &effective_config, &node_sizes, &ordered_nodes)?;
+            (positioned_nodes, width, height, Some(node_ranks))
         }
     };
 
@@ -822,21 +835,7 @@ fn assign_coordinates(
         is_horizontal,
     );
     let graph_bounds = compute_graph_bounds(&positioned_nodes, config);
-
-    // Flip coordinates for reversed directions
-    match config.direction {
-        LayoutDirection::BottomToTop => {
-            for node in &mut positioned_nodes {
-                node.y = graph_bounds.1 - node.y - node.height;
-            }
-        }
-        LayoutDirection::RightToLeft => {
-            for node in &mut positioned_nodes {
-                node.x = graph_bounds.0 - node.x - node.width;
-            }
-        }
-        LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => {}
-    }
+    mirror_positioned_nodes_for_direction(&mut positioned_nodes, graph_bounds, config.direction);
 
     let (width, height) = compute_graph_bounds(&positioned_nodes, config);
     Ok((positioned_nodes, width, height))
@@ -1000,39 +999,26 @@ fn apply_force_layout(
     graph: &LayoutGraph,
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
-) -> (Vec<PositionedNode>, f32, f32) {
+    ordered_nodes: &[Vec<usize>],
+) -> Result<(Vec<PositionedNode>, f32, f32), LayoutError> {
     let n = graph.nodes.len();
     if n == 0 {
-        return (Vec::new(), config.origin_x * 2.0, config.origin_y * 2.0);
+        return Ok((Vec::new(), config.origin_x * 2.0, config.origin_y * 2.0));
     }
 
     // Force parameters
     let repulsion_strength = 5000.0;
     let attraction_strength = 0.05;
     let gravity_strength = 0.1;
+    let primary_axis_gravity_strength = 0.18;
     let damping = 0.9;
     let min_distance = 1.0;
 
-    // Calculate ideal spacing based on config
-    let max_node_span = node_sizes
-        .iter()
-        .map(|size| size.width.max(size.height))
-        .fold(0.0, f32::max);
-    let ideal_spacing = config.horizontal_spacing.max(config.vertical_spacing) + max_node_span;
-    let initial_radius = ideal_spacing * (n as f32).sqrt() * 0.5;
-
-    // Initialize positions in a circle layout (deterministic)
-    let mut positions: Vec<(f32, f32)> = graph
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            let angle = 2.0 * std::f32::consts::PI * i as f32 / n as f32;
-            let x = config.origin_x + initial_radius * angle.cos();
-            let y = config.origin_y + initial_radius * angle.sin();
-            (x, y)
-        })
-        .collect();
+    let canonical_config = force_layout_canonical_config(config);
+    let seed_nodes = force_layout_seed_nodes(graph, ordered_nodes, &canonical_config, node_sizes)?;
+    let mut positions: Vec<(f32, f32)> = seed_nodes.iter().map(|node| (node.x, node.y)).collect();
+    let primary_targets: Vec<f32> = seed_nodes.iter().map(|node| node.y).collect();
+    let (center_x, center_y) = force_layout_seed_center(&positions, node_sizes);
 
     // Initialize velocities
     let mut velocities: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
@@ -1107,10 +1093,13 @@ fn apply_force_layout(
             forces[to_idx].1 -= fy;
         }
 
-        // Centering gravity
-        let center_x = config.origin_x + initial_radius;
-        let center_y = config.origin_y + initial_radius;
+        // Rank-guided gravity keeps the semantic parent/child order aligned with
+        // the canonical top-to-bottom simulation axis while still allowing force
+        // relaxation on the secondary axis.
         for i in 0..n {
+            let primary_delta = primary_targets[i] - positions[i].1;
+            forces[i].1 += primary_axis_gravity_strength * primary_delta;
+
             let dx = center_x - positions[i].0;
             let dy = center_y - positions[i].1;
             forces[i].0 += gravity_strength * dx;
@@ -1143,14 +1132,38 @@ fn apply_force_layout(
     resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
 
     // Grouped force-directed layouts need an explicit packing pass so schema
-    // containers do not overlap and cover each other's label bands.
-    separate_force_groups(graph, &mut positions, node_sizes, config);
+    // containers do not overlap and cover each other's label bands. Packing
+    // always advances simulation-X so a later LR/RL transpose maps it to screen Y.
+    separate_force_groups(graph, &mut positions, node_sizes, false);
 
     // Group packing can tighten connected pairs again, especially in
     // left-to-right layouts where ungrouped nodes share the same column.
     enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
     resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
-    separate_force_groups(graph, &mut positions, node_sizes, config);
+    separate_force_groups(graph, &mut positions, node_sizes, false);
+
+    // Last group pack only moves along the secondary axis; restore FK corridor
+    // gaps so edge backbones (especially first/last orthogonal legs) stay long
+    // enough for markers after packing.
+    enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    restore_force_primary_axis_positions(&mut positions, &primary_targets);
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+
+    if matches!(
+        config.direction,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+    ) {
+        for pos in &mut positions {
+            std::mem::swap(&mut pos.0, &mut pos.1);
+        }
+        // Clearance was enforced in canonical TB simulation space; swapping axes
+        // can leave the former vertical gap as the on-screen horizontal gap.
+        enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+        resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    }
 
     // Calculate bounding box and shift to positive coordinates
     let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
@@ -1162,25 +1175,20 @@ fn apply_force_layout(
         pos.1 = pos.1 - min_y + config.origin_y;
     }
     // Build positioned nodes
-    let mut max_x = config.origin_x;
-    let mut max_y = config.origin_y;
-
-    let positioned_nodes: Vec<PositionedNode> = graph
+    let mut positioned_nodes: Vec<PositionedNode> = graph
         .nodes
         .iter()
         .zip(positions.iter().zip(node_sizes.iter()))
         .map(|(node, (&(x, y), size))| {
-            max_x = max_x.max(x + size.width);
-            max_y = max_y.max(y + size.height);
-
             build_positioned_node(node, x, y, size.width, size.height, config.show_columns)
         })
         .collect();
 
-    let width = max_x + config.origin_x;
-    let height = max_y + config.origin_y;
+    let graph_bounds = compute_graph_bounds(&positioned_nodes, config);
+    mirror_positioned_nodes_for_direction(&mut positioned_nodes, graph_bounds, config.direction);
+    let (width, height) = compute_graph_bounds(&positioned_nodes, config);
 
-    (positioned_nodes, width, height)
+    Ok((positioned_nodes, width, height))
 }
 
 fn build_positioned_node(
@@ -1221,6 +1229,54 @@ fn build_positioned_node(
         is_join_table_candidate: node.is_join_table_candidate,
         has_self_loop: node.has_self_loop,
         group_index: node.group_index,
+    }
+}
+
+fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConfig {
+    let mut canonical = config.clone();
+    canonical.direction = LayoutDirection::TopToBottom;
+    if matches!(
+        config.direction,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+    ) {
+        std::mem::swap(
+            &mut canonical.horizontal_spacing,
+            &mut canonical.vertical_spacing,
+        );
+    }
+    canonical
+}
+
+fn force_layout_seed_nodes(
+    graph: &LayoutGraph,
+    ordered_nodes: &[Vec<usize>],
+    config: &LayoutConfig,
+    node_sizes: &[NodeSize],
+) -> Result<Vec<PositionedNode>, LayoutError> {
+    let (positioned_nodes, _, _) = assign_coordinates(graph, ordered_nodes, config, node_sizes)?;
+    Ok(positioned_nodes)
+}
+
+fn force_layout_seed_center(positions: &[(f32, f32)], node_sizes: &[NodeSize]) -> (f32, f32) {
+    let min_x = positions.iter().map(|pos| pos.0).fold(f32::MAX, f32::min);
+    let min_y = positions.iter().map(|pos| pos.1).fold(f32::MAX, f32::min);
+    let max_x = positions
+        .iter()
+        .zip(node_sizes)
+        .map(|(pos, size)| pos.0 + size.width)
+        .fold(f32::MIN, f32::max);
+    let max_y = positions
+        .iter()
+        .zip(node_sizes)
+        .map(|(pos, size)| pos.1 + size.height)
+        .fold(f32::MIN, f32::max);
+
+    (f32::midpoint(min_x, max_x), f32::midpoint(min_y, max_y))
+}
+
+fn restore_force_primary_axis_positions(positions: &mut [(f32, f32)], primary_targets: &[f32]) {
+    for ((_, y), target_y) in positions.iter_mut().zip(primary_targets) {
+        *y = *target_y;
     }
 }
 
@@ -1518,6 +1574,28 @@ fn compute_graph_bounds(positioned_nodes: &[PositionedNode], config: &LayoutConf
     (max_x + config.origin_x, max_y + config.origin_y)
 }
 
+/// Flips node coordinates for `BottomToTop` / `RightToLeft`, matching hierarchical
+/// `assign_coordinates` so reversed directions are visually mirrored.
+fn mirror_positioned_nodes_for_direction(
+    positioned_nodes: &mut [PositionedNode],
+    graph_bounds: (f32, f32),
+    direction: LayoutDirection,
+) {
+    match direction {
+        LayoutDirection::BottomToTop => {
+            for node in positioned_nodes.iter_mut() {
+                node.y = graph_bounds.1 - node.y - node.height;
+            }
+        }
+        LayoutDirection::RightToLeft => {
+            for node in positioned_nodes.iter_mut() {
+                node.x = graph_bounds.0 - node.x - node.width;
+            }
+        }
+        LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => {}
+    }
+}
+
 /// Expand graph bounds so that edge routes (especially self-loop curves and
 /// their control points) are not clipped by the SVG viewport.
 fn expand_bounds_for_edges(width: f32, height: f32, edges: &[PositionedEdge]) -> (f32, f32) {
@@ -1718,6 +1796,40 @@ fn compact_toward_neighbours(
     }
 }
 
+/// Axis-aligned separation between two node rectangles (`x`, `y`, `width`, `height`).
+///
+/// Positive `gap_x` / `gap_y` mean the boxes are separated on that axis; negative values
+/// mean overlap along that axis (projection overlap).
+#[allow(clippy::similar_names, clippy::too_many_arguments)] // Eight floats are clearer than a bespoke rect pair type here.
+fn force_pair_axis_gaps(
+    ax: f32,
+    ay: f32,
+    aw: f32,
+    ah: f32,
+    bx: f32,
+    by: f32,
+    bw: f32,
+    bh: f32,
+) -> (f32, f32) {
+    let gap_x = if ax + aw <= bx {
+        bx - (ax + aw)
+    } else if bx + bw <= ax {
+        ax - (bx + bw)
+    } else {
+        -((ax + aw).min(bx + bw) - ax.max(bx))
+    };
+
+    let gap_y = if ay + ah <= by {
+        by - (ay + ah)
+    } else if by + bh <= ay {
+        ay - (by + bh)
+    } else {
+        -((ay + ah).min(by + bh) - ay.max(by))
+    };
+
+    (gap_x, gap_y)
+}
+
 #[allow(clippy::cast_precision_loss, clippy::similar_names)]
 fn enforce_force_edge_clearance(
     positions: &mut [(f32, f32)],
@@ -1728,7 +1840,8 @@ fn enforce_force_edge_clearance(
         return;
     }
 
-    let passes = 6;
+    // Separating one axis can tighten the other; a few extra passes stabilise diagonals.
+    let passes = 12;
     for _ in 0..passes {
         let mut moved = false;
 
@@ -1745,34 +1858,47 @@ fn enforce_force_edge_clearance(
             let dx = to_center_x - from_center_x;
             let dy = to_center_y - from_center_y;
 
-            if dx.abs() >= dy.abs() {
+            let aw = node_sizes[from_idx].width;
+            let ah = node_sizes[from_idx].height;
+            let bw = node_sizes[to_idx].width;
+            let bh = node_sizes[to_idx].height;
+
+            let (gap_x, gap_y) = force_pair_axis_gaps(
+                positions[from_idx].0,
+                positions[from_idx].1,
+                aw,
+                ah,
+                positions[to_idx].0,
+                positions[to_idx].1,
+                bw,
+                bh,
+            );
+
+            if gap_x < FORCE_CONNECTED_NODE_GAP {
                 let gap = if dx >= 0.0 {
-                    positions[to_idx].0 - (positions[from_idx].0 + node_sizes[from_idx].width)
+                    positions[to_idx].0 - (positions[from_idx].0 + aw)
                 } else {
-                    positions[from_idx].0 - (positions[to_idx].0 + node_sizes[to_idx].width)
+                    positions[from_idx].0 - (positions[to_idx].0 + bw)
                 };
+                let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
+                let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
+                positions[from_idx].0 -= push * sign;
+                positions[to_idx].0 += push * sign;
+                moved = true;
+            }
 
-                if gap < FORCE_CONNECTED_NODE_GAP {
-                    let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
-                    let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
-                    positions[from_idx].0 -= push * sign;
-                    positions[to_idx].0 += push * sign;
-                    moved = true;
-                }
-            } else {
+            // Horizontal nudges do not change `gap_y`, so the initial `gap_y` stays valid here.
+            if gap_y < FORCE_CONNECTED_NODE_GAP {
                 let gap = if dy >= 0.0 {
-                    positions[to_idx].1 - (positions[from_idx].1 + node_sizes[from_idx].height)
+                    positions[to_idx].1 - (positions[from_idx].1 + ah)
                 } else {
-                    positions[from_idx].1 - (positions[to_idx].1 + node_sizes[to_idx].height)
+                    positions[from_idx].1 - (positions[to_idx].1 + bh)
                 };
-
-                if gap < FORCE_CONNECTED_NODE_GAP {
-                    let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
-                    let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
-                    positions[from_idx].1 -= push * sign;
-                    positions[to_idx].1 += push * sign;
-                    moved = true;
-                }
+                let push = (FORCE_CONNECTED_NODE_GAP - gap) * 0.5;
+                let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
+                positions[from_idx].1 -= push * sign;
+                positions[to_idx].1 += push * sign;
+                moved = true;
             }
         }
 
@@ -1801,50 +1927,60 @@ fn separate_force_groups(
     graph: &LayoutGraph,
     positions: &mut [(f32, f32)],
     node_sizes: &[NodeSize],
-    config: &LayoutConfig,
+    pack_along_sim_y: bool,
 ) {
-    if graph.groups.len() < 2 {
-        return;
-    }
-
-    let is_horizontal = matches!(
-        config.direction,
-        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
-    );
-    let mut packed_items = graph
-        .groups
-        .iter()
-        .enumerate()
-        .filter_map(|(group_idx, group)| {
-            force_group_bounds(group, positions, node_sizes)
-                .map(|bounds| (ForcePackItem::Group(group_idx), bounds))
-        })
-        .chain(
-            graph
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, node)| node.group_index.is_none())
-                .map(|(node_idx, _)| {
-                    (
-                        ForcePackItem::UngroupedNode(node_idx),
-                        force_node_bounds(node_idx, positions, node_sizes),
-                    )
-                }),
-        )
-        .collect::<Vec<_>>();
+    // With two or more logical groups (prefix clusters, multi-schema, …) pack
+    // group bounding boxes plus any truly-ungrouped nodes along the secondary axis.
+    //
+    // With **no** groups (`GroupingStrategy::None`) or a **single** schema bucket
+    // (`BySchema` on one schema), `packed_items` would otherwise contain at most
+    // one `Group` entry and this pass would become a no-op — tables then stay
+    // stacked on the secondary axis and FK edges stay too short for markers.
+    let mut packed_items: Vec<(ForcePackItem, PackedBounds)> = if graph.groups.len() >= 2 {
+        graph
+            .groups
+            .iter()
+            .enumerate()
+            .filter_map(|(group_idx, group)| {
+                force_group_bounds(group, positions, node_sizes)
+                    .map(|bounds| (ForcePackItem::Group(group_idx), bounds))
+            })
+            .chain(
+                graph
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, node)| node.group_index.is_none())
+                    .map(|(node_idx, _)| {
+                        (
+                            ForcePackItem::UngroupedNode(node_idx),
+                            force_node_bounds(node_idx, positions, node_sizes),
+                        )
+                    }),
+            )
+            .collect()
+    } else {
+        (0..graph.nodes.len())
+            .map(|node_idx| {
+                (
+                    ForcePackItem::UngroupedNode(node_idx),
+                    force_node_bounds(node_idx, positions, node_sizes),
+                )
+            })
+            .collect()
+    };
 
     if packed_items.len() < 2 {
         return;
     }
 
     packed_items.sort_by(|(left_item, left_bounds), (right_item, right_bounds)| {
-        let left_min = if is_horizontal {
+        let left_min = if pack_along_sim_y {
             left_bounds.min_y
         } else {
             left_bounds.min_x
         };
-        let right_min = if is_horizontal {
+        let right_min = if pack_along_sim_y {
             right_bounds.min_y
         } else {
             right_bounds.min_x
@@ -1855,14 +1991,14 @@ fn separate_force_groups(
     });
 
     let mut previous_item = packed_items[0].0;
-    let mut previous_end = if is_horizontal {
+    let mut previous_end = if pack_along_sim_y {
         packed_items[0].1.max_y
     } else {
         packed_items[0].1.max_x
     };
 
     for &(item, bounds) in packed_items.iter().skip(1) {
-        let current_min = if is_horizontal {
+        let current_min = if pack_along_sim_y {
             bounds.min_y
         } else {
             bounds.min_x
@@ -1870,14 +2006,14 @@ fn separate_force_groups(
         let required_min = previous_end + force_pack_gap(graph, previous_item, item);
         if current_min < required_min {
             let delta = required_min - current_min;
-            shift_force_pack_item(graph, positions, item, delta, is_horizontal);
-            previous_end = if is_horizontal {
+            shift_force_pack_item(graph, positions, item, delta, pack_along_sim_y);
+            previous_end = if pack_along_sim_y {
                 bounds.max_y + delta
             } else {
                 bounds.max_x + delta
             };
         } else {
-            previous_end = if is_horizontal {
+            previous_end = if pack_along_sim_y {
                 bounds.max_y
             } else {
                 bounds.max_x
@@ -1995,13 +2131,13 @@ fn shift_force_pack_item(
     positions: &mut [(f32, f32)],
     item: ForcePackItem,
     delta: f32,
-    is_horizontal: bool,
+    pack_along_sim_y: bool,
 ) {
     match item {
         ForcePackItem::Group(group_idx) => {
             for &node_idx in &graph.groups[group_idx].node_indices {
                 if let Some((x, y)) = positions.get_mut(node_idx) {
-                    if is_horizontal {
+                    if pack_along_sim_y {
                         *y += delta;
                     } else {
                         *x += delta;
@@ -2011,7 +2147,7 @@ fn shift_force_pack_item(
         }
         ForcePackItem::UngroupedNode(node_idx) => {
             if let Some((x, y)) = positions.get_mut(node_idx) {
-                if is_horizontal {
+                if pack_along_sim_y {
                     *y += delta;
                 } else {
                     *x += delta;
@@ -2395,7 +2531,7 @@ fn route_edges_with_diagnostics(
         .iter()
         .map(|node| (node.id.as_str(), (node.x, node.y, node.width, node.height)))
         .collect();
-    let port_assignments = assign_edge_ports(graph, positioned_nodes, config);
+    let port_assignments = assign_edge_ports(graph, positioned_nodes, config, node_ranks);
     let rank_bounds = node_ranks.map(|ranks| rank_axis_bounds(positioned_nodes, ranks, config));
     let edge_counts = edge_lane_counts(graph);
     let lane_indices = edge_lane_indices(graph);
@@ -2937,6 +3073,9 @@ fn obstacle_aware_channel_for_edge(
         let score = score_channel_candidate(
             &route,
             context.obstacles,
+            context.direction,
+            source_rank,
+            target_rank,
             context.assignment.source_side,
             context.assignment.target_side,
             candidate,
@@ -3294,15 +3433,20 @@ fn node_rank_for_edge_endpoint(
         .copied()
 }
 
+#[allow(clippy::too_many_arguments)] // Channel scoring stays clearer with explicit ranking and routing inputs.
 fn score_channel_candidate(
     route: &EdgeRoute,
     obstacles: &[Rect],
+    direction: LayoutDirection,
+    source_rank: usize,
+    target_rank: usize,
     source_side: AttachmentSide,
     target_side: AttachmentSide,
     candidate: ObstacleAwareChannelCandidate,
     channel_usage: &BTreeMap<(ChannelAxis, i32), u32>,
 ) -> ChannelCandidateScore {
     let hard_constraint_violations = clipped_u16(route_obstacle_hit_count(route, obstacles, 0.0))
+        + route_primary_direction_violations(route, direction, source_rank, target_rank)
         + endpoint_side_violations(route, source_side, target_side);
 
     ChannelCandidateScore {
@@ -3317,6 +3461,44 @@ fn score_channel_candidate(
             candidate.coordinate,
         ),
         stable_order: candidate.stable_order,
+    }
+}
+
+fn route_primary_direction_violations(
+    route: &EdgeRoute,
+    direction: LayoutDirection,
+    source_rank: usize,
+    target_rank: usize,
+) -> u16 {
+    if source_rank == target_rank {
+        return 0;
+    }
+
+    let points = route_points(route);
+    let epsilon = 0.5;
+    let should_increase = match direction {
+        LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => source_rank < target_rank,
+        LayoutDirection::BottomToTop | LayoutDirection::RightToLeft => source_rank > target_rank,
+    };
+    let violations = points
+        .windows(2)
+        .filter(|segment| {
+            let start = primary_axis_value(segment[0], direction);
+            let end = primary_axis_value(segment[1], direction);
+            if should_increase {
+                end + epsilon < start
+            } else {
+                end > start + epsilon
+            }
+        })
+        .count();
+    clipped_u16(violations)
+}
+
+const fn primary_axis_value(point: (f32, f32), direction: LayoutDirection) -> f32 {
+    match direction {
+        LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => point.1,
+        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft => point.0,
     }
 }
 
@@ -4697,6 +4879,144 @@ mod tests {
             assert!(edge.label_x.is_finite());
             assert!(edge.label_y.is_finite());
         }
+    }
+
+    #[test]
+    fn test_force_layout_bt_mirrors_tb_and_rl_mirrors_lr() {
+        let schema = make_test_schema();
+        let request = LayoutRequest::default();
+        let cfg_tb = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::TopToBottom,
+            ..Default::default()
+        };
+        let cfg_bt = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::BottomToTop,
+            ..Default::default()
+        };
+        let cfg_lr = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::LeftToRight,
+            ..Default::default()
+        };
+        let cfg_rl = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::RightToLeft,
+            ..Default::default()
+        };
+
+        let tb = build_layout_with_config(&schema, &request, &cfg_tb).unwrap();
+        let bt = build_layout_with_config(&schema, &request, &cfg_bt).unwrap();
+        let lr = build_layout_with_config(&schema, &request, &cfg_lr).unwrap();
+        let rl = build_layout_with_config(&schema, &request, &cfg_rl).unwrap();
+
+        let bounds_tb = super::compute_graph_bounds(&tb.nodes, &cfg_tb);
+        let bounds_lr = super::compute_graph_bounds(&lr.nodes, &cfg_lr);
+
+        let mut by_id_tb: BTreeMap<&str, _> = tb.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        let by_id_bt: BTreeMap<&str, _> = bt.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        let by_id_lr: BTreeMap<&str, _> = lr.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        let by_id_rl: BTreeMap<&str, _> = rl.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+        for (id, n_tb) in &by_id_tb {
+            let n_bt = by_id_bt.get(id).expect("same schema");
+            let expected_y = bounds_tb.1 - n_tb.y - n_tb.height;
+            assert!(
+                (n_bt.y - expected_y).abs() < 1e-3,
+                "BT Y mirror mismatch for {id}: got {} expected {}",
+                n_bt.y,
+                expected_y
+            );
+        }
+
+        for (id, n_lr) in &by_id_lr {
+            let n_rl = by_id_rl.get(id).expect("same schema");
+            let expected_x = bounds_lr.0 - n_lr.x - n_lr.width;
+            assert!(
+                (n_rl.x - expected_x).abs() < 1e-3,
+                "RL X mirror mismatch for {id}: got {} expected {}",
+                n_rl.x,
+                expected_x
+            );
+        }
+
+        // Same underlying placement: canvas size unchanged by mirroring.
+        assert!((tb.width - bt.width).abs() < 1e-3);
+        assert!((tb.height - bt.height).abs() < 1e-3);
+        assert!((lr.width - rl.width).abs() < 1e-3);
+        assert!((lr.height - rl.height).abs() < 1e-3);
+
+        // Mirroring must actually move at least one node when the graph is non-degenerate.
+        by_id_tb.retain(|_, n| {
+            let n_bt = by_id_bt.get(n.id.as_str()).unwrap();
+            (n.y - n_bt.y).abs() > 1e-3
+        });
+        assert!(
+            !by_id_tb.is_empty(),
+            "expected BT to differ from TB on Y for make_test_schema"
+        );
+    }
+
+    #[test]
+    fn test_force_layout_keeps_connected_nodes_clear_after_primary_axis_restore() {
+        let schema = make_test_schema();
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::TopToBottom,
+            horizontal_spacing: 320.0,
+            vertical_spacing: 8.0,
+            compaction: LayoutCompactionSpec {
+                min_horizontal_spacing: 220.0,
+                min_vertical_spacing: 8.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let graph = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+        let users = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "users")
+            .expect("users node");
+        let posts = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "posts")
+            .expect("posts node");
+        let (_, gap_y) = force_pair_axis_gaps(
+            users.x,
+            users.y,
+            users.width,
+            users.height,
+            posts.x,
+            posts.y,
+            posts.width,
+            posts.height,
+        );
+
+        assert!(
+            gap_y >= FORCE_CONNECTED_NODE_GAP,
+            "expected force layout to preserve vertical clearance after restoring rank-guided primary positions, got {gap_y}"
+        );
+    }
+
+    #[test]
+    fn test_force_layout_canonical_config_preserves_screen_spacing_semantics_for_lr() {
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction: LayoutDirection::LeftToRight,
+            horizontal_spacing: 480.0,
+            vertical_spacing: 120.0,
+            ..Default::default()
+        };
+
+        let canonical = force_layout_canonical_config(&config);
+
+        assert_eq!(canonical.direction, LayoutDirection::TopToBottom);
+        assert!((canonical.vertical_spacing - 480.0).abs() < f32::EPSILON);
+        assert!((canonical.horizontal_spacing - 120.0).abs() < f32::EPSILON);
     }
 
     #[test]
