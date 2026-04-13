@@ -32,19 +32,15 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
-          package_json_file: playground/package.json
+          package_json_file: package.json
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version-file: playground/package.json
+          node-version-file: package.json
           cache: pnpm
-          cache-dependency-path: |
-            crates/relune-render-html/pnpm-lock.yaml
-            playground/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install frontend packages
-        run: |
-          pnpm --dir crates/relune-render-html install --frozen-lockfile
-          pnpm --dir playground install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: make fmt-check
       - name: Run lint
@@ -102,15 +98,15 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
-          package_json_file: playground/package.json
+          package_json_file: package.json
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version-file: playground/package.json
+          node-version-file: package.json
           cache: pnpm
-          cache-dependency-path: playground/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install playground packages
-        run: pnpm --dir playground install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Build playground
         run: make build-playground
 

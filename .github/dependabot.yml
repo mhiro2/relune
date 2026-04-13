@@ -16,15 +16,13 @@ updates:
       default-days: 7
 
   - package-ecosystem: npm
-    directory: crates/relune-render-html/
+    directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
-
-  - package-ecosystem: npm
-    directory: playground/
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
+    groups:
+      codemirror:
+        patterns:
+          - "@codemirror/*"
+          - "codemirror"

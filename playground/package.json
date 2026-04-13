@@ -2,14 +2,6 @@
   "name": "@relune/playground",
   "private": true,
   "description": "Public WASM playground for relune",
-  "packageManager": "pnpm@10.32.1",
-  "devEngines": {
-    "runtime": {
-      "name": "node",
-      "version": "~24.14.0",
-      "onFail": "download"
-    }
-  },
   "scripts": {
     "build": "node esbuild.config.mjs",
     "fmt": "oxfmt src",
@@ -18,11 +10,20 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json",
     "check": "pnpm fmt:check && pnpm lint && pnpm typecheck"
   },
+  "dependencies": {
+    "@codemirror/commands": "6.10.3",
+    "@codemirror/lang-sql": "6.10.0",
+    "@codemirror/language": "6.12.3",
+    "@codemirror/search": "6.6.0",
+    "@codemirror/state": "6.6.0",
+    "@codemirror/view": "6.41.0",
+    "@lezer/highlight": "1.2.3",
+    "codemirror": "6.0.2"
+  },
   "devDependencies": {
-    "@typescript/native-preview": "^7.0.0-dev.20260331.1",
-    "esbuild": "^0.28.0",
-    "oxfmt": "^0.43.0",
-    "oxlint": "^1.58.0",
-    "typescript": "~6.0.2"
+    "@typescript/native-preview": "catalog:",
+    "esbuild": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:"
   }
 }

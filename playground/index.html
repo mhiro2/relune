@@ -201,15 +201,30 @@
             <div class="ctrl-section ctrl-section--editor">
               <div class="ctrl-section__title ctrl-section__title--static">
                 SQL DDL
+                <button
+                  id="editor-expand"
+                  class="editor-expand"
+                  type="button"
+                  aria-label="Expand editor"
+                  title="Expand editor"
+                >
+                  <!-- expand: arrows pointing outward -->
+                  <svg class="editor-expand__icon--expand" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="10 2 14 2 14 6" />
+                    <line x1="9" y1="7" x2="14" y2="2" />
+                    <polyline points="6 14 2 14 2 10" />
+                    <line x1="7" y1="9" x2="2" y2="14" />
+                  </svg>
+                  <!-- collapse: arrows pointing inward from corners -->
+                  <svg class="editor-expand__icon--collapse" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="14" y1="2" x2="9" y2="7" />
+                    <polyline points="14 7 9 7 9 2" />
+                    <line x1="2" y1="14" x2="7" y2="9" />
+                    <polyline points="2 9 7 9 7 14" />
+                  </svg>
+                </button>
               </div>
-              <textarea
-                id="sql-input"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                aria-label="SQL input"
-              ></textarea>
+              <div id="sql-input"></div>
             </div>
 
             <!-- Actions -->
