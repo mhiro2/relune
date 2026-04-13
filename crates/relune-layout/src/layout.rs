@@ -1855,36 +1855,51 @@ fn separate_force_groups(
     node_sizes: &[NodeSize],
     config: &LayoutConfig,
 ) {
-    if graph.groups.len() < 2 {
-        return;
-    }
-
     let is_horizontal = matches!(
         config.direction,
         LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
     );
-    let mut packed_items = graph
-        .groups
-        .iter()
-        .enumerate()
-        .filter_map(|(group_idx, group)| {
-            force_group_bounds(group, positions, node_sizes)
-                .map(|bounds| (ForcePackItem::Group(group_idx), bounds))
-        })
-        .chain(
-            graph
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, node)| node.group_index.is_none())
-                .map(|(node_idx, _)| {
-                    (
-                        ForcePackItem::UngroupedNode(node_idx),
-                        force_node_bounds(node_idx, positions, node_sizes),
-                    )
-                }),
-        )
-        .collect::<Vec<_>>();
+
+    // With two or more logical groups (prefix clusters, multi-schema, …) pack
+    // group bounding boxes plus any truly-ungrouped nodes along the secondary axis.
+    //
+    // With **no** groups (`GroupingStrategy::None`) or a **single** schema bucket
+    // (`BySchema` on one schema), `packed_items` would otherwise contain at most
+    // one `Group` entry and this pass would become a no-op — tables then stay
+    // stacked on the secondary axis and FK edges stay too short for markers.
+    let mut packed_items: Vec<(ForcePackItem, PackedBounds)> = if graph.groups.len() >= 2 {
+        graph
+            .groups
+            .iter()
+            .enumerate()
+            .filter_map(|(group_idx, group)| {
+                force_group_bounds(group, positions, node_sizes)
+                    .map(|bounds| (ForcePackItem::Group(group_idx), bounds))
+            })
+            .chain(
+                graph
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, node)| node.group_index.is_none())
+                    .map(|(node_idx, _)| {
+                        (
+                            ForcePackItem::UngroupedNode(node_idx),
+                            force_node_bounds(node_idx, positions, node_sizes),
+                        )
+                    }),
+            )
+            .collect()
+    } else {
+        (0..graph.nodes.len())
+            .map(|node_idx| {
+                (
+                    ForcePackItem::UngroupedNode(node_idx),
+                    force_node_bounds(node_idx, positions, node_sizes),
+                )
+            })
+            .collect()
+    };
 
     if packed_items.len() < 2 {
         return;

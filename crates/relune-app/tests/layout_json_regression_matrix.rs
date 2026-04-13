@@ -240,13 +240,11 @@ fn layout_parallel_edge_spacing_holds_for_matrix() {
     }
 }
 
-fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirection) {
+fn assert_force_directed_ecommerce_layout(direction: LayoutDirection, grouping: GroupingStrategy) {
     let graph = export_layout_request(ExportRequest {
         input: InputSource::sql_file(sql_fixture_path("ecommerce.sql")),
         format: ExportFormat::LayoutJson,
-        grouping: GroupingSpec {
-            strategy: GroupingStrategy::ByPrefix,
-        },
+        grouping: GroupingSpec { strategy: grouping },
         layout: LayoutSpec {
             algorithm: LayoutAlgorithm::ForceDirected,
             direction,
@@ -269,20 +267,22 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
         }
     }
 
-    for (group_idx, group) in graph.groups.iter().enumerate() {
-        for node in &graph.nodes {
-            if node.group_index == Some(group_idx) {
-                continue;
+    if !graph.groups.is_empty() {
+        for (group_idx, group) in graph.groups.iter().enumerate() {
+            for node in &graph.nodes {
+                if node.group_index == Some(group_idx) {
+                    continue;
+                }
+                assert!(
+                    !rects_overlap(
+                        (group.x, group.y, group.width, group.height),
+                        (node.x, node.y, node.width, node.height),
+                    ),
+                    "force-directed ecommerce group {} overlaps node {}",
+                    group.label,
+                    node.id
+                );
             }
-            assert!(
-                !rects_overlap(
-                    (group.x, group.y, group.width, group.height),
-                    (node.x, node.y, node.width, node.height),
-                ),
-                "force-directed ecommerce group {} overlaps node {}",
-                group.label,
-                node.id
-            );
         }
     }
 
@@ -334,12 +334,36 @@ fn assert_force_directed_prefix_grouping_ecommerce_layout(direction: LayoutDirec
 
 #[test]
 fn layout_force_directed_prefix_grouping_ecommerce_avoids_overlaps() {
-    assert_force_directed_prefix_grouping_ecommerce_layout(LayoutDirection::TopToBottom);
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::TopToBottom,
+        GroupingStrategy::ByPrefix,
+    );
 }
 
 #[test]
 fn layout_force_directed_prefix_grouping_ecommerce_left_to_right_preserves_edge_margin() {
-    assert_force_directed_prefix_grouping_ecommerce_layout(LayoutDirection::LeftToRight);
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::LeftToRight,
+        GroupingStrategy::ByPrefix,
+    );
+}
+
+#[test]
+fn layout_force_directed_ecommerce_none_grouping_preserves_connected_gaps() {
+    assert_force_directed_ecommerce_layout(LayoutDirection::TopToBottom, GroupingStrategy::None);
+    assert_force_directed_ecommerce_layout(LayoutDirection::LeftToRight, GroupingStrategy::None);
+}
+
+#[test]
+fn layout_force_directed_ecommerce_by_schema_preserves_connected_gaps() {
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::TopToBottom,
+        GroupingStrategy::BySchema,
+    );
+    assert_force_directed_ecommerce_layout(
+        LayoutDirection::LeftToRight,
+        GroupingStrategy::BySchema,
+    );
 }
 
 #[test]
