@@ -1156,6 +1156,12 @@ fn apply_force_layout(
     resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
     separate_force_groups(graph, &mut positions, node_sizes, config);
 
+    // Last group pack only moves along the secondary axis; restore FK corridor
+    // gaps so edge backbones (especially first/last orthogonal legs) stay long
+    // enough for markers after packing.
+    enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
+    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+
     // Calculate bounding box and shift to positive coordinates
     let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
     let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);

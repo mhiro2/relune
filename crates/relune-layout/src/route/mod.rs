@@ -6,10 +6,10 @@
 mod geometry;
 mod obstacle;
 
-pub use geometry::point_along_route;
 pub(crate) use geometry::{
     approximate_route_length, rebuild_route_from_points, route_points, sample_route_obstacles,
 };
+pub use geometry::{point_along_route, shortest_backbone_segment_length};
 pub use obstacle::{detour_around_obstacles, nudge_label};
 
 use geometry::{polyline_midpoint, simplify_orthogonal_path};

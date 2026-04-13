@@ -26,6 +26,10 @@ pub use legend::render_legend;
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
 
+/// When any backbone segment is shorter than this, Crow's Foot `<marker>` geometry
+/// (refX up to ~26px) intrudes past orthogonal elbows; draw inline symbols instead.
+const MIN_SVG_MARKER_BACKBONE_SEGMENT: f32 = 32.0;
+
 /// Renders a positioned graph to an SVG string with the given options.
 ///
 /// Supports group rendering for visually grouping related tables.
@@ -289,9 +293,16 @@ fn render_edge_internal(
     let uses_crow_markers = edge.kind == EdgeKind::ForeignKey;
     // Curved FK edges use inline markers drawn against the rendered backbone,
     // because SVG <marker> elements follow the endpoint tangent and can look
-    // detached once the visible path is smoothed.
-    let use_inline_markers =
-        uses_crow_markers && (edge.is_self_loop || edge.route.style == RouteStyle::Curved);
+    // detached once the visible path is smoothed.  Short orthogonal / straight
+    // legs also need inline placement so markers do not float mid-edge.
+    let shortest_seg = relune_layout::shortest_backbone_segment_length(&edge.route);
+    let use_inline_markers = uses_crow_markers
+        && (edge.is_self_loop
+            || edge.route.style == RouteStyle::Curved
+            || (matches!(
+                edge.route.style,
+                RouteStyle::Orthogonal | RouteStyle::Straight
+            ) && shortest_seg < MIN_SVG_MARKER_BACKBONE_SEGMENT));
     let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
 
     let stroke_dasharray = if options.dashed {
@@ -1260,6 +1271,21 @@ mod tests {
         );
         assert!(svg.contains("marker-start=\"url(#cardinality-one-many)\""));
         assert!(svg.contains("marker-end=\"url(#cardinality-one)\""));
+    }
+
+    #[test]
+    fn test_short_straight_fk_backbone_uses_inline_crow_markers() {
+        let mut graph = marker_test_graph(false, Cardinality::One);
+        graph.edges[0].route.style = RouteStyle::Straight;
+        graph.edges[0].route.x2 = 120.0;
+        graph.edges[0].route.y2 = 50.0;
+        graph.edges[0].route.control_points.clear();
+        graph.edges[0].route.label_position = (110.0, 50.0);
+
+        assert!(relune_layout::shortest_backbone_segment_length(&graph.edges[0].route) < 32.0);
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+        assert!(!svg.contains("marker-start=\"url(#cardinality-one-many)\""));
+        assert!(svg.contains(r#"class="crow-inline""#));
     }
 
     #[test]
