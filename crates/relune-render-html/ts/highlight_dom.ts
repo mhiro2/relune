@@ -283,6 +283,8 @@ function buildColumnElement(column: {
   data_type: string;
   nullable: boolean;
   is_primary_key: boolean;
+  is_foreign_key: boolean;
+  is_indexed: boolean;
   diff_kind?: string | null;
 }): HTMLDivElement {
   const columnEl = document.createElement('div');
@@ -300,6 +302,20 @@ function buildColumnElement(column: {
     pk.className = 'detail-column-pill detail-column-pill-pk';
     pk.textContent = 'PK';
     pills.appendChild(pk);
+  }
+
+  if (column.is_foreign_key) {
+    const fk = document.createElement('span');
+    fk.className = 'detail-column-pill detail-column-pill-fk';
+    fk.textContent = 'FK';
+    pills.appendChild(fk);
+  }
+
+  if (column.is_indexed) {
+    const ix = document.createElement('span');
+    ix.className = 'detail-column-pill detail-column-pill-ix';
+    ix.textContent = 'IX';
+    pills.appendChild(ix);
   }
 
   const typePill = document.createElement('span');

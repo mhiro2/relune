@@ -8,6 +8,8 @@ export interface ColumnMetadata {
   data_type: string;
   nullable: boolean;
   is_primary_key: boolean;
+  is_foreign_key: boolean;
+  is_indexed: boolean;
   diff_kind?: 'added' | 'removed' | 'modified' | null;
 }
 

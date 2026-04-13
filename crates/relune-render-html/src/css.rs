@@ -1202,6 +1202,18 @@ pub(crate) fn build_css(
       opacity: 1;
     }
 
+    .detail-column-pill-fk {
+      background: rgba(99, 102, 241, 0.2);
+      color: #818cf8;
+      opacity: 1;
+    }
+
+    .detail-column-pill-ix {
+      background: rgba(20, 184, 166, 0.2);
+      color: #2dd4bf;
+      opacity: 1;
+    }
+
     .detail-column-pill-required {
       opacity: 0.56;
     }
