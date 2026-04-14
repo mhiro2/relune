@@ -895,6 +895,96 @@ mod inspect_tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("PARSE004"));
     }
+
+    #[test]
+    fn inspect_multi_schema_text() {
+        let multi_schema = fixtures_dir().join("multi_schema.sql");
+        let mut cmd = relune();
+        let output = cmd
+            .arg("inspect")
+            .arg("--sql")
+            .arg(multi_schema)
+            .arg("--format")
+            .arg("text")
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+
+        // Cross-schema FK resolution: public.users has 2 incoming
+        // (public.posts -> public.users, sales.orders -> public.users).
+        assert!(
+            stdout.contains("public.users"),
+            "Output should list qualified table names"
+        );
+        assert!(
+            stdout.contains("FKs(0 out, 2 in)"),
+            "public.users should have 2 incoming FKs: {stdout}"
+        );
+
+        // sales.orders has 1 out + 2 in.
+        assert!(
+            stdout.contains("sales.orders"),
+            "Output should list sales.orders"
+        );
+
+        // Highlights section present.
+        assert!(
+            stdout.contains("Hub tables"),
+            "Multi-schema output should show Hub tables: {stdout}"
+        );
+
+        // Next steps present.
+        assert!(
+            stdout.contains("Next steps:"),
+            "Output should show Next steps"
+        );
+    }
+
+    #[test]
+    fn inspect_multi_schema_json() {
+        let multi_schema = fixtures_dir().join("multi_schema.sql");
+        let mut cmd = relune();
+        let output = cmd
+            .arg("inspect")
+            .arg("--sql")
+            .arg(multi_schema)
+            .arg("--format")
+            .arg("json")
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+        // Verify new fields in JSON.
+        let summary = &parsed["summary"];
+        assert!(
+            summary["index_count"].as_u64().unwrap() > 0,
+            "index_count should be present and > 0"
+        );
+        assert!(
+            summary["orphan_table_count"].is_u64(),
+            "orphan_table_count should be present"
+        );
+        assert!(
+            summary["tables_without_pk"].is_u64(),
+            "tables_without_pk should be present"
+        );
+
+        // Check incoming_fk_count on public.users.
+        let tables = summary["tables"].as_array().unwrap();
+        let pub_users = tables
+            .iter()
+            .find(|t| t["name"] == "public.users")
+            .expect("public.users should exist");
+        assert_eq!(
+            pub_users["incoming_fk_count"].as_u64().unwrap(),
+            2,
+            "public.users should have 2 incoming FKs"
+        );
+    }
 }
 
 // ============================================================================

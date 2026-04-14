@@ -9,9 +9,12 @@ use relune_introspect::introspect_sqlite;
 use relune_introspect::postgres::introspect_postgres;
 use relune_parser_sql::parse_sql_to_schema;
 use std::collections::HashSet;
+use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::mysql::Mysql;
 use testcontainers_modules::postgres::Postgres;
+
+const POSTGRES_TAG: &str = "18";
 
 /// Sets up a `PostgreSQL` container and executes the provided SQL against it.
 ///
@@ -22,7 +25,7 @@ async fn setup_postgres_with_sql(
     sql: &str,
 ) -> Result<(String, testcontainers::ContainerAsync<Postgres>), Box<dyn std::error::Error>> {
     // Start PostgreSQL container
-    let container = Postgres::default().start().await?;
+    let container = Postgres::default().with_tag(POSTGRES_TAG).start().await?;
 
     // Get connection parameters from the container
     let host = container.get_host().await?;
@@ -269,7 +272,11 @@ async fn test_introspect_database_dispatches_postgres_url() {
     let sql = r"
         CREATE TABLE t1 (id INT PRIMARY KEY);
     ";
-    let container = Postgres::default().start().await.expect("postgres");
+    let container = Postgres::default()
+        .with_tag(POSTGRES_TAG)
+        .start()
+        .await
+        .expect("postgres");
     let host = container.get_host().await.expect("host");
     let port = container.get_host_port_ipv4(5432).await.expect("port");
     let database_url = format!("postgresql://postgres:postgres@{host}:{port}/postgres");

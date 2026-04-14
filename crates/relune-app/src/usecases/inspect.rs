@@ -418,6 +418,50 @@ mod tests {
         assert_eq!(result.summary.table_count, 2);
         assert_eq!(result.summary.column_count, 5);
         assert_eq!(result.summary.foreign_key_count, 1);
+
+        // Enriched stats
+        assert_eq!(result.summary.tables_without_pk, 0);
+        assert_eq!(result.summary.orphan_table_count, 0);
+
+        // users has 1 incoming FK (from posts), 0 outgoing
+        let users = result
+            .summary
+            .tables
+            .iter()
+            .find(|t| t.name == "users")
+            .unwrap();
+        assert_eq!(users.incoming_fk_count, 1);
+        assert_eq!(users.foreign_key_count, 0);
+
+        // posts has 0 incoming, 1 outgoing
+        let posts = result
+            .summary
+            .tables
+            .iter()
+            .find(|t| t.name == "posts")
+            .unwrap();
+        assert_eq!(posts.incoming_fk_count, 0);
+        assert_eq!(posts.foreign_key_count, 1);
+    }
+
+    #[test]
+    fn test_inspect_summary_orphan_and_no_pk() {
+        let sql = r"
+            CREATE TABLE users (
+                id INT PRIMARY KEY,
+                name VARCHAR(255)
+            );
+            CREATE TABLE logs (
+                message TEXT
+            );
+        ";
+
+        let request = InspectRequest::from_sql(sql);
+        let result = inspect(request).unwrap();
+
+        assert_eq!(result.summary.tables_without_pk, 1);
+        // Both tables are orphans (no FK connections)
+        assert_eq!(result.summary.orphan_table_count, 2);
     }
 
     #[test]
@@ -517,7 +561,50 @@ mod tests {
 
         assert!(text.contains("Schema Summary"));
         assert!(text.contains("Tables: 1"));
+        assert!(text.contains("Indexes: 0"));
         assert!(text.contains("users"));
+        // Single table: no Highlights section
+        assert!(!text.contains("Highlights:"));
+        // Summary mode shows Next steps
+        assert!(text.contains("Next steps:"));
+    }
+
+    #[test]
+    fn test_format_inspect_text_with_highlights() {
+        let sql = r"
+            CREATE TABLE users (
+                id INT PRIMARY KEY,
+                name VARCHAR(255)
+            );
+            CREATE TABLE posts (
+                id INT PRIMARY KEY,
+                user_id INT REFERENCES users(id),
+                title VARCHAR(255)
+            );
+            CREATE TABLE comments (
+                id INT PRIMARY KEY,
+                post_id INT REFERENCES posts(id),
+                body TEXT
+            );
+            CREATE TABLE logs (
+                message TEXT
+            );
+        ";
+
+        let request = InspectRequest::from_sql(sql);
+        let result = inspect(request).unwrap();
+        let text = format_inspect_text(&result);
+
+        // Hub tables section
+        assert!(text.contains("Hub tables"));
+        // posts is a hub (1 out + 1 in = 2)
+        assert!(text.contains("posts"));
+        // Isolated tables
+        assert!(text.contains("Isolated tables"));
+        assert!(text.contains("logs"));
+        // No PK
+        assert!(text.contains("Tables without primary key"));
+        assert!(text.contains("logs"));
     }
 
     #[test]
