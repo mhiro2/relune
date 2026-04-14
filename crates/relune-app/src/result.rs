@@ -146,23 +146,50 @@ pub struct SchemaSummary {
     pub column_count: usize,
     /// Total number of foreign keys.
     pub foreign_key_count: usize,
+    /// Total number of indexes.
+    pub index_count: usize,
     /// Total number of views.
     pub view_count: usize,
     /// Total number of enums.
     pub enum_count: usize,
-    /// List of table names.
+    /// Number of tables without a primary key.
+    pub tables_without_pk: usize,
+    /// Number of orphan tables (no FK in or out).
+    pub orphan_table_count: usize,
+    /// List of table summaries.
     pub tables: Vec<TableSummary>,
 }
 
 impl From<&Schema> for SchemaSummary {
     fn from(schema: &Schema) -> Self {
+        // Use core's schema-qualified FK resolution for accurate counts.
+        let incoming_fk_counts = schema.incoming_fk_counts();
+
+        let tables: Vec<TableSummary> = schema
+            .tables
+            .iter()
+            .map(|t| {
+                let incoming_fk_count = incoming_fk_counts.get(&t.id).copied().unwrap_or(0);
+                TableSummary::from_table(t, incoming_fk_count)
+            })
+            .collect();
+
+        let tables_without_pk = tables.iter().filter(|t| !t.has_primary_key).count();
+        let orphan_table_count = tables
+            .iter()
+            .filter(|t| t.foreign_key_count == 0 && t.incoming_fk_count == 0)
+            .count();
+
         Self {
             table_count: schema.tables.len(),
             column_count: schema.tables.iter().map(|t| t.columns.len()).sum(),
             foreign_key_count: schema.tables.iter().map(|t| t.foreign_keys.len()).sum(),
+            index_count: schema.tables.iter().map(|t| t.indexes.len()).sum(),
             view_count: schema.views.len(),
             enum_count: schema.enums.len(),
-            tables: schema.tables.iter().map(TableSummary::from).collect(),
+            tables_without_pk,
+            orphan_table_count,
+            tables,
         }
     }
 }
@@ -174,20 +201,33 @@ pub struct TableSummary {
     pub name: String,
     /// Number of columns.
     pub column_count: usize,
-    /// Number of foreign keys.
+    /// Number of outgoing foreign keys (this table references others).
     pub foreign_key_count: usize,
+    /// Number of incoming foreign keys (other tables reference this one).
+    pub incoming_fk_count: usize,
+    /// Number of indexes.
+    pub index_count: usize,
     /// Whether the table has a primary key.
     pub has_primary_key: bool,
 }
 
-impl From<&relune_core::Table> for TableSummary {
-    fn from(table: &relune_core::Table) -> Self {
+impl TableSummary {
+    /// Build from a core Table plus precomputed incoming FK count.
+    fn from_table(table: &relune_core::Table, incoming_fk_count: usize) -> Self {
         Self {
             name: table.qualified_name(),
             column_count: table.columns.len(),
             foreign_key_count: table.foreign_keys.len(),
+            incoming_fk_count,
+            index_count: table.indexes.len(),
             has_primary_key: table.columns.iter().any(|c| c.is_primary_key),
         }
+    }
+
+    /// Total FK connections (outgoing + incoming).
+    #[must_use]
+    pub const fn total_connections(&self) -> usize {
+        self.foreign_key_count + self.incoming_fk_count
     }
 }
 

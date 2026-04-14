@@ -352,6 +352,30 @@ impl Schema {
         }
     }
 
+    /// Returns a map from `TableId` to the number of incoming foreign keys.
+    ///
+    /// Uses the same schema-qualified resolution logic as FK validation,
+    /// so `auth.sessions -> auth.users` correctly targets `auth.users`
+    /// even when `public.users` also exists.
+    #[must_use]
+    pub fn incoming_fk_counts(&self) -> std::collections::HashMap<TableId, usize> {
+        use std::collections::HashMap;
+        let mut counts: HashMap<TableId, usize> = HashMap::new();
+        for table in &self.tables {
+            for fk in &table.foreign_keys {
+                if let ForeignKeyTargetResolution::Found(target) = resolve_table_reference(
+                    self,
+                    Some(table),
+                    fk.to_schema.as_deref(),
+                    &fk.to_table,
+                ) {
+                    *counts.entry(target.id).or_insert(0) += 1;
+                }
+            }
+        }
+        counts
+    }
+
     /// Returns statistics about the schema.
     #[must_use]
     pub fn stats(&self) -> SchemaStats {
