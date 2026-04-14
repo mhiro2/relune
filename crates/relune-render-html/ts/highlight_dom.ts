@@ -20,6 +20,13 @@ function clearChildren(element: HTMLElement): void {
   element.replaceChildren();
 }
 
+function joinTableBadge(): HTMLDivElement {
+  const badge = document.createElement('div');
+  badge.className = 'detail-badge detail-badge-join';
+  badge.textContent = 'Join Table';
+  return badge;
+}
+
 function diffBadge(kind: string): HTMLDivElement {
   const badge = document.createElement('div');
   const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
@@ -161,6 +168,7 @@ export function renderDrawer(
   table: TableMetadata | undefined,
   state: HighlightState,
   elements: DrawerElements,
+  onNavigate?: (tableId: string) => void,
 ): void {
   if (table === undefined) {
     elements.drawer.setAttribute('hidden', '');
@@ -182,15 +190,22 @@ export function renderDrawer(
     ? `${table.schema_name}.${table.table_name}`
     : table.table_name;
 
-  // Metrics
+  // Badges (join table candidate, diff)
   clearChildren(elements.metrics);
+  if (table.is_join_table_candidate) {
+    elements.metrics.append(joinTableBadge());
+  }
   if (table.diff_kind) {
     elements.metrics.append(diffBadge(table.diff_kind));
   }
+
+  // Metrics
+  const totalRelations = table.inbound_count + table.outbound_count;
   elements.metrics.append(
     metricCard('Columns', String(table.columns.length)),
-    metricCard('Inbound', String(table.inbound_count)),
-    metricCard('Outbound', String(table.outbound_count)),
+    metricCard('Relations', String(totalRelations)),
+    metricCard('\u2190 In', String(table.inbound_count)),
+    metricCard('Out \u2192', String(table.outbound_count)),
   );
 
   // Columns
@@ -213,7 +228,7 @@ export function renderDrawer(
     elements.relationsEmpty.setAttribute('hidden', '');
     for (const relation of relations) {
       elements.relations.appendChild(
-        buildRelationElement(relation.edge, relation.node, state.tableById),
+        buildRelationElement(relation.edge, relation.node, state.tableById, onNavigate),
       );
     }
   }
@@ -283,6 +298,8 @@ function buildColumnElement(column: {
   data_type: string;
   nullable: boolean;
   is_primary_key: boolean;
+  is_foreign_key: boolean;
+  is_indexed: boolean;
   diff_kind?: string | null;
 }): HTMLDivElement {
   const columnEl = document.createElement('div');
@@ -300,6 +317,20 @@ function buildColumnElement(column: {
     pk.className = 'detail-column-pill detail-column-pill-pk';
     pk.textContent = 'PK';
     pills.appendChild(pk);
+  }
+
+  if (column.is_foreign_key) {
+    const fk = document.createElement('span');
+    fk.className = 'detail-column-pill detail-column-pill-fk';
+    fk.textContent = 'FK';
+    pills.appendChild(fk);
+  }
+
+  if (column.is_indexed) {
+    const ix = document.createElement('span');
+    ix.className = 'detail-column-pill detail-column-pill-ix';
+    ix.textContent = 'IX';
+    pills.appendChild(ix);
   }
 
   const typePill = document.createElement('span');
@@ -331,26 +362,38 @@ function buildRelationElement(
   edge: EdgeMetadata,
   targetNodeId: string,
   tableById: Map<string, TableMetadata>,
-): HTMLDivElement {
-  const relationEl = document.createElement('div');
-  relationEl.className = 'detail-relation';
-
+  onNavigate?: (tableId: string) => void,
+): HTMLElement {
   const targetTable = tableById.get(targetNodeId);
+  const targetName = targetTable?.label ?? targetNodeId;
+
   const label = document.createElement('span');
   label.className = 'detail-relation-label';
   label.textContent = edge.name ?? `${edge.from} → ${edge.to}`;
 
   const meta = document.createElement('span');
   meta.className = 'detail-relation-meta';
-  const targetName = targetTable?.label ?? targetNodeId;
   const columnMap =
     edge.from_columns.length > 0 && edge.to_columns.length > 0
       ? ` · ${edge.from_columns.join(', ')} → ${edge.to_columns.join(', ')}`
       : '';
   meta.textContent = `${edge.kind} · ${targetName}${columnMap}`;
 
-  relationEl.append(label, meta);
-  return relationEl;
+  if (onNavigate) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'detail-relation detail-relation-navigable';
+    btn.addEventListener('click', () => {
+      onNavigate(targetNodeId);
+    });
+    btn.append(label, meta);
+    return btn;
+  }
+
+  const div = document.createElement('div');
+  div.className = 'detail-relation';
+  div.append(label, meta);
+  return div;
 }
 
 function buildIssueElement(issue: IssueMetadata): HTMLDivElement {

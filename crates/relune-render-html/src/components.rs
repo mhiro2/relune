@@ -111,6 +111,13 @@ pub(crate) fn build_detail_drawer_html() -> String {
     </div>
     <p class="detail-subtitle" id="detail-subtitle"></p>
     <div class="detail-metrics" id="detail-metrics"></div>
+    <div class="detail-traversal" id="detail-traversal" hidden>
+      <span class="detail-traversal-label">Highlight</span>
+      <div class="detail-traversal-buttons">
+        <button type="button" class="detail-traversal-btn active" data-depth="1">1-hop</button>
+        <button type="button" class="detail-traversal-btn" data-depth="2">2-hop</button>
+      </div>
+    </div>
     <section class="detail-section">
       <h3>Columns</h3>
       <div class="detail-empty" id="detail-columns-empty">No column details available.</div>

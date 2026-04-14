@@ -73,34 +73,62 @@
       (outboundMap[edge.from] ??= []).push({ node: edge.to, edge });
       (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
     }
-    return { hoveredNode: null, selectedNode: null, tableById, inboundMap, outboundMap, edges };
+    return {
+      hoveredNode: null,
+      selectedNode: null,
+      traversalDepth: 1,
+      tableById,
+      inboundMap,
+      outboundMap,
+      edges
+    };
   }
 
   // ts/highlight_actions.ts
-  function collectNeighborhood(nodeId, state) {
-    const inbound = state.inboundMap[nodeId] ?? [];
-    const outbound = state.outboundMap[nodeId] ?? [];
+  function collectNeighborhood(nodeId, state, depth = 1) {
     const neighborIds = /* @__PURE__ */ new Set();
     const inboundNodeIds = /* @__PURE__ */ new Set();
     const outboundNodeIds = /* @__PURE__ */ new Set();
-    for (const relation of inbound) {
-      neighborIds.add(relation.node);
-      inboundNodeIds.add(relation.node);
-    }
-    for (const relation of outbound) {
-      neighborIds.add(relation.node);
-      outboundNodeIds.add(relation.node);
+    const traversedEdgeKeys = /* @__PURE__ */ new Set();
+    const visited = /* @__PURE__ */ new Set([nodeId]);
+    let frontier = [nodeId];
+    for (let hop = 0; hop < depth && frontier.length > 0; hop++) {
+      const nextFrontier = [];
+      for (const current of frontier) {
+        for (const relation of state.inboundMap[current] ?? []) {
+          neighborIds.add(relation.node);
+          traversedEdgeKeys.add(edgeKey(relation.edge));
+          if (current === nodeId) inboundNodeIds.add(relation.node);
+          if (!visited.has(relation.node)) {
+            visited.add(relation.node);
+            nextFrontier.push(relation.node);
+          }
+        }
+        for (const relation of state.outboundMap[current] ?? []) {
+          neighborIds.add(relation.node);
+          traversedEdgeKeys.add(edgeKey(relation.edge));
+          if (current === nodeId) outboundNodeIds.add(relation.node);
+          if (!visited.has(relation.node)) {
+            visited.add(relation.node);
+            nextFrontier.push(relation.node);
+          }
+        }
+      }
+      frontier = nextFrontier;
     }
     const connectedEdgeIndices = /* @__PURE__ */ new Set();
     state.edges.forEach((edge, index) => {
-      if (edge.from === nodeId || edge.to === nodeId) {
+      if (traversedEdgeKeys.has(edgeKey(edge))) {
         connectedEdgeIndices.add(index);
       }
     });
     return { neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
   }
-  function computeNeighborHighlights(nodeId, state) {
-    return { selectedId: nodeId, ...collectNeighborhood(nodeId, state) };
+  function edgeKey(edge) {
+    return `${edge.from}\0${edge.to}\0${edge.name ?? ""}`;
+  }
+  function computeNeighborHighlights(nodeId, state, depth = 1) {
+    return { selectedId: nodeId, ...collectNeighborhood(nodeId, state, depth) };
   }
   function computeHoverPreview(nodeId, state) {
     return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
@@ -123,6 +151,12 @@
   }
   function clearChildren(element) {
     element.replaceChildren();
+  }
+  function joinTableBadge() {
+    const badge = document.createElement("div");
+    badge.className = "detail-badge detail-badge-join";
+    badge.textContent = "Join Table";
+    return badge;
   }
   function diffBadge(kind) {
     const badge = document.createElement("div");
@@ -204,7 +238,7 @@
       edgeElement.classList.toggle("hover-preview-edge", preview.connectedEdgeIndices.has(index));
     });
   }
-  function renderDrawer(table, state, elements) {
+  function renderDrawer(table, state, elements, onNavigate) {
     if (table === void 0) {
       elements.drawer.setAttribute("hidden", "");
       clearChildren(elements.metrics);
@@ -222,13 +256,18 @@
     elements.title.textContent = table.label || table.table_name || table.id;
     elements.subtitle.textContent = table.schema_name ? `${table.schema_name}.${table.table_name}` : table.table_name;
     clearChildren(elements.metrics);
+    if (table.is_join_table_candidate) {
+      elements.metrics.append(joinTableBadge());
+    }
     if (table.diff_kind) {
       elements.metrics.append(diffBadge(table.diff_kind));
     }
+    const totalRelations = table.inbound_count + table.outbound_count;
     elements.metrics.append(
       metricCard("Columns", String(table.columns.length)),
-      metricCard("Inbound", String(table.inbound_count)),
-      metricCard("Outbound", String(table.outbound_count))
+      metricCard("Relations", String(totalRelations)),
+      metricCard("\u2190 In", String(table.inbound_count)),
+      metricCard("Out \u2192", String(table.outbound_count))
     );
     clearChildren(elements.columns);
     if (table.columns.length === 0) {
@@ -247,7 +286,7 @@
       elements.relationsEmpty.setAttribute("hidden", "");
       for (const relation of relations) {
         elements.relations.appendChild(
-          buildRelationElement(relation.edge, relation.node, state.tableById)
+          buildRelationElement(relation.edge, relation.node, state.tableById, onNavigate)
         );
       }
     }
@@ -310,6 +349,18 @@
       pk.textContent = "PK";
       pills.appendChild(pk);
     }
+    if (column.is_foreign_key) {
+      const fk = document.createElement("span");
+      fk.className = "detail-column-pill detail-column-pill-fk";
+      fk.textContent = "FK";
+      pills.appendChild(fk);
+    }
+    if (column.is_indexed) {
+      const ix = document.createElement("span");
+      ix.className = "detail-column-pill detail-column-pill-ix";
+      ix.textContent = "IX";
+      pills.appendChild(ix);
+    }
     const typePill = document.createElement("span");
     typePill.className = "detail-column-pill";
     typePill.textContent = column.data_type || "unknown";
@@ -328,20 +379,30 @@
     columnEl.append(name, pills);
     return columnEl;
   }
-  function buildRelationElement(edge, targetNodeId, tableById) {
-    const relationEl = document.createElement("div");
-    relationEl.className = "detail-relation";
+  function buildRelationElement(edge, targetNodeId, tableById, onNavigate) {
     const targetTable = tableById.get(targetNodeId);
+    const targetName = targetTable?.label ?? targetNodeId;
     const label = document.createElement("span");
     label.className = "detail-relation-label";
     label.textContent = edge.name ?? `${edge.from} \u2192 ${edge.to}`;
     const meta = document.createElement("span");
     meta.className = "detail-relation-meta";
-    const targetName = targetTable?.label ?? targetNodeId;
     const columnMap = edge.from_columns.length > 0 && edge.to_columns.length > 0 ? ` \xB7 ${edge.from_columns.join(", ")} \u2192 ${edge.to_columns.join(", ")}` : "";
     meta.textContent = `${edge.kind} \xB7 ${targetName}${columnMap}`;
-    relationEl.append(label, meta);
-    return relationEl;
+    if (onNavigate) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "detail-relation detail-relation-navigable";
+      btn.addEventListener("click", () => {
+        onNavigate(targetNodeId);
+      });
+      btn.append(label, meta);
+      return btn;
+    }
+    const div = document.createElement("div");
+    div.className = "detail-relation";
+    div.append(label, meta);
+    return div;
   }
   function buildIssueElement(issue) {
     const issueEl = document.createElement("div");
@@ -468,6 +529,7 @@
     const objectBrowserCount = document.getElementById("object-browser-count");
     const objectBrowserEmpty = document.getElementById("object-browser-empty");
     const drawerClose = document.getElementById("detail-close");
+    const traversalEl = document.getElementById("detail-traversal");
     const viewport = document.getElementById("viewport");
     const drawerEls = (() => {
       const drawer = document.getElementById("detail-drawer");
@@ -533,6 +595,10 @@
         const height = Number.parseFloat(rect.getAttribute("height") ?? "0");
         runtime.viewport?.center(x + width / 2, y + height / 2);
       };
+      const navigateToTable = (tableId) => {
+        setSelectedNode(tableId);
+        centerNodeInViewport(tableId);
+      };
       const syncObjectBrowser = () => {
         if (!(objectBrowserList instanceof HTMLElement) || !(objectBrowserCount instanceof HTMLElement) || !(objectBrowserEmpty instanceof HTMLElement)) {
           return;
@@ -571,15 +637,37 @@
           }
         );
       };
+      const syncTraversalButtons = () => {
+        traversalEl?.querySelectorAll(".detail-traversal-btn").forEach((btn) => {
+          const depth = Number(btn.dataset["depth"]);
+          btn.classList.toggle("active", depth === state.traversalDepth);
+        });
+      };
+      traversalEl?.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement) || target.dataset["depth"] === void 0) return;
+        const depth = Number(target.dataset["depth"]);
+        if (depth >= 1 && depth <= 2 && depth !== state.traversalDepth) {
+          state.traversalDepth = depth;
+          renderInteraction();
+        }
+      });
       const renderInteraction = () => {
         clearHighlightClasses(svgRoot, getNodes);
         hideHoverPopover(hoverEls);
         if (state.selectedNode !== null) {
-          const highlight = computeNeighborHighlights(state.selectedNode, state);
+          const highlight = computeNeighborHighlights(
+            state.selectedNode,
+            state,
+            state.traversalDepth
+          );
           applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
-          renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls);
+          renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
+          traversalEl?.removeAttribute("hidden");
+          syncTraversalButtons();
         } else {
           renderDrawer(void 0, state, drawerEls);
+          traversalEl?.setAttribute("hidden", "");
           if (state.hoveredNode !== null) {
             const hoveredNode = findNode(state.hoveredNode);
             if (hoveredNode !== void 0) {
@@ -641,6 +729,14 @@
           } else {
             setSelectedNode(nodeId);
           }
+        });
+      });
+      svgRoot.querySelectorAll(".edge").forEach((edgeEl) => {
+        edgeEl.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const fromId = edgeEl.getAttribute("data-from");
+          if (fromId === null) return;
+          navigateToTable(fromId);
         });
       });
       svgRoot.addEventListener("click", () => {

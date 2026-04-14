@@ -16,25 +16,51 @@ export interface HoverPreview extends HighlightNeighborhood {
   hoveredId: string;
 }
 
-function collectNeighborhood(nodeId: string, state: HighlightState): HighlightNeighborhood {
-  const inbound = state.inboundMap[nodeId] ?? [];
-  const outbound = state.outboundMap[nodeId] ?? [];
+function collectNeighborhood(
+  nodeId: string,
+  state: HighlightState,
+  depth: number = 1,
+): HighlightNeighborhood {
   const neighborIds = new Set<string>();
   const inboundNodeIds = new Set<string>();
   const outboundNodeIds = new Set<string>();
 
-  for (const relation of inbound) {
-    neighborIds.add(relation.node);
-    inboundNodeIds.add(relation.node);
-  }
-  for (const relation of outbound) {
-    neighborIds.add(relation.node);
-    outboundNodeIds.add(relation.node);
+  // Track edges traversed during BFS so only reachable edges are highlighted
+  const traversedEdgeKeys = new Set<string>();
+
+  // BFS traversal up to `depth` hops
+  const visited = new Set<string>([nodeId]);
+  let frontier = [nodeId];
+
+  for (let hop = 0; hop < depth && frontier.length > 0; hop++) {
+    const nextFrontier: string[] = [];
+    for (const current of frontier) {
+      for (const relation of state.inboundMap[current] ?? []) {
+        neighborIds.add(relation.node);
+        traversedEdgeKeys.add(edgeKey(relation.edge));
+        if (current === nodeId) inboundNodeIds.add(relation.node);
+        if (!visited.has(relation.node)) {
+          visited.add(relation.node);
+          nextFrontier.push(relation.node);
+        }
+      }
+      for (const relation of state.outboundMap[current] ?? []) {
+        neighborIds.add(relation.node);
+        traversedEdgeKeys.add(edgeKey(relation.edge));
+        if (current === nodeId) outboundNodeIds.add(relation.node);
+        if (!visited.has(relation.node)) {
+          visited.add(relation.node);
+          nextFrontier.push(relation.node);
+        }
+      }
+    }
+    frontier = nextFrontier;
   }
 
+  // Only highlight edges that were actually traversed
   const connectedEdgeIndices = new Set<number>();
   state.edges.forEach((edge, index) => {
-    if (edge.from === nodeId || edge.to === nodeId) {
+    if (traversedEdgeKeys.has(edgeKey(edge))) {
       connectedEdgeIndices.add(index);
     }
   });
@@ -42,11 +68,16 @@ function collectNeighborhood(nodeId: string, state: HighlightState): HighlightNe
   return { neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
 }
 
+function edgeKey(edge: { from: string; to: string; name?: string | null }): string {
+  return `${edge.from}\0${edge.to}\0${edge.name ?? ''}`;
+}
+
 export function computeNeighborHighlights(
   nodeId: string,
   state: HighlightState,
+  depth: number = 1,
 ): NeighborHighlight {
-  return { selectedId: nodeId, ...collectNeighborhood(nodeId, state) };
+  return { selectedId: nodeId, ...collectNeighborhood(nodeId, state, depth) };
 }
 
 export function computeHoverPreview(nodeId: string, state: HighlightState): HoverPreview {

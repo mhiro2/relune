@@ -1107,11 +1107,70 @@ pub(crate) fn build_css(
       cursor: pointer;
     }
 
+    .detail-traversal {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 12px 0 4px;
+    }
+
+    .detail-traversal-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.55;
+      font-weight: 600;
+    }
+
+    .detail-traversal-buttons {
+      display: flex;
+      gap: 4px;
+    }
+
+    .detail-traversal-btn {
+      padding: 3px 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-color);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .detail-traversal-btn:hover {
+      border-color: var(--accent-color);
+      background: color-mix(in srgb, transparent 80%, var(--accent-soft));
+    }
+
+    .detail-traversal-btn.active {
+      border-color: var(--accent-color);
+      background: var(--accent-soft);
+      font-weight: 600;
+    }
+
     .detail-metrics {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
       margin: 16px 0;
+    }
+
+    .detail-badge {
+      grid-column: 1 / -1;
+      display: inline-block;
+      width: fit-content;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .detail-badge-join {
+      background: rgba(139, 92, 246, 0.18);
+      color: #a78bfa;
     }
 
     .detail-metric {
@@ -1123,10 +1182,12 @@ pub(crate) fn build_css(
     .detail-metric-label {
       display: block;
       font-size: 11px;
+      line-height: 1.3;
       opacity: 0.65;
       margin-bottom: 4px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
+      overflow-wrap: anywhere;
     }
 
     .detail-metric-value {
@@ -1157,6 +1218,10 @@ pub(crate) fn build_css(
       flex: 1 1 100%;
     }
 
+    .detail-relations .detail-relation {
+      flex: 1 1 100%;
+    }
+
     .detail-column,
     .detail-relation {
       border: 1px solid rgba(148, 163, 184, 0.12);
@@ -1164,6 +1229,16 @@ pub(crate) fn build_css(
       padding: 8px 12px;
       background: rgba(148, 163, 184, 0.05);
       transition: border-color 0.15s, background-color 0.15s;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    button.detail-relation {
+      width: 100%;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
     }
 
     .detail-relation:hover {
@@ -1177,6 +1252,7 @@ pub(crate) fn build_css(
       font-family: var(--mono-font);
       font-size: 13px;
       margin-bottom: 2px;
+      overflow-wrap: anywhere;
     }
 
     .detail-column-pills {
@@ -1199,6 +1275,18 @@ pub(crate) fn build_css(
     .detail-column-pill-pk {
       background: rgba(245, 158, 11, 0.2);
       color: var(--accent-color);
+      opacity: 1;
+    }
+
+    .detail-column-pill-fk {
+      background: rgba(99, 102, 241, 0.2);
+      color: #818cf8;
+      opacity: 1;
+    }
+
+    .detail-column-pill-ix {
+      background: rgba(20, 184, 166, 0.2);
+      color: #2dd4bf;
       opacity: 1;
     }
 
@@ -1258,19 +1346,16 @@ pub(crate) fn build_css(
 
     .detail-column-meta,
     .detail-relation-meta {
+      display: block;
       font-size: 11px;
+      line-height: 1.35;
       opacity: 0.65;
       letter-spacing: 0.01em;
+      overflow-wrap: anywhere;
     }
 
     .detail-relation-meta {
-      border: none;
-      background: transparent;
-      color: inherit;
-      padding: 0;
-      text-align: left;
-      cursor: pointer;
-      font: inherit;
+      margin-top: 2px;
     }
 
     .detail-empty {
@@ -1358,6 +1443,7 @@ pub(crate) fn build_css(
 
     .canvas svg .edge {
       animation-name: relune-edge-enter;
+      cursor: pointer;
     }
 
     .node.dimmed-by-filter .type-filter-overlay {
