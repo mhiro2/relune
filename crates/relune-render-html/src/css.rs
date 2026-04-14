@@ -1152,7 +1152,7 @@ pub(crate) fn build_css(
 
     .detail-metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
       margin: 16px 0;
     }
@@ -1182,10 +1182,12 @@ pub(crate) fn build_css(
     .detail-metric-label {
       display: block;
       font-size: 11px;
+      line-height: 1.3;
       opacity: 0.65;
       margin-bottom: 4px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
+      overflow-wrap: anywhere;
     }
 
     .detail-metric-value {
@@ -1213,6 +1215,10 @@ pub(crate) fn build_css(
     }
 
     .detail-columns .detail-column {
+      flex: 1 1 100%;
+    }
+
+    .detail-relations .detail-relation {
       flex: 1 1 100%;
     }
 
@@ -1340,20 +1346,16 @@ pub(crate) fn build_css(
 
     .detail-column-meta,
     .detail-relation-meta {
+      display: block;
       font-size: 11px;
+      line-height: 1.35;
       opacity: 0.65;
       letter-spacing: 0.01em;
       overflow-wrap: anywhere;
     }
 
     .detail-relation-meta {
-      border: none;
-      background: transparent;
-      color: inherit;
-      padding: 0;
-      text-align: left;
-      cursor: pointer;
-      font: inherit;
+      margin-top: 2px;
     }
 
     .detail-empty {

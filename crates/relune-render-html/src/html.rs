@@ -632,6 +632,17 @@ mod tests {
     }
 
     #[test]
+    fn test_detail_drawer_layout_css() {
+        let css = build_css(Theme::Dark, false, false, false, true);
+
+        assert!(css.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"));
+        assert!(css.contains(".detail-relations .detail-relation"));
+        assert!(css.contains(".detail-relation-meta"));
+        assert!(css.contains("line-height: 1.35;"));
+        assert!(css.contains("margin-top: 2px;"));
+    }
+
+    #[test]
     fn test_panel_radius_consistency() {
         let css = build_css(Theme::Dark, true, true, false, true);
 
