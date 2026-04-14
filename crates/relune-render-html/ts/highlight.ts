@@ -269,6 +269,17 @@ import {
       });
     });
 
+    // ── Edge click listeners ────────────────────────────────────────────
+
+    svgRoot.querySelectorAll('.edge').forEach((edgeEl) => {
+      edgeEl.addEventListener('click', (event: Event) => {
+        event.stopPropagation();
+        const fromId = edgeEl.getAttribute('data-from');
+        if (fromId === null) return;
+        navigateToTable(fromId);
+      });
+    });
+
     svgRoot.addEventListener('click', () => {
       if (state.selectedNode !== null) {
         setSelectedNode(null);

@@ -1378,6 +1378,7 @@ pub(crate) fn build_css(
 
     .canvas svg .edge {
       animation-name: relune-edge-enter;
+      cursor: pointer;
     }
 
     .node.dimmed-by-filter .type-filter-overlay {
