@@ -1107,6 +1107,49 @@ pub(crate) fn build_css(
       cursor: pointer;
     }
 
+    .detail-traversal {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 12px 0 4px;
+    }
+
+    .detail-traversal-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.55;
+      font-weight: 600;
+    }
+
+    .detail-traversal-buttons {
+      display: flex;
+      gap: 4px;
+    }
+
+    .detail-traversal-btn {
+      padding: 3px 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-color);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .detail-traversal-btn:hover {
+      border-color: var(--accent-color);
+      background: color-mix(in srgb, transparent 80%, var(--accent-soft));
+    }
+
+    .detail-traversal-btn.active {
+      border-color: var(--accent-color);
+      background: var(--accent-soft);
+      font-weight: 600;
+    }
+
     .detail-metrics {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));

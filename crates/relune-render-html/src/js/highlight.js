@@ -73,34 +73,62 @@
       (outboundMap[edge.from] ??= []).push({ node: edge.to, edge });
       (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
     }
-    return { hoveredNode: null, selectedNode: null, tableById, inboundMap, outboundMap, edges };
+    return {
+      hoveredNode: null,
+      selectedNode: null,
+      traversalDepth: 1,
+      tableById,
+      inboundMap,
+      outboundMap,
+      edges
+    };
   }
 
   // ts/highlight_actions.ts
-  function collectNeighborhood(nodeId, state) {
-    const inbound = state.inboundMap[nodeId] ?? [];
-    const outbound = state.outboundMap[nodeId] ?? [];
+  function collectNeighborhood(nodeId, state, depth = 1) {
     const neighborIds = /* @__PURE__ */ new Set();
     const inboundNodeIds = /* @__PURE__ */ new Set();
     const outboundNodeIds = /* @__PURE__ */ new Set();
-    for (const relation of inbound) {
-      neighborIds.add(relation.node);
-      inboundNodeIds.add(relation.node);
-    }
-    for (const relation of outbound) {
-      neighborIds.add(relation.node);
-      outboundNodeIds.add(relation.node);
+    const traversedEdgeKeys = /* @__PURE__ */ new Set();
+    const visited = /* @__PURE__ */ new Set([nodeId]);
+    let frontier = [nodeId];
+    for (let hop = 0; hop < depth && frontier.length > 0; hop++) {
+      const nextFrontier = [];
+      for (const current of frontier) {
+        for (const relation of state.inboundMap[current] ?? []) {
+          neighborIds.add(relation.node);
+          traversedEdgeKeys.add(edgeKey(relation.edge));
+          if (current === nodeId) inboundNodeIds.add(relation.node);
+          if (!visited.has(relation.node)) {
+            visited.add(relation.node);
+            nextFrontier.push(relation.node);
+          }
+        }
+        for (const relation of state.outboundMap[current] ?? []) {
+          neighborIds.add(relation.node);
+          traversedEdgeKeys.add(edgeKey(relation.edge));
+          if (current === nodeId) outboundNodeIds.add(relation.node);
+          if (!visited.has(relation.node)) {
+            visited.add(relation.node);
+            nextFrontier.push(relation.node);
+          }
+        }
+      }
+      frontier = nextFrontier;
     }
     const connectedEdgeIndices = /* @__PURE__ */ new Set();
     state.edges.forEach((edge, index) => {
-      if (edge.from === nodeId || edge.to === nodeId) {
+      if (traversedEdgeKeys.has(edgeKey(edge))) {
         connectedEdgeIndices.add(index);
       }
     });
     return { neighborIds, connectedEdgeIndices, inboundNodeIds, outboundNodeIds };
   }
-  function computeNeighborHighlights(nodeId, state) {
-    return { selectedId: nodeId, ...collectNeighborhood(nodeId, state) };
+  function edgeKey(edge) {
+    return `${edge.from}\0${edge.to}\0${edge.name ?? ""}`;
+  }
+  function computeNeighborHighlights(nodeId, state, depth = 1) {
+    return { selectedId: nodeId, ...collectNeighborhood(nodeId, state, depth) };
   }
   function computeHoverPreview(nodeId, state) {
     return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
@@ -341,25 +369,29 @@
     return columnEl;
   }
   function buildRelationElement(edge, targetNodeId, tableById, onNavigate) {
-    const relationEl = document.createElement("div");
-    relationEl.className = "detail-relation";
-    if (onNavigate) {
-      relationEl.classList.add("detail-relation-navigable");
-      relationEl.addEventListener("click", () => {
-        onNavigate(targetNodeId);
-      });
-    }
     const targetTable = tableById.get(targetNodeId);
+    const targetName = targetTable?.label ?? targetNodeId;
     const label = document.createElement("span");
     label.className = "detail-relation-label";
     label.textContent = edge.name ?? `${edge.from} \u2192 ${edge.to}`;
     const meta = document.createElement("span");
     meta.className = "detail-relation-meta";
-    const targetName = targetTable?.label ?? targetNodeId;
     const columnMap = edge.from_columns.length > 0 && edge.to_columns.length > 0 ? ` \xB7 ${edge.from_columns.join(", ")} \u2192 ${edge.to_columns.join(", ")}` : "";
     meta.textContent = `${edge.kind} \xB7 ${targetName}${columnMap}`;
-    relationEl.append(label, meta);
-    return relationEl;
+    if (onNavigate) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "detail-relation detail-relation-navigable";
+      btn.addEventListener("click", () => {
+        onNavigate(targetNodeId);
+      });
+      btn.append(label, meta);
+      return btn;
+    }
+    const div = document.createElement("div");
+    div.className = "detail-relation";
+    div.append(label, meta);
+    return div;
   }
   function buildIssueElement(issue) {
     const issueEl = document.createElement("div");
@@ -486,6 +518,7 @@
     const objectBrowserCount = document.getElementById("object-browser-count");
     const objectBrowserEmpty = document.getElementById("object-browser-empty");
     const drawerClose = document.getElementById("detail-close");
+    const traversalEl = document.getElementById("detail-traversal");
     const viewport = document.getElementById("viewport");
     const drawerEls = (() => {
       const drawer = document.getElementById("detail-drawer");
@@ -593,15 +626,37 @@
           }
         );
       };
+      const syncTraversalButtons = () => {
+        traversalEl?.querySelectorAll(".detail-traversal-btn").forEach((btn) => {
+          const depth = Number(btn.dataset["depth"]);
+          btn.classList.toggle("active", depth === state.traversalDepth);
+        });
+      };
+      traversalEl?.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement) || target.dataset["depth"] === void 0) return;
+        const depth = Number(target.dataset["depth"]);
+        if (depth >= 1 && depth <= 2 && depth !== state.traversalDepth) {
+          state.traversalDepth = depth;
+          renderInteraction();
+        }
+      });
       const renderInteraction = () => {
         clearHighlightClasses(svgRoot, getNodes);
         hideHoverPopover(hoverEls);
         if (state.selectedNode !== null) {
-          const highlight = computeNeighborHighlights(state.selectedNode, state);
+          const highlight = computeNeighborHighlights(
+            state.selectedNode,
+            state,
+            state.traversalDepth
+          );
           applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
           renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
+          traversalEl?.removeAttribute("hidden");
+          syncTraversalButtons();
         } else {
           renderDrawer(void 0, state, drawerEls);
+          traversalEl?.setAttribute("hidden", "");
           if (state.hoveredNode !== null) {
             const hoveredNode = findNode(state.hoveredNode);
             if (hoveredNode !== void 0) {

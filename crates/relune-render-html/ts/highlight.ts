@@ -32,6 +32,7 @@ import {
   const objectBrowserCount = document.getElementById('object-browser-count');
   const objectBrowserEmpty = document.getElementById('object-browser-empty');
   const drawerClose = document.getElementById('detail-close');
+  const traversalEl = document.getElementById('detail-traversal');
   const viewport = document.getElementById('viewport');
 
   const drawerEls: DrawerElements | null = (() => {
@@ -182,6 +183,25 @@ import {
       );
     };
 
+    // ── Traversal depth toggle ─────────────────────────────────────────
+
+    const syncTraversalButtons = (): void => {
+      traversalEl?.querySelectorAll<HTMLButtonElement>('.detail-traversal-btn').forEach((btn) => {
+        const depth = Number(btn.dataset['depth']);
+        btn.classList.toggle('active', depth === state.traversalDepth);
+      });
+    };
+
+    traversalEl?.addEventListener('click', (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement) || target.dataset['depth'] === undefined) return;
+      const depth = Number(target.dataset['depth']);
+      if (depth >= 1 && depth <= 2 && depth !== state.traversalDepth) {
+        state.traversalDepth = depth;
+        renderInteraction();
+      }
+    });
+
     // ── Selection / highlight orchestration ────────────────────────────────
 
     const renderInteraction = (): void => {
@@ -189,11 +209,18 @@ import {
       hideHoverPopover(hoverEls);
 
       if (state.selectedNode !== null) {
-        const highlight = computeNeighborHighlights(state.selectedNode, state);
+        const highlight = computeNeighborHighlights(
+          state.selectedNode,
+          state,
+          state.traversalDepth,
+        );
         applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
         renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
+        traversalEl?.removeAttribute('hidden');
+        syncTraversalButtons();
       } else {
         renderDrawer(undefined, state, drawerEls);
+        traversalEl?.setAttribute('hidden', '');
         if (state.hoveredNode !== null) {
           const hoveredNode = findNode(state.hoveredNode);
           if (hoveredNode !== undefined) {
