@@ -20,6 +20,13 @@ function clearChildren(element: HTMLElement): void {
   element.replaceChildren();
 }
 
+function joinTableBadge(): HTMLDivElement {
+  const badge = document.createElement('div');
+  badge.className = 'detail-badge detail-badge-join';
+  badge.textContent = 'Join Table';
+  return badge;
+}
+
 function diffBadge(kind: string): HTMLDivElement {
   const badge = document.createElement('div');
   const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
@@ -183,15 +190,22 @@ export function renderDrawer(
     ? `${table.schema_name}.${table.table_name}`
     : table.table_name;
 
-  // Metrics
+  // Badges (join table candidate, diff)
   clearChildren(elements.metrics);
+  if (table.is_join_table_candidate) {
+    elements.metrics.append(joinTableBadge());
+  }
   if (table.diff_kind) {
     elements.metrics.append(diffBadge(table.diff_kind));
   }
+
+  // Metrics
+  const totalRelations = table.inbound_count + table.outbound_count;
   elements.metrics.append(
     metricCard('Columns', String(table.columns.length)),
-    metricCard('Inbound', String(table.inbound_count)),
-    metricCard('Outbound', String(table.outbound_count)),
+    metricCard('Relations', String(totalRelations)),
+    metricCard('\u2190 In', String(table.inbound_count)),
+    metricCard('Out \u2192', String(table.outbound_count)),
   );
 
   // Columns

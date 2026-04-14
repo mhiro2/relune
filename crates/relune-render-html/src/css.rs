@@ -1152,9 +1152,25 @@ pub(crate) fn build_css(
 
     .detail-metrics {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
       margin: 16px 0;
+    }
+
+    .detail-badge {
+      grid-column: 1 / -1;
+      display: inline-block;
+      width: fit-content;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .detail-badge-join {
+      background: rgba(139, 92, 246, 0.18);
+      color: #a78bfa;
     }
 
     .detail-metric {
@@ -1207,6 +1223,8 @@ pub(crate) fn build_css(
       padding: 8px 12px;
       background: rgba(148, 163, 184, 0.05);
       transition: border-color 0.15s, background-color 0.15s;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
 
     button.detail-relation {
@@ -1228,6 +1246,7 @@ pub(crate) fn build_css(
       font-family: var(--mono-font);
       font-size: 13px;
       margin-bottom: 2px;
+      overflow-wrap: anywhere;
     }
 
     .detail-column-pills {
@@ -1324,6 +1343,7 @@ pub(crate) fn build_css(
       font-size: 11px;
       opacity: 0.65;
       letter-spacing: 0.01em;
+      overflow-wrap: anywhere;
     }
 
     .detail-relation-meta {

@@ -152,6 +152,12 @@
   function clearChildren(element) {
     element.replaceChildren();
   }
+  function joinTableBadge() {
+    const badge = document.createElement("div");
+    badge.className = "detail-badge detail-badge-join";
+    badge.textContent = "Join Table";
+    return badge;
+  }
   function diffBadge(kind) {
     const badge = document.createElement("div");
     const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
@@ -250,13 +256,18 @@
     elements.title.textContent = table.label || table.table_name || table.id;
     elements.subtitle.textContent = table.schema_name ? `${table.schema_name}.${table.table_name}` : table.table_name;
     clearChildren(elements.metrics);
+    if (table.is_join_table_candidate) {
+      elements.metrics.append(joinTableBadge());
+    }
     if (table.diff_kind) {
       elements.metrics.append(diffBadge(table.diff_kind));
     }
+    const totalRelations = table.inbound_count + table.outbound_count;
     elements.metrics.append(
       metricCard("Columns", String(table.columns.length)),
-      metricCard("Inbound", String(table.inbound_count)),
-      metricCard("Outbound", String(table.outbound_count))
+      metricCard("Relations", String(totalRelations)),
+      metricCard("\u2190 In", String(table.inbound_count)),
+      metricCard("Out \u2192", String(table.outbound_count))
     );
     clearChildren(elements.columns);
     if (table.columns.length === 0) {
