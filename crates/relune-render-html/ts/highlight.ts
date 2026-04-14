@@ -126,6 +126,11 @@ import {
       runtime.viewport?.center(x + width / 2, y + height / 2);
     };
 
+    const navigateToTable = (tableId: string): void => {
+      setSelectedNode(tableId);
+      centerNodeInViewport(tableId);
+    };
+
     // ── Object browser sync ───────────────────────────────────────────────
 
     const syncObjectBrowser = (): void => {
@@ -186,7 +191,7 @@ import {
       if (state.selectedNode !== null) {
         const highlight = computeNeighborHighlights(state.selectedNode, state);
         applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
-        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls);
+        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
       } else {
         renderDrawer(undefined, state, drawerEls);
         if (state.hoveredNode !== null) {

@@ -1166,6 +1166,14 @@ pub(crate) fn build_css(
       transition: border-color 0.15s, background-color 0.15s;
     }
 
+    button.detail-relation {
+      width: 100%;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+    }
+
     .detail-relation:hover {
       border-color: var(--accent-color);
       background: color-mix(in srgb, rgba(148, 163, 184, 0.05) 72%, var(--accent-soft));

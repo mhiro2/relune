@@ -161,6 +161,7 @@ export function renderDrawer(
   table: TableMetadata | undefined,
   state: HighlightState,
   elements: DrawerElements,
+  onNavigate?: (tableId: string) => void,
 ): void {
   if (table === undefined) {
     elements.drawer.setAttribute('hidden', '');
@@ -213,7 +214,7 @@ export function renderDrawer(
     elements.relationsEmpty.setAttribute('hidden', '');
     for (const relation of relations) {
       elements.relations.appendChild(
-        buildRelationElement(relation.edge, relation.node, state.tableById),
+        buildRelationElement(relation.edge, relation.node, state.tableById, onNavigate),
       );
     }
   }
@@ -347,26 +348,38 @@ function buildRelationElement(
   edge: EdgeMetadata,
   targetNodeId: string,
   tableById: Map<string, TableMetadata>,
-): HTMLDivElement {
-  const relationEl = document.createElement('div');
-  relationEl.className = 'detail-relation';
-
+  onNavigate?: (tableId: string) => void,
+): HTMLElement {
   const targetTable = tableById.get(targetNodeId);
+  const targetName = targetTable?.label ?? targetNodeId;
+
   const label = document.createElement('span');
   label.className = 'detail-relation-label';
   label.textContent = edge.name ?? `${edge.from} → ${edge.to}`;
 
   const meta = document.createElement('span');
   meta.className = 'detail-relation-meta';
-  const targetName = targetTable?.label ?? targetNodeId;
   const columnMap =
     edge.from_columns.length > 0 && edge.to_columns.length > 0
       ? ` · ${edge.from_columns.join(', ')} → ${edge.to_columns.join(', ')}`
       : '';
   meta.textContent = `${edge.kind} · ${targetName}${columnMap}`;
 
-  relationEl.append(label, meta);
-  return relationEl;
+  if (onNavigate) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'detail-relation detail-relation-navigable';
+    btn.addEventListener('click', () => {
+      onNavigate(targetNodeId);
+    });
+    btn.append(label, meta);
+    return btn;
+  }
+
+  const div = document.createElement('div');
+  div.className = 'detail-relation';
+  div.append(label, meta);
+  return div;
 }
 
 function buildIssueElement(issue: IssueMetadata): HTMLDivElement {

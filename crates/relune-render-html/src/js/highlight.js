@@ -204,7 +204,7 @@
       edgeElement.classList.toggle("hover-preview-edge", preview.connectedEdgeIndices.has(index));
     });
   }
-  function renderDrawer(table, state, elements) {
+  function renderDrawer(table, state, elements, onNavigate) {
     if (table === void 0) {
       elements.drawer.setAttribute("hidden", "");
       clearChildren(elements.metrics);
@@ -247,7 +247,7 @@
       elements.relationsEmpty.setAttribute("hidden", "");
       for (const relation of relations) {
         elements.relations.appendChild(
-          buildRelationElement(relation.edge, relation.node, state.tableById)
+          buildRelationElement(relation.edge, relation.node, state.tableById, onNavigate)
         );
       }
     }
@@ -340,9 +340,15 @@
     columnEl.append(name, pills);
     return columnEl;
   }
-  function buildRelationElement(edge, targetNodeId, tableById) {
+  function buildRelationElement(edge, targetNodeId, tableById, onNavigate) {
     const relationEl = document.createElement("div");
     relationEl.className = "detail-relation";
+    if (onNavigate) {
+      relationEl.classList.add("detail-relation-navigable");
+      relationEl.addEventListener("click", () => {
+        onNavigate(targetNodeId);
+      });
+    }
     const targetTable = tableById.get(targetNodeId);
     const label = document.createElement("span");
     label.className = "detail-relation-label";
@@ -545,6 +551,10 @@
         const height = Number.parseFloat(rect.getAttribute("height") ?? "0");
         runtime.viewport?.center(x + width / 2, y + height / 2);
       };
+      const navigateToTable = (tableId) => {
+        setSelectedNode(tableId);
+        centerNodeInViewport(tableId);
+      };
       const syncObjectBrowser = () => {
         if (!(objectBrowserList instanceof HTMLElement) || !(objectBrowserCount instanceof HTMLElement) || !(objectBrowserEmpty instanceof HTMLElement)) {
           return;
@@ -589,7 +599,7 @@
         if (state.selectedNode !== null) {
           const highlight = computeNeighborHighlights(state.selectedNode, state);
           applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
-          renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls);
+          renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
         } else {
           renderDrawer(void 0, state, drawerEls);
           if (state.hoveredNode !== null) {
