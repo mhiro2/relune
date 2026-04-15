@@ -8,9 +8,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use assert_cmd::Command;
+use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::mysql::Mysql;
 use testcontainers_modules::postgres::Postgres;
+
+const POSTGRES_TAG: &str = "18";
 
 fn relune() -> Command {
     Command::cargo_bin("relune").expect("Failed to find relune binary")
@@ -26,7 +29,11 @@ fn fixtures_dir() -> PathBuf {
 
 /// Start a `PostgreSQL` container and return `(url, container)`.
 async fn pg_container(sql: &str) -> (String, testcontainers::ContainerAsync<Postgres>) {
-    let container = Postgres::default().start().await.expect("start postgres");
+    let container = Postgres::default()
+        .with_tag(POSTGRES_TAG)
+        .start()
+        .await
+        .expect("start postgres");
     let host = container.get_host().await.expect("host");
     let port = container.get_host_port_ipv4(5432).await.expect("port");
     let url = format!("postgresql://postgres:postgres@{host}:{port}/postgres");
