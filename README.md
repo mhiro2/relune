@@ -80,6 +80,7 @@ Tune diagrams for the shape of your schema:
 
 Reduce noise in larger schemas:
 
+- reuse named viewpoints from config
 - focus on a table
 - control traversal depth
 - group by schema or prefix
@@ -160,6 +161,9 @@ relune render --sql schema.sql --stdout > erd.svg
 
 # Focus on the "orders" table with depth 2
 relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
+
+# Reuse a named viewpoint from config
+relune render --config relune.toml --sql schema.sql --viewpoint billing -o billing.svg
 
 # Use a force-directed layout with orthogonal edges
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o erd-force.svg

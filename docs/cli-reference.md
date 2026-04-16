@@ -37,6 +37,7 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 
 | Option | Description |
 |--------|-------------|
+| `--viewpoint <NAME>` | Apply a named viewpoint from the active config |
 | `--focus <TABLE>` | Center on a table |
 | `--depth <N>` | Neighbor depth for focus (default `1`) |
 | `--group-by none\|schema\|prefix` | Group tables |
@@ -61,6 +62,7 @@ relune render --sql schema.sql -o erd.svg
 relune render --sql schema.sql --format html -o erd.html
 relune render --sql schema.sql --format html --stdout > erd.html
 relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
+relune render --config relune.toml --sql schema.sql --viewpoint billing -o billing.svg
 relune render --sql schema.sql --group-by schema -o grouped.svg
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o force.svg
 relune render --sql schema.sql --include users --include orders -o subset.svg
@@ -122,7 +124,7 @@ Emit normalized JSON or diagram text. **`--format` is required.**
 | `d2` | [D2](https://d2lang.com/) diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--focus`, `--depth`, `--group-by`, `--layout`, `--direction`, and `--edge-style` like `render` for positioned exports. `export` applies the same `focus`/`depth` validation rule as `render`, so `--depth` requires `--focus`.
+Supports `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, `--exclude`, `--layout`, `--direction`, and `--edge-style` like `render` for graph-backed exports. `export` applies the same focus/filter validation rules as `render`, so `--depth` requires `--focus`, the same table cannot appear in both `--include` and `--exclude`, and the focused table must stay inside the effective include set.
 `--fail-on-warning` is also available for CI flows that treat parser diagnostics as failures.
 
 `layout-json` includes graph-level `routing_debug.non_self_loop_detour_activations` and per-edge `routing_debug` fields for source/target side policy, slot indices, slot counts, row offsets, and selected channel coordinates.
@@ -132,6 +134,7 @@ relune export --sql schema.sql --format schema-json -o schema.json
 relune export --sql schema.sql --format graph-json -o graph.json
 relune export --sql schema.sql --format layout-json -o layout.json
 relune export --sql schema.sql --format layout-json --layout force-directed --edge-style orthogonal -o layout-force.json
+relune export --config relune.toml --sql schema.sql --format schema-json --viewpoint billing -o billing.json
 relune export --sql schema.sql --format mermaid -o erd.mmd
 relune export --sql schema.sql --format d2 -o erd.d2
 relune export --sql schema.sql --format dot -o erd.dot

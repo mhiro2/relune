@@ -21,6 +21,7 @@ theme = "light"
 layout = "force-directed"
 edge_style = "orthogonal"
 direction = "left-to-right"
+viewpoint = "billing"
 group_by = "none"
 focus = "orders"
 depth = 2
@@ -33,12 +34,15 @@ fail_on_warning = false
 
 [export]
 format = "schema-json"
+viewpoint = "billing"
 group_by = "schema"
 layout = "hierarchical"
 edge_style = "curved"
 direction = "top-to-bottom"
 focus = "orders"
 depth = 1
+include = ["users", "orders"]
+exclude = ["schema_migrations"]
 fail_on_warning = false
 
 [doc]
@@ -52,6 +56,13 @@ fail_on_warning = false
 format = "json"
 dialect = "postgres"
 fail_on_warning = false
+
+[viewpoints.billing]
+focus = "orders"
+depth = 2
+group_by = "schema"
+include = ["users", "orders", "payments"]
+exclude = ["audit_*"]
 ```
 
 ```bash
@@ -69,6 +80,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
+| `viewpoint` | Name from `[viewpoints.<name>]` |
 | `group_by` | `none`, `schema`, `prefix` |
 | `focus` | Table name |
 | `depth` | Unsigned integer |
@@ -87,6 +99,12 @@ Semantic validation is also applied after merge:
 - if `include` is non-empty, it must contain the focused table
 - the focused table cannot also appear in `exclude`
 
+If `viewpoint` is set, Relune applies the selected named preset before CLI flags. The precedence for view-related settings is:
+
+1. CLI flags such as `--viewpoint`, `--focus`, `--include`
+2. Selected `[viewpoints.<name>]`
+3. Command defaults in `[render]`
+
 ---
 
 ## `[inspect]`
@@ -103,14 +121,33 @@ Semantic validation is also applied after merge:
 | Key | Values |
 |-----|--------|
 | `format` | `schema-json`, `graph-json`, `layout-json`, `mermaid`, `d2`, `dot` |
+| `viewpoint` | Name from `[viewpoints.<name>]` |
 | `group_by` | `none`, `schema`, `prefix` |
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
 | `focus`, `depth` | Same as CLI |
+| `include` / `exclude` | Same as CLI |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 `export.format` can be set in the config file and overridden with `--format`. If neither config nor CLI provides a format, the command fails fast. As with `render`, `export.depth` requires `export.focus`, and focused table names must be non-empty after trimming.
+
+`export.viewpoint` uses the same precedence rule as `render`: CLI flags override the selected viewpoint, and the selected viewpoint overrides plain `[export]` focus/filter/grouping defaults.
+
+---
+
+## `[viewpoints.<name>]`
+
+Named viewpoints let you reuse the same focus, filter, and grouping rules across `render` and `export`.
+
+| Key | Values |
+|-----|--------|
+| `group_by` | `none`, `schema`, `prefix` |
+| `focus` | Table name |
+| `depth` | Unsigned integer |
+| `include` / `exclude` | String arrays |
+
+Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint <NAME>`, or `relune export --viewpoint <NAME>`.
 
 ---
 

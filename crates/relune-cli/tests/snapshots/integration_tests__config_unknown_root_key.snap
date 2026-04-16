@@ -8,4 +8,4 @@ Error: Failed to load config file '$WORKSPACE/fixtures/config/unknown_root_key.t
   |
 1 | unknown_field = true
   | ^^^^^^^^^^^^^
-unknown field `unknown_field`, expected one of `render`, `inspect`, `export`, `doc`, `lint`, `diff`
+unknown field `unknown_field`, expected one of `render`, `inspect`, `export`, `doc`, `lint`, `diff`, `viewpoints`

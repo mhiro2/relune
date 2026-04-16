@@ -29,7 +29,7 @@ pub fn run_render(
     let input = InputSelection::from_render(args).resolve(args.dialect.into(), "input")?;
 
     // Merge config file with CLI args
-    let merged = config.merge_render_args(args);
+    let merged = config.merge_render_args(args)?;
     merged.validate_semantics()?;
 
     // Convert merged format to app format.

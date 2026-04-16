@@ -36,8 +36,10 @@ pub fn run_export(
         ExportFormat::Dot => AppExportFormat::Dot,
     };
 
-    // Build filter spec (empty for now, could be extended)
-    let filter = FilterSpec::default();
+    let filter = FilterSpec {
+        include: merged.include,
+        exclude: merged.exclude,
+    };
 
     // Build focus spec from merged config
     let focus = merged.focus.as_ref().map(|table| FocusSpec {

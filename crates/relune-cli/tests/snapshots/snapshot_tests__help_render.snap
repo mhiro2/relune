@@ -69,6 +69,9 @@ Options:
       --focus <TABLE>
           Center the graph on a table
 
+      --viewpoint <NAME>
+          Apply a named viewpoint from the active config file
+
       --depth <N>
           Traversal depth for focus mode. Defaults to `1` after config merge
 
