@@ -152,6 +152,17 @@
             <!-- Filter -->
             <details class="ctrl-section">
               <summary class="ctrl-section__title">Filter</summary>
+              <div class="ctrl-row ctrl-row--stack">
+                <label class="ctrl">
+                  <span class="ctrl__label">Example preset</span>
+                  <select id="viewpoint-select" aria-label="Example viewpoint preset">
+                    <option value="">Manual controls</option>
+                  </select>
+                  <span id="viewpoint-hint" class="ctrl__hint">
+                    Built-in presets for the selected example apply focus, filters, and grouping.
+                  </span>
+                </label>
+              </div>
               <div class="ctrl-row">
                 <label class="ctrl">
                   <span class="ctrl__label">Focus table</span>
@@ -241,7 +252,7 @@
             </div>
 
             <p class="sidebar__note" id="state-note">
-              Options are synced to URL. Custom SQL is stored in this browser.
+              Options and viewpoint selection are synced to URL. Custom SQL is stored in this browser.
             </p>
           </div>
         </aside>
