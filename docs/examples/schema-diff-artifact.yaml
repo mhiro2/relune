@@ -1,0 +1,40 @@
+# schema-diff-artifact.yaml — Generate an SVG schema diff and upload as artifact.
+#
+# Minimal example that runs relune diff and stores the visual output
+# as a downloadable workflow artifact. No PR comment, no extra permissions.
+
+name: Schema Diff Artifact
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      # Adjust to match your migration directory.
+
+permissions:
+  contents: read
+
+jobs:
+  schema-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # TODO: Generate before/after schema files from your migrations.
+      # See migration-diff.yaml for a more detailed example.
+
+      - name: Diff schemas
+        id: diff
+        uses: mhiro2/relune/action@v0  # pin to a release tag
+        with:
+          before: before-schema.sql
+          after: after-schema.sql
+          format: svg
+
+      - name: Upload SVG diff
+        if: steps.diff.outputs.has-changes == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: schema-diff-svg
+          path: ${{ steps.diff.outputs.output-path }}
