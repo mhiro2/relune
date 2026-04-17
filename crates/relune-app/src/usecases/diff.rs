@@ -32,7 +32,7 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
                 render_diff_visual(&before_schema, &after_schema, &schema_diff, &request)?;
             Some(content)
         }
-        DiffFormat::Text | DiffFormat::Json => None,
+        DiffFormat::Text | DiffFormat::Json | DiffFormat::Markdown => None,
     };
 
     Ok(DiffResult {
@@ -352,6 +352,217 @@ pub fn format_diff_text(result: &DiffResult) -> String {
     );
 
     output
+}
+
+/// Escape a string for use inside raw HTML (e.g. `<code>` in `<summary>`).
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;")
+}
+
+/// Format diff result as GitHub-flavored Markdown.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn format_diff_markdown(result: &DiffResult) -> String {
+    let mut out = String::new();
+
+    if result.diff.is_empty() {
+        return "No schema changes detected.\n".to_string();
+    }
+
+    let summary = &result.diff.summary;
+
+    // Header
+    let _ = writeln!(
+        out,
+        "## Schema Diff: {} added, {} removed, {} modified\n",
+        summary.added_items(),
+        summary.removed_items(),
+        summary.modified_items()
+    );
+
+    // Summary table
+    out.push_str("| Category | Added | Removed | Modified |\n");
+    out.push_str("|----------|-------|---------|----------|\n");
+    let _ = writeln!(
+        out,
+        "| Tables | {} | {} | {} |",
+        summary.tables_added, summary.tables_removed, summary.tables_modified
+    );
+    let _ = writeln!(
+        out,
+        "| Views | {} | {} | {} |",
+        summary.views_added, summary.views_removed, summary.views_modified
+    );
+    let _ = writeln!(
+        out,
+        "| Enums | {} | {} | {} |",
+        summary.enums_added, summary.enums_removed, summary.enums_modified
+    );
+
+    // Added tables
+    if !result.diff.added_tables.is_empty() {
+        out.push_str("\n### Added tables\n\n");
+        for table in &result.diff.added_tables {
+            let _ = writeln!(out, "- <code>{}</code>", escape_html(table));
+        }
+    }
+
+    // Removed tables
+    if !result.diff.removed_tables.is_empty() {
+        out.push_str("\n### Removed tables\n\n");
+        for table in &result.diff.removed_tables {
+            let _ = writeln!(out, "- <code>{}</code>", escape_html(table));
+        }
+    }
+
+    // Modified tables
+    if !result.diff.modified_tables.is_empty() {
+        out.push_str("\n### Modified tables\n\n");
+        for table_diff in &result.diff.modified_tables {
+            write_table_diff_markdown(&mut out, table_diff);
+        }
+    }
+
+    // Views
+    if !result.diff.added_views.is_empty() {
+        out.push_str("\n### Added views\n\n");
+        for view in &result.diff.added_views {
+            let _ = writeln!(out, "- <code>{}</code>", escape_html(view));
+        }
+    }
+
+    if !result.diff.removed_views.is_empty() {
+        out.push_str("\n### Removed views\n\n");
+        for view in &result.diff.removed_views {
+            let _ = writeln!(out, "- <code>{}</code>", escape_html(view));
+        }
+    }
+
+    if !result.diff.modified_views.is_empty() {
+        out.push_str("\n### Modified views\n\n");
+        for view_diff in &result.diff.modified_views {
+            write_view_diff_markdown(&mut out, view_diff);
+        }
+    }
+
+    // Enums
+    if !result.diff.added_enums.is_empty() {
+        out.push_str("\n### Added enums\n\n");
+        for enum_name in &result.diff.added_enums {
+            let _ = writeln!(out, "- <code>{}</code>", escape_html(enum_name));
+        }
+    }
+
+    if !result.diff.removed_enums.is_empty() {
+        out.push_str("\n### Removed enums\n\n");
+        for enum_name in &result.diff.removed_enums {
+            let _ = writeln!(out, "- <code>{}</code>", escape_html(enum_name));
+        }
+    }
+
+    if !result.diff.modified_enums.is_empty() {
+        out.push_str("\n### Modified enums\n\n");
+        for enum_diff in &result.diff.modified_enums {
+            write_enum_diff_markdown(&mut out, enum_diff);
+        }
+    }
+
+    out
+}
+
+fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
+    let change_count =
+        table_diff.column_diffs.len() + table_diff.fk_diffs.len() + table_diff.index_diffs.len();
+    let name = escape_html(&table_diff.table_name);
+    let _ = writeln!(
+        out,
+        "<details>\n<summary><code>{name}</code> ({change_count} changes)</summary>\n"
+    );
+
+    if !table_diff.column_diffs.is_empty() {
+        out.push_str("**Columns:**\n\n");
+        for col_diff in &table_diff.column_diffs {
+            let indicator = change_indicator(col_diff.change_kind);
+            let col_name = escape_html(&col_diff.column_name);
+            let _ = writeln!(out, "- <code>{indicator}</code> <code>{col_name}</code>");
+        }
+        out.push('\n');
+    }
+
+    if !table_diff.fk_diffs.is_empty() {
+        out.push_str("**Foreign keys:**\n\n");
+        for fk_diff in &table_diff.fk_diffs {
+            let indicator = change_indicator(fk_diff.change_kind);
+            let fk_name = escape_html(fk_diff.name.as_deref().unwrap_or("unnamed"));
+            let _ = writeln!(out, "- <code>{indicator}</code> <code>{fk_name}</code>");
+        }
+        out.push('\n');
+    }
+
+    if !table_diff.index_diffs.is_empty() {
+        out.push_str("**Indexes:**\n\n");
+        for index_diff in &table_diff.index_diffs {
+            let indicator = change_indicator(index_diff.change_kind);
+            let index_name = escape_html(index_diff.name.as_deref().unwrap_or("unnamed"));
+            let _ = writeln!(out, "- <code>{indicator}</code> <code>{index_name}</code>");
+        }
+        out.push('\n');
+    }
+
+    out.push_str("</details>\n");
+}
+
+fn write_view_diff_markdown(out: &mut String, view_diff: &ViewDiff) {
+    let change_count = view_diff.column_diffs.len() + usize::from(view_diff.definition_changed());
+    let name = escape_html(&view_diff.view_name);
+    let _ = writeln!(
+        out,
+        "<details>\n<summary><code>{name}</code> ({change_count} changes)</summary>\n"
+    );
+
+    if !view_diff.column_diffs.is_empty() {
+        out.push_str("**Columns:**\n\n");
+        for col_diff in &view_diff.column_diffs {
+            let indicator = change_indicator(col_diff.change_kind);
+            let col_name = escape_html(&col_diff.column_name);
+            let _ = writeln!(out, "- <code>{indicator}</code> <code>{col_name}</code>");
+        }
+        out.push('\n');
+    }
+
+    if view_diff.definition_changed() {
+        out.push_str("**Definition:** changed\n\n");
+    }
+
+    out.push_str("</details>\n");
+}
+
+fn write_enum_diff_markdown(out: &mut String, enum_diff: &EnumDiff) {
+    let name = escape_html(&enum_diff.enum_name);
+    let _ = writeln!(
+        out,
+        "<details>\n<summary><code>{name}</code> ({} changes)</summary>\n",
+        enum_diff.value_diffs.len()
+    );
+
+    out.push_str("**Values:**\n\n");
+    for value_diff in &enum_diff.value_diffs {
+        let indicator = change_indicator(value_diff.change_kind);
+        let value = escape_html(&value_diff.value);
+        let detail = match (value_diff.old_position, value_diff.new_position) {
+            (Some(old), Some(new)) => format!(" (position {} → {})", old + 1, new + 1),
+            (Some(old), None) => format!(" (position {})", old + 1),
+            (None, Some(new)) => format!(" (position {})", new + 1),
+            (None, None) => String::new(),
+        };
+        let _ = writeln!(
+            out,
+            "- <code>{indicator}</code> <code>{value}</code>{detail}"
+        );
+    }
+    out.push('\n');
+
+    out.push_str("</details>\n");
 }
 
 /// Build a merged schema that contains the union of both schemas for diff visualization.
@@ -1910,6 +2121,115 @@ mod tests {
             posts.foreign_keys.len(),
             2,
             "merged schema should contain both added and removed FKs"
+        );
+    }
+
+    #[test]
+    fn test_format_diff_markdown_no_changes() {
+        let result = DiffResult {
+            diff: relune_core::SchemaDiff::default(),
+            diagnostics: vec![],
+            rendered: None,
+        };
+
+        let md = format_diff_markdown(&result);
+        assert!(md.contains("No schema changes detected"));
+    }
+
+    #[test]
+    fn test_format_diff_markdown_with_changes() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));\nCREATE TABLE posts (id INT PRIMARY KEY);";
+
+        let result = diff(DiffRequest::from_sql(before, after)).unwrap();
+        let md = format_diff_markdown(&result);
+
+        // Summary header
+        assert!(md.contains("## Schema Diff:"));
+        // GFM table
+        assert!(md.contains("| Category | Added | Removed | Modified |"));
+        assert!(md.contains("| Tables |"));
+        // Added table
+        assert!(md.contains("### Added tables"));
+        assert!(md.contains("<code>posts</code>"));
+        // Modified table with details
+        assert!(md.contains("<details>"));
+        assert!(md.contains("<code>users</code>"));
+        assert!(md.contains("<code>+</code> <code>name</code>"));
+    }
+
+    #[test]
+    fn test_format_diff_markdown_with_view_and_enum_changes() {
+        let before = "\
+            CREATE TYPE status AS ENUM ('draft', 'published');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status status);\n\
+            CREATE VIEW active_users AS SELECT id, status FROM users;\n\
+        ";
+        let after = "\
+            CREATE TYPE status AS ENUM ('published', 'draft');\n\
+            CREATE TABLE users (id INT PRIMARY KEY, status TEXT);\n\
+            CREATE VIEW active_users AS SELECT id FROM users;\n\
+        ";
+
+        let result = diff(DiffRequest::from_sql(before, after)).unwrap();
+        let md = format_diff_markdown(&result);
+
+        assert!(md.contains("### Modified views"));
+        assert!(md.contains("active_users"));
+        assert!(md.contains("### Modified enums"));
+        assert!(md.contains("status"));
+    }
+
+    #[test]
+    fn test_format_diff_markdown_escapes_special_chars() {
+        use relune_core::SchemaDiff;
+        use relune_core::diff::{ColumnDiff, DiffSummary, TableDiff};
+
+        let mut diff_result = SchemaDiff::default();
+        diff_result
+            .added_tables
+            .push("table|with<pipe&amp".to_string());
+        diff_result.modified_tables.push(TableDiff {
+            table_name: "t<able".to_string(),
+            change_kind: ChangeKind::Modified,
+            column_diffs: vec![ColumnDiff {
+                column_name: "col|name".to_string(),
+                change_kind: ChangeKind::Added,
+                old_value: None,
+                new_value: None,
+            }],
+            fk_diffs: vec![],
+            index_diffs: vec![],
+        });
+        diff_result.summary = DiffSummary {
+            tables_added: 1,
+            tables_modified: 1,
+            columns_changed: 1,
+            ..Default::default()
+        };
+
+        let result = DiffResult {
+            diff: diff_result,
+            diagnostics: vec![],
+            rendered: None,
+        };
+
+        let md = format_diff_markdown(&result);
+
+        // Added table in bullet list: HTML-escaped inside <code>
+        assert!(
+            md.contains("<code>table|with&lt;pipe&amp;amp</code>"),
+            "added table name should be HTML-escaped in <code> tag"
+        );
+        // Table name in <summary><code>: HTML-escaped
+        assert!(
+            md.contains("<code>t&lt;able</code>"),
+            "<code> in <summary> requires HTML escaping"
+        );
+        // Column name inside <details> body: HTML-escaped in <code>
+        assert!(
+            md.contains("<code>col|name</code>"),
+            "column name in <details> body should be HTML-escaped in <code> tag"
         );
     }
 }

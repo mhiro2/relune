@@ -1,0 +1,113 @@
+name: Relune Schema Diff
+description: Run relune diff to compare two database schemas and report changes. Supports Linux and macOS runners only.
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  version:
+    description: >
+      Relune version to install (e.g. "0.7.0").
+      Ignored when binary-path is set.
+    required: false
+    default: latest
+  before:
+    description: Path to the baseline schema file (SQL or schema JSON).
+    required: true
+  after:
+    description: Path to the updated schema file (SQL or schema JSON).
+    required: true
+  format:
+    description: "Output format: text, json, markdown, svg, or html."
+    required: false
+    default: markdown
+  output-path:
+    description: >
+      Path to write the diff output file.
+      When omitted the extension is derived from format
+      (e.g. relune-diff.md for markdown, relune-diff.svg for svg).
+    required: false
+    default: ""
+  binary-path:
+    description: >
+      Path to a pre-built relune binary.
+      When set the install step is skipped — useful for testing
+      unreleased builds in CI.
+    required: false
+    default: ""
+
+outputs:
+  has-changes:
+    description: '"true" if schema changes were detected, "false" otherwise.'
+    value: ${{ steps.diff.outputs.has-changes }}
+  output-path:
+    description: Path to the diff output file.
+    value: ${{ steps.diff.outputs.output-path }}
+
+runs:
+  using: composite
+  steps:
+    # ------------------------------------------------------------------
+    # 1. Install relune (skipped when binary-path is provided)
+    # ------------------------------------------------------------------
+    - name: Install relune
+      if: inputs.binary-path == ''
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: bash "${{ github.action_path }}/install.sh"
+
+    # ------------------------------------------------------------------
+    # 2. Run relune diff
+    # ------------------------------------------------------------------
+    - name: Run relune diff
+      id: diff
+      shell: bash
+      env:
+        RELUNE_BIN: ${{ inputs.binary-path }}
+        BEFORE: ${{ inputs.before }}
+        AFTER: ${{ inputs.after }}
+        FORMAT: ${{ inputs.format }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+      run: |
+        # Resolve binary
+        if [[ -n "${RELUNE_BIN}" ]]; then
+          relune="${RELUNE_BIN}"
+        else
+          relune="relune"
+        fi
+
+        # Derive default output path from format when not specified
+        if [[ -z "${OUTPUT_PATH}" ]]; then
+          case "${FORMAT}" in
+            markdown) OUTPUT_PATH="relune-diff.md" ;;
+            svg)      OUTPUT_PATH="relune-diff.svg" ;;
+            html)     OUTPUT_PATH="relune-diff.html" ;;
+            json)     OUTPUT_PATH="relune-diff.json" ;;
+            text)     OUTPUT_PATH="relune-diff.txt" ;;
+            *)        OUTPUT_PATH="relune-diff.txt" ;;
+          esac
+        fi
+
+        # Run diff with --exit-code to detect changes
+        set +e
+        "${relune}" diff \
+          --before "${BEFORE}" \
+          --after  "${AFTER}" \
+          --format "${FORMAT}" \
+          --exit-code \
+          -o "${OUTPUT_PATH}"
+        rc=$?
+        set -e
+
+        if [[ $rc -eq 10 ]]; then
+          echo "has-changes=true" >> "${GITHUB_OUTPUT}"
+        elif [[ $rc -eq 0 ]]; then
+          echo "has-changes=false" >> "${GITHUB_OUTPUT}"
+        else
+          echo "::error::relune diff failed with exit code ${rc}"
+          exit "${rc}"
+        fi
+
+        echo "output-path=${OUTPUT_PATH}" >> "${GITHUB_OUTPUT}"

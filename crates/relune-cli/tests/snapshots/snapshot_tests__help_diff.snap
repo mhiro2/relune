@@ -57,10 +57,11 @@ Options:
           Output format
 
           Possible values:
-          - text: Human-readable text output
-          - json: JSON output
-          - svg:  SVG diagram with diff overlay
-          - html: Self-contained HTML with diff overlay
+          - text:     Human-readable text output
+          - json:     JSON output
+          - svg:      SVG diagram with diff overlay
+          - html:     Self-contained HTML with diff overlay
+          - markdown: GitHub-flavored Markdown output
 
   -o, --out <FILE>
           Output file path; stdout if omitted
@@ -70,6 +71,9 @@ Options:
 
       --fail-on-warning
           Exit with non-zero code if warnings are emitted
+
+      --exit-code
+          Exit with code 10 if schema changes are detected (like `git diff --exit-code`)
 
   -h, --help
           Print help (see a summary with '-h')

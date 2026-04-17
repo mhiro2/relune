@@ -551,6 +551,8 @@ pub enum DiffFormat {
     Svg,
     /// Self-contained HTML with diff overlay.
     Html,
+    /// GitHub-flavored Markdown output.
+    Markdown,
 }
 
 #[cfg(test)]

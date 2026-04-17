@@ -1,0 +1,135 @@
+# migration-diff.yaml — Post schema diff as a PR comment when migrations change.
+#
+# Copy this file to your repository's .github/workflows/ directory and
+# adjust the "Generate schema" steps to match your migration tooling
+# (e.g. pg_dump, Rails db:schema:dump, Flyway, etc.).
+#
+# If you also want an HTML artifact, add a second relune/action step
+# with format: html and a separate output-path, then upload it with
+# actions/upload-artifact.
+
+name: Schema Diff
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      # Adjust this path to match your migration directory.
+
+# Required for posting PR comments and reading the repository.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  schema-diff:
+    runs-on: ubuntu-latest
+    steps:
+      # ----------------------------------------------------------------
+      # 1. Checkout both base and head so we can generate schemas from
+      #    each ref.
+      # ----------------------------------------------------------------
+      - name: Checkout HEAD
+        uses: actions/checkout@v6
+
+      - name: Checkout base ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      # ----------------------------------------------------------------
+      # 2. Generate the final schema from each ref.
+      #
+      #    Replace the commands below with whatever produces a single
+      #    SQL DDL file representing your full database schema.
+      #
+      #    Examples:
+      #      Rails:   bin/rails db:schema:dump SCHEMA=schema.sql
+      #      Flyway:  flyway migrate && pg_dump -s > schema.sql
+      #      Manual:  cat migrations/*.sql > schema.sql
+      # ----------------------------------------------------------------
+      - name: Generate schema (base)
+        working-directory: base
+        run: |
+          # TODO: Replace with your schema generation command.
+          cat migrations/*.sql > ../base-schema.sql
+
+      - name: Generate schema (head)
+        run: |
+          # TODO: Replace with your schema generation command.
+          cat migrations/*.sql > head-schema.sql
+
+      # ----------------------------------------------------------------
+      # 3. Run relune diff
+      # ----------------------------------------------------------------
+      - name: Diff schemas (Markdown)
+        id: diff
+        uses: mhiro2/relune/action@v0  # pin to a release tag
+        with:
+          before: base-schema.sql
+          after: head-schema.sql
+          format: markdown
+
+      # ----------------------------------------------------------------
+      # 4. Post PR comment (only when changes are detected)
+      # ----------------------------------------------------------------
+      - name: Post diff comment
+        if: steps.diff.outputs.has-changes == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('${{ steps.diff.outputs.output-path }}', 'utf8');
+            const marker = '<!-- relune-schema-diff -->';
+            const fullBody = marker + '\n' + body;
+
+            // Find an existing comment with our marker
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: fullBody,
+              });
+            }
+
+      # ----------------------------------------------------------------
+      # 5. (Optional) Upload HTML visual diff as an artifact
+      # ----------------------------------------------------------------
+      # - name: Diff schemas (HTML)
+      #   id: diff-html
+      #   uses: mhiro2/relune/action@v0
+      #   with:
+      #     before: base-schema.sql
+      #     after: head-schema.sql
+      #     format: html
+      #
+      # - name: Upload HTML diff
+      #   if: steps.diff-html.outputs.has-changes == 'true'
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: schema-diff
+      #     path: ${{ steps.diff-html.outputs.output-path }}
+
+# NOTE: This workflow uses `on: pull_request`, which runs in the context
+# of the head branch. For fork PRs the GITHUB_TOKEN has read-only access
+# to the base repository, so the comment step will fail.
+#
+# If you need to support fork PRs, consider splitting into two workflows:
+# one that generates the diff artifact (pull_request) and one that posts
+# the comment (workflow_run with pull-requests: write permission).

@@ -1396,6 +1396,7 @@ mod tests {
             out: None,
             stdout: false,
             fail_on_warning: false,
+            exit_code: false,
         };
 
         let merged = config.merge_diff_args(&args);
@@ -1422,6 +1423,7 @@ mod tests {
             out: None,
             stdout: false,
             fail_on_warning: false,
+            exit_code: false,
         };
 
         let merged = config.merge_diff_args(&args);

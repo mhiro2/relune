@@ -17,6 +17,8 @@ pub(crate) enum CliError {
     Warning(anyhow::Error),
     /// Unexpected runtime failure.
     General(anyhow::Error),
+    /// Diff detected schema changes (used with `--exit-code`).
+    DiffChangesDetected,
 }
 
 impl CliError {
@@ -45,6 +47,7 @@ impl CliError {
             Self::Usage(_) => 2,
             Self::Warning(_) => 3,
             Self::General(_) => 1,
+            Self::DiffChangesDetected => 10,
         }
     }
 }
@@ -54,6 +57,9 @@ impl Display for CliError {
         match self {
             Self::Usage(error) | Self::Warning(error) | Self::General(error) => {
                 Display::fmt(error, f)
+            }
+            Self::DiffChangesDetected => {
+                write!(f, "schema changes detected")
             }
         }
     }

@@ -7,9 +7,9 @@ use anyhow::Context;
 use super::input::DiffInputSelection;
 use crate::cli::{ColorWhen, DiffArgs, DiffFormat};
 use crate::config::ReluneConfig;
-use crate::error::CliResult;
+use crate::error::{CliError, CliResult};
 use crate::output::{check_diagnostics, print_success, validate_markup_stdout_usage, write_output};
-use relune_app::{DiffRequest, diff, format_diff_text};
+use relune_app::{DiffRequest, diff, format_diff_markdown, format_diff_text};
 
 /// Run the diff command.
 pub fn run_diff(
@@ -42,6 +42,7 @@ pub fn run_diff(
             DiffFormat::Json => relune_app::DiffFormat::Json,
             DiffFormat::Svg => relune_app::DiffFormat::Svg,
             DiffFormat::Html => relune_app::DiffFormat::Html,
+            DiffFormat::Markdown => relune_app::DiffFormat::Markdown,
         },
         output_path: args.out.clone(),
         ..Default::default()
@@ -56,6 +57,7 @@ pub fn run_diff(
     let rendered = result.rendered.take();
     let content = match merged.format {
         DiffFormat::Text => format_diff_text(&result),
+        DiffFormat::Markdown => format_diff_markdown(&result),
         DiffFormat::Json => serde_json::to_string_pretty(&result.diff)
             .context("Failed to serialize diff to JSON")?,
         DiffFormat::Svg | DiffFormat::Html => rendered.unwrap_or_default(),
@@ -85,6 +87,11 @@ pub fn run_diff(
         );
     }
 
+    // Exit with code 10 if --exit-code is set and changes were detected
+    if args.exit_code && result.has_changes() {
+        return Err(CliError::DiffChangesDetected);
+    }
+
     Ok(())
 }
 
@@ -101,7 +108,7 @@ fn validate_stdout_usage(
             explicit_stdout,
             stdout_is_terminal,
         ),
-        DiffFormat::Text | DiffFormat::Json => Ok(()),
+        DiffFormat::Text | DiffFormat::Json | DiffFormat::Markdown => Ok(()),
     }
 }
 
