@@ -240,10 +240,11 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 
 | Option | Values | Default |
 |--------|--------|---------|
-| `-f`, `--format` | `text`, `json`, `svg`, `html` | `text` |
+| `-f`, `--format` | `text`, `json`, `markdown`, `svg`, `html` | `text` |
 | `-o`, `--out` | Output file path | stdout (`svg`/`html` on terminals require `--stdout`) |
 | `--stdout` | Allow raw `svg`/`html` on interactive stdout | off |
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
+| `--exit-code` | Exit with code 10 if schema changes are detected (like `git diff --exit-code`) | off |
 | `--fail-on-warning` | Non-zero exit on warnings | -- |
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
@@ -267,9 +268,11 @@ relune inspect --sql schema.sql --table <TABLE>          # drill into flagged ta
 Diff before/after schemas and lint the result:
 
 ```bash
-relune diff --before old.sql --after new.sql                       # text diff
-relune diff --before old.sql --after new.sql --format html -o d.html # visual diff
-relune lint --sql new.sql                                          # lint new schema
+relune diff --before old.sql --after new.sql                          # text diff
+relune diff --before old.sql --after new.sql --format markdown        # GFM for PR comments
+relune diff --before old.sql --after new.sql --format html -o d.html  # visual diff
+relune diff --before old.sql --after new.sql --exit-code              # exit 10 if changes
+relune lint --sql new.sql                                             # lint new schema
 relune render --sql new.sql --focus <CHANGED_TABLE> --depth 1 -o area.svg
 ```
 
@@ -292,6 +295,32 @@ Fail the build on lint warnings:
 ```bash
 relune lint --sql schema.sql --deny warning
 ```
+
+### GitHub Actions
+
+A composite action is available at `mhiro2/relune/action` (Linux and macOS runners).
+
+```yaml
+- uses: mhiro2/relune/action@v0
+  id: diff
+  with:
+    before: base-schema.sql
+    after: head-schema.sql
+    format: markdown        # text, json, markdown, svg, html
+
+# Post comment only when changes are detected
+- if: steps.diff.outputs.has-changes == 'true'
+  uses: actions/github-script@v7
+  with:
+    script: |
+      const body = require('fs').readFileSync('${{ steps.diff.outputs.output-path }}', 'utf8');
+      // ... create or update PR comment
+```
+
+Action inputs: `version`, `before`, `after`, `format`, `output-path`, `binary-path`.
+Action outputs: `has-changes` (`"true"` / `"false"`), `output-path`.
+
+See `docs/github-actions.md` for full reference and sample workflows.
 
 ## Configuration
 
@@ -328,7 +357,7 @@ deny = "warning"
 fail_on_warning = false
 
 [diff]
-format = "json"
+format = "markdown"
 dialect = "postgres"
 fail_on_warning = false
 ```

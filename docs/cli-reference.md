@@ -188,16 +188,19 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 
 | Option | Description |
 |--------|-------------|
-| `-f`, `--format text\|json\|svg\|html` | Output format |
+| `-f`, `--format text\|json\|markdown\|svg\|html` | Output format |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
 | `--stdout` | Explicitly allow raw SVG/HTML on interactive stdout |
 | `--dialect` | For SQL parsing on both sides |
 | `--fail-on-warning` | Return exit code `3` when diagnostics include warnings |
+| `--exit-code` | Return exit code `10` when schema changes are detected (like `git diff --exit-code`) |
 
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
+relune diff --before old.sql --after new.sql --format markdown
 relune diff --before old.sql --after new.sql --format html -o diff.html
 relune diff --before old.sql --after new.sql --format html --stdout > diff.html
+relune diff --before old.sql --after new.sql --exit-code  # exits 10 if changes found
 relune --config relune.toml diff --before old.sql --after new.sql
 ```

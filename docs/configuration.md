@@ -173,7 +173,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 
 | Key | Values |
 |-----|--------|
-| `format` | `text`, `json`, `svg`, `html` |
+| `format` | `text`, `json`, `markdown`, `svg`, `html` |
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 

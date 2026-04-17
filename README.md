@@ -117,10 +117,11 @@ Understand schema shape and catch common issues:
 
 Compare schema revisions and integrate with tooling:
 
-- text diff output
+- text and Markdown diff output
 - JSON output for CI and automation
 - `layout-json` with routing debug metadata for edge-side, slot, and channel inspection
 - SVG or HTML visual diff with color-coded overlays
+- [GitHub Actions integration](docs/github-actions.md) for automated schema review on pull requests
 
 ### Flexible input sources
 
@@ -212,6 +213,7 @@ Download the latest release from GitHub Releases and place `relune` on your `PAT
 | [Getting started](docs/getting-started.md) | Installation, first commands, live database introspection |
 | [CLI reference](docs/cli-reference.md)     | Commands and flags                                        |
 | [Configuration](docs/configuration.md)     | `relune.toml` and merge rules                             |
+| [GitHub Actions](docs/github-actions.md)   | Composite action, sample workflows, CI integration        |
 
 ## License
 
