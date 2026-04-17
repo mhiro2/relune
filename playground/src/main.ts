@@ -1,12 +1,11 @@
 import initWasm, {
+  diff_from_sql,
+  export_from_sql,
+  inspect_from_sql,
+  lint_from_sql,
   render_from_sql,
   set_panic_hook,
   version,
-  type WasmDiagnostic,
-  type WasmDuration,
-  type WasmErrorShape,
-  type WasmRenderRequest,
-  type WasmRenderStats,
 } from "../pkg/relune_wasm.js";
 import { createSqlEditor } from "./editor.js";
 
@@ -16,10 +15,204 @@ type LayoutAlgorithm = "hierarchical" | "force-directed";
 type LayoutDirection = "top-to-bottom" | "left-to-right" | "right-to-left" | "bottom-to-top";
 type EdgeStyle = "curved" | "orthogonal" | "straight";
 type GroupBy = "none" | "schema" | "prefix";
+type WorkbenchMode = "render" | "inspect" | "export" | "lint" | "compare";
+type ExportFormat = "schema-json" | "graph-json" | "layout-json" | "mermaid" | "d2" | "dot";
+type CompareView = "visual" | "text" | "markdown" | "json";
 type ViewpointId = string;
+type WasmSeverity = "error" | "warning" | "info" | "hint";
+
+type WasmDiagnosticCode = {
+  prefix: string;
+  number: number;
+};
+
+type WasmDiagnostic = {
+  severity: WasmSeverity;
+  code: WasmDiagnosticCode;
+  message: string;
+};
+
+type WasmDuration = {
+  secs: number;
+  nanos: number;
+};
+
+type WasmRenderStats = {
+  table_count: number;
+  column_count: number;
+  edge_count: number;
+  view_count: number;
+  parse_time: WasmDuration;
+  graph_time: WasmDuration;
+  layout_time: WasmDuration;
+  render_time: WasmDuration;
+  total_time: WasmDuration;
+};
+
+type WasmRenderResult = {
+  content: string;
+  diagnostics: WasmDiagnostic[];
+  stats: WasmRenderStats;
+};
+
+type SchemaStats = {
+  table_count: number;
+  column_count: number;
+  foreign_key_count: number;
+  view_count: number;
+};
+
+type TableSummary = {
+  name: string;
+  column_count: number;
+  foreign_key_count: number;
+  incoming_fk_count: number;
+  index_count: number;
+  has_primary_key: boolean;
+};
+
+type SchemaSummary = {
+  table_count: number;
+  column_count: number;
+  foreign_key_count: number;
+  index_count: number;
+  view_count: number;
+  enum_count: number;
+  tables_without_pk: number;
+  orphan_table_count: number;
+  tables: TableSummary[];
+};
+
+type ColumnDetails = {
+  name: string;
+  data_type: string;
+  nullable: boolean;
+  is_primary_key: boolean;
+  comment?: string | null;
+};
+
+type ForeignKeyDetails = {
+  name?: string | null;
+  from_columns: string[];
+  to_table: string;
+  to_columns: string[];
+  on_delete?: string | null;
+  on_update?: string | null;
+};
+
+type IndexDetails = {
+  name?: string | null;
+  columns: string[];
+  is_unique: boolean;
+};
+
+type TableDetails = {
+  name: string;
+  comment?: string | null;
+  columns: ColumnDetails[];
+  foreign_keys: ForeignKeyDetails[];
+  indexes: IndexDetails[];
+};
+
+type WasmInspectResult = {
+  summary: SchemaSummary;
+  table?: TableDetails | null;
+  diagnostics: WasmDiagnostic[];
+};
+
+type WasmExportResult = {
+  content: string;
+  diagnostics: WasmDiagnostic[];
+  stats: SchemaStats;
+};
+
+type LintStats = {
+  total: number;
+  errors: number;
+  warnings: number;
+  infos: number;
+  hints: number;
+};
+
+type LintIssue = {
+  rule_id: string;
+  severity: WasmSeverity;
+  message: string;
+  table_id?: string | null;
+  table_name?: string | null;
+  column_name?: string | null;
+  hint?: string | null;
+};
+
+type WasmLintResult = {
+  issues: LintIssue[];
+  stats: LintStats;
+  diagnostics: WasmDiagnostic[];
+};
+
+type DiffSummary = {
+  tables_added: number;
+  tables_removed: number;
+  tables_modified: number;
+  columns_changed: number;
+  foreign_keys_changed: number;
+  indexes_changed: number;
+  views_added: number;
+  views_removed: number;
+  views_modified: number;
+  view_columns_changed: number;
+  view_definitions_changed: number;
+  enums_added: number;
+  enums_removed: number;
+  enums_modified: number;
+  enum_values_changed: number;
+};
+
+type TableDiff = {
+  table_name: string;
+  column_diffs: unknown[];
+  fk_diffs: unknown[];
+  index_diffs: unknown[];
+};
+
+type ViewDiff = {
+  view_name: string;
+  column_diffs: unknown[];
+};
+
+type EnumDiff = {
+  enum_name: string;
+  value_diffs: unknown[];
+};
+
+type SchemaDiff = {
+  added_tables: string[];
+  removed_tables: string[];
+  modified_tables: TableDiff[];
+  added_views: string[];
+  removed_views: string[];
+  modified_views: ViewDiff[];
+  added_enums: string[];
+  removed_enums: string[];
+  modified_enums: EnumDiff[];
+  summary: DiffSummary;
+};
+
+type WasmDiffResult = {
+  diff: SchemaDiff;
+  diagnostics: WasmDiagnostic[];
+  rendered?: string | null;
+  content?: string | null;
+};
+
+type WasmErrorShape = {
+  message: string;
+  code?: string;
+};
 
 type PersistedState = {
   example: ExampleId;
+  mode: WorkbenchMode;
   theme: Theme;
   layout: LayoutAlgorithm;
   direction: LayoutDirection;
@@ -30,7 +223,13 @@ type PersistedState = {
   depth: string;
   includeTables: string;
   excludeTables: string;
+  exportFormat: ExportFormat;
+  inspectTable: string;
+  lintRules: string;
+  compareView: CompareView;
   sql: string;
+  compareBeforeSql: string;
+  compareAfterSql: string;
 };
 
 type ExampleDefinition = {
@@ -58,11 +257,18 @@ type ManualViewState = {
   excludeTables: string;
 };
 
-const STORAGE_KEY = "relune-playground:v1";
+type ButtonAction = {
+  label: string;
+  run: () => void | Promise<void>;
+};
+
+const STORAGE_KEY = "relune-schema-workbench:v1";
 const CUSTOM_EXAMPLE_ID = "custom";
 const DEFAULT_EXAMPLE_ID: Exclude<ExampleId, "custom"> = "simple-blog";
 const MANUAL_VIEWPOINT_ID = "";
 const MANUAL_VIEWPOINT_LABEL = "Manual controls";
+const SIDEBAR_DEFAULT = 380;
+
 const DEFAULT_MANUAL_VIEW_STATE: Readonly<ManualViewState> = {
   groupBy: "none",
   focusTable: "",
@@ -70,6 +276,7 @@ const DEFAULT_MANUAL_VIEW_STATE: Readonly<ManualViewState> = {
   includeTables: "",
   excludeTables: "",
 };
+
 const EXAMPLES: readonly ExampleDefinition[] = [
   {
     id: "simple-blog",
@@ -157,8 +364,52 @@ const VIEWPOINTS: Record<Exclude<ExampleId, "custom">, readonly ViewpointDefinit
   ],
 };
 
+const MODE_META: Record<
+  WorkbenchMode,
+  {
+    label: string;
+    title: string;
+    description: string;
+    actionLabel: string;
+  }
+> = {
+  render: {
+    label: "Render",
+    title: "Schema Preview",
+    description: "Render deterministic viewer HTML and SVG with the same WASM engine as the CLI.",
+    actionLabel: "Render",
+  },
+  inspect: {
+    label: "Inspect",
+    title: "Schema Inventory",
+    description: "Explore schema counts, table inventory, and table details from one SQL input.",
+    actionLabel: "Inspect",
+  },
+  export: {
+    label: "Export",
+    title: "Portable Schema Outputs",
+    description: "Export normalized schema data, graph data, and documentation-friendly sources.",
+    actionLabel: "Export",
+  },
+  lint: {
+    label: "Lint",
+    title: "Schema Review",
+    description:
+      "Review lint issues and parser diagnostics as a schema workbench, not just a demo viewer.",
+    actionLabel: "Lint",
+  },
+  compare: {
+    label: "Compare",
+    title: "Before / After Diff",
+    description:
+      "Keep before and after separate, then inspect visual or structured changes without crowding the viewer mode.",
+    actionLabel: "Compare",
+  },
+};
+
 const DEFAULT_STATE: PersistedState = {
   example: DEFAULT_EXAMPLE_ID,
+  mode: "render",
   theme: "light",
   layout: "hierarchical",
   direction: "top-to-bottom",
@@ -169,7 +420,13 @@ const DEFAULT_STATE: PersistedState = {
   depth: "1",
   includeTables: "",
   excludeTables: "",
+  exportFormat: "schema-json",
+  inspectTable: "",
+  lintRules: "",
+  compareView: "visual",
   sql: "",
+  compareBeforeSql: "",
+  compareAfterSql: "",
 };
 
 const exampleSelect = getElement<HTMLSelectElement>("example-select");
@@ -177,26 +434,71 @@ const themeSelect = getElement<HTMLSelectElement>("theme-select");
 const layoutSelect = getElement<HTMLSelectElement>("layout-select");
 const directionSelect = getElement<HTMLSelectElement>("direction-select");
 const edgeStyleSelect = getElement<HTMLSelectElement>("edge-style-select");
+const groupBySelect = getElement<HTMLSelectElement>("group-by-select");
 const viewpointSelect = getElement<HTMLSelectElement>("viewpoint-select");
 const viewpointHint = getElement<HTMLElement>("viewpoint-hint");
-const groupBySelect = getElement<HTMLSelectElement>("group-by-select");
 const focusTableInput = getElement<HTMLInputElement>("focus-table-input");
 const depthInput = getElement<HTMLInputElement>("depth-input");
 const includeTablesInput = getElement<HTMLInputElement>("include-tables-input");
 const excludeTablesInput = getElement<HTMLInputElement>("exclude-tables-input");
+const inspectTableSelect = getElement<HTMLSelectElement>("inspect-table-select");
+const exportFormatSelect = getElement<HTMLSelectElement>("export-format-select");
+const lintRulesInput = getElement<HTMLInputElement>("lint-rules-input");
+const compareFormatSelect = getElement<HTMLSelectElement>("compare-format-select");
+
+const appearanceSection = getElement<HTMLElement>("appearance-section");
+const layoutSection = getElement<HTMLElement>("layout-section");
+const scopeSection = getElement<HTMLElement>("scope-section");
+const inspectSection = getElement<HTMLElement>("inspect-section");
+const exportSection = getElement<HTMLElement>("export-section");
+const lintSection = getElement<HTMLElement>("lint-section");
+const compareSection = getElement<HTMLElement>("compare-section");
+const viewpointRow = getElement<HTMLElement>("viewpoint-row");
+const focusRow = getElement<HTMLElement>("focus-row");
+
 const sqlEditorMount = getElement<HTMLDivElement>("sql-input");
+const compareBeforeMount = getElement<HTMLDivElement>("compare-before-input");
+const compareAfterMount = getElement<HTMLDivElement>("compare-after-input");
 const sqlEditor = createSqlEditor(sqlEditorMount);
+const compareBeforeEditor = createSqlEditor(compareBeforeMount);
+const compareAfterEditor = createSqlEditor(compareAfterMount);
+
+const singleEditorSection = getElement<HTMLElement>("single-editor-section");
+const compareEditorsSection = getElement<HTMLElement>("compare-editors-section");
+const modeHint = getElement<HTMLElement>("mode-hint");
+const modeTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".mode-tab"));
+
 const resetExampleButton = getElement<HTMLButtonElement>("reset-example");
 const renderNowButton = getElement<HTMLButtonElement>("render-now");
-const downloadHtmlButton = getElement<HTMLButtonElement>("download-html");
-const downloadSvgButton = getElement<HTMLButtonElement>("download-svg");
+const copyOutputButton = getElement<HTMLButtonElement>("copy-output");
+const downloadPrimaryButton = getElement<HTMLButtonElement>("download-html");
+const downloadSecondaryButton = getElement<HTMLButtonElement>("download-svg");
 const renderStatus = getElement<HTMLElement>("render-status");
 const versionPill = getElement<HTMLElement>("version-pill");
 const errorBox = getElement<HTMLElement>("error-box");
 const statsGrid = getElement<HTMLElement>("stats-grid");
 const diagnosticCount = getElement<HTMLElement>("diagnostic-count");
 const diagnosticList = getElement<HTMLUListElement>("diagnostic-list");
+const previewPanel = getElement<HTMLElement>("preview-panel");
 const previewFrame = getElement<HTMLIFrameElement>("preview-frame");
+
+const surfaceEyebrow = getElement<HTMLElement>("surface-eyebrow");
+const surfaceTitle = getElement<HTMLElement>("surface-title");
+const surfaceDescription = getElement<HTMLElement>("surface-description");
+const inspectPanel = getElement<HTMLElement>("inspect-panel");
+const inspectTableList = getElement<HTMLUListElement>("inspect-table-list");
+const inspectDetail = getElement<HTMLElement>("inspect-detail");
+const lintPanel = getElement<HTMLElement>("lint-panel");
+const lintIssueList = getElement<HTMLUListElement>("lint-issue-list");
+const compareSummaryPanel = getElement<HTMLElement>("compare-summary-panel");
+const compareSummary = getElement<HTMLElement>("compare-summary");
+const compareSummaryCount = getElement<HTMLElement>("compare-summary-count");
+const compareObjectList = getElement<HTMLUListElement>("compare-object-list");
+const textOutputPanel = getElement<HTMLElement>("text-output-panel");
+const textOutputLabel = getElement<HTMLElement>("text-output-label");
+const textOutputMeta = getElement<HTMLElement>("text-output-meta");
+const textOutput = getElement<HTMLElement>("text-output");
+
 const sidebar = getElement<HTMLElement>("sidebar");
 const sidebarHandle = getElement<HTMLElement>("sidebar-handle");
 const sidebarCollapseButton = getElement<HTMLButtonElement>("sidebar-collapse");
@@ -205,15 +507,16 @@ const editorExpandButton = getElement<HTMLButtonElement>("editor-expand");
 const sidebarScroll = document.querySelector<HTMLElement>(".sidebar__scroll")!;
 
 const exampleSql = new Map<Exclude<ExampleId, "custom">, string>();
+const manualViewStateByExample = new Map<ExampleId, ManualViewState>();
 
-const SIDEBAR_DEFAULT = 380;
-
+let currentMode: WorkbenchMode = DEFAULT_STATE.mode;
 let renderTimer = 0;
 let renderSerial = 0;
-let lastHtmlOutput = "";
-let isApplyingViewpoint = false;
 let previousViewpointId = MANUAL_VIEWPOINT_ID;
-const manualViewStateByExample = new Map<ExampleId, ManualViewState>();
+let isApplyingViewpoint = false;
+let primaryAction: ButtonAction | null = null;
+let secondaryAction: ButtonAction | null = null;
+let copyAction: ButtonAction | null = null;
 
 populateExampleOptions();
 
@@ -222,16 +525,14 @@ void bootstrap();
 async function bootstrap(): Promise<void> {
   try {
     setStatus("Loading WASM runtime…");
-    renderNowButton.disabled = true;
-    downloadHtmlButton.disabled = true;
-    downloadSvgButton.disabled = true;
+    setActionButtonsDisabled(true);
     await loadExamples();
     restoreInitialState();
     await initWasm();
     set_panic_hook();
     versionPill.textContent = `relune-wasm ${version()}`;
-    renderNowButton.disabled = false;
-    scheduleRender(0);
+    setActionButtonsDisabled(false);
+    scheduleWorkbench(0);
   } catch (error) {
     showError(normalizeError(error));
     setStatus("Runtime failed");
@@ -240,7 +541,7 @@ async function bootstrap(): Promise<void> {
 
 function populateExampleOptions(): void {
   const options = EXAMPLES.map(
-    (example) => `<option value="${example.id}">${example.label}</option>`,
+    (example) => `<option value="${example.id}">${escapeHtml(example.label)}</option>`,
   );
   options.push(`<option value="${CUSTOM_EXAMPLE_ID}">Custom</option>`);
   exampleSelect.innerHTML = options.join("");
@@ -403,10 +704,22 @@ function restoreInitialState(): void {
 
   if (initialState.example !== CUSTOM_EXAMPLE_ID) {
     initialState.sql = exampleSql.get(toBuiltinExampleId(initialState.example)) ?? "";
+    if (!initialState.compareBeforeSql) {
+      initialState.compareBeforeSql = initialState.sql;
+    }
+    if (!initialState.compareAfterSql) {
+      initialState.compareAfterSql = initialState.sql;
+    }
   }
 
   if (!initialState.sql) {
     initialState.sql = exampleSql.get(DEFAULT_EXAMPLE_ID) ?? "";
+  }
+  if (!initialState.compareBeforeSql) {
+    initialState.compareBeforeSql = initialState.sql;
+  }
+  if (!initialState.compareAfterSql) {
+    initialState.compareAfterSql = initialState.compareBeforeSql;
   }
 
   applyState(initialState);
@@ -417,13 +730,18 @@ function restoreInitialState(): void {
 function attachEventListeners(): void {
   exampleSelect.addEventListener("change", handleExampleChange);
   viewpointSelect.addEventListener("change", handleViewpointChange);
-  resetExampleButton.addEventListener("click", resetExample);
   renderNowButton.addEventListener("click", () => {
-    void renderDiagram();
+    void runWorkbench();
   });
-  downloadHtmlButton.addEventListener("click", downloadHtml);
-  downloadSvgButton.addEventListener("click", () => {
-    void downloadSvg();
+  resetExampleButton.addEventListener("click", resetExample);
+  copyOutputButton.addEventListener("click", () => {
+    void copyAction?.run();
+  });
+  downloadPrimaryButton.addEventListener("click", () => {
+    void primaryAction?.run();
+  });
+  downloadSecondaryButton.addEventListener("click", () => {
+    void secondaryAction?.run();
   });
 
   const controls: readonly HTMLElement[] = [
@@ -436,6 +754,10 @@ function attachEventListeners(): void {
     depthInput,
     includeTablesInput,
     excludeTablesInput,
+    inspectTableSelect,
+    exportFormatSelect,
+    lintRulesInput,
+    compareFormatSelect,
   ];
 
   for (const control of controls) {
@@ -443,9 +765,26 @@ function attachEventListeners(): void {
     control.addEventListener("input", handleControlChange);
   }
 
+  for (const tab of modeTabs) {
+    tab.addEventListener("click", () => {
+      const nextMode = tab.dataset.mode;
+      if (isWorkbenchMode(nextMode)) {
+        handleModeChange(nextMode);
+      }
+    });
+  }
+
   sqlEditor.onUpdate(() => {
-    syncExampleSelectionWithEditor();
-    handleControlChange();
+    syncExampleSelectionWithActiveEditors();
+    handleEditorChange();
+  });
+  compareBeforeEditor.onUpdate(() => {
+    syncExampleSelectionWithActiveEditors();
+    handleEditorChange();
+  });
+  compareAfterEditor.onUpdate(() => {
+    syncExampleSelectionWithActiveEditors();
+    handleEditorChange();
   });
 
   sidebarCollapseButton.addEventListener("click", collapseSidebar);
@@ -454,8 +793,121 @@ function attachEventListeners(): void {
   initSidebarResize();
 }
 
+function handleModeChange(mode: WorkbenchMode): void {
+  if (mode === currentMode) {
+    return;
+  }
+
+  if (
+    mode === "compare" &&
+    !compareBeforeEditor.getValue().trim() &&
+    !compareAfterEditor.getValue().trim()
+  ) {
+    const seedSql = sqlEditor.getValue().trim() || exampleSql.get(DEFAULT_EXAMPLE_ID) || "";
+    compareBeforeEditor.setValue(seedSql);
+    compareAfterEditor.setValue(seedSql);
+  }
+
+  currentMode = mode;
+  applyModeVisibility();
+  persistState();
+  scheduleWorkbench(0);
+}
+
+function handleEditorChange(): void {
+  if (currentMode !== "compare") {
+    syncViewpointSelectionWithControls();
+    if (viewpointSelect.value === MANUAL_VIEWPOINT_ID) {
+      storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
+    }
+    previousViewpointId = viewpointSelect.value;
+  }
+
+  persistState();
+  scheduleWorkbench();
+}
+
+function handleControlChange(): void {
+  if (currentMode !== "compare") {
+    syncViewpointSelectionWithControls();
+    if (viewpointSelect.value === MANUAL_VIEWPOINT_ID) {
+      storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
+    }
+    previousViewpointId = viewpointSelect.value;
+  }
+
+  applyTheme(themeSelect.value as Theme);
+  applyModeVisibility();
+  persistState();
+  scheduleWorkbench();
+}
+
+function handleExampleChange(): void {
+  populateViewpointOptions(exampleSelect.value as ExampleId, viewpointSelect.value);
+
+  const selectedViewpoint = getSelectedViewpoint();
+  if (selectedViewpoint) {
+    applyViewpoint(selectedViewpoint);
+  } else {
+    restoreManualViewState(exampleSelect.value as ExampleId);
+  }
+
+  if (exampleSelect.value !== CUSTOM_EXAMPLE_ID) {
+    const sql = exampleSql.get(exampleSelect.value as Exclude<ExampleId, "custom">);
+    if (sql) {
+      syncEditorsWithExampleSql(sql);
+    }
+  }
+
+  previousViewpointId = viewpointSelect.value;
+  persistState();
+  scheduleWorkbench(0);
+}
+
+function handleViewpointChange(): void {
+  const selected = getSelectedViewpoint();
+  if (selected) {
+    if (previousViewpointId === MANUAL_VIEWPOINT_ID) {
+      storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
+    }
+    applyViewpoint(selected);
+  } else {
+    restoreManualViewState(exampleSelect.value as ExampleId);
+  }
+
+  previousViewpointId = viewpointSelect.value;
+  persistState();
+  scheduleWorkbench();
+}
+
+function resetExample(): void {
+  const selectedExample = exampleSelect.value as ExampleId;
+  const effectiveExample = toBuiltinExampleId(selectedExample);
+  exampleSelect.value = effectiveExample;
+  populateViewpointOptions(effectiveExample, viewpointSelect.value);
+  const selectedViewpoint = getSelectedViewpoint();
+
+  if (selectedViewpoint) {
+    applyViewpoint(selectedViewpoint);
+  } else {
+    restoreManualViewState(effectiveExample);
+  }
+
+  const sql = exampleSql.get(effectiveExample) ?? "";
+  syncEditorsWithExampleSql(sql);
+
+  previousViewpointId = viewpointSelect.value;
+  persistState();
+  scheduleWorkbench(0);
+}
+
 function collapseSidebar(): void {
   sidebar.classList.add("is-collapsed");
+}
+
+function expandSidebar(): void {
+  sidebar.classList.remove("is-collapsed");
+  sidebar.style.width = `${SIDEBAR_DEFAULT}px`;
 }
 
 function toggleEditorExpand(): void {
@@ -464,18 +916,12 @@ function toggleEditorExpand(): void {
   editorExpandButton.setAttribute("title", expanded ? "Collapse editor" : "Expand editor");
 }
 
-function expandSidebar(): void {
-  sidebar.classList.remove("is-collapsed");
-  sidebar.style.width = `${SIDEBAR_DEFAULT}px`;
-}
-
 function initSidebarResize(): void {
   let dragging = false;
   let startX = 0;
   let startWidth = 0;
 
   function onPointerDown(event: PointerEvent): void {
-    // If collapsed, restore on click
     if (sidebar.classList.contains("is-collapsed")) {
       sidebar.classList.remove("is-collapsed");
       sidebar.style.width = `${SIDEBAR_DEFAULT}px`;
@@ -528,83 +974,24 @@ function initSidebarResize(): void {
   sidebarHandle.addEventListener("dblclick", onDoubleClick);
 }
 
-function handleExampleChange(): void {
-  populateViewpointOptions(exampleSelect.value as ExampleId, viewpointSelect.value);
-  const selectedViewpoint = getSelectedViewpoint();
-  if (selectedViewpoint) {
-    applyViewpoint(selectedViewpoint);
-  } else {
-    restoreManualViewState(exampleSelect.value as ExampleId);
-  }
-
-  if (exampleSelect.value === CUSTOM_EXAMPLE_ID) {
-    previousViewpointId = viewpointSelect.value;
-    persistState();
-    scheduleRender();
-    return;
-  }
-
-  const sql = exampleSql.get(exampleSelect.value as Exclude<ExampleId, "custom">);
-  if (sql) {
-    sqlEditor.setValue(sql);
-  }
-
-  previousViewpointId = viewpointSelect.value;
-  persistState();
-  scheduleRender();
-}
-
-function handleViewpointChange(): void {
-  const selected = getSelectedViewpoint();
-  if (selected) {
-    if (previousViewpointId === MANUAL_VIEWPOINT_ID) {
-      storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
-    }
-    applyViewpoint(selected);
-  } else {
-    restoreManualViewState(exampleSelect.value as ExampleId);
-  }
-
-  previousViewpointId = viewpointSelect.value;
-  persistState();
-  scheduleRender();
-}
-
-function resetExample(): void {
-  const selectedExample = exampleSelect.value as ExampleId;
-  const effectiveExample = toBuiltinExampleId(selectedExample);
-  exampleSelect.value = effectiveExample;
-  populateViewpointOptions(effectiveExample, viewpointSelect.value);
-  const selectedViewpoint = getSelectedViewpoint();
-  if (selectedViewpoint) {
-    applyViewpoint(selectedViewpoint);
-  } else {
-    restoreManualViewState(effectiveExample);
-  }
-  sqlEditor.setValue(exampleSql.get(effectiveExample) ?? "");
-  previousViewpointId = viewpointSelect.value;
-  persistState();
-  scheduleRender(0);
-}
-
-function handleControlChange(): void {
-  syncViewpointSelectionWithControls();
-  if (viewpointSelect.value === MANUAL_VIEWPOINT_ID) {
-    storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
-  }
-  previousViewpointId = viewpointSelect.value;
-  applyTheme(themeSelect.value as Theme);
-  persistState();
-  scheduleRender();
-}
-
-function syncExampleSelectionWithEditor(): void {
+function syncExampleSelectionWithActiveEditors(): void {
   if (exampleSelect.value === CUSTOM_EXAMPLE_ID) {
     return;
   }
 
   const selectedSql = exampleSql.get(toBuiltinExampleId(exampleSelect.value as ExampleId));
-  if (selectedSql && sqlEditor.getValue().trim() !== selectedSql.trim()) {
+  if (!selectedSql) {
+    return;
+  }
+
+  const builtinSql = selectedSql.trim();
+  const matchesExample =
+    currentMode === "compare"
+      ? compareBeforeEditor.getValue().trim() === builtinSql &&
+        compareAfterEditor.getValue().trim() === builtinSql
+      : sqlEditor.getValue().trim() === builtinSql;
+
+  if (!matchesExample) {
     exampleSelect.value = CUSTOM_EXAMPLE_ID;
     populateViewpointOptions(CUSTOM_EXAMPLE_ID, MANUAL_VIEWPOINT_ID);
     previousViewpointId = MANUAL_VIEWPOINT_ID;
@@ -612,11 +999,17 @@ function syncExampleSelectionWithEditor(): void {
 }
 
 function applyState(state: PersistedState): void {
+  currentMode = state.mode;
   exampleSelect.value = state.example;
   themeSelect.value = state.theme;
   layoutSelect.value = state.layout;
   directionSelect.value = state.direction;
   edgeStyleSelect.value = state.edgeStyle;
+  exportFormatSelect.value = state.exportFormat;
+  inspectTableSelect.value = state.inspectTable;
+  lintRulesInput.value = state.lintRules;
+  compareFormatSelect.value = state.compareView;
+
   populateViewpointOptions(state.example, state.viewpoint);
   const selectedViewpoint = getSelectedViewpoint();
   if (selectedViewpoint) {
@@ -631,23 +1024,99 @@ function applyState(state: PersistedState): void {
     });
     restoreManualViewState(state.example);
   }
+
   sqlEditor.setValue(state.sql);
+  compareBeforeEditor.setValue(state.compareBeforeSql);
+  compareAfterEditor.setValue(state.compareAfterSql);
   applyTheme(state.theme);
   previousViewpointId = viewpointSelect.value;
+  applyModeVisibility();
 }
 
-function applyTheme(theme: Theme): void {
-  document.documentElement.dataset.theme = theme;
+function applyModeVisibility(): void {
+  const modeMeta = MODE_META[currentMode];
+  surfaceEyebrow.textContent = modeMeta.label;
+  surfaceTitle.textContent = modeMeta.title;
+  surfaceDescription.textContent = modeMeta.description;
+  modeHint.textContent = modeMeta.description;
+  renderNowButton.textContent = modeMeta.actionLabel;
+
+  for (const tab of modeTabs) {
+    tab.classList.toggle("is-active", tab.dataset.mode === currentMode);
+    tab.setAttribute("aria-selected", `${tab.dataset.mode === currentMode}`);
+  }
+
+  const usesVisualControls =
+    currentMode === "render" || currentMode === "export" || currentMode === "compare";
+  const usesScopeControls =
+    currentMode === "render" || currentMode === "export" || currentMode === "compare";
+
+  appearanceSection.hidden = !usesVisualControls;
+  layoutSection.hidden = !usesVisualControls;
+  scopeSection.hidden = !usesScopeControls;
+  inspectSection.hidden = currentMode !== "inspect";
+  exportSection.hidden = currentMode !== "export";
+  lintSection.hidden = currentMode !== "lint";
+  compareSection.hidden = currentMode !== "compare";
+  viewpointRow.hidden = !(currentMode === "render" || currentMode === "export");
+  focusRow.hidden = currentMode === "compare";
+
+  singleEditorSection.hidden = currentMode === "compare";
+  compareEditorsSection.hidden = currentMode !== "compare";
+
+  if (currentMode === "compare") {
+    previewFrame.title = "Relune diff preview";
+  } else if (currentMode === "render") {
+    previewFrame.title = "Relune HTML preview";
+  } else {
+    previewFrame.title = "Relune workbench output";
+  }
 }
 
-function scheduleRender(delay = 250): void {
+function scheduleWorkbench(delay = 250): void {
   window.clearTimeout(renderTimer);
   renderTimer = window.setTimeout(() => {
-    void renderDiagram();
+    void runWorkbench();
   }, delay);
 }
 
-async function renderDiagram(): Promise<void> {
+async function runWorkbench(): Promise<void> {
+  const currentSerial = ++renderSerial;
+  clearError();
+  resetOutputPanels();
+
+  try {
+    switch (currentMode) {
+      case "render":
+        await runRenderMode(currentSerial);
+        break;
+      case "inspect":
+        await runInspectMode(currentSerial);
+        break;
+      case "export":
+        await runExportMode(currentSerial);
+        break;
+      case "lint":
+        await runLintMode(currentSerial);
+        break;
+      case "compare":
+        await runCompareMode(currentSerial);
+        break;
+    }
+  } catch (error) {
+    if (currentSerial !== renderSerial) {
+      return;
+    }
+
+    renderMetricCards([]);
+    renderDiagnostics([]);
+    resetActions();
+    showError(normalizeError(error));
+    setStatus(`${MODE_META[currentMode].actionLabel} failed`);
+  }
+}
+
+async function runRenderMode(currentSerial: number): Promise<void> {
   const sql = sqlEditor.getValue().trim();
   if (!sql) {
     showError({ message: "SQL input is empty." });
@@ -655,38 +1124,275 @@ async function renderDiagram(): Promise<void> {
     return;
   }
 
-  const currentSerial = ++renderSerial;
-  clearError();
   setStatus("Rendering…");
-
-  try {
-    const request = buildRenderRequest("html");
-    const result = render_from_sql(request);
-
-    if (currentSerial !== renderSerial) {
-      return;
-    }
-
-    lastHtmlOutput = result.content;
-    previewFrame.srcdoc = result.content;
-    renderStats(result.stats);
-    renderDiagnostics(result.diagnostics);
-    downloadHtmlButton.disabled = false;
-    downloadSvgButton.disabled = false;
-    setStatus(`Rendered in ${formatDuration(result.stats.total_time)}`);
-  } catch (error) {
-    if (currentSerial !== renderSerial) {
-      return;
-    }
-
-    renderDiagnostics([]);
-    renderStats(null);
-    showError(normalizeError(error));
-    setStatus("Render failed");
+  const result = render_from_sql(buildRenderRequest("html")) as WasmRenderResult;
+  if (currentSerial !== renderSerial) {
+    return;
   }
+
+  previewPanel.hidden = false;
+  previewFrame.srcdoc = result.content;
+  renderMetricCards([
+    ["Tables", `${result.stats.table_count}`],
+    ["Columns", `${result.stats.column_count}`],
+    ["Edges", `${result.stats.edge_count}`],
+    ["Views", `${result.stats.view_count}`],
+    ["Parse", formatDuration(result.stats.parse_time)],
+    ["Graph", formatDuration(result.stats.graph_time)],
+    ["Layout", formatDuration(result.stats.layout_time)],
+    ["Render", formatDuration(result.stats.render_time)],
+  ]);
+  renderDiagnostics(result.diagnostics);
+  configureActions({
+    copy: {
+      label: "Copy HTML",
+      run: () => copyText(result.content, "Copied HTML"),
+    },
+    primary: {
+      label: "HTML",
+      run: () => downloadText("relune-workbench.html", result.content, "text/html;charset=utf-8"),
+    },
+    secondary: {
+      label: "SVG",
+      run: () => {
+        const svgResult = render_from_sql(buildRenderRequest("svg")) as { content: string };
+        downloadText("relune-workbench.svg", svgResult.content, "image/svg+xml;charset=utf-8");
+      },
+    },
+  });
+  setStatus(`Rendered in ${formatDuration(result.stats.total_time)}`);
 }
 
-function buildRenderRequest(format: WasmRenderRequest["format"]): WasmRenderRequest {
+async function runInspectMode(currentSerial: number): Promise<void> {
+  const sql = sqlEditor.getValue().trim();
+  if (!sql) {
+    showError({ message: "SQL input is empty." });
+    setStatus("Waiting for SQL");
+    return;
+  }
+
+  setStatus("Inspecting…");
+  const summaryResult = inspect_from_sql({
+    sql: sqlEditor.getValue(),
+    format: "json",
+  }) as WasmInspectResult;
+  if (currentSerial !== renderSerial) {
+    return;
+  }
+
+  const tableNames = summaryResult.summary.tables.map((table) => table.name);
+  const selectedTable = tableNames.includes(inspectTableSelect.value)
+    ? inspectTableSelect.value
+    : "";
+  populateInspectTableOptions(tableNames, selectedTable);
+
+  const detailResult =
+    selectedTable.length > 0
+      ? (inspect_from_sql({
+          sql: sqlEditor.getValue(),
+          table: selectedTable,
+          format: "json",
+        }) as WasmInspectResult)
+      : summaryResult;
+  if (currentSerial !== renderSerial) {
+    return;
+  }
+
+  inspectPanel.hidden = false;
+  renderMetricCards([
+    ["Tables", `${summaryResult.summary.table_count}`],
+    ["Columns", `${summaryResult.summary.column_count}`],
+    ["FKs", `${summaryResult.summary.foreign_key_count}`],
+    ["Indexes", `${summaryResult.summary.index_count}`],
+    ["Views", `${summaryResult.summary.view_count}`],
+    ["Enums", `${summaryResult.summary.enum_count}`],
+    ["No PK", `${summaryResult.summary.tables_without_pk}`],
+    ["Isolated", `${summaryResult.summary.orphan_table_count}`],
+  ]);
+  renderDiagnostics(detailResult.diagnostics);
+  renderInspectPanel(summaryResult.summary, detailResult.table ?? null, selectedTable);
+  const inspectJson = JSON.stringify(detailResult, null, 2);
+  configureActions({
+    copy: {
+      label: "Copy JSON",
+      run: () => copyText(inspectJson, "Copied inspect JSON"),
+    },
+    primary: {
+      label: "JSON",
+      run: () => downloadText("relune-inspect.json", inspectJson, "application/json;charset=utf-8"),
+    },
+  });
+  setStatus(selectedTable ? `Inspected ${selectedTable}` : "Inspected schema");
+}
+
+async function runExportMode(currentSerial: number): Promise<void> {
+  const sql = sqlEditor.getValue().trim();
+  if (!sql) {
+    showError({ message: "SQL input is empty." });
+    setStatus("Waiting for SQL");
+    return;
+  }
+
+  setStatus("Exporting…");
+  const result = export_from_sql(buildExportRequest()) as WasmExportResult;
+  if (currentSerial !== renderSerial) {
+    return;
+  }
+
+  renderMetricCards([
+    ["Tables", `${result.stats.table_count}`],
+    ["Columns", `${result.stats.column_count}`],
+    ["FKs", `${result.stats.foreign_key_count}`],
+    ["Views", `${result.stats.view_count}`],
+  ]);
+  renderDiagnostics(result.diagnostics);
+  showTextOutput(exportFormatLabel(), result.content);
+  configureActions({
+    copy: {
+      label: "Copy output",
+      run: () => copyText(result.content, "Copied export output"),
+    },
+    primary: {
+      label: "Download",
+      run: () => downloadText(exportFilename(), result.content, exportMimeType()),
+    },
+  });
+  setStatus(`Exported ${exportFormatLabel()}`);
+}
+
+async function runLintMode(currentSerial: number): Promise<void> {
+  const sql = sqlEditor.getValue().trim();
+  if (!sql) {
+    showError({ message: "SQL input is empty." });
+    setStatus("Waiting for SQL");
+    return;
+  }
+
+  setStatus("Linting…");
+  const result = lint_from_sql({
+    sql: sqlEditor.getValue(),
+    format: "json",
+    rules: splitPatterns(lintRulesInput.value),
+  }) as WasmLintResult;
+  if (currentSerial !== renderSerial) {
+    return;
+  }
+
+  lintPanel.hidden = false;
+  renderMetricCards([
+    ["Total", `${result.stats.total}`],
+    ["Errors", `${result.stats.errors}`],
+    ["Warnings", `${result.stats.warnings}`],
+    ["Info", `${result.stats.infos}`],
+    ["Hints", `${result.stats.hints}`],
+  ]);
+  renderDiagnostics(result.diagnostics);
+  renderLintPanel(result.issues);
+  const lintJson = JSON.stringify(result, null, 2);
+  configureActions({
+    copy: {
+      label: "Copy JSON",
+      run: () => copyText(lintJson, "Copied lint JSON"),
+    },
+    primary: {
+      label: "JSON",
+      run: () => downloadText("relune-lint.json", lintJson, "application/json;charset=utf-8"),
+    },
+  });
+  setStatus(result.stats.total === 0 ? "No lint issues" : `${result.stats.total} issues found`);
+}
+
+async function runCompareMode(currentSerial: number): Promise<void> {
+  const beforeSql = compareBeforeEditor.getValue().trim();
+  const afterSql = compareAfterEditor.getValue().trim();
+  if (!beforeSql || !afterSql) {
+    showError({ message: "Both before and after SQL inputs are required." });
+    setStatus("Waiting for before / after SQL");
+    return;
+  }
+
+  const compareView = compareFormatSelect.value as CompareView;
+  setStatus("Comparing…");
+  const result = diff_from_sql(buildDiffRequest(compareView)) as WasmDiffResult;
+  if (currentSerial !== renderSerial) {
+    return;
+  }
+
+  renderMetricCards([
+    ["Tables +", `${result.diff.summary.tables_added}`],
+    ["Tables -", `${result.diff.summary.tables_removed}`],
+    ["Tables ~", `${result.diff.summary.tables_modified}`],
+    ["Columns", `${result.diff.summary.columns_changed}`],
+    ["FKs", `${result.diff.summary.foreign_keys_changed}`],
+    ["Indexes", `${result.diff.summary.indexes_changed}`],
+    [
+      "Views",
+      `${result.diff.summary.views_added + result.diff.summary.views_removed + result.diff.summary.views_modified}`,
+    ],
+    [
+      "Enums",
+      `${result.diff.summary.enums_added + result.diff.summary.enums_removed + result.diff.summary.enums_modified}`,
+    ],
+  ]);
+  renderDiagnostics(result.diagnostics);
+  renderCompareSummary(result.diff);
+
+  if (compareView === "visual") {
+    previewPanel.hidden = false;
+    previewFrame.srcdoc = result.rendered ?? "";
+    configureActions({
+      copy: {
+        label: "Copy HTML",
+        run: () => copyText(result.rendered ?? "", "Copied diff HTML"),
+      },
+      primary: {
+        label: "HTML",
+        run: () =>
+          downloadText("relune-diff.html", result.rendered ?? "", "text/html;charset=utf-8"),
+      },
+    });
+  } else if (compareView === "json") {
+    const diffJson = result.content ?? JSON.stringify(result, null, 2);
+    showTextOutput("Structured diff JSON", diffJson);
+    configureActions({
+      copy: {
+        label: "Copy JSON",
+        run: () => copyText(diffJson, "Copied diff JSON"),
+      },
+      primary: {
+        label: "JSON",
+        run: () => downloadText("relune-diff.json", diffJson, "application/json;charset=utf-8"),
+      },
+    });
+  } else {
+    const diffText = result.content ?? "";
+    showTextOutput(compareView === "markdown" ? "Diff markdown" : "Diff text", diffText);
+    configureActions({
+      copy: {
+        label: compareView === "markdown" ? "Copy markdown" : "Copy text",
+        run: () =>
+          copyText(
+            diffText,
+            compareView === "markdown" ? "Copied diff markdown" : "Copied diff text",
+          ),
+      },
+      primary: {
+        label: compareView === "markdown" ? "MD" : "TXT",
+        run: () =>
+          downloadText(
+            compareView === "markdown" ? "relune-diff.md" : "relune-diff.txt",
+            diffText,
+            "text/plain;charset=utf-8",
+          ),
+      },
+    });
+  }
+
+  const totalChanges = totalDiffChanges(result.diff.summary);
+  setStatus(totalChanges === 0 ? "No changes detected" : `${totalChanges} changes detected`);
+}
+
+function buildRenderRequest(format: "html" | "svg"): Record<string, unknown> {
   const focusTable = focusTableInput.value.trim();
   const depth = parsePositiveInteger(depthInput.value);
 
@@ -707,38 +1413,343 @@ function buildRenderRequest(format: WasmRenderRequest["format"]): WasmRenderRequ
   };
 }
 
-function splitPatterns(rawValue: string): string[] {
-  return rawValue
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+function buildExportRequest(): Record<string, unknown> {
+  const focusTable = focusTableInput.value.trim();
+  const depth = parsePositiveInteger(depthInput.value);
+
+  return {
+    sql: sqlEditor.getValue(),
+    format: exportFormatSelect.value as ExportFormat,
+    groupBy: groupBySelect.value as GroupBy,
+    focusTable: focusTable || undefined,
+    depth: focusTable ? depth : undefined,
+    includeTables: splitPatterns(includeTablesInput.value),
+    excludeTables: splitPatterns(excludeTablesInput.value),
+    layoutAlgorithm: layoutSelect.value as LayoutAlgorithm,
+    layoutDirection: directionSelect.value as LayoutDirection,
+    edgeStyle: edgeStyleSelect.value as EdgeStyle,
+  };
 }
 
-function parsePositiveInteger(rawValue: string): number | undefined {
-  const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return undefined;
+function buildDiffRequest(compareView: CompareView): Record<string, unknown> {
+  const format =
+    compareView === "visual"
+      ? "html"
+      : compareView === "markdown"
+        ? "markdown"
+        : compareView === "text"
+          ? "text"
+          : "json";
+
+  return {
+    beforeSql: compareBeforeEditor.getValue(),
+    afterSql: compareAfterEditor.getValue(),
+    format,
+    theme: themeSelect.value as Theme,
+    layoutAlgorithm: layoutSelect.value as LayoutAlgorithm,
+    layoutDirection: directionSelect.value as LayoutDirection,
+    edgeStyle: edgeStyleSelect.value as EdgeStyle,
+    groupBy: groupBySelect.value as GroupBy,
+    includeTables: splitPatterns(includeTablesInput.value),
+    excludeTables: splitPatterns(excludeTablesInput.value),
+    showLegend: false,
+    showStats: false,
+  };
+}
+
+function syncEditorsWithExampleSql(sql: string): void {
+  sqlEditor.setValue(sql);
+  compareBeforeEditor.setValue(sql);
+  compareAfterEditor.setValue(sql);
+}
+
+function renderInspectPanel(
+  summary: SchemaSummary,
+  table: TableDetails | null,
+  selectedTable: string,
+): void {
+  inspectTableList.innerHTML =
+    summary.tables.length === 0
+      ? '<li class="issue-card"><p class="empty-state">No tables detected.</p></li>'
+      : summary.tables
+          .map(
+            (item) => `
+              <li>
+                <button
+                  class="inspect-table-button${item.name === selectedTable ? " is-active" : ""}"
+                  type="button"
+                  data-table-name="${escapeHtml(item.name)}"
+                >
+                  <span class="inspect-table-name">${escapeHtml(item.name)}</span>
+                  <span class="inspect-table-meta">
+                    ${item.column_count} cols · ${item.foreign_key_count} out · ${item.incoming_fk_count} in · ${item.index_count} idx${item.has_primary_key ? " · PK" : ""}
+                  </span>
+                </button>
+              </li>
+            `,
+          )
+          .join("");
+
+  for (const button of inspectTableList.querySelectorAll<HTMLButtonElement>("[data-table-name]")) {
+    button.addEventListener("click", () => {
+      inspectTableSelect.value = button.dataset.tableName ?? "";
+      handleControlChange();
+    });
   }
-  return parsed;
-}
 
-function renderStats(stats: WasmRenderStats | null): void {
-  if (!stats) {
-    statsGrid.innerHTML = "";
+  if (!table) {
+    const hubTables = [...summary.tables]
+      .sort(
+        (left, right) =>
+          right.foreign_key_count +
+          right.incoming_fk_count -
+          (left.foreign_key_count + left.incoming_fk_count),
+      )
+      .slice(0, 5);
+
+    inspectDetail.innerHTML = `
+      <article class="detail-card">
+        <h2>Schema overview</h2>
+        <p>
+          ${summary.table_count} tables, ${summary.column_count} columns, ${summary.foreign_key_count} foreign keys, and ${summary.index_count} indexes parsed from the current SQL input.
+        </p>
+      </article>
+      <article class="detail-card">
+        <h3>Highlights</h3>
+        <div class="detail-list">
+          <div class="detail-item">
+            <div class="detail-item__title">Tables without primary key</div>
+            <div class="detail-item__meta">${summary.tables_without_pk}</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-item__title">Isolated tables</div>
+            <div class="detail-item__meta">${summary.orphan_table_count}</div>
+          </div>
+          ${hubTables
+            .map(
+              (item) => `
+                <div class="detail-item">
+                  <div class="detail-item__title">${escapeHtml(item.name)}</div>
+                  <div class="detail-item__meta">
+                    ${item.foreign_key_count} outgoing · ${item.incoming_fk_count} incoming
+                  </div>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </article>
+    `;
     return;
   }
 
-  const entries: readonly [string, string][] = [
-    ["Tables", `${stats.table_count}`],
-    ["Columns", `${stats.column_count}`],
-    ["Edges", `${stats.edge_count}`],
-    ["Views", `${stats.view_count}`],
-    ["Parse", formatDuration(stats.parse_time)],
-    ["Graph", formatDuration(stats.graph_time)],
-    ["Layout", formatDuration(stats.layout_time)],
-    ["Render", formatDuration(stats.render_time)],
-  ];
+  inspectDetail.innerHTML = `
+    <article class="detail-card">
+      <h2>${escapeHtml(table.name)}</h2>
+      <p>${table.comment ? escapeHtml(table.comment) : "No table comment."}</p>
+    </article>
+    <article class="detail-card">
+      <h3>Columns</h3>
+      <div class="detail-list">
+        ${
+          table.columns.length === 0
+            ? '<p class="empty-state">No columns.</p>'
+            : table.columns
+                .map(
+                  (column) => `
+                    <div class="detail-item">
+                      <div class="detail-item__title">
+                        ${escapeHtml(column.name)}
+                        ${column.is_primary_key ? '<span class="pill pill--warning">PK</span>' : ""}
+                        ${column.nullable ? '<span class="pill pill--hint">NULL</span>' : '<span class="pill pill--info">NOT NULL</span>'}
+                      </div>
+                      <div class="detail-item__meta">${escapeHtml(column.data_type)}</div>
+                    </div>
+                  `,
+                )
+                .join("")
+        }
+      </div>
+    </article>
+    <article class="detail-card">
+      <h3>Foreign keys</h3>
+      <div class="detail-list">
+        ${
+          table.foreign_keys.length === 0
+            ? '<p class="empty-state">No foreign keys.</p>'
+            : table.foreign_keys
+                .map(
+                  (foreignKey) => `
+                    <div class="detail-item">
+                      <div class="detail-item__title">${escapeHtml(
+                        foreignKey.name || foreignKey.from_columns.join(", "),
+                      )}</div>
+                      <div class="detail-item__meta">
+                        ${escapeHtml(foreignKey.from_columns.join(", "))} → ${escapeHtml(foreignKey.to_table)}(${escapeHtml(foreignKey.to_columns.join(", "))})
+                      </div>
+                    </div>
+                  `,
+                )
+                .join("")
+        }
+      </div>
+    </article>
+    <article class="detail-card">
+      <h3>Indexes</h3>
+      <div class="detail-list">
+        ${
+          table.indexes.length === 0
+            ? '<p class="empty-state">No indexes.</p>'
+            : table.indexes
+                .map(
+                  (index) => `
+                    <div class="detail-item">
+                      <div class="detail-item__title">
+                        ${escapeHtml(index.name || index.columns.join(", "))}
+                        ${index.is_unique ? '<span class="pill pill--warning">UNIQUE</span>' : ""}
+                      </div>
+                      <div class="detail-item__meta">${escapeHtml(index.columns.join(", "))}</div>
+                    </div>
+                  `,
+                )
+                .join("")
+        }
+      </div>
+    </article>
+  `;
+}
 
+function renderLintPanel(issues: readonly LintIssue[]): void {
+  if (issues.length === 0) {
+    lintIssueList.innerHTML =
+      '<li class="issue-card"><p class="empty-state">No lint issues found.</p></li>';
+    return;
+  }
+
+  lintIssueList.innerHTML = issues
+    .map(
+      (issue) => `
+        <li class="issue-card">
+          <div class="issue-card__meta">
+            <span class="pill pill--${issue.severity}">${issue.severity}</span>
+            <span class="issue-card__title">${escapeHtml(issue.rule_id)}</span>
+            ${issue.table_name ? `<code>${escapeHtml(issue.table_name)}</code>` : ""}
+            ${issue.column_name ? `<code>${escapeHtml(issue.column_name)}</code>` : ""}
+          </div>
+          <div class="issue-card__body">${escapeHtml(issue.message)}</div>
+          ${issue.hint ? `<div class="issue-card__hint">${escapeHtml(issue.hint)}</div>` : ""}
+        </li>
+      `,
+    )
+    .join("");
+}
+
+function renderCompareSummary(diff: SchemaDiff): void {
+  compareSummaryPanel.hidden = false;
+  const totalObjects =
+    diff.added_tables.length +
+    diff.removed_tables.length +
+    diff.modified_tables.length +
+    diff.added_views.length +
+    diff.removed_views.length +
+    diff.modified_views.length +
+    diff.added_enums.length +
+    diff.removed_enums.length +
+    diff.modified_enums.length;
+  compareSummaryCount.textContent = `${totalObjects}`;
+  compareSummary.innerHTML = [
+    ["Added tables", `${diff.added_tables.length}`],
+    ["Removed tables", `${diff.removed_tables.length}`],
+    ["Modified tables", `${diff.modified_tables.length}`],
+    ["Added views", `${diff.added_views.length}`],
+    ["Removed views", `${diff.removed_views.length}`],
+    ["Modified views", `${diff.modified_views.length}`],
+    ["Added enums", `${diff.added_enums.length}`],
+    ["Removed enums", `${diff.removed_enums.length}`],
+  ]
+    .map(
+      ([label, value]) => `
+        <article class="stat-card">
+          <span class="stat-card__label">${label}</span>
+          <strong class="stat-card__value">${value}</strong>
+        </article>
+      `,
+    )
+    .join("");
+
+  const changeCards: string[] = [];
+  for (const tableName of diff.added_tables) {
+    changeCards.push(buildChangeCard("Added table", tableName, "Table exists only in after."));
+  }
+  for (const tableName of diff.removed_tables) {
+    changeCards.push(buildChangeCard("Removed table", tableName, "Table exists only in before."));
+  }
+  for (const table of diff.modified_tables) {
+    changeCards.push(
+      buildChangeCard(
+        "Modified table",
+        table.table_name,
+        `${table.column_diffs.length} column changes · ${table.fk_diffs.length} foreign key changes · ${table.index_diffs.length} index changes`,
+      ),
+    );
+  }
+  for (const viewName of diff.added_views) {
+    changeCards.push(buildChangeCard("Added view", viewName, "View exists only in after."));
+  }
+  for (const viewName of diff.removed_views) {
+    changeCards.push(buildChangeCard("Removed view", viewName, "View exists only in before."));
+  }
+  for (const view of diff.modified_views) {
+    changeCards.push(
+      buildChangeCard(
+        "Modified view",
+        view.view_name,
+        `${view.column_diffs.length} column changes`,
+      ),
+    );
+  }
+  for (const enumName of diff.added_enums) {
+    changeCards.push(buildChangeCard("Added enum", enumName, "Enum exists only in after."));
+  }
+  for (const enumName of diff.removed_enums) {
+    changeCards.push(buildChangeCard("Removed enum", enumName, "Enum exists only in before."));
+  }
+  for (const schemaEnum of diff.modified_enums) {
+    changeCards.push(
+      buildChangeCard(
+        "Modified enum",
+        schemaEnum.enum_name,
+        `${schemaEnum.value_diffs.length} enum value changes`,
+      ),
+    );
+  }
+
+  compareObjectList.innerHTML =
+    changeCards.length === 0
+      ? '<li class="change-card"><p class="empty-state">No schema changes detected.</p></li>'
+      : changeCards.join("");
+}
+
+function buildChangeCard(kind: string, name: string, body: string): string {
+  return `
+    <li class="change-card">
+      <div class="change-card__meta">
+        <span class="pill pill--info">${escapeHtml(kind)}</span>
+        <span class="change-card__title">${escapeHtml(name)}</span>
+      </div>
+      <div class="change-card__body">${escapeHtml(body)}</div>
+    </li>
+  `;
+}
+
+function showTextOutput(label: string, content: string): void {
+  textOutputPanel.hidden = false;
+  textOutputLabel.textContent = label;
+  textOutputMeta.textContent = `${content.length.toLocaleString()} chars`;
+  textOutput.textContent = content;
+}
+
+function renderMetricCards(entries: readonly [string, string][]): void {
   statsGrid.innerHTML = entries
     .map(
       ([label, value]) => `
@@ -775,8 +1786,68 @@ function renderDiagnostics(diagnostics: readonly WasmDiagnostic[]): void {
     .join("");
 }
 
-function formatDiagnosticCode(diagnostic: WasmDiagnostic): string {
-  return `${diagnostic.code.prefix}${diagnostic.code.number.toString().padStart(3, "0")}`;
+function configureActions(actions: {
+  copy?: ButtonAction;
+  primary?: ButtonAction;
+  secondary?: ButtonAction;
+}): void {
+  copyAction = actions.copy ?? null;
+  primaryAction = actions.primary ?? null;
+  secondaryAction = actions.secondary ?? null;
+
+  copyOutputButton.textContent = copyAction?.label ?? "Copy";
+  downloadPrimaryButton.textContent = primaryAction?.label ?? "Download";
+  downloadSecondaryButton.textContent = secondaryAction?.label ?? "More";
+
+  copyOutputButton.hidden = copyAction === null;
+  downloadPrimaryButton.hidden = primaryAction === null;
+  downloadSecondaryButton.hidden = secondaryAction === null;
+}
+
+function resetActions(): void {
+  configureActions({});
+}
+
+function resetOutputPanels(): void {
+  previewPanel.hidden = true;
+  inspectPanel.hidden = true;
+  lintPanel.hidden = true;
+  compareSummaryPanel.hidden = true;
+  textOutputPanel.hidden = true;
+  previewFrame.srcdoc = "";
+  inspectTableList.innerHTML = "";
+  inspectDetail.innerHTML = "";
+  lintIssueList.innerHTML = "";
+  compareSummary.innerHTML = "";
+  compareObjectList.innerHTML = "";
+  textOutput.textContent = "";
+  textOutputMeta.textContent = "";
+  resetActions();
+}
+
+function populateInspectTableOptions(tableNames: readonly string[], selectedTable: string): void {
+  inspectTableSelect.innerHTML = [
+    '<option value="">Schema summary</option>',
+    ...tableNames.map(
+      (tableName) => `<option value="${escapeHtml(tableName)}">${escapeHtml(tableName)}</option>`,
+    ),
+  ].join("");
+  inspectTableSelect.value = selectedTable;
+}
+
+function splitPatterns(rawValue: string): string[] {
+  return rawValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function parsePositiveInteger(rawValue: string): number | undefined {
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function formatDuration(duration: WasmDuration): string {
@@ -790,6 +1861,75 @@ function formatDuration(duration: WasmDuration): string {
   return `${millis.toFixed(1)} ms`;
 }
 
+function formatDiagnosticCode(diagnostic: WasmDiagnostic): string {
+  return `${diagnostic.code.prefix}${diagnostic.code.number.toString().padStart(3, "0")}`;
+}
+
+function totalDiffChanges(summary: DiffSummary): number {
+  return (
+    summary.tables_added +
+    summary.tables_removed +
+    summary.tables_modified +
+    summary.columns_changed +
+    summary.foreign_keys_changed +
+    summary.indexes_changed +
+    summary.views_added +
+    summary.views_removed +
+    summary.views_modified +
+    summary.view_columns_changed +
+    summary.view_definitions_changed +
+    summary.enums_added +
+    summary.enums_removed +
+    summary.enums_modified +
+    summary.enum_values_changed
+  );
+}
+
+function exportFormatLabel(): string {
+  switch (exportFormatSelect.value as ExportFormat) {
+    case "schema-json":
+      return "Schema JSON";
+    case "graph-json":
+      return "Graph JSON";
+    case "layout-json":
+      return "Layout JSON";
+    case "mermaid":
+      return "Mermaid";
+    case "d2":
+      return "D2";
+    case "dot":
+      return "DOT";
+  }
+}
+
+function exportFilename(): string {
+  switch (exportFormatSelect.value as ExportFormat) {
+    case "schema-json":
+      return "relune-schema.json";
+    case "graph-json":
+      return "relune-graph.json";
+    case "layout-json":
+      return "relune-layout.json";
+    case "mermaid":
+      return "relune-diagram.mmd";
+    case "d2":
+      return "relune-diagram.d2";
+    case "dot":
+      return "relune-diagram.dot";
+  }
+}
+
+function exportMimeType(): string {
+  switch (exportFormatSelect.value as ExportFormat) {
+    case "schema-json":
+    case "graph-json":
+    case "layout-json":
+      return "application/json;charset=utf-8";
+    default:
+      return "text/plain;charset=utf-8";
+  }
+}
+
 function setStatus(text: string): void {
   renderStatus.textContent = text;
 }
@@ -797,7 +1937,7 @@ function setStatus(text: string): void {
 function showError(error: WasmErrorShape): void {
   errorBox.hidden = false;
   errorBox.innerHTML = `
-    <strong>${escapeHtml(error.code ?? "PLAYGROUND_ERROR")}</strong>
+    <strong>${escapeHtml(error.code ?? "WORKBENCH_ERROR")}</strong>
     <p>${escapeHtml(error.message)}</p>
   `;
 }
@@ -830,26 +1970,6 @@ function isWasmErrorShape(value: unknown): value is WasmErrorShape {
   return "message" in value && typeof value.message === "string";
 }
 
-function downloadHtml(): void {
-  if (!lastHtmlOutput) {
-    return;
-  }
-
-  downloadText("relune-playground.html", lastHtmlOutput, "text/html;charset=utf-8");
-}
-
-async function downloadSvg(): Promise<void> {
-  try {
-    setStatus("Preparing SVG…");
-    const svgResult = render_from_sql(buildRenderRequest("svg"));
-    downloadText("relune-playground.svg", svgResult.content, "image/svg+xml;charset=utf-8");
-    setStatus("SVG downloaded");
-  } catch (error) {
-    showError(normalizeError(error));
-    setStatus("SVG export failed");
-  }
-}
-
 function downloadText(filename: string, content: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });
   const blobUrl = URL.createObjectURL(blob);
@@ -860,6 +1980,15 @@ function downloadText(filename: string, content: string, mimeType: string): void
   URL.revokeObjectURL(blobUrl);
 }
 
+async function copyText(content: string, successStatus: string): Promise<void> {
+  if (!content) {
+    return;
+  }
+
+  await navigator.clipboard.writeText(content);
+  setStatus(successStatus);
+}
+
 function readStoredState(): Partial<PersistedState> {
   const rawValue = localStorage.getItem(STORAGE_KEY);
   if (!rawValue) {
@@ -867,8 +1996,7 @@ function readStoredState(): Partial<PersistedState> {
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as Partial<PersistedState>;
-    return sanitizeState(parsed);
+    return sanitizeState(JSON.parse(rawValue) as Partial<PersistedState>);
   } catch {
     return {};
   }
@@ -878,6 +2006,7 @@ function readQueryState(): Partial<PersistedState> {
   const params = new URLSearchParams(window.location.search);
   return sanitizeState({
     example: (params.get("example") as ExampleId | null) ?? undefined,
+    mode: (params.get("mode") as WorkbenchMode | null) ?? undefined,
     theme: (params.get("theme") as Theme | null) ?? undefined,
     layout: (params.get("layout") as LayoutAlgorithm | null) ?? undefined,
     direction: (params.get("direction") as LayoutDirection | null) ?? undefined,
@@ -888,6 +2017,10 @@ function readQueryState(): Partial<PersistedState> {
     depth: params.get("depth") ?? undefined,
     includeTables: params.get("include") ?? undefined,
     excludeTables: params.get("exclude") ?? undefined,
+    exportFormat: (params.get("export") as ExportFormat | null) ?? undefined,
+    inspectTable: params.get("table") ?? undefined,
+    lintRules: params.get("rules") ?? undefined,
+    compareView: (params.get("compare") as CompareView | null) ?? undefined,
   });
 }
 
@@ -896,6 +2029,9 @@ function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> 
 
   if (isExampleId(state.example)) {
     sanitized.example = state.example;
+  }
+  if (isWorkbenchMode(state.mode)) {
+    sanitized.mode = state.mode;
   }
   if (isTheme(state.theme)) {
     sanitized.theme = state.theme;
@@ -927,8 +2063,26 @@ function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> 
   if (typeof state.excludeTables === "string") {
     sanitized.excludeTables = state.excludeTables;
   }
+  if (isExportFormat(state.exportFormat)) {
+    sanitized.exportFormat = state.exportFormat;
+  }
+  if (typeof state.inspectTable === "string") {
+    sanitized.inspectTable = state.inspectTable;
+  }
+  if (typeof state.lintRules === "string") {
+    sanitized.lintRules = state.lintRules;
+  }
+  if (isCompareView(state.compareView)) {
+    sanitized.compareView = state.compareView;
+  }
   if (typeof state.sql === "string") {
     sanitized.sql = state.sql;
+  }
+  if (typeof state.compareBeforeSql === "string") {
+    sanitized.compareBeforeSql = state.compareBeforeSql;
+  }
+  if (typeof state.compareAfterSql === "string") {
+    sanitized.compareAfterSql = state.compareAfterSql;
   }
 
   return sanitized;
@@ -943,6 +2097,7 @@ function persistState(): void {
 function collectState(): PersistedState {
   return {
     example: exampleSelect.value as ExampleId,
+    mode: currentMode,
     theme: themeSelect.value as Theme,
     layout: layoutSelect.value as LayoutAlgorithm,
     direction: directionSelect.value as LayoutDirection,
@@ -953,22 +2108,29 @@ function collectState(): PersistedState {
     depth: depthInput.value.trim(),
     includeTables: includeTablesInput.value.trim(),
     excludeTables: excludeTablesInput.value.trim(),
+    exportFormat: exportFormatSelect.value as ExportFormat,
+    inspectTable: inspectTableSelect.value,
+    lintRules: lintRulesInput.value.trim(),
+    compareView: compareFormatSelect.value as CompareView,
     sql: sqlEditor.getValue(),
+    compareBeforeSql: compareBeforeEditor.getValue(),
+    compareAfterSql: compareAfterEditor.getValue(),
   };
 }
 
 function syncQueryString(state: PersistedState): void {
   const params = new URLSearchParams();
   params.set("example", state.example);
+  params.set("mode", state.mode);
   params.set("theme", state.theme);
   params.set("layout", state.layout);
   params.set("direction", state.direction);
   params.set("edges", state.edgeStyle);
+  params.set("group", state.groupBy);
+
   if (state.viewpoint) {
     params.set("viewpoint", state.viewpoint);
   }
-  params.set("group", state.groupBy);
-
   if (state.focusTable) {
     params.set("focus", state.focusTable);
   }
@@ -981,10 +2143,29 @@ function syncQueryString(state: PersistedState): void {
   if (state.excludeTables) {
     params.set("exclude", state.excludeTables);
   }
+  if (state.mode === "export") {
+    params.set("export", state.exportFormat);
+  }
+  if (state.mode === "inspect" && state.inspectTable) {
+    params.set("table", state.inspectTable);
+  }
+  if (state.mode === "lint" && state.lintRules) {
+    params.set("rules", state.lintRules);
+  }
+  if (state.mode === "compare") {
+    params.set("compare", state.compareView);
+  }
 
   const nextQuery = params.toString();
   const nextUrl = nextQuery ? `?${nextQuery}` : window.location.pathname;
   window.history.replaceState(null, "", nextUrl);
+}
+
+function setActionButtonsDisabled(disabled: boolean): void {
+  renderNowButton.disabled = disabled;
+  copyOutputButton.disabled = disabled;
+  downloadPrimaryButton.disabled = disabled;
+  downloadSecondaryButton.disabled = disabled;
 }
 
 function isExampleId(value: unknown): value is ExampleId {
@@ -996,8 +2177,14 @@ function isExampleId(value: unknown): value is ExampleId {
   );
 }
 
-function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, "custom"> {
-  return value === CUSTOM_EXAMPLE_ID ? DEFAULT_EXAMPLE_ID : value;
+function isWorkbenchMode(value: unknown): value is WorkbenchMode {
+  return (
+    value === "render" ||
+    value === "inspect" ||
+    value === "export" ||
+    value === "lint" ||
+    value === "compare"
+  );
 }
 
 function isTheme(value: unknown): value is Theme {
@@ -1023,6 +2210,29 @@ function isEdgeStyle(value: unknown): value is EdgeStyle {
 
 function isGroupBy(value: unknown): value is GroupBy {
   return value === "none" || value === "schema" || value === "prefix";
+}
+
+function isExportFormat(value: unknown): value is ExportFormat {
+  return (
+    value === "schema-json" ||
+    value === "graph-json" ||
+    value === "layout-json" ||
+    value === "mermaid" ||
+    value === "d2" ||
+    value === "dot"
+  );
+}
+
+function isCompareView(value: unknown): value is CompareView {
+  return value === "visual" || value === "text" || value === "markdown" || value === "json";
+}
+
+function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, "custom"> {
+  return value === CUSTOM_EXAMPLE_ID ? DEFAULT_EXAMPLE_ID : value;
+}
+
+function applyTheme(theme: Theme): void {
+  document.documentElement.dataset.theme = theme;
 }
 
 function getElement<T extends HTMLElement>(id: string): T {

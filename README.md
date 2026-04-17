@@ -137,7 +137,7 @@ Use whichever input fits your workflow:
 
 ## Quick start
 
-Try the [public browser playground](https://mhiro2.github.io/relune/) first — no install required.
+Try the [public browser schema workbench](https://mhiro2.github.io/relune/) first — no install required. It exposes `render`, `inspect`, `export`, `lint`, and `compare` in one browser session.
 
 ```bash
 # Render an SVG diagram from SQL
