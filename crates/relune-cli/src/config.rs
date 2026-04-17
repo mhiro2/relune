@@ -8,6 +8,7 @@
 //! layout = "hierarchical" # hierarchical, force-directed
 //! edge_style = "straight" # straight, orthogonal, curved
 //! direction = "top-to-bottom" # top-to-bottom, left-to-right, right-to-left, bottom-to-top
+//! viewpoint = "billing"
 //! group_by = "none" # none, schema, prefix
 //! focus = "table_name"
 //! depth = 1
@@ -22,13 +23,23 @@
 //!
 //! [export]
 //! format = "schema-json" # schema-json, graph-json, layout-json, mermaid, d2, dot
+//! viewpoint = "billing"
 //! group_by = "none"
 //! layout = "hierarchical"
 //! edge_style = "straight"
 //! direction = "top-to-bottom"
 //! focus = "table_name"
 //! depth = 1
+//! include = ["table1", "table2"]
+//! exclude = ["table3"]
 //! fail_on_warning = false
+//!
+//! [viewpoints.billing]
+//! focus = "invoices"
+//! depth = 2
+//! include = ["billing_*", "invoices", "payments"]
+//! exclude = ["audit_*"]
+//! group_by = "schema"
 //!
 //! [doc]
 //! fail_on_warning = false
@@ -45,6 +56,7 @@
 //! 3. CLI flags
 
 use std::path::Path;
+use std::{collections::BTreeMap, fmt::Write as _};
 
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +87,9 @@ pub struct ReluneConfig {
     /// Diff command configuration.
     #[serde(default)]
     pub diff: DiffConfig,
+    /// Named focus/filter/grouping presets shared across commands.
+    #[serde(default)]
+    pub viewpoints: BTreeMap<String, ViewpointConfig>,
 }
 
 /// Configuration for the render command.
@@ -102,6 +117,9 @@ pub struct RenderConfig {
     /// Focus table name.
     #[serde(default)]
     pub focus: Option<String>,
+    /// Named viewpoint to apply by default.
+    #[serde(default)]
+    pub viewpoint: Option<String>,
     /// Focus depth.
     #[serde(default)]
     pub depth: Option<u32>,
@@ -144,6 +162,9 @@ pub struct ExportConfig {
     /// Grouping mode.
     #[serde(default)]
     pub group_by: Option<GroupByMode>,
+    /// Named viewpoint to apply by default.
+    #[serde(default)]
+    pub viewpoint: Option<String>,
     /// Layout algorithm.
     #[serde(default)]
     pub layout: Option<LayoutAlgorithmArg>,
@@ -159,9 +180,36 @@ pub struct ExportConfig {
     /// Focus depth.
     #[serde(default)]
     pub depth: Option<u32>,
+    /// Tables to include.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Tables to exclude.
+    #[serde(default)]
+    pub exclude: Vec<String>,
     /// Exit with non-zero code if warnings are emitted.
     #[serde(default)]
     pub fail_on_warning: Option<bool>,
+}
+
+/// Named focus/filter/grouping preset.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewpointConfig {
+    /// Grouping mode.
+    #[serde(default)]
+    pub group_by: Option<GroupByMode>,
+    /// Focus table name.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Focus depth.
+    #[serde(default)]
+    pub depth: Option<u32>,
+    /// Tables to include.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Tables to exclude.
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// Configuration for the doc command.
@@ -307,8 +355,17 @@ impl ReluneConfig {
 
     /// Merge CLI render args into this config.
     /// CLI args take precedence over config file values.
-    pub fn merge_render_args(&self, args: &crate::cli::RenderArgs) -> MergedRenderConfig {
-        MergedRenderConfig {
+    pub fn merge_render_args(
+        &self,
+        args: &crate::cli::RenderArgs,
+    ) -> Result<MergedRenderConfig, ConfigError> {
+        let viewpoint_name = args
+            .viewpoint
+            .clone()
+            .or_else(|| self.render.viewpoint.clone());
+        let viewpoint = self.resolve_viewpoint(viewpoint_name.as_deref())?;
+
+        Ok(MergedRenderConfig {
             format: args.format.or(self.render.format).unwrap_or_default(),
             theme: args.theme.or(self.render.theme).unwrap_or_default(),
             layout: args.layout.or(self.render.layout).unwrap_or_default(),
@@ -317,23 +374,34 @@ impl ReluneConfig {
                 .or(self.render.edge_style)
                 .unwrap_or_default(),
             direction: args.direction.or(self.render.direction).unwrap_or_default(),
-            group_by: args.group_by.or(self.render.group_by),
-            focus: args.focus.clone().or_else(|| self.render.focus.clone()),
-            depth: args.depth.or(self.render.depth).unwrap_or(1),
-            include: if args.include.is_empty() {
-                self.render.include.clone()
-            } else {
-                args.include.clone()
-            },
-            exclude: if args.exclude.is_empty() {
-                self.render.exclude.clone()
-            } else {
-                args.exclude.clone()
-            },
+            group_by: args
+                .group_by
+                .or_else(|| viewpoint.and_then(|entry| entry.group_by))
+                .or(self.render.group_by),
+            focus: args
+                .focus
+                .clone()
+                .or_else(|| viewpoint.and_then(|entry| entry.focus.clone()))
+                .or_else(|| self.render.focus.clone()),
+            depth: args
+                .depth
+                .or_else(|| viewpoint.and_then(|entry| entry.depth))
+                .or(self.render.depth)
+                .unwrap_or(1),
+            include: merge_table_filters(
+                &args.include,
+                viewpoint.map_or(&[], |entry| entry.include.as_slice()),
+                &self.render.include,
+            ),
+            exclude: merge_table_filters(
+                &args.exclude,
+                viewpoint.map_or(&[], |entry| entry.exclude.as_slice()),
+                &self.render.exclude,
+            ),
             show_legend: self.render.show_legend.unwrap_or(false),
             show_stats: args.stats || self.render.show_stats.unwrap_or(false),
             fail_on_warning: args.fail_on_warning || self.render.fail_on_warning.unwrap_or(false),
-        }
+        })
     }
 
     /// Merge CLI inspect args into this config.
@@ -354,6 +422,11 @@ impl ReluneConfig {
         &self,
         args: &crate::cli::ExportArgs,
     ) -> Result<MergedExportConfig, ConfigError> {
+        let viewpoint_name = args
+            .viewpoint
+            .clone()
+            .or_else(|| self.export.viewpoint.clone());
+        let viewpoint = self.resolve_viewpoint(viewpoint_name.as_deref())?;
         let format = args
             .format
             .or_else(|| self.export.format.map(Into::into))
@@ -366,15 +439,36 @@ impl ReluneConfig {
 
         Ok(MergedExportConfig {
             format,
-            group_by: args.group_by.or(self.export.group_by),
+            group_by: args
+                .group_by
+                .or_else(|| viewpoint.and_then(|entry| entry.group_by))
+                .or(self.export.group_by),
             layout: args.layout.or(self.export.layout).unwrap_or_default(),
             edge_style: args
                 .edge_style
                 .or(self.export.edge_style)
                 .unwrap_or_default(),
             direction: args.direction.or(self.export.direction).unwrap_or_default(),
-            focus: args.focus.clone().or_else(|| self.export.focus.clone()),
-            depth: args.depth.or(self.export.depth).unwrap_or(1),
+            focus: args
+                .focus
+                .clone()
+                .or_else(|| viewpoint.and_then(|entry| entry.focus.clone()))
+                .or_else(|| self.export.focus.clone()),
+            depth: args
+                .depth
+                .or_else(|| viewpoint.and_then(|entry| entry.depth))
+                .or(self.export.depth)
+                .unwrap_or(1),
+            include: merge_table_filters(
+                &args.include,
+                viewpoint.map_or(&[], |entry| entry.include.as_slice()),
+                &self.export.include,
+            ),
+            exclude: merge_table_filters(
+                &args.exclude,
+                viewpoint.map_or(&[], |entry| entry.exclude.as_slice()),
+                &self.export.exclude,
+            ),
             fail_on_warning: args.fail_on_warning || self.export.fail_on_warning.unwrap_or(false),
         })
     }
@@ -408,6 +502,56 @@ impl ReluneConfig {
             fail_on_warning: args.fail_on_warning || self.diff.fail_on_warning.unwrap_or(false),
         }
     }
+
+    fn resolve_viewpoint(
+        &self,
+        raw_name: Option<&str>,
+    ) -> Result<Option<&ViewpointConfig>, ConfigError> {
+        let Some(raw_name) = raw_name else {
+            return Ok(None);
+        };
+
+        let name = validate_named_value("viewpoint", raw_name)?;
+        let viewpoint = self.viewpoints.get(name).ok_or_else(|| {
+            let mut message = format!("unknown viewpoint '{name}'");
+            if self.viewpoints.is_empty() {
+                message.push_str("; no viewpoints are defined in the active config");
+            } else {
+                let mut available = String::new();
+                for (index, candidate) in self.viewpoints.keys().enumerate() {
+                    if index > 0 {
+                        available.push_str(", ");
+                    }
+                    let _ = write!(&mut available, "{candidate}");
+                }
+                let _ = write!(&mut message, "; available viewpoints: {available}");
+            }
+            ConfigError::InvalidValue(message)
+        })?;
+
+        Ok(Some(viewpoint))
+    }
+}
+
+fn merge_table_filters(cli: &[String], viewpoint: &[String], config: &[String]) -> Vec<String> {
+    if !cli.is_empty() {
+        cli.to_vec()
+    } else if !viewpoint.is_empty() {
+        viewpoint.to_vec()
+    } else {
+        config.to_vec()
+    }
+}
+
+fn validate_named_value<'a>(label: &str, raw_value: &'a str) -> Result<&'a str, ConfigError> {
+    let trimmed = raw_value.trim();
+    if trimmed.is_empty() || trimmed != raw_value {
+        return Err(ConfigError::InvalidValue(format!(
+            "{label} must contain a non-empty value without surrounding whitespace"
+        )));
+    }
+
+    Ok(trimmed)
 }
 
 fn validate_table_list(label: &str, values: &[String]) -> Result<(), ConfigError> {
@@ -512,6 +656,8 @@ pub struct MergedExportConfig {
     pub direction: DirectionArg,
     pub focus: Option<String>,
     pub depth: u32,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
     pub fail_on_warning: bool,
 }
 
@@ -553,7 +699,13 @@ impl MergedRenderConfig {
 impl MergedExportConfig {
     /// Validates semantic constraints for export configuration.
     pub fn validate_semantics(&self) -> Result<(), ConfigError> {
-        validate_focus_filters("export", self.focus.as_deref(), self.depth, &[], &[])
+        validate_focus_filters(
+            "export",
+            self.focus.as_deref(),
+            self.depth,
+            &self.include,
+            &self.exclude,
+        )
     }
 }
 
@@ -591,6 +743,7 @@ mod tests {
         assert_eq!(config.render.direction, Some(DirectionArg::LeftToRight));
         assert_eq!(config.render.group_by, Some(GroupByMode::Schema));
         assert_eq!(config.render.focus, Some("users".to_string()));
+        assert_eq!(config.render.viewpoint, Some("billing".to_string()));
         assert_eq!(config.render.depth, Some(2));
         assert_eq!(config.render.include, vec!["users", "posts", "comments"]);
         assert_eq!(config.render.exclude, vec!["migrations", "audit_logs"]);
@@ -608,11 +761,20 @@ mod tests {
             config.export.format,
             Some(ExportFormatConfig::GraphJson)
         ));
+        assert_eq!(config.export.viewpoint, Some("billing".to_string()));
         assert_eq!(config.export.layout, Some(LayoutAlgorithmArg::Hierarchical));
         assert_eq!(config.export.edge_style, Some(EdgeStyleArg::Curved));
         assert_eq!(config.export.direction, Some(DirectionArg::RightToLeft));
+        assert_eq!(config.export.include, vec!["users", "posts"]);
+        assert_eq!(config.export.exclude, vec!["audit_logs"]);
         assert_eq!(config.diff.format, Some(DiffFormat::Json));
         assert_eq!(config.diff.dialect, Some(DialectArg::Postgres));
+        assert_eq!(config.viewpoints.len(), 2);
+        assert_eq!(
+            config.viewpoints["billing"].focus,
+            Some("users".to_string())
+        );
+        assert_eq!(config.viewpoints["billing"].include, vec!["users", "posts"]);
     }
 
     #[test]
@@ -695,11 +857,12 @@ mod tests {
             out: None,
             stdout: false,
             focus: Some("posts".to_string()), // CLI specifies different focus
-            depth: Some(3),                   // CLI specifies different depth
+            viewpoint: None,
+            depth: Some(3),                      // CLI specifies different depth
             group_by: Some(GroupByMode::Prefix), // CLI specifies different group_by
-            include: vec!["a".to_string()],   // CLI specifies different include
-            exclude: vec!["b".to_string()],   // CLI specifies different exclude
-            theme: Some(Theme::Light),        // CLI specifies light theme
+            include: vec!["a".to_string()],      // CLI specifies different include
+            exclude: vec!["b".to_string()],      // CLI specifies different exclude
+            theme: Some(Theme::Light),           // CLI specifies light theme
             layout: Some(LayoutAlgorithmArg::Hierarchical),
             edge_style: Some(EdgeStyleArg::Straight),
             direction: None,
@@ -708,7 +871,9 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_render_args(&args);
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
 
         // CLI values should win
         assert_eq!(merged.format, RenderFormat::Svg);
@@ -731,9 +896,20 @@ mod tests {
         config.render.format = Some(RenderFormat::Html);
         config.render.theme = Some(Theme::Dark);
         config.render.focus = Some("config_table".to_string());
+        config.render.viewpoint = Some("billing".to_string());
         config.render.depth = Some(5);
         config.render.group_by = Some(GroupByMode::Schema);
         config.render.include = vec!["config_include".to_string()];
+        config.viewpoints.insert(
+            "billing".to_string(),
+            ViewpointConfig {
+                focus: Some("viewpoint_table".to_string()),
+                depth: Some(3),
+                group_by: Some(GroupByMode::Prefix),
+                include: vec!["viewpoint_include".to_string()],
+                exclude: vec!["viewpoint_exclude".to_string()],
+            },
+        );
 
         // Create CLI args with minimal values (defaults)
         let args = RenderArgs {
@@ -745,6 +921,7 @@ mod tests {
             out: None,
             stdout: false,
             focus: None, // Not specified - should use config
+            viewpoint: None,
             depth: None,
             group_by: None,  // Not specified - should use config
             include: vec![], // Empty - should use config
@@ -758,15 +935,18 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_render_args(&args);
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
 
         // Config values should be used when CLI uses defaults
         assert_eq!(merged.format, RenderFormat::Html);
         assert_eq!(merged.theme, Theme::Dark);
-        assert_eq!(merged.focus, Some("config_table".to_string()));
-        assert_eq!(merged.depth, 5); // Config value, not CLI default
-        assert_eq!(merged.group_by, Some(GroupByMode::Schema));
-        assert_eq!(merged.include, vec!["config_include"]);
+        assert_eq!(merged.focus, Some("viewpoint_table".to_string()));
+        assert_eq!(merged.depth, 3);
+        assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
+        assert_eq!(merged.include, vec!["viewpoint_include"]);
+        assert_eq!(merged.exclude, vec!["viewpoint_exclude"]);
     }
 
     #[test]
@@ -774,10 +954,21 @@ mod tests {
         // Create config with specific values
         let mut config = ReluneConfig::default();
         config.render.focus = Some("config_table".to_string());
+        config.render.viewpoint = Some("billing".to_string());
         config.render.depth = Some(5);
         config.render.group_by = Some(GroupByMode::Schema);
         config.render.include = vec!["config_include".to_string()];
         config.render.exclude = vec!["config_exclude".to_string()];
+        config.viewpoints.insert(
+            "billing".to_string(),
+            ViewpointConfig {
+                focus: Some("viewpoint_table".to_string()),
+                depth: Some(3),
+                group_by: Some(GroupByMode::Prefix),
+                include: vec!["viewpoint_include".to_string()],
+                exclude: vec!["viewpoint_exclude".to_string()],
+            },
+        );
 
         // Create CLI args with explicit values (non-defaults)
         let args = RenderArgs {
@@ -789,11 +980,12 @@ mod tests {
             out: None,
             stdout: false,
             focus: Some("cli_table".to_string()), // CLI explicitly specifies focus
-            depth: Some(10),                      // CLI explicitly specifies depth
-            group_by: Some(GroupByMode::Prefix),  // CLI explicitly specifies group_by
+            viewpoint: None,
+            depth: Some(10),                     // CLI explicitly specifies depth
+            group_by: Some(GroupByMode::Prefix), // CLI explicitly specifies group_by
             include: vec!["cli_include".to_string()], // CLI explicitly specifies include
             exclude: vec!["cli_exclude".to_string()], // CLI explicitly specifies exclude
-            theme: Some(Theme::Dark),             // CLI explicitly specifies dark
+            theme: Some(Theme::Dark),            // CLI explicitly specifies dark
             layout: Some(LayoutAlgorithmArg::ForceDirected),
             edge_style: Some(EdgeStyleArg::Orthogonal),
             direction: None,
@@ -802,7 +994,9 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_render_args(&args);
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
 
         // CLI values should always win when explicitly provided
         assert_eq!(merged.format, RenderFormat::Html);
@@ -874,9 +1068,22 @@ mod tests {
         let mut config = ReluneConfig::default();
         config.export.format = Some(ExportFormatConfig::GraphJson);
         config.export.focus = Some("config_focus".to_string());
+        config.export.viewpoint = Some("billing".to_string());
         config.export.depth = Some(5);
         config.export.layout = Some(LayoutAlgorithmArg::ForceDirected);
         config.export.edge_style = Some(EdgeStyleArg::Orthogonal);
+        config.export.include = vec!["config_include".to_string()];
+        config.export.exclude = vec!["config_exclude".to_string()];
+        config.viewpoints.insert(
+            "billing".to_string(),
+            ViewpointConfig {
+                focus: Some("viewpoint_focus".to_string()),
+                depth: Some(2),
+                group_by: Some(GroupByMode::Schema),
+                include: vec!["viewpoint_include".to_string()],
+                exclude: vec!["viewpoint_exclude".to_string()],
+            },
+        );
 
         let args = crate::cli::ExportArgs {
             sql: None,
@@ -886,8 +1093,11 @@ mod tests {
             format: None,
             out: None,
             focus: None, // Not specified - should use config
+            viewpoint: None,
             depth: None,
             group_by: None,
+            include: vec![],
+            exclude: vec![],
             layout: None,
             edge_style: None,
             direction: None,
@@ -899,8 +1109,11 @@ mod tests {
             .merge_export_args(&args)
             .expect("export format should be resolved");
         assert_eq!(merged.format, ExportFormat::GraphJson);
-        assert_eq!(merged.focus, Some("config_focus".to_string()));
-        assert_eq!(merged.depth, 5);
+        assert_eq!(merged.focus, Some("viewpoint_focus".to_string()));
+        assert_eq!(merged.depth, 2);
+        assert_eq!(merged.group_by, Some(GroupByMode::Schema));
+        assert_eq!(merged.include, vec!["viewpoint_include"]);
+        assert_eq!(merged.exclude, vec!["viewpoint_exclude"]);
         assert_eq!(merged.layout, LayoutAlgorithmArg::ForceDirected);
         assert_eq!(merged.edge_style, EdgeStyleArg::Orthogonal);
         assert!(!merged.fail_on_warning);
@@ -917,8 +1130,11 @@ mod tests {
             format: None,
             out: None,
             focus: None,
+            viewpoint: None,
             depth: None,
             group_by: None,
+            include: vec![],
+            exclude: vec![],
             layout: None,
             edge_style: None,
             direction: None,
@@ -1068,6 +1284,8 @@ mod tests {
             direction: DirectionArg::default(),
             focus: Some("   ".to_string()),
             depth: 1,
+            include: Vec::new(),
+            exclude: Vec::new(),
             fail_on_warning: false,
         };
 
@@ -1091,6 +1309,8 @@ mod tests {
             direction: DirectionArg::default(),
             focus: None,
             depth: 2,
+            include: Vec::new(),
+            exclude: Vec::new(),
             fail_on_warning: false,
         };
 
@@ -1138,6 +1358,7 @@ mod tests {
             out: None,
             stdout: false,
             focus: None,
+            viewpoint: None,
             depth: None,
             group_by: None,
             include: vec![],
@@ -1151,7 +1372,9 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_render_args(&args);
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
         assert!(merged.fail_on_warning);
     }
 
@@ -1221,6 +1444,7 @@ mod tests {
             out: None,
             stdout: false,
             focus: None,
+            viewpoint: None,
             depth: None,
             group_by: None,
             include: vec![],
@@ -1234,7 +1458,9 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_render_args(&args);
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
         assert_eq!(merged.direction, DirectionArg::BottomToTop);
     }
 
@@ -1252,6 +1478,7 @@ mod tests {
             out: None,
             stdout: false,
             focus: None,
+            viewpoint: None,
             depth: None,
             group_by: None,
             include: vec![],
@@ -1265,7 +1492,9 @@ mod tests {
             dialect: crate::cli::DialectArg::Auto,
         };
 
-        let merged = config.merge_render_args(&args);
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
         assert_eq!(merged.direction, DirectionArg::LeftToRight);
     }
 
@@ -1277,5 +1506,143 @@ direction = "left-to-right"
 "#;
         let config: ReluneConfig = toml::from_str(toml).expect("should parse kebab-case direction");
         assert_eq!(config.render.direction, Some(DirectionArg::LeftToRight));
+    }
+
+    #[test]
+    fn test_merge_render_args_cli_viewpoint_overrides_config_viewpoint() {
+        let mut config = ReluneConfig::default();
+        config.render.viewpoint = Some("billing".to_string());
+        config.viewpoints.insert(
+            "billing".to_string(),
+            ViewpointConfig {
+                focus: Some("invoices".to_string()),
+                depth: Some(2),
+                group_by: Some(GroupByMode::Schema),
+                include: vec!["billing_*".to_string()],
+                exclude: vec!["audit_*".to_string()],
+            },
+        );
+        config.viewpoints.insert(
+            "auth".to_string(),
+            ViewpointConfig {
+                focus: Some("users".to_string()),
+                depth: Some(1),
+                group_by: Some(GroupByMode::Prefix),
+                include: vec!["users".to_string(), "sessions".to_string()],
+                exclude: vec!["audit_logs".to_string()],
+            },
+        );
+
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            stdout: false,
+            focus: None,
+            viewpoint: Some("auth".to_string()),
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            theme: None,
+            layout: None,
+            edge_style: None,
+            direction: None,
+            stats: false,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
+        assert_eq!(merged.focus, Some("users".to_string()));
+        assert_eq!(merged.depth, 1);
+        assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
+        assert_eq!(merged.include, vec!["users", "sessions"]);
+        assert_eq!(merged.exclude, vec!["audit_logs"]);
+    }
+
+    #[test]
+    fn test_merge_render_args_rejects_unknown_viewpoint() {
+        let config = ReluneConfig::default();
+        let args = RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            stdout: false,
+            focus: None,
+            viewpoint: Some("missing".to_string()),
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            theme: None,
+            layout: None,
+            edge_style: None,
+            direction: None,
+            stats: false,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let error = config
+            .merge_render_args(&args)
+            .expect_err("unknown viewpoint should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown viewpoint 'missing'; no viewpoints are defined")
+        );
+    }
+
+    #[test]
+    fn test_merge_export_args_cli_filters_override_viewpoint() {
+        let mut config = ReluneConfig::default();
+        config.export.format = Some(ExportFormatConfig::SchemaJson);
+        config.viewpoints.insert(
+            "billing".to_string(),
+            ViewpointConfig {
+                focus: Some("invoices".to_string()),
+                depth: Some(2),
+                group_by: Some(GroupByMode::Schema),
+                include: vec!["billing_*".to_string()],
+                exclude: vec!["audit_*".to_string()],
+            },
+        );
+
+        let args = crate::cli::ExportArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            focus: None,
+            viewpoint: Some("billing".to_string()),
+            depth: None,
+            group_by: None,
+            include: vec!["invoices".to_string()],
+            exclude: vec!["billing_audit".to_string()],
+            layout: None,
+            edge_style: None,
+            direction: None,
+            fail_on_warning: false,
+            dialect: crate::cli::DialectArg::Auto,
+        };
+
+        let merged = config
+            .merge_export_args(&args)
+            .expect("merge should succeed");
+        assert_eq!(merged.focus, Some("invoices".to_string()));
+        assert_eq!(merged.depth, 2);
+        assert_eq!(merged.include, vec!["invoices"]);
+        assert_eq!(merged.exclude, vec!["billing_audit"]);
     }
 }

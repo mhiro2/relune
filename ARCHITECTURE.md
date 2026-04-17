@@ -189,7 +189,7 @@ Supported paths into a `Schema`:
 
 ## 8. Configuration
 
-CLI merges **defaults → TOML file → flags** for command settings (`render`, `inspect`, `doc`, `export`, `lint`, `diff`). Implementation: `crates/relune-cli/src/config.rs`. Required inputs still come from the CLI. After merge, render/export apply semantic validation for focus depth and filter combinations, and diff file inputs are classified by content instead of extension alone.
+CLI merges **defaults → TOML file → flags** for command settings (`render`, `inspect`, `doc`, `export`, `lint`, `diff`). Implementation: `crates/relune-cli/src/config.rs`. Required inputs still come from the CLI. Named `[viewpoints.<name>]` presets provide reusable focus/filter/grouping bundles for `render` and `export`, and are applied between command defaults and explicit CLI flags. After merge, render/export apply semantic validation for focus depth and filter combinations, and diff file inputs are classified by content instead of extension alone.
 
 ---
 

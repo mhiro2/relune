@@ -16,6 +16,7 @@ type LayoutAlgorithm = "hierarchical" | "force-directed";
 type LayoutDirection = "top-to-bottom" | "left-to-right" | "right-to-left" | "bottom-to-top";
 type EdgeStyle = "curved" | "orthogonal" | "straight";
 type GroupBy = "none" | "schema" | "prefix";
+type ViewpointId = string;
 
 type PersistedState = {
   example: ExampleId;
@@ -23,6 +24,7 @@ type PersistedState = {
   layout: LayoutAlgorithm;
   direction: LayoutDirection;
   edgeStyle: EdgeStyle;
+  viewpoint: ViewpointId;
   groupBy: GroupBy;
   focusTable: string;
   depth: string;
@@ -37,9 +39,37 @@ type ExampleDefinition = {
   path: string;
 };
 
+type ViewpointDefinition = {
+  id: ViewpointId;
+  label: string;
+  description: string;
+  groupBy: GroupBy;
+  focusTable: string;
+  depth: number;
+  includeTables: readonly string[];
+  excludeTables: readonly string[];
+};
+
+type ManualViewState = {
+  groupBy: GroupBy;
+  focusTable: string;
+  depth: string;
+  includeTables: string;
+  excludeTables: string;
+};
+
 const STORAGE_KEY = "relune-playground:v1";
 const CUSTOM_EXAMPLE_ID = "custom";
 const DEFAULT_EXAMPLE_ID: Exclude<ExampleId, "custom"> = "simple-blog";
+const MANUAL_VIEWPOINT_ID = "";
+const MANUAL_VIEWPOINT_LABEL = "Manual controls";
+const DEFAULT_MANUAL_VIEW_STATE: Readonly<ManualViewState> = {
+  groupBy: "none",
+  focusTable: "",
+  depth: "1",
+  includeTables: "",
+  excludeTables: "",
+};
 const EXAMPLES: readonly ExampleDefinition[] = [
   {
     id: "simple-blog",
@@ -58,12 +88,82 @@ const EXAMPLES: readonly ExampleDefinition[] = [
   },
 ] as const;
 
+const VIEWPOINTS: Record<Exclude<ExampleId, "custom">, readonly ViewpointDefinition[]> = {
+  "simple-blog": [
+    {
+      id: "authoring",
+      label: "Authoring",
+      description: "Posts with their authors and comments.",
+      groupBy: "none",
+      focusTable: "posts",
+      depth: 1,
+      includeTables: ["users", "posts", "comments"],
+      excludeTables: [],
+    },
+    {
+      id: "community",
+      label: "Community",
+      description: "Comment moderation around users and posts.",
+      groupBy: "none",
+      focusTable: "comments",
+      depth: 1,
+      includeTables: ["comments", "posts", "users"],
+      excludeTables: [],
+    },
+  ],
+  ecommerce: [
+    {
+      id: "billing",
+      label: "Billing",
+      description: "Orders, payments, and purchased products.",
+      groupBy: "none",
+      focusTable: "orders",
+      depth: 1,
+      includeTables: ["orders", "order_items", "payments", "products", "users"],
+      excludeTables: [],
+    },
+    {
+      id: "catalog",
+      label: "Catalog",
+      description: "Products and categories around order lines.",
+      groupBy: "none",
+      focusTable: "products",
+      depth: 1,
+      includeTables: ["products", "categories", "order_items"],
+      excludeTables: ["payments"],
+    },
+  ],
+  "multi-schema": [
+    {
+      id: "sales",
+      label: "Sales",
+      description: "Schema-scoped sales flow with grouped tables.",
+      groupBy: "schema",
+      focusTable: "sales.orders",
+      depth: 1,
+      includeTables: ["sales.*"],
+      excludeTables: [],
+    },
+    {
+      id: "inventory",
+      label: "Inventory",
+      description: "Products and stock relationships inside the inventory schema.",
+      groupBy: "schema",
+      focusTable: "inventory.products",
+      depth: 1,
+      includeTables: ["inventory.*"],
+      excludeTables: [],
+    },
+  ],
+};
+
 const DEFAULT_STATE: PersistedState = {
   example: DEFAULT_EXAMPLE_ID,
   theme: "light",
   layout: "hierarchical",
   direction: "top-to-bottom",
   edgeStyle: "curved",
+  viewpoint: MANUAL_VIEWPOINT_ID,
   groupBy: "none",
   focusTable: "",
   depth: "1",
@@ -77,6 +177,8 @@ const themeSelect = getElement<HTMLSelectElement>("theme-select");
 const layoutSelect = getElement<HTMLSelectElement>("layout-select");
 const directionSelect = getElement<HTMLSelectElement>("direction-select");
 const edgeStyleSelect = getElement<HTMLSelectElement>("edge-style-select");
+const viewpointSelect = getElement<HTMLSelectElement>("viewpoint-select");
+const viewpointHint = getElement<HTMLElement>("viewpoint-hint");
 const groupBySelect = getElement<HTMLSelectElement>("group-by-select");
 const focusTableInput = getElement<HTMLInputElement>("focus-table-input");
 const depthInput = getElement<HTMLInputElement>("depth-input");
@@ -109,6 +211,9 @@ const SIDEBAR_DEFAULT = 380;
 let renderTimer = 0;
 let renderSerial = 0;
 let lastHtmlOutput = "";
+let isApplyingViewpoint = false;
+let previousViewpointId = MANUAL_VIEWPOINT_ID;
+const manualViewStateByExample = new Map<ExampleId, ManualViewState>();
 
 populateExampleOptions();
 
@@ -139,6 +244,136 @@ function populateExampleOptions(): void {
   );
   options.push(`<option value="${CUSTOM_EXAMPLE_ID}">Custom</option>`);
   exampleSelect.innerHTML = options.join("");
+}
+
+function getViewpoints(example: ExampleId): readonly ViewpointDefinition[] {
+  if (example === CUSTOM_EXAMPLE_ID) {
+    return [];
+  }
+
+  return VIEWPOINTS[toBuiltinExampleId(example)];
+}
+
+function findViewpoint(
+  example: ExampleId,
+  viewpointId: ViewpointId,
+): ViewpointDefinition | undefined {
+  return getViewpoints(example).find((viewpoint) => viewpoint.id === viewpointId);
+}
+
+function populateViewpointOptions(example: ExampleId, preferredViewpoint: ViewpointId): void {
+  const viewpoints = getViewpoints(example);
+  const options = [
+    `<option value="${MANUAL_VIEWPOINT_ID}">${MANUAL_VIEWPOINT_LABEL}</option>`,
+    ...viewpoints.map(
+      (viewpoint) => `<option value="${viewpoint.id}">${escapeHtml(viewpoint.label)}</option>`,
+    ),
+  ];
+
+  viewpointSelect.innerHTML = options.join("");
+  viewpointSelect.disabled = viewpoints.length === 0;
+  viewpointSelect.value = findViewpoint(example, preferredViewpoint)?.id ?? MANUAL_VIEWPOINT_ID;
+  updateViewpointHint();
+}
+
+function updateViewpointHint(): void {
+  const viewpoints = getViewpoints(exampleSelect.value as ExampleId);
+  const selected = getSelectedViewpoint();
+
+  if (selected) {
+    viewpointHint.textContent = selected.description;
+    return;
+  }
+
+  viewpointHint.textContent =
+    viewpoints.length === 0
+      ? "Manual controls edit focus, filters, and grouping directly for custom SQL."
+      : "Built-in presets are scoped to the selected example. Switch to Manual controls to edit focus, filters, and grouping yourself.";
+}
+
+function getSelectedViewpoint(): ViewpointDefinition | undefined {
+  return findViewpoint(exampleSelect.value as ExampleId, viewpointSelect.value);
+}
+
+function serializePatterns(patterns: readonly string[]): string {
+  return patterns.join(", ");
+}
+
+function cloneManualViewState(state: Readonly<ManualViewState>): ManualViewState {
+  return { ...state };
+}
+
+function defaultManualViewState(): ManualViewState {
+  return cloneManualViewState(DEFAULT_MANUAL_VIEW_STATE);
+}
+
+function readManualViewStateFromControls(): ManualViewState {
+  return {
+    groupBy: groupBySelect.value as GroupBy,
+    focusTable: focusTableInput.value.trim(),
+    depth: depthInput.value.trim() || DEFAULT_MANUAL_VIEW_STATE.depth,
+    includeTables: includeTablesInput.value.trim(),
+    excludeTables: excludeTablesInput.value.trim(),
+  };
+}
+
+function storeManualViewState(example: ExampleId, state: Readonly<ManualViewState>): void {
+  manualViewStateByExample.set(example, cloneManualViewState(state));
+}
+
+function restoreManualViewState(example: ExampleId): void {
+  const state = manualViewStateByExample.get(example) ?? defaultManualViewState();
+  isApplyingViewpoint = true;
+  groupBySelect.value = state.groupBy;
+  focusTableInput.value = state.focusTable;
+  depthInput.value = state.depth;
+  includeTablesInput.value = state.includeTables;
+  excludeTablesInput.value = state.excludeTables;
+  isApplyingViewpoint = false;
+  updateViewpointHint();
+}
+
+function applyViewpoint(viewpoint: ViewpointDefinition): void {
+  isApplyingViewpoint = true;
+  groupBySelect.value = viewpoint.groupBy;
+  focusTableInput.value = viewpoint.focusTable;
+  depthInput.value = `${viewpoint.depth}`;
+  includeTablesInput.value = serializePatterns(viewpoint.includeTables);
+  excludeTablesInput.value = serializePatterns(viewpoint.excludeTables);
+  isApplyingViewpoint = false;
+  updateViewpointHint();
+}
+
+function currentViewSettingsMatch(viewpoint: ViewpointDefinition): boolean {
+  return (
+    groupBySelect.value === viewpoint.groupBy &&
+    focusTableInput.value.trim() === viewpoint.focusTable &&
+    depthInput.value.trim() === `${viewpoint.depth}` &&
+    arraysEqual(splitPatterns(includeTablesInput.value), [...viewpoint.includeTables]) &&
+    arraysEqual(splitPatterns(excludeTablesInput.value), [...viewpoint.excludeTables])
+  );
+}
+
+function syncViewpointSelectionWithControls(): void {
+  if (isApplyingViewpoint) {
+    return;
+  }
+
+  const selected = getSelectedViewpoint();
+  if (!selected) {
+    updateViewpointHint();
+    return;
+  }
+
+  if (!currentViewSettingsMatch(selected)) {
+    viewpointSelect.value = MANUAL_VIEWPOINT_ID;
+  }
+
+  updateViewpointHint();
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 async function loadExamples(): Promise<void> {
@@ -181,6 +416,7 @@ function restoreInitialState(): void {
 
 function attachEventListeners(): void {
   exampleSelect.addEventListener("change", handleExampleChange);
+  viewpointSelect.addEventListener("change", handleViewpointChange);
   resetExampleButton.addEventListener("click", resetExample);
   renderNowButton.addEventListener("click", () => {
     void renderDiagram();
@@ -293,7 +529,16 @@ function initSidebarResize(): void {
 }
 
 function handleExampleChange(): void {
+  populateViewpointOptions(exampleSelect.value as ExampleId, viewpointSelect.value);
+  const selectedViewpoint = getSelectedViewpoint();
+  if (selectedViewpoint) {
+    applyViewpoint(selectedViewpoint);
+  } else {
+    restoreManualViewState(exampleSelect.value as ExampleId);
+  }
+
   if (exampleSelect.value === CUSTOM_EXAMPLE_ID) {
+    previousViewpointId = viewpointSelect.value;
     persistState();
     scheduleRender();
     return;
@@ -304,6 +549,23 @@ function handleExampleChange(): void {
     sqlEditor.setValue(sql);
   }
 
+  previousViewpointId = viewpointSelect.value;
+  persistState();
+  scheduleRender();
+}
+
+function handleViewpointChange(): void {
+  const selected = getSelectedViewpoint();
+  if (selected) {
+    if (previousViewpointId === MANUAL_VIEWPOINT_ID) {
+      storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
+    }
+    applyViewpoint(selected);
+  } else {
+    restoreManualViewState(exampleSelect.value as ExampleId);
+  }
+
+  previousViewpointId = viewpointSelect.value;
   persistState();
   scheduleRender();
 }
@@ -312,12 +574,25 @@ function resetExample(): void {
   const selectedExample = exampleSelect.value as ExampleId;
   const effectiveExample = toBuiltinExampleId(selectedExample);
   exampleSelect.value = effectiveExample;
+  populateViewpointOptions(effectiveExample, viewpointSelect.value);
+  const selectedViewpoint = getSelectedViewpoint();
+  if (selectedViewpoint) {
+    applyViewpoint(selectedViewpoint);
+  } else {
+    restoreManualViewState(effectiveExample);
+  }
   sqlEditor.setValue(exampleSql.get(effectiveExample) ?? "");
+  previousViewpointId = viewpointSelect.value;
   persistState();
   scheduleRender(0);
 }
 
 function handleControlChange(): void {
+  syncViewpointSelectionWithControls();
+  if (viewpointSelect.value === MANUAL_VIEWPOINT_ID) {
+    storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
+  }
+  previousViewpointId = viewpointSelect.value;
   applyTheme(themeSelect.value as Theme);
   persistState();
   scheduleRender();
@@ -331,6 +606,8 @@ function syncExampleSelectionWithEditor(): void {
   const selectedSql = exampleSql.get(toBuiltinExampleId(exampleSelect.value as ExampleId));
   if (selectedSql && sqlEditor.getValue().trim() !== selectedSql.trim()) {
     exampleSelect.value = CUSTOM_EXAMPLE_ID;
+    populateViewpointOptions(CUSTOM_EXAMPLE_ID, MANUAL_VIEWPOINT_ID);
+    previousViewpointId = MANUAL_VIEWPOINT_ID;
   }
 }
 
@@ -340,13 +617,23 @@ function applyState(state: PersistedState): void {
   layoutSelect.value = state.layout;
   directionSelect.value = state.direction;
   edgeStyleSelect.value = state.edgeStyle;
-  groupBySelect.value = state.groupBy;
-  focusTableInput.value = state.focusTable;
-  depthInput.value = state.depth;
-  includeTablesInput.value = state.includeTables;
-  excludeTablesInput.value = state.excludeTables;
+  populateViewpointOptions(state.example, state.viewpoint);
+  const selectedViewpoint = getSelectedViewpoint();
+  if (selectedViewpoint) {
+    applyViewpoint(selectedViewpoint);
+  } else {
+    storeManualViewState(state.example, {
+      groupBy: state.groupBy,
+      focusTable: state.focusTable,
+      depth: state.depth || DEFAULT_MANUAL_VIEW_STATE.depth,
+      includeTables: state.includeTables,
+      excludeTables: state.excludeTables,
+    });
+    restoreManualViewState(state.example);
+  }
   sqlEditor.setValue(state.sql);
   applyTheme(state.theme);
+  previousViewpointId = viewpointSelect.value;
 }
 
 function applyTheme(theme: Theme): void {
@@ -595,6 +882,7 @@ function readQueryState(): Partial<PersistedState> {
     layout: (params.get("layout") as LayoutAlgorithm | null) ?? undefined,
     direction: (params.get("direction") as LayoutDirection | null) ?? undefined,
     edgeStyle: (params.get("edges") as EdgeStyle | null) ?? undefined,
+    viewpoint: params.get("viewpoint") ?? undefined,
     groupBy: (params.get("group") as GroupBy | null) ?? undefined,
     focusTable: params.get("focus") ?? undefined,
     depth: params.get("depth") ?? undefined,
@@ -620,6 +908,9 @@ function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> 
   }
   if (isEdgeStyle(state.edgeStyle)) {
     sanitized.edgeStyle = state.edgeStyle;
+  }
+  if (typeof state.viewpoint === "string") {
+    sanitized.viewpoint = state.viewpoint.trim();
   }
   if (isGroupBy(state.groupBy)) {
     sanitized.groupBy = state.groupBy;
@@ -656,6 +947,7 @@ function collectState(): PersistedState {
     layout: layoutSelect.value as LayoutAlgorithm,
     direction: directionSelect.value as LayoutDirection,
     edgeStyle: edgeStyleSelect.value as EdgeStyle,
+    viewpoint: viewpointSelect.value,
     groupBy: groupBySelect.value as GroupBy,
     focusTable: focusTableInput.value.trim(),
     depth: depthInput.value.trim(),
@@ -672,6 +964,9 @@ function syncQueryString(state: PersistedState): void {
   params.set("layout", state.layout);
   params.set("direction", state.direction);
   params.set("edges", state.edgeStyle);
+  if (state.viewpoint) {
+    params.set("viewpoint", state.viewpoint);
+  }
   params.set("group", state.groupBy);
 
   if (state.focusTable) {

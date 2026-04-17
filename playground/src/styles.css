@@ -503,6 +503,13 @@ details[open] > .ctrl-section__title::before {
   padding-left: 2px;
 }
 
+.ctrl__hint {
+  padding-left: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .ctrl select,
 .ctrl input {
   height: 32px;
@@ -514,6 +521,12 @@ details[open] > .ctrl-section__title::before {
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease;
+}
+
+.ctrl select:disabled,
+.ctrl input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .ctrl select:focus,

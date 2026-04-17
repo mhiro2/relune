@@ -86,6 +86,7 @@ relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 relune render --sql schema.sql --layout force-directed --edge-style curved --theme dark -o erd.svg
 relune render --sql schema.sql --group-by schema -o grouped.svg
 relune render --sql schema.sql --include users --include orders -o subset.svg
+relune render --config relune.toml --sql schema.sql --viewpoint billing -o billing.svg
 relune render --db-url 'postgres://user:pass@localhost:5432/mydb' -o erd.svg
 ```
 
@@ -97,6 +98,7 @@ relune render --db-url 'postgres://user:pass@localhost:5432/mydb' -o erd.svg
 | `--edge-style` | `straight`, `orthogonal`, `curved` | `orthogonal` |
 | `--direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` | `top-to-bottom` |
 | `--theme` | `light`, `dark` | `light` |
+| `--viewpoint` | Named preset from `[viewpoints.<name>]` in config | -- |
 | `--focus` | Table name to center on | -- |
 | `--depth` | Neighbor depth (requires `--focus`) | `1` |
 | `--group-by` | `none`, `schema`, `prefix` | `none` |
@@ -110,6 +112,8 @@ Validation rules:
 - The focused table cannot be excluded
 - If `--include` is set, it must contain the focused table
 - The same table cannot appear in both `--include` and `--exclude`
+
+Named viewpoints are applied before explicit CLI view flags. Effective precedence is: CLI flags > selected viewpoint > command defaults from `[render]`.
 
 ### doc
 
@@ -158,6 +162,7 @@ relune export --sql schema.sql --format schema-json -o schema.json
 relune export --sql schema.sql --format graph-json -o graph.json
 relune export --sql schema.sql --format layout-json --layout force-directed -o layout.json
 relune export --sql schema.sql --format mermaid --focus orders --depth 2 -o orders.mmd
+relune export --config relune.toml --sql schema.sql --format graph-json --viewpoint billing -o billing.json
 ```
 
 | Format | Description |
@@ -169,8 +174,24 @@ relune export --sql schema.sql --format mermaid --focus orders --depth 2 -o orde
 | `d2` | D2 diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--layout`, `--edge-style`, `--direction`, `--focus`, `--depth`, `--group-by` for positioned exports. `layout-json` includes graph-level detour counts plus per-edge side, slot, and channel metadata, which makes route diffs easier to audit alongside SVG/HTML output.
+Supports `--layout`, `--edge-style`, `--direction`, `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, and `--exclude` for graph-backed exports. `layout-json` includes graph-level detour counts plus per-edge side, slot, and channel metadata, which makes route diffs easier to audit alongside SVG/HTML output.
 `--fail-on-warning` is also available when export diagnostics should fail automation.
+
+### Named viewpoints in config
+
+```toml
+[viewpoints.billing]
+focus = "orders"
+depth = 1
+group_by = "schema"
+include = ["orders", "order_items", "payments"]
+exclude = ["audit_*"]
+
+[render]
+viewpoint = "billing"
+```
+
+Use viewpoints when you want the same boundary to be reused across `render` and `export`.
 
 ### lint
 
@@ -251,6 +272,10 @@ relune diff --before old.sql --after new.sql --format html -o d.html # visual di
 relune lint --sql new.sql                                          # lint new schema
 relune render --sql new.sql --focus <CHANGED_TABLE> --depth 1 -o area.svg
 ```
+
+### Playground viewpoint presets
+
+The public playground also exposes example-specific named viewpoints. Pick a built-in example, switch the `Viewpoint` control, and the playground will apply the corresponding focus, filter, and grouping preset while keeping the selection in the URL.
 
 ### Embed ERDs in documentation
 

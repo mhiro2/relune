@@ -126,6 +126,10 @@ pub struct RenderArgs {
     #[arg(long = "focus", value_name = "TABLE")]
     pub focus: Option<String>,
 
+    /// Apply a named viewpoint from the active config file.
+    #[arg(long = "viewpoint", value_name = "NAME")]
+    pub viewpoint: Option<String>,
+
     /// Traversal depth for focus mode. Defaults to `1` after config merge.
     #[arg(long = "depth", value_name = "N")]
     pub depth: Option<u32>,
@@ -432,6 +436,10 @@ pub struct ExportArgs {
     #[arg(long = "focus", value_name = "TABLE")]
     pub focus: Option<String>,
 
+    /// Apply a named viewpoint from the active config file.
+    #[arg(long = "viewpoint", value_name = "NAME")]
+    pub viewpoint: Option<String>,
+
     /// Focus depth. Defaults to `1` after config merge.
     #[arg(long = "depth", value_name = "N")]
     pub depth: Option<u32>,
@@ -439,6 +447,14 @@ pub struct ExportArgs {
     /// Grouping mode.
     #[arg(long = "group-by", value_enum)]
     pub group_by: Option<GroupByMode>,
+
+    /// Explicitly include only these tables.
+    #[arg(long = "include", value_name = "TABLE")]
+    pub include: Vec<String>,
+
+    /// Exclude tables from output.
+    #[arg(long = "exclude", value_name = "TABLE")]
+    pub exclude: Vec<String>,
 
     /// Layout algorithm for positioned output.
     #[arg(long = "layout", value_enum)]

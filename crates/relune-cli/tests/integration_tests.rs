@@ -318,6 +318,43 @@ mod render_tests {
     }
 
     #[test]
+    fn render_with_named_viewpoint_from_config() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("viewpoint.svg");
+        let config_path = temp.path().join("relune.toml");
+
+        fs::write(
+            &config_path,
+            r#"
+[viewpoints.authoring]
+focus = "users"
+depth = 1
+include = ["users", "posts"]
+exclude = ["comments"]
+"#,
+        )
+        .expect("viewpoint config should be written");
+
+        let mut cmd = relune();
+        cmd.arg("--config")
+            .arg(&config_path)
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--viewpoint")
+            .arg("authoring")
+            .arg("--out")
+            .arg(&output_path)
+            .assert()
+            .success();
+
+        let content = fs::read_to_string(&output_path).expect("Failed to read output file");
+        assert!(content.contains("users"));
+        assert!(content.contains("posts"));
+        assert!(!content.contains("comments"));
+    }
+
+    #[test]
     fn render_with_force_directed_layout() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");
         let output_path = temp.path().join("force.svg");
@@ -641,6 +678,53 @@ mod export_tests {
         assert!(
             parsed.get("tables").is_some(),
             "Schema JSON should have tables field"
+        );
+    }
+
+    #[test]
+    fn export_with_named_viewpoint_filters_tables() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(
+            &config_path,
+            r#"
+[viewpoints.authoring]
+focus = "users"
+depth = 1
+include = ["users", "posts"]
+exclude = ["comments"]
+"#,
+        )
+        .expect("viewpoint config should be written");
+
+        let mut cmd = relune();
+        let output = cmd
+            .arg("--config")
+            .arg(&config_path)
+            .arg("export")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--format")
+            .arg("graph-json")
+            .arg("--viewpoint")
+            .arg("authoring")
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("Output should be valid JSON");
+        let nodes = parsed["nodes"].as_array().expect("nodes array");
+        let names = nodes
+            .iter()
+            .map(|node| node["table_name"].as_str().expect("table name"))
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            names,
+            ["posts", "users"]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
         );
     }
 

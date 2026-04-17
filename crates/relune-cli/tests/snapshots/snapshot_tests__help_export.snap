@@ -67,6 +67,9 @@ Options:
       --focus <TABLE>
           Optional focus table
 
+      --viewpoint <NAME>
+          Apply a named viewpoint from the active config file
+
       --depth <N>
           Focus depth. Defaults to `1` after config merge
 
@@ -77,6 +80,12 @@ Options:
           - none:   No grouping
           - schema: Group by schema name
           - prefix: Group by table name prefix
+
+      --include <TABLE>
+          Explicitly include only these tables
+
+      --exclude <TABLE>
+          Exclude tables from output
 
       --layout <LAYOUT>
           Layout algorithm for positioned output

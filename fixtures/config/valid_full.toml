@@ -6,6 +6,7 @@ theme = "dark"
 layout = "force-directed"
 edge_style = "orthogonal"
 direction = "left-to-right"
+viewpoint = "billing"
 group_by = "schema"
 focus = "users"
 depth = 2
@@ -19,13 +20,30 @@ format = "json"
 
 [export]
 format = "graph-json"
+viewpoint = "billing"
 group_by = "prefix"
 layout = "hierarchical"
 edge_style = "curved"
 direction = "right-to-left"
 focus = "posts"
 depth = 3
+include = ["users", "posts"]
+exclude = ["audit_logs"]
 
 [diff]
 format = "json"
 dialect = "postgres"
+
+[viewpoints.billing]
+focus = "users"
+depth = 1
+group_by = "schema"
+include = ["users", "posts"]
+exclude = ["comments"]
+
+[viewpoints.auth]
+focus = "users"
+depth = 1
+group_by = "prefix"
+include = ["users", "sessions"]
+exclude = ["audit_logs"]
