@@ -698,6 +698,10 @@ pub struct DiffArgs {
     /// Exit with non-zero code if warnings are emitted.
     #[arg(long = "fail-on-warning")]
     pub fail_on_warning: bool,
+
+    /// Exit with code 10 if schema changes are detected (like `git diff --exit-code`).
+    #[arg(long = "exit-code")]
+    pub exit_code: bool,
 }
 
 /// Output format for diff command.
@@ -713,4 +717,6 @@ pub enum DiffFormat {
     Svg,
     /// Self-contained HTML with diff overlay.
     Html,
+    /// GitHub-flavored Markdown output.
+    Markdown,
 }

@@ -29,8 +29,10 @@ fn main() -> ExitCode {
     match run_command(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // Print error to stderr
-            eprintln!("Error: {e}");
+            // DiffChangesDetected is a signaling exit, not an error
+            if !matches!(e, CliError::DiffChangesDetected) {
+                eprintln!("Error: {e}");
+            }
             ExitCode::from(e.exit_code())
         }
     }

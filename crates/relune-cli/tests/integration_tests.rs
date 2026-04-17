@@ -1859,4 +1859,54 @@ mod diff_tests {
             "explicit stdout should emit HTML markup"
         );
     }
+
+    #[test]
+    fn diff_markdown_format() {
+        let output = relune()
+            .arg("diff")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));")
+            .arg("--format")
+            .arg("markdown")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("## Schema Diff:"));
+        assert!(stdout.contains("| Category | Added | Removed | Modified |"));
+        assert!(stdout.contains("<details>"));
+    }
+
+    #[test]
+    fn diff_exit_code_with_changes() {
+        let output = relune()
+            .arg("diff")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255));")
+            .arg("--exit-code")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(10));
+    }
+
+    #[test]
+    fn diff_exit_code_no_changes() {
+        let output = relune()
+            .arg("diff")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--exit-code")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success());
+    }
 }

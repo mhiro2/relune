@@ -59,7 +59,9 @@ pub use schema_input::schema_from_db_url_async;
 pub use usecases::{diff, doc, export, inspect, lint, render};
 
 // Re-export from usecases for convenience
-pub use usecases::diff::{build_diff_overlay, build_diff_schema, format_diff_text};
+pub use usecases::diff::{
+    build_diff_overlay, build_diff_schema, format_diff_markdown, format_diff_text,
+};
 pub use usecases::doc::format_doc_markdown;
 pub use usecases::inspect::format_inspect_text;
 pub use usecases::lint::{format_lint_json, format_lint_text};
