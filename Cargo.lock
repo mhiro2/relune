@@ -2296,8 +2296,10 @@ version = "0.7.0"
 dependencies = [
  "console_error_panic_hook",
  "relune-app",
+ "relune-core",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]
