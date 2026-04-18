@@ -6,16 +6,16 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <title>Relune Playground</title>
+    <title>Relune Schema Workbench</title>
     <meta
       name="description"
-      content="Public WASM playground for Relune. Render deterministic ERDs in the browser with the same Rust engine as the CLI."
+      content="Public WASM schema workbench for Relune. Render, inspect, export, lint, and compare schemas in the browser with the same Rust engine as the CLI."
     />
     <link rel="icon" href="./assets/logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./assets/styles.css" />
@@ -23,7 +23,6 @@
   </head>
   <body>
     <div class="app">
-      <!-- Top bar -->
       <header class="topbar">
         <div class="topbar__brand">
           <img
@@ -34,7 +33,7 @@
             height="52"
           />
           <div class="topbar__brand-text">
-            <span class="topbar__tag">Playground</span>
+            <span class="topbar__tag">Schema Workbench</span>
             <span class="topbar__badge" id="version-pill">Loading…</span>
           </div>
         </div>
@@ -61,12 +60,10 @@
         </div>
       </header>
 
-      <!-- Main workspace -->
       <div class="workspace">
-        <!-- Sidebar: Controls -->
         <aside class="sidebar" id="sidebar">
           <div class="sidebar__head">
-            <span class="sidebar__label">Controls</span>
+            <span class="sidebar__label">Workbench</span>
             <button
               class="sidebar__collapse"
               id="sidebar-collapse"
@@ -81,7 +78,6 @@
             </button>
           </div>
           <div class="sidebar__scroll">
-            <!-- Example + Render -->
             <div class="ctrl-section">
               <div class="ctrl-row ctrl-row--actions">
                 <label class="ctrl">
@@ -92,10 +88,24 @@
                   Render
                 </button>
               </div>
+              <div class="ctrl-row ctrl-row--stack ctrl-row--mode-tabs">
+                <div class="ctrl">
+                  <span class="ctrl__label">Mode</span>
+                  <div class="mode-tabs" id="mode-tabs" role="tablist" aria-label="Workbench mode">
+                    <button class="mode-tab" type="button" data-mode="render">Render</button>
+                    <button class="mode-tab" type="button" data-mode="inspect">Inspect</button>
+                    <button class="mode-tab" type="button" data-mode="export">Export</button>
+                    <button class="mode-tab" type="button" data-mode="lint">Lint</button>
+                    <button class="mode-tab" type="button" data-mode="compare">Compare</button>
+                  </div>
+                  <span id="mode-hint" class="ctrl__hint mode-hint">
+                    Render diagrams and viewer HTML with the same WASM engine as the CLI.
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <!-- Appearance -->
-            <details class="ctrl-section" open>
+            <details class="ctrl-section" id="appearance-section" open>
               <summary class="ctrl-section__title">Appearance</summary>
               <div class="ctrl-row">
                 <label class="ctrl">
@@ -116,8 +126,7 @@
               </div>
             </details>
 
-            <!-- Layout -->
-            <details class="ctrl-section" open>
+            <details class="ctrl-section" id="layout-section" open>
               <summary class="ctrl-section__title">Layout</summary>
               <div class="ctrl-row">
                 <label class="ctrl">
@@ -149,10 +158,9 @@
               </div>
             </details>
 
-            <!-- Filter -->
-            <details class="ctrl-section">
-              <summary class="ctrl-section__title">Filter</summary>
-              <div class="ctrl-row ctrl-row--stack">
+            <details class="ctrl-section" id="scope-section" open>
+              <summary class="ctrl-section__title">Scope</summary>
+              <div class="ctrl-row ctrl-row--stack" id="viewpoint-row">
                 <label class="ctrl">
                   <span class="ctrl__label">Example preset</span>
                   <select id="viewpoint-select" aria-label="Example viewpoint preset">
@@ -163,7 +171,7 @@
                   </span>
                 </label>
               </div>
-              <div class="ctrl-row">
+              <div class="ctrl-row" id="focus-row">
                 <label class="ctrl">
                   <span class="ctrl__label">Focus table</span>
                   <input
@@ -208,8 +216,78 @@
               </div>
             </details>
 
-            <!-- SQL Editor -->
-            <div class="ctrl-section ctrl-section--editor">
+            <details class="ctrl-section" id="inspect-section" open>
+              <summary class="ctrl-section__title">Inspect</summary>
+              <div class="ctrl-row ctrl-row--stack">
+                <label class="ctrl">
+                  <span class="ctrl__label">Table details</span>
+                  <select id="inspect-table-select" aria-label="Inspect table">
+                    <option value="">Schema summary</option>
+                  </select>
+                  <span class="ctrl__hint">
+                    Pick a table after parsing to see columns, foreign keys, and indexes.
+                  </span>
+                </label>
+              </div>
+            </details>
+
+            <details class="ctrl-section" id="export-section" open>
+              <summary class="ctrl-section__title">Export</summary>
+              <div class="ctrl-row ctrl-row--stack">
+                <label class="ctrl">
+                  <span class="ctrl__label">Format</span>
+                  <select id="export-format-select" aria-label="Export format">
+                    <option value="schema-json">Schema JSON</option>
+                    <option value="graph-json">Graph JSON</option>
+                    <option value="layout-json">Layout JSON</option>
+                    <option value="mermaid">Mermaid</option>
+                    <option value="d2">D2</option>
+                    <option value="dot">DOT</option>
+                  </select>
+                  <span class="ctrl__hint">
+                    Graph and layout exports honor the current visual controls.
+                  </span>
+                </label>
+              </div>
+            </details>
+
+            <details class="ctrl-section" id="lint-section" open>
+              <summary class="ctrl-section__title">Lint</summary>
+              <div class="ctrl-row ctrl-row--stack">
+                <label class="ctrl">
+                  <span class="ctrl__label">Rules</span>
+                  <input
+                    id="lint-rules-input"
+                    type="text"
+                    placeholder="no-primary-key, missing-foreign-key-index"
+                    aria-label="Lint rules"
+                  />
+                  <span class="ctrl__hint">
+                    Leave empty to run the default schema review ruleset.
+                  </span>
+                </label>
+              </div>
+            </details>
+
+            <details class="ctrl-section" id="compare-section" open>
+              <summary class="ctrl-section__title">Compare</summary>
+              <div class="ctrl-row ctrl-row--stack">
+                <label class="ctrl">
+                  <span class="ctrl__label">Output</span>
+                  <select id="compare-format-select" aria-label="Compare output">
+                    <option value="visual">Visual diff</option>
+                    <option value="text">Text</option>
+                    <option value="markdown">Markdown</option>
+                    <option value="json">Structured JSON</option>
+                  </select>
+                  <span class="ctrl__hint">
+                    Compare keeps before and after as separate editors instead of squeezing diff into the viewer mode.
+                  </span>
+                </label>
+              </div>
+            </details>
+
+            <div class="ctrl-section ctrl-section--editor" id="single-editor-section">
               <div class="ctrl-section__title ctrl-section__title--static">
                 SQL DDL
                 <button
@@ -219,14 +297,12 @@
                   aria-label="Expand editor"
                   title="Expand editor"
                 >
-                  <!-- expand: arrows pointing outward -->
                   <svg class="editor-expand__icon--expand" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="10 2 14 2 14 6" />
                     <line x1="9" y1="7" x2="14" y2="2" />
                     <polyline points="6 14 2 14 2 10" />
                     <line x1="7" y1="9" x2="2" y2="14" />
                   </svg>
-                  <!-- collapse: arrows pointing inward from corners -->
                   <svg class="editor-expand__icon--collapse" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="14" y1="2" x2="9" y2="7" />
                     <polyline points="14 7 9 7 9 2" />
@@ -238,26 +314,41 @@
               <div id="sql-input"></div>
             </div>
 
-            <!-- Actions -->
+            <div class="ctrl-section ctrl-section--editor ctrl-section--compare" id="compare-editors-section" hidden>
+              <div class="ctrl-section__title ctrl-section__title--static">Before / After SQL</div>
+              <div class="compare-editors">
+                <div class="compare-editors__pane">
+                  <div class="compare-editors__label">Before</div>
+                  <div id="compare-before-input"></div>
+                </div>
+                <div class="compare-editors__pane">
+                  <div class="compare-editors__label">After</div>
+                  <div id="compare-after-input"></div>
+                </div>
+              </div>
+            </div>
+
             <div class="sidebar__actions">
               <button id="reset-example" class="btn btn--ghost" type="button">
                 Reset
               </button>
+              <button id="copy-output" class="btn btn--ghost" type="button">
+                Copy
+              </button>
               <button id="download-html" class="btn btn--ghost" type="button">
-                HTML
+                Download
               </button>
               <button id="download-svg" class="btn btn--ghost" type="button">
-                SVG
+                More
               </button>
             </div>
 
             <p class="sidebar__note" id="state-note">
-              Options and viewpoint selection are synced to URL. Custom SQL is stored in this browser.
+              Mode, filters, and example presets sync to the URL. Custom SQL stays in this browser.
             </p>
           </div>
         </aside>
 
-        <!-- Expand button (visible only when collapsed) -->
         <button
           class="sidebar-expand"
           id="sidebar-expand"
@@ -271,19 +362,58 @@
           </svg>
         </button>
 
-        <!-- Sidebar resize handle -->
         <div class="sidebar-handle" id="sidebar-handle">
           <span class="sidebar-handle__grip"></span>
         </div>
 
-        <!-- Main: Preview -->
         <main class="preview">
-          <div id="error-box" class="error-box" hidden></div>
+          <section class="surface-head">
+            <p class="surface-head__eyebrow" id="surface-eyebrow">Render</p>
+            <h1 class="surface-head__title" id="surface-title">Schema Preview</h1>
+            <p class="surface-head__description" id="surface-description">
+              Render deterministic viewer HTML and SVG with the same WASM engine as the CLI.
+            </p>
+          </section>
 
-          <!-- Stats ribbon -->
+          <div id="error-box" class="error-box" hidden></div>
           <div class="stats-ribbon" id="stats-grid" aria-live="polite"></div>
 
-          <!-- Diagnostics -->
+          <section class="surface" id="inspect-panel" hidden>
+            <div class="surface__head">
+              <span class="surface__label">Schema Inventory</span>
+            </div>
+            <div class="inspect-grid">
+              <div class="inspect-list-wrap">
+                <ul id="inspect-table-list" class="inspect-table-list"></ul>
+              </div>
+              <div id="inspect-detail" class="inspect-detail"></div>
+            </div>
+          </section>
+
+          <section class="surface" id="lint-panel" hidden>
+            <div class="surface__head">
+              <span class="surface__label">Schema Review</span>
+            </div>
+            <ul id="lint-issue-list" class="issue-list"></ul>
+          </section>
+
+          <details class="compare-summary" id="compare-summary-panel" hidden open>
+            <summary class="compare-summary__header">
+              <span class="compare-summary__label">Change Summary</span>
+              <span id="compare-summary-count" class="compare-summary__count"></span>
+            </summary>
+            <div id="compare-summary" class="change-grid"></div>
+            <ul id="compare-object-list" class="change-list"></ul>
+          </details>
+
+          <section class="surface" id="text-output-panel" hidden>
+            <div class="surface__head">
+              <span class="surface__label" id="text-output-label">Output</span>
+              <span class="surface__meta" id="text-output-meta"></span>
+            </div>
+            <pre id="text-output" class="code-output"></pre>
+          </section>
+
           <details class="diagnostics" id="diagnostics-panel">
             <summary class="diagnostics__header">
               <span class="diagnostics__label">Diagnostics</span>
@@ -292,8 +422,7 @@
             <ul id="diagnostic-list" class="diagnostics__list"></ul>
           </details>
 
-          <!-- Preview viewport -->
-          <div class="viewport">
+          <div class="viewport" id="preview-panel">
             <iframe
               id="preview-frame"
               title="Relune HTML preview"

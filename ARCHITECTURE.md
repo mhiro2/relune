@@ -234,7 +234,7 @@ The two crates are separate to keep low-level vector output apart from document 
 - Export a **small, stable** API surface (prefer request/response JSON or a few entrypoints).
 - No DB networking or filesystem in the WASM graph path.
 - Deserialize into the same DTOs `relune-app` uses on native.
-- The public GitHub Pages playground is a thin static client over `relune-wasm`; it must not fork rendering logic from the CLI path.
+- The public GitHub Pages schema workbench is a thin static client over `relune-wasm`; it must not fork rendering, inspect, export, lint, or diff logic from the CLI path.
 
 ---
 
