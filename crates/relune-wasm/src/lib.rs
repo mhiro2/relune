@@ -375,8 +375,12 @@ mod wasm_bindgen_tests {
         let input = serde_wasm_bindgen::to_value(&WasmLintRequest {
             sql: Some("CREATE TABLE users (name TEXT);".to_string()),
             schema_json: None,
+            profile: None,
             format: Some(LintFormat::Json),
             rules: vec![],
+            exclude_rules: vec![],
+            categories: vec![],
+            except_tables: vec![],
             fail_on: None,
         })
         .expect("serialize lint request");
@@ -385,7 +389,7 @@ mod wasm_bindgen_tests {
         let value: serde_json::Value =
             serde_wasm_bindgen::from_value(result).expect("deserialize lint result");
 
-        assert_eq!(value["stats"]["total"], 3);
+        assert_eq!(value["stats"]["total"], 4);
     }
 
     #[wasm_bindgen_test]
