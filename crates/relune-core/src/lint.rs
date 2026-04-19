@@ -8,6 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
+use petgraph::algo::kosaraju_scc;
+use petgraph::graphmap::DiGraphMap;
+
 use crate::diagnostic::{DiagnosticCode, Severity};
 use crate::model::{
     ForeignKey, ForeignKeyTargetResolution, Schema, Table, TableId, resolve_table_reference,
@@ -19,6 +22,10 @@ use crate::model::{
 pub enum LintRuleId {
     /// Table has no primary key.
     NoPrimaryKey,
+    /// Table has no comment.
+    MissingTableComment,
+    /// Column has no comment.
+    MissingColumnComment,
     /// Table has no incoming or outgoing foreign keys.
     OrphanTable,
     /// More than 50% of columns are nullable.
@@ -37,14 +44,145 @@ pub enum LintRuleId {
     ForeignKeyNonUniqueTarget,
     /// Foreign key references a table that cannot be resolved (missing or ambiguous).
     UnresolvedForeignKey,
+    /// Table participates in a foreign key cycle.
+    CircularForeignKey,
+}
+
+/// Category of a lint rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintRuleCategory {
+    /// Structural schema design rules.
+    Structure,
+    /// Foreign key and relational integrity rules.
+    Relationships,
+    /// Identifier naming conventions.
+    Naming,
+    /// Documentation and comment coverage rules.
+    Documentation,
+}
+
+impl LintRuleCategory {
+    /// Returns the kebab-case string representation of the category.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Structure => "structure",
+            Self::Relationships => "relationships",
+            Self::Naming => "naming",
+            Self::Documentation => "documentation",
+        }
+    }
+
+    /// Returns a short human-readable description of the category.
+    #[must_use]
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Structure => "Primary keys, nullability, and join/orphan heuristics",
+            Self::Relationships => "Foreign key coverage, target integrity, ambiguity, and cycles",
+            Self::Naming => "Identifier naming conventions",
+            Self::Documentation => "Table and column comment coverage",
+        }
+    }
+}
+
+impl fmt::Display for LintRuleCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Lint profile for schema review.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintProfile {
+    /// Balanced schema review profile for everyday CI checks.
+    #[default]
+    Default,
+    /// Stricter review profile with full documentation coverage checks.
+    Strict,
+}
+
+impl LintProfile {
+    /// Returns the kebab-case string representation of the profile.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Strict => "strict",
+        }
+    }
+
+    /// Returns the rules enabled by the profile.
+    #[must_use]
+    pub const fn default_rules(&self) -> &'static [LintRuleId] {
+        match self {
+            Self::Default => &[
+                LintRuleId::NoPrimaryKey,
+                LintRuleId::MissingTableComment,
+                LintRuleId::OrphanTable,
+                LintRuleId::TooManyNullable,
+                LintRuleId::SuspiciousJoinTable,
+                LintRuleId::DuplicatedFkPattern,
+                LintRuleId::NonSnakeCaseIdentifier,
+                LintRuleId::MissingForeignKeyIndex,
+                LintRuleId::NullableForeignKeyLazyLoad,
+                LintRuleId::ForeignKeyNonUniqueTarget,
+                LintRuleId::UnresolvedForeignKey,
+                LintRuleId::CircularForeignKey,
+            ],
+            Self::Strict => LintRuleId::all(),
+        }
+    }
+}
+
+impl fmt::Display for LintProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Serializable metadata for one lint rule.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LintRuleMetadata {
+    /// Stable rule identifier.
+    pub rule_id: LintRuleId,
+    /// Rule category.
+    pub category: LintRuleCategory,
+    /// Default severity used by the rule.
+    pub default_severity: Severity,
+    /// Human-readable description of the rule.
+    pub description: String,
 }
 
 impl LintRuleId {
+    /// Returns every available lint rule.
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::NoPrimaryKey,
+            Self::MissingTableComment,
+            Self::MissingColumnComment,
+            Self::OrphanTable,
+            Self::TooManyNullable,
+            Self::SuspiciousJoinTable,
+            Self::DuplicatedFkPattern,
+            Self::NonSnakeCaseIdentifier,
+            Self::MissingForeignKeyIndex,
+            Self::NullableForeignKeyLazyLoad,
+            Self::ForeignKeyNonUniqueTarget,
+            Self::UnresolvedForeignKey,
+            Self::CircularForeignKey,
+        ]
+    }
+
     /// Returns the kebab-case string representation of the rule ID.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::NoPrimaryKey => "no-primary-key",
+            Self::MissingTableComment => "missing-table-comment",
+            Self::MissingColumnComment => "missing-column-comment",
             Self::OrphanTable => "orphan-table",
             Self::TooManyNullable => "too-many-nullable",
             Self::SuspiciousJoinTable => "suspicious-join-table",
@@ -54,6 +192,7 @@ impl LintRuleId {
             Self::NullableForeignKeyLazyLoad => "nullable-foreign-key-lazy-load",
             Self::ForeignKeyNonUniqueTarget => "foreign-key-non-unique-target",
             Self::UnresolvedForeignKey => "unresolved-foreign-key",
+            Self::CircularForeignKey => "circular-foreign-key",
         }
     }
 
@@ -62,14 +201,18 @@ impl LintRuleId {
     pub const fn default_severity(&self) -> Severity {
         match self {
             Self::NoPrimaryKey
+            | Self::MissingTableComment
             | Self::TooManyNullable
             | Self::MissingForeignKeyIndex
             | Self::ForeignKeyNonUniqueTarget
-            | Self::UnresolvedForeignKey => Severity::Warning,
+            | Self::UnresolvedForeignKey
+            | Self::CircularForeignKey => Severity::Warning,
             Self::OrphanTable | Self::SuspiciousJoinTable | Self::NullableForeignKeyLazyLoad => {
                 Severity::Info
             }
-            Self::DuplicatedFkPattern | Self::NonSnakeCaseIdentifier => Severity::Hint,
+            Self::DuplicatedFkPattern
+            | Self::NonSnakeCaseIdentifier
+            | Self::MissingColumnComment => Severity::Hint,
         }
     }
 
@@ -78,6 +221,8 @@ impl LintRuleId {
     pub const fn description(&self) -> &'static str {
         match self {
             Self::NoPrimaryKey => "Table has no primary key defined",
+            Self::MissingTableComment => "Table has no comment",
+            Self::MissingColumnComment => "Column has no comment",
             Self::OrphanTable => "Table has no incoming or outgoing foreign keys",
             Self::TooManyNullable => "More than 50% of columns are nullable",
             Self::SuspiciousJoinTable => "Table name suggests join table but has FK pattern issues",
@@ -91,6 +236,39 @@ impl LintRuleId {
                 "Foreign key targets columns that are not a primary or unique key"
             }
             Self::UnresolvedForeignKey => "Foreign key references a table that cannot be resolved",
+            Self::CircularForeignKey => "Foreign key participates in a cross-table cycle",
+        }
+    }
+
+    /// Returns the review category for this rule.
+    #[must_use]
+    pub const fn category(&self) -> LintRuleCategory {
+        match self {
+            Self::NoPrimaryKey
+            | Self::OrphanTable
+            | Self::TooManyNullable
+            | Self::SuspiciousJoinTable => LintRuleCategory::Structure,
+            Self::NonSnakeCaseIdentifier => LintRuleCategory::Naming,
+            Self::MissingTableComment | Self::MissingColumnComment => {
+                LintRuleCategory::Documentation
+            }
+            Self::DuplicatedFkPattern
+            | Self::MissingForeignKeyIndex
+            | Self::NullableForeignKeyLazyLoad
+            | Self::ForeignKeyNonUniqueTarget
+            | Self::UnresolvedForeignKey
+            | Self::CircularForeignKey => LintRuleCategory::Relationships,
+        }
+    }
+
+    /// Returns serializable metadata for this rule.
+    #[must_use]
+    pub fn metadata(&self) -> LintRuleMetadata {
+        LintRuleMetadata {
+            rule_id: *self,
+            category: self.category(),
+            default_severity: self.default_severity(),
+            description: self.description().to_string(),
         }
     }
 
@@ -99,15 +277,18 @@ impl LintRuleId {
     pub fn diagnostic_code(&self) -> DiagnosticCode {
         let number = match self {
             Self::NoPrimaryKey => 1,
-            Self::OrphanTable => 2,
-            Self::TooManyNullable => 3,
-            Self::SuspiciousJoinTable => 4,
-            Self::DuplicatedFkPattern => 5,
-            Self::NonSnakeCaseIdentifier => 6,
-            Self::MissingForeignKeyIndex => 7,
-            Self::NullableForeignKeyLazyLoad => 8,
-            Self::ForeignKeyNonUniqueTarget => 9,
-            Self::UnresolvedForeignKey => 10,
+            Self::MissingTableComment => 2,
+            Self::MissingColumnComment => 3,
+            Self::OrphanTable => 4,
+            Self::TooManyNullable => 5,
+            Self::SuspiciousJoinTable => 6,
+            Self::DuplicatedFkPattern => 7,
+            Self::NonSnakeCaseIdentifier => 8,
+            Self::MissingForeignKeyIndex => 9,
+            Self::NullableForeignKeyLazyLoad => 10,
+            Self::ForeignKeyNonUniqueTarget => 11,
+            Self::UnresolvedForeignKey => 12,
+            Self::CircularForeignKey => 13,
         };
         DiagnosticCode::new("LINT", number)
     }
@@ -124,6 +305,8 @@ impl fmt::Display for LintRuleId {
 pub struct LintIssue {
     /// The rule that triggered this issue.
     pub rule_id: LintRuleId,
+    /// Review category for this issue.
+    pub category: LintRuleCategory,
     /// Severity level for this issue.
     pub severity: Severity,
     /// Human-readable message describing the issue.
@@ -151,6 +334,7 @@ impl LintIssue {
     pub fn new(rule_id: LintRuleId, severity: Severity, message: impl Into<String>) -> Self {
         Self {
             rule_id,
+            category: rule_id.category(),
             severity,
             message: message.into(),
             table_id: None,
@@ -266,6 +450,8 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
     let (incoming_fks, outgoing_fks) = build_fk_maps(schema);
 
     for table in &schema.tables {
+        check_missing_table_comment(table, &mut result);
+        check_missing_column_comments(table, &mut result);
         check_no_primary_key(table, &mut result);
         check_orphan_table(table, &incoming_fks, &outgoing_fks, &mut result);
         check_too_many_nullable(table, &mut result);
@@ -275,6 +461,7 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
         check_unresolved_foreign_keys(schema, table, &mut result);
         check_foreign_key_indexes_nullable_and_target(schema, table, &mut result);
     }
+    check_circular_foreign_keys(schema, &mut result);
 
     // Sort issues by severity (errors first) then by table identifier.
     result.issues.sort_by(|a, b| {
@@ -320,6 +507,76 @@ fn build_fk_maps(schema: &Schema) -> (FkMap, FkMap) {
     }
 
     (incoming, outgoing)
+}
+
+/// Build a table dependency graph from resolved foreign keys.
+fn fk_dependency_graph(schema: &Schema) -> DiGraphMap<TableId, ()> {
+    let mut graph = DiGraphMap::new();
+    for table in &schema.tables {
+        graph.add_node(table.id);
+        for fk in &table.foreign_keys {
+            if let Some(target_table) = resolve_referenced_table(schema, table, fk) {
+                graph.add_edge(table.id, target_table.id, ());
+            }
+        }
+    }
+    graph
+}
+
+/// Check: table comments should be present for schema review.
+fn check_missing_table_comment(table: &Table, result: &mut LintResult) {
+    if table
+        .comment
+        .as_deref()
+        .is_some_and(|comment| !comment.trim().is_empty())
+    {
+        return;
+    }
+
+    result.add_issue(
+        LintIssue::new(
+            LintRuleId::MissingTableComment,
+            LintRuleId::MissingTableComment.default_severity(),
+            format!(
+                "Table '{}' is missing a comment that explains its role",
+                table.qualified_name()
+            ),
+        )
+        .with_table_id(&table.stable_id)
+        .with_table(table.qualified_name())
+        .with_hint(
+            "Add a table comment in the source schema so reviewers can understand the table intent",
+        ),
+    );
+}
+
+/// Check: column comments should be present for stricter schema review.
+fn check_missing_column_comments(table: &Table, result: &mut LintResult) {
+    for column in &table.columns {
+        if column
+            .comment
+            .as_deref()
+            .is_some_and(|comment| !comment.trim().is_empty())
+        {
+            continue;
+        }
+
+        result.add_issue(
+            LintIssue::new(
+                LintRuleId::MissingColumnComment,
+                LintRuleId::MissingColumnComment.default_severity(),
+                format!(
+                    "Column '{}' on table '{}' is missing a comment",
+                    column.name,
+                    table.qualified_name()
+                ),
+            )
+            .with_table_id(&table.stable_id)
+            .with_table(table.qualified_name())
+            .with_column(&column.name)
+            .with_hint("Document non-obvious semantics with a column comment in the source schema"),
+        );
+    }
 }
 
 /// Check: Table has no primary key.
@@ -608,6 +865,51 @@ fn resolve_referenced_table<'a>(
     match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
         ForeignKeyTargetResolution::Found(ref_table) => Some(ref_table),
         ForeignKeyTargetResolution::Missing | ForeignKeyTargetResolution::Ambiguous => None,
+    }
+}
+
+/// Check: foreign keys should not form cycles across multiple tables.
+fn check_circular_foreign_keys(schema: &Schema, result: &mut LintResult) {
+    let graph = fk_dependency_graph(schema);
+    let table_by_id: HashMap<TableId, &Table> = schema
+        .tables
+        .iter()
+        .map(|table| (table.id, table))
+        .collect();
+
+    for component in kosaraju_scc(&graph) {
+        if component.len() <= 1 {
+            continue;
+        }
+
+        let mut participants: Vec<&Table> = component
+            .iter()
+            .filter_map(|table_id| table_by_id.get(table_id).copied())
+            .collect();
+        participants.sort_by_key(|table| table.qualified_name());
+        let participant_names: Vec<String> = participants
+            .iter()
+            .map(|table| table.qualified_name())
+            .collect();
+
+        for table in participants {
+            result.add_issue(
+                LintIssue::new(
+                    LintRuleId::CircularForeignKey,
+                    LintRuleId::CircularForeignKey.default_severity(),
+                    format!(
+                        "Table '{}' participates in a foreign key cycle",
+                        table.qualified_name()
+                    ),
+                )
+                .with_table_id(&table.stable_id)
+                .with_table(table.qualified_name())
+                .with_hint(format!(
+                    "Cycle members: {}. Review whether one edge should be optional, deferred, or removed",
+                    participant_names.join(", ")
+                )),
+            );
+        }
     }
 }
 
@@ -917,6 +1219,14 @@ mod tests {
     #[test]
     fn test_lint_rule_id_as_str() {
         assert_eq!(LintRuleId::NoPrimaryKey.as_str(), "no-primary-key");
+        assert_eq!(
+            LintRuleId::MissingTableComment.as_str(),
+            "missing-table-comment"
+        );
+        assert_eq!(
+            LintRuleId::MissingColumnComment.as_str(),
+            "missing-column-comment"
+        );
         assert_eq!(LintRuleId::OrphanTable.as_str(), "orphan-table");
         assert_eq!(LintRuleId::TooManyNullable.as_str(), "too-many-nullable");
         assert_eq!(
@@ -943,6 +1253,14 @@ mod tests {
             LintRuleId::ForeignKeyNonUniqueTarget.as_str(),
             "foreign-key-non-unique-target"
         );
+        assert_eq!(
+            LintRuleId::UnresolvedForeignKey.as_str(),
+            "unresolved-foreign-key"
+        );
+        assert_eq!(
+            LintRuleId::CircularForeignKey.as_str(),
+            "circular-foreign-key"
+        );
     }
 
     #[test]
@@ -950,6 +1268,14 @@ mod tests {
         assert_eq!(
             LintRuleId::NoPrimaryKey.default_severity(),
             Severity::Warning
+        );
+        assert_eq!(
+            LintRuleId::MissingTableComment.default_severity(),
+            Severity::Warning
+        );
+        assert_eq!(
+            LintRuleId::MissingColumnComment.default_severity(),
+            Severity::Hint
         );
         assert_eq!(LintRuleId::OrphanTable.default_severity(), Severity::Info);
         assert_eq!(
@@ -980,6 +1306,24 @@ mod tests {
             LintRuleId::ForeignKeyNonUniqueTarget.default_severity(),
             Severity::Warning
         );
+        assert_eq!(
+            LintRuleId::CircularForeignKey.default_severity(),
+            Severity::Warning
+        );
+    }
+
+    #[test]
+    fn test_lint_profile_default_excludes_missing_column_comment() {
+        assert!(
+            !LintProfile::Default
+                .default_rules()
+                .contains(&LintRuleId::MissingColumnComment)
+        );
+        assert!(
+            LintProfile::Strict
+                .default_rules()
+                .contains(&LintRuleId::MissingColumnComment)
+        );
     }
 
     #[test]
@@ -1000,6 +1344,38 @@ mod tests {
         assert_eq!(result.issues.len(), 1);
         assert_eq!(result.issues[0].rule_id, LintRuleId::NoPrimaryKey);
         assert_eq!(result.stats.warnings, 1);
+    }
+
+    #[test]
+    fn test_missing_table_comment_detection() {
+        let table = create_test_table(
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+
+        let mut result = LintResult::new();
+        check_missing_table_comment(&table, &mut result);
+
+        assert_eq!(result.issues.len(), 1);
+        assert_eq!(result.issues[0].rule_id, LintRuleId::MissingTableComment);
+    }
+
+    #[test]
+    fn test_missing_column_comment_detection() {
+        let table = create_test_table(
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+
+        let mut result = LintResult::new();
+        check_missing_column_comments(&table, &mut result);
+
+        assert_eq!(result.issues.len(), 1);
+        assert_eq!(result.issues[0].rule_id, LintRuleId::MissingColumnComment);
     }
 
     #[test]
@@ -1330,6 +1706,75 @@ mod tests {
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::NullableForeignKeyLazyLoad)
+        );
+    }
+
+    #[test]
+    fn test_circular_foreign_key_detection() {
+        let cycle_a = create_test_table(
+            "cycle_a",
+            vec![
+                create_column("id", false, true),
+                create_column("cycle_b_id", false, false),
+            ],
+            vec![create_fk("cycle_b", &["cycle_b_id"])],
+            vec![Index {
+                name: Some("idx_cycle_a_ref".to_string()),
+                columns: vec!["cycle_b_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let cycle_b = create_test_table(
+            "cycle_b",
+            vec![
+                create_column("id", false, true),
+                create_column("cycle_a_id", false, false),
+            ],
+            vec![create_fk("cycle_a", &["cycle_a_id"])],
+            vec![Index {
+                name: Some("idx_cycle_b_ref".to_string()),
+                columns: vec!["cycle_a_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let result = lint_schema(&Schema {
+            tables: vec![cycle_a, cycle_b],
+            ..Schema::default()
+        });
+
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.rule_id == LintRuleId::CircularForeignKey)
+        );
+    }
+
+    #[test]
+    fn test_self_referential_foreign_key_is_not_treated_as_circular_table_cycle() {
+        let employees = create_test_table(
+            "employees",
+            vec![
+                create_column("id", false, true),
+                create_column("manager_id", true, false),
+            ],
+            vec![create_fk("employees", &["manager_id"])],
+            vec![Index {
+                name: Some("employees_manager_id_idx".to_string()),
+                columns: vec!["manager_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let result = lint_schema(&Schema {
+            tables: vec![employees],
+            ..Schema::default()
+        });
+
+        assert!(
+            !result
+                .issues
+                .iter()
+                .any(|issue| issue.rule_id == LintRuleId::CircularForeignKey)
         );
     }
 

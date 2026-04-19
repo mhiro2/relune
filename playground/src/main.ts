@@ -136,6 +136,7 @@ type LintStats = {
 
 type LintIssue = {
   rule_id: string;
+  category: string;
   severity: WasmSeverity;
   message: string;
   table_id?: string | null;
@@ -1632,6 +1633,7 @@ function renderLintPanel(issues: readonly LintIssue[]): void {
         <li class="issue-card">
           <div class="issue-card__meta">
             <span class="pill pill--${issue.severity}">${issue.severity}</span>
+            <span class="pill pill--info">${escapeHtml(issue.category)}</span>
             <span class="issue-card__title">${escapeHtml(issue.rule_id)}</span>
             ${issue.table_name ? `<code>${escapeHtml(issue.table_name)}</code>` : ""}
             ${issue.column_name ? `<code>${escapeHtml(issue.column_name)}</code>` : ""}

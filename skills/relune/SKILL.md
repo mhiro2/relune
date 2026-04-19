@@ -201,8 +201,10 @@ Detect structural issues and anti-patterns. Note: `--sql-text` is not available 
 relune lint --sql schema.sql
 relune lint --sql schema.sql --format json
 relune lint --sql schema.sql --format json -o lint.json
+relune lint --sql schema.sql --profile strict --rule-category documentation
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
+relune lint --sql schema.sql --exclude-rules missing-table-comment --except-table audit_*
 relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 ```
 
@@ -210,11 +212,15 @@ relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 |--------|--------|---------|
 | `--format` | `text`, `json` | `text` |
 | `-o`, `--out` | Output file path | stdout |
+| `--profile` | `default`, `strict` | `default` |
 | `--rules` | Repeatable; run only these rules (kebab-case IDs) | all rules |
+| `--exclude-rules` | Repeatable; remove rules from the active set | -- |
+| `--rule-category` | Repeatable; keep `structure`, `relationships`, `naming`, `documentation` | all categories |
+| `--except-table` | Repeatable table pattern suppression | -- |
 | `--deny` | `error`, `warning`, `info`, `hint` -- min severity for non-zero exit | -- |
 | `--fail-on-warning` | Non-zero exit on warning diagnostics | -- |
 
-Rule categories: primary keys, orphan tables, naming conventions, FK indexes, nullable FK risks.
+Rule categories cover structure, relationships, naming conventions, and documentation. `strict` adds column comment coverage on top of the default schema review profile.
 `--deny` applies to lint issues and parse diagnostics together, so warning-level parser diagnostics now fail the command when the configured threshold includes warnings.
 
 ### diff

@@ -158,7 +158,11 @@ Run built-in rules on the schema. Inputs: **`--sql`**, **`--schema-json`**, or *
 |--------|-------------|
 | `--format text\|json` | Report format |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
+| `--profile default\|strict` | Seed rule set for schema review |
 | `--rules <RULE>` | Repeatable; run only these rules |
+| `--exclude-rules <RULE>` | Repeatable; remove rules from the active set |
+| `--rule-category <CATEGORY>` | Repeatable; keep only `structure`, `relationships`, `naming`, `documentation` |
+| `--except-table <PATTERN>` | Repeatable; suppress issues for matching tables |
 | `--deny error\|warning\|info\|hint` | Minimum severity for non-zero exit |
 | `--fail-on-warning` | Shortcut for treating warning diagnostics as failures |
 
@@ -166,11 +170,13 @@ Run built-in rules on the schema. Inputs: **`--sql`**, **`--schema-json`**, or *
 relune lint --sql schema.sql
 relune lint --sql schema.sql --format json
 relune lint --sql schema.sql --format json -o lint.json
+relune lint --sql schema.sql --profile strict --rule-category documentation
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
+relune lint --sql schema.sql --exclude-rules missing-table-comment --except-table audit_*
 ```
 
-Rule IDs are **kebab-case** (for example `missing-foreign-key-index`, `non-snake-case-identifier`). Categories include primary keys, orphan tables, naming, FK indexes, nullable FK risks, and related heuristics.
+Rule IDs are **kebab-case** (for example `missing-foreign-key-index`, `missing-table-comment`, `circular-foreign-key`). `default` is the everyday schema review profile; `strict` additionally enforces column comment coverage. Categories are `structure`, `relationships`, `naming`, and `documentation`.
 
 ---
 

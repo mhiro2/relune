@@ -1,14 +1,14 @@
 //! Lint command implementation.
 
-use anyhow::Context;
-
 use super::input::InputSelection;
-use crate::cli::{ColorWhen, LintArgs, LintFormat, LintSeverity};
+use crate::cli::{
+    ColorWhen, LintArgs, LintFormat, LintProfileArg, LintRuleCategoryArg, LintSeverity,
+};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{check_diagnostics_at_or_above, print_success, write_output};
 use relune_app::{LintFormat as AppLintFormat, LintRequest, format_lint_text, lint};
-use relune_core::Severity;
+use relune_core::{LintProfile, LintRuleCategory, Severity};
 
 /// Run the lint command.
 pub fn run_lint(
@@ -29,16 +29,25 @@ pub fn run_lint(
     // Build request
     let request = LintRequest {
         input,
+        profile: lint_profile_to_core(merged.profile),
         format: match merged.format {
             LintFormat::Text => AppLintFormat::Text,
             LintFormat::Json => AppLintFormat::Json,
         },
-        rules: args.rules.clone(),
+        rules: merged.rules,
+        exclude_rules: merged.exclude_rules,
+        categories: merged
+            .rule_categories
+            .into_iter()
+            .map(lint_category_to_core)
+            .collect(),
+        except_tables: merged.except_tables,
         fail_on,
     };
 
     // Execute lint
-    let result = lint(request).context("Failed to lint schema")?;
+    let result = lint(request)
+        .map_err(|error| CliError::general(anyhow::anyhow!("Failed to lint schema: {error}")))?;
 
     let diagnostic_threshold = merged
         .deny
@@ -54,9 +63,11 @@ pub fn run_lint(
 
     // Format and write output.
     let output = match merged.format {
-        LintFormat::Json => {
-            serde_json::to_string_pretty(&result).context("Failed to serialize result to JSON")?
-        }
+        LintFormat::Json => serde_json::to_string_pretty(&result).map_err(|error| {
+            CliError::general(anyhow::anyhow!(
+                "Failed to serialize result to JSON: {error}"
+            ))
+        })?,
         LintFormat::Text => format_lint_text(&result),
     };
     write_output(&output, args.out.as_deref(), color)?;
@@ -89,5 +100,21 @@ const fn lint_severity_to_core(severity: LintSeverity) -> Severity {
         LintSeverity::Warning => Severity::Warning,
         LintSeverity::Info => Severity::Info,
         LintSeverity::Hint => Severity::Hint,
+    }
+}
+
+const fn lint_profile_to_core(profile: LintProfileArg) -> LintProfile {
+    match profile {
+        LintProfileArg::Default => LintProfile::Default,
+        LintProfileArg::Strict => LintProfile::Strict,
+    }
+}
+
+const fn lint_category_to_core(category: LintRuleCategoryArg) -> LintRuleCategory {
+    match category {
+        LintRuleCategoryArg::Structure => LintRuleCategory::Structure,
+        LintRuleCategoryArg::Relationships => LintRuleCategory::Relationships,
+        LintRuleCategoryArg::Naming => LintRuleCategory::Naming,
+        LintRuleCategoryArg::Documentation => LintRuleCategory::Documentation,
     }
 }

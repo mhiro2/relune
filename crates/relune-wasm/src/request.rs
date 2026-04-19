@@ -9,7 +9,7 @@ use relune_app::{
     LayoutDirection, LayoutSpec, LintFormat, LintRequest, OutputFormat, RenderOptions,
     RenderRequest, RenderTheme, RouteStyle,
 };
-use relune_core::Severity;
+use relune_core::{LintProfile, LintRuleCategory, Severity};
 use serde::{Deserialize, Serialize};
 
 /// Grouping strategy as exposed to the WASM/JS API.
@@ -296,12 +296,24 @@ pub struct WasmLintRequest {
     pub sql: Option<String>,
     /// Pre-normalized schema JSON (optional, mutually exclusive with sql).
     pub schema_json: Option<String>,
+    /// Lint profile used to seed the active rule set.
+    #[serde(default)]
+    pub profile: Option<LintProfile>,
     /// Output format.
     #[serde(default)]
     pub format: Option<LintFormat>,
     /// Optional specific rules to run.
     #[serde(default)]
     pub rules: Vec<String>,
+    /// Optional rule IDs to exclude from the active rule set.
+    #[serde(default)]
+    pub exclude_rules: Vec<String>,
+    /// Optional rule categories to keep.
+    #[serde(default)]
+    pub categories: Vec<LintRuleCategory>,
+    /// Table patterns to suppress from the final report.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
     /// Minimum severity that should be treated as failure.
     #[serde(default)]
     pub fail_on: Option<Severity>,
@@ -312,8 +324,12 @@ impl WasmLintRequest {
     pub fn to_lint_request(&self) -> Result<LintRequest, String> {
         Ok(LintRequest {
             input: wasm_input_source(self.sql.as_deref(), self.schema_json.as_deref())?,
+            profile: self.profile.unwrap_or_default(),
             format: self.format.unwrap_or(LintFormat::Json),
             rules: self.rules.clone(),
+            exclude_rules: self.exclude_rules.clone(),
+            categories: self.categories.clone(),
+            except_tables: self.except_tables.clone(),
             fail_on: self.fail_on,
         })
     }
@@ -563,8 +579,12 @@ mod tests {
         let req = WasmLintRequest {
             sql: Some("CREATE TABLE users (name TEXT);".to_string()),
             schema_json: None,
+            profile: None,
             format: None,
             rules: vec!["no-primary-key".to_string()],
+            exclude_rules: vec![],
+            categories: vec![],
+            except_tables: vec![],
             fail_on: Some(Severity::Warning),
         };
 

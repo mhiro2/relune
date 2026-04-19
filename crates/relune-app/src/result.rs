@@ -365,6 +365,8 @@ pub struct ExportResult {
 /// Result of a lint operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintResult {
+    /// Schema review configuration summary.
+    pub review: LintReview,
     /// Lint issues found.
     pub issues: Vec<relune_core::LintIssue>,
     /// Statistics.
@@ -372,6 +374,20 @@ pub struct LintResult {
     /// Diagnostics collected during processing.
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Summary of the active schema review configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LintReview {
+    /// Applied lint profile.
+    pub profile: relune_core::LintProfile,
+    /// Active rules after filters are resolved.
+    pub active_rules: Vec<relune_core::LintRuleMetadata>,
+    /// Exception table patterns used to suppress issues.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
+    /// Number of issues suppressed by table exception patterns.
+    pub suppressed_issue_count: usize,
 }
 
 impl LintResult {
