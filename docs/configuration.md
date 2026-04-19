@@ -164,8 +164,15 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | Key | Values |
 |-----|--------|
 | `format` | `text`, `json` |
+| `profile` | `default`, `strict` |
+| `rules` | Array of kebab-case rule IDs to run instead of the profile defaults |
+| `exclude_rules` | Array of kebab-case rule IDs to remove from the active set |
+| `categories` | Array of `structure`, `relationships`, `naming`, `documentation` |
+| `except_tables` | Array of table patterns to suppress from the report |
 | `deny` | `error`, `warning`, `info`, `hint` — minimum severity for a non-zero exit when not overridden by `--deny` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures when `deny` is unset |
+
+`default` is the balanced schema review profile. `strict` adds full column comment coverage checks. CLI flags override config values when provided, and array settings follow the same rule: if you pass any CLI values for `rules`, `exclude_rules`, `categories`, or `except_tables`, those values replace the config list for that key.
 
 ---
 

@@ -197,7 +197,7 @@ CLI merges **defaults → TOML file → flags** for command settings (`render`, 
 
 Diagnostics are a first-class stream: parse errors, recoverable warnings, unsupported DDL, layout notices, and lint findings. Each carries a **stable code** and severity suitable for CI (`--fail-on-warning`, `--deny`). Partial success (warnings + output) is preferred over hard failure for exploratory use.
 
-`LintIssue` separates **stable identifiers** (`table_id` — matches `Table::stable_id`) from **display names** (`table_name` — human-readable, schema-qualified). Renderers and overlay builders use `table_id` to map issues to diagram nodes without ambiguity in multi-schema environments; CLI and text output use `table_name` for readability.
+`LintIssue` separates **stable identifiers** (`table_id` — matches `Table::stable_id`) from **display names** (`table_name` — human-readable, schema-qualified), and now also carries a **review category** so CLI / JSON output can group issues into structure, relationships, naming, and documentation review lanes. Renderers and overlay builders use `table_id` to map issues to diagram nodes without ambiguity in multi-schema environments; CLI and text output use `table_name` for readability. `relune-app::LintResult` additionally includes a `review` summary that records the applied profile, active rule catalog, and suppressed issues after table exceptions.
 
 ---
 
