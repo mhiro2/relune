@@ -4,7 +4,9 @@
 
 use std::path::PathBuf;
 
-use relune_core::{FilterSpec, FocusSpec, GroupingSpec, LayoutSpec, SqlDialect};
+use relune_core::{
+    FilterSpec, FocusSpec, GroupingSpec, LayoutSpec, LintProfile, LintRuleCategory, SqlDialect,
+};
 use serde::{Deserialize, Serialize};
 
 /// Source of input schema data.
@@ -392,9 +394,21 @@ pub struct LintRequest {
     /// Output format.
     #[serde(default)]
     pub format: LintFormat,
-    /// Optional specific rules to run. If empty, runs all rules.
+    /// Lint profile used to seed the active rule set.
+    #[serde(default)]
+    pub profile: LintProfile,
+    /// Optional specific rules to run. If set, this overrides the profile defaults.
     #[serde(default)]
     pub rules: Vec<String>,
+    /// Optional rule IDs to exclude after profile/rule/category selection.
+    #[serde(default)]
+    pub exclude_rules: Vec<String>,
+    /// Optional categories to keep after the base rule set is resolved.
+    #[serde(default)]
+    pub categories: Vec<LintRuleCategory>,
+    /// Table patterns to suppress from the final report.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
     /// Minimum severity that causes non-zero exit.
     #[serde(default)]
     pub fail_on: Option<relune_core::Severity>,
@@ -420,6 +434,34 @@ impl LintRequest {
     #[must_use]
     pub fn with_rules(mut self, rules: Vec<String>) -> Self {
         self.rules = rules;
+        self
+    }
+
+    /// Set rules to exclude from the active rule set.
+    #[must_use]
+    pub fn with_exclude_rules(mut self, rules: Vec<String>) -> Self {
+        self.exclude_rules = rules;
+        self
+    }
+
+    /// Restrict the active rule set to specific categories.
+    #[must_use]
+    pub fn with_categories(mut self, categories: Vec<LintRuleCategory>) -> Self {
+        self.categories = categories;
+        self
+    }
+
+    /// Set the lint profile.
+    #[must_use]
+    pub const fn with_profile(mut self, profile: LintProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// Suppress issues for tables matching the given patterns.
+    #[must_use]
+    pub fn with_except_tables(mut self, patterns: Vec<String>) -> Self {
+        self.except_tables = patterns;
         self
     }
 

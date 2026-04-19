@@ -1,6 +1,6 @@
 //! Resolve [`relune_core::Schema`] from [`crate::request::InputSource`].
 
-use relune_core::{Diagnostic, Schema};
+use relune_core::{Diagnostic, Schema, SqlDialect};
 use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
 use tracing::info;
 
@@ -12,10 +12,25 @@ pub const MAX_INPUT_FILE_SIZE_BYTES: u64 = 8 * 1024 * 1024;
 /// Maximum size for direct text/JSON input (same limit as file input for consistency).
 const MAX_TEXT_INPUT_SIZE_BYTES: usize = 8 * 1024 * 1024;
 
+/// Extra context resolved while loading schema input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SchemaInputContext {
+    /// Whether table/column comments can be reviewed reliably for this input.
+    pub supports_comment_review: bool,
+}
+
 /// Load a schema from the given input source.
 pub(crate) fn schema_from_input(
     input: &InputSource,
 ) -> Result<(Schema, Vec<Diagnostic>), AppError> {
+    let (schema, diagnostics, _context) = schema_from_input_with_context(input)?;
+    Ok((schema, diagnostics))
+}
+
+/// Load a schema plus resolved input capabilities.
+pub(crate) fn schema_from_input_with_context(
+    input: &InputSource,
+) -> Result<(Schema, Vec<Diagnostic>, SchemaInputContext), AppError> {
     match input {
         InputSource::SqlText { sql, dialect } => {
             ensure_text_size_within_limit(sql.len(), "SQL text")?;
@@ -28,7 +43,13 @@ pub(crate) fn schema_from_input(
                 "parsed SQL text input"
             );
             match output.schema {
-                Some(schema) => Ok((schema, output.diagnostics)),
+                Some(schema) => Ok((
+                    schema,
+                    output.diagnostics,
+                    SchemaInputContext {
+                        supports_comment_review: supports_comment_review_for_sql(output.dialect),
+                    },
+                )),
                 None => Err(AppError::input_with_type(
                     "sql_text",
                     "Failed to parse SQL: no schema produced",
@@ -48,7 +69,13 @@ pub(crate) fn schema_from_input(
                 "parsed SQL file input"
             );
             match output.schema {
-                Some(schema) => Ok((schema, output.diagnostics)),
+                Some(schema) => Ok((
+                    schema,
+                    output.diagnostics,
+                    SchemaInputContext {
+                        supports_comment_review: supports_comment_review_for_sql(output.dialect),
+                    },
+                )),
                 None => Err(AppError::input_with_type(
                     "sql_file",
                     "Failed to parse SQL: no schema produced",
@@ -58,19 +85,61 @@ pub(crate) fn schema_from_input(
         InputSource::SchemaJson { json } => {
             ensure_text_size_within_limit(json.len(), "Schema JSON")?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(json)?;
-            Ok((relune_core::export::import_schema(&export), vec![]))
+            Ok((
+                relune_core::export::import_schema(&export),
+                vec![],
+                SchemaInputContext {
+                    supports_comment_review: false,
+                },
+            ))
         }
         InputSource::SchemaJsonFile { path } => {
             ensure_file_size_within_limit(path)?;
             let json = std::fs::read_to_string(path)?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(&json)?;
-            Ok((relune_core::export::import_schema(&export), vec![]))
+            Ok((
+                relune_core::export::import_schema(&export),
+                vec![],
+                SchemaInputContext {
+                    supports_comment_review: false,
+                },
+            ))
         }
         #[cfg(feature = "introspect")]
         InputSource::DbUrl { url } => {
             let schema = schema_from_db_url(url)?;
-            Ok((schema, vec![]))
+            let dialect = dialect_from_db_url(url);
+            Ok((
+                schema,
+                vec![],
+                SchemaInputContext {
+                    supports_comment_review: dialect.is_some_and(supports_comment_review_for_db),
+                },
+            ))
         }
+    }
+}
+
+const fn supports_comment_review_for_sql(dialect: SqlDialect) -> bool {
+    matches!(dialect, SqlDialect::Postgres)
+}
+
+#[cfg(feature = "introspect")]
+const fn supports_comment_review_for_db(dialect: SqlDialect) -> bool {
+    matches!(dialect, SqlDialect::Postgres | SqlDialect::Mysql)
+}
+
+#[cfg(feature = "introspect")]
+fn dialect_from_db_url(url: &str) -> Option<SqlDialect> {
+    let trimmed = url.trim().to_ascii_lowercase();
+    if trimmed.starts_with("postgres://") || trimmed.starts_with("postgresql://") {
+        Some(SqlDialect::Postgres)
+    } else if trimmed.starts_with("mysql://") || trimmed.starts_with("mariadb://") {
+        Some(SqlDialect::Mysql)
+    } else if trimmed.starts_with("sqlite:") {
+        Some(SqlDialect::Sqlite)
+    } else {
+        None
     }
 }
 

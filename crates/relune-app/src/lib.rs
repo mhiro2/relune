@@ -45,7 +45,7 @@ pub use request::{
 // Re-export result types
 pub use result::{
     ColumnDetails, DiffResult, DocResult, ExportResult, ForeignKeyDetails, IndexDetails,
-    InspectResult, LintResult, RenderResult, RenderStats, SchemaSummary, TableDetails,
+    InspectResult, LintResult, LintReview, RenderResult, RenderStats, SchemaSummary, TableDetails,
     TableSummary,
 };
 
