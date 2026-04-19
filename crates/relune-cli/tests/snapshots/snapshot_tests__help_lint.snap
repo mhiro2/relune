@@ -57,8 +57,30 @@ Options:
   -o, --out <FILE>
           Output file path; stdout if omitted
 
+      --profile <PROFILE>
+          Review profile used to seed the active rule set
+
+          Possible values:
+          - default: Balanced schema review profile for CI and day-to-day review
+          - strict:  Stricter profile with full comment coverage checks
+
       --rules <RULE>
           Restrict execution to specific rules (can be repeated)
+
+      --exclude-rules <RULE>
+          Remove specific rules from the active rule set (can be repeated)
+
+      --rule-category <CATEGORY>
+          Restrict execution to specific rule categories (can be repeated)
+
+          Possible values:
+          - structure:     Structural schema design rules
+          - relationships: Foreign key and relational integrity rules
+          - naming:        Naming convention rules
+          - documentation: Table and column comment coverage rules
+
+      --except-table <PATTERN>
+          Suppress issues for matching tables (can be repeated, supports `*`)
 
       --deny <SEVERITY>
           Minimum severity that causes non-zero exit

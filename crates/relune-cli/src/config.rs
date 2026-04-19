@@ -48,6 +48,13 @@
 //! format = "text" # text, json
 //! dialect = "auto" # auto, postgres, mysql, sqlite
 //! fail_on_warning = false
+//!
+//! [lint]
+//! profile = "default" # default, strict
+//! rules = ["missing-foreign-key-index"]
+//! exclude_rules = ["missing-column-comment"]
+//! categories = ["relationships"]
+//! except_tables = ["schema_migrations"]
 //! ```
 //!
 //! Config layering order (later overrides earlier):
@@ -228,6 +235,21 @@ pub struct LintConfig {
     /// Output format.
     #[serde(default)]
     pub format: Option<LintFormatConfig>,
+    /// Review profile used to seed the active rule set.
+    #[serde(default)]
+    pub profile: Option<LintProfileConfig>,
+    /// Optional rule IDs to run.
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Optional rule IDs to exclude.
+    #[serde(default)]
+    pub exclude_rules: Vec<String>,
+    /// Optional categories to keep.
+    #[serde(default)]
+    pub categories: Vec<LintRuleCategoryConfig>,
+    /// Table patterns to suppress from the report.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
     /// Minimum severity that causes non-zero exit.
     #[serde(default)]
     pub deny: Option<LintSeverityConfig>,
@@ -280,6 +302,24 @@ pub enum LintFormatConfig {
     Json,
 }
 
+/// Lint profile configuration (mirrors CLI `LintProfileArg`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintProfileConfig {
+    Default,
+    Strict,
+}
+
+/// Lint category configuration (mirrors CLI `LintRuleCategoryArg`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintRuleCategoryConfig {
+    Structure,
+    Relationships,
+    Naming,
+    Documentation,
+}
+
 /// Lint severity configuration (mirrors CLI `LintSeverity`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -317,6 +357,26 @@ impl From<LintFormatConfig> for crate::cli::LintFormat {
         match value {
             LintFormatConfig::Text => Self::Text,
             LintFormatConfig::Json => Self::Json,
+        }
+    }
+}
+
+impl From<LintProfileConfig> for crate::cli::LintProfileArg {
+    fn from(value: LintProfileConfig) -> Self {
+        match value {
+            LintProfileConfig::Default => Self::Default,
+            LintProfileConfig::Strict => Self::Strict,
+        }
+    }
+}
+
+impl From<LintRuleCategoryConfig> for crate::cli::LintRuleCategoryArg {
+    fn from(value: LintRuleCategoryConfig) -> Self {
+        match value {
+            LintRuleCategoryConfig::Structure => Self::Structure,
+            LintRuleCategoryConfig::Relationships => Self::Relationships,
+            LintRuleCategoryConfig::Naming => Self::Naming,
+            LintRuleCategoryConfig::Documentation => Self::Documentation,
         }
     }
 }
@@ -489,6 +549,23 @@ impl ReluneConfig {
                 .format
                 .or_else(|| self.lint.format.map(Into::into))
                 .unwrap_or_default(),
+            profile: args
+                .profile
+                .or_else(|| self.lint.profile.map(Into::into))
+                .unwrap_or_default(),
+            rules: merge_string_values(&args.rules, &self.lint.rules),
+            exclude_rules: merge_string_values(&args.exclude_rules, &self.lint.exclude_rules),
+            rule_categories: if args.rule_categories.is_empty() {
+                self.lint
+                    .categories
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect()
+            } else {
+                args.rule_categories.clone()
+            },
+            except_tables: merge_string_values(&args.except_tables, &self.lint.except_tables),
             deny: args.deny.or_else(|| self.lint.deny.map(Into::into)),
             fail_on_warning: args.fail_on_warning || self.lint.fail_on_warning.unwrap_or(false),
         }
@@ -540,6 +617,14 @@ fn merge_table_filters(cli: &[String], viewpoint: &[String], config: &[String]) 
         viewpoint.to_vec()
     } else {
         config.to_vec()
+    }
+}
+
+fn merge_string_values(cli: &[String], config: &[String]) -> Vec<String> {
+    if cli.is_empty() {
+        config.to_vec()
+    } else {
+        cli.to_vec()
     }
 }
 
@@ -671,6 +756,11 @@ pub struct MergedDocConfig {
 #[derive(Debug, Clone)]
 pub struct MergedLintConfig {
     pub format: crate::cli::LintFormat,
+    pub profile: crate::cli::LintProfileArg,
+    pub rules: Vec<String>,
+    pub exclude_rules: Vec<String>,
+    pub rule_categories: Vec<crate::cli::LintRuleCategoryArg>,
+    pub except_tables: Vec<String>,
     pub deny: Option<crate::cli::LintSeverity>,
     pub fail_on_warning: bool,
 }
@@ -1330,16 +1420,21 @@ mod tests {
             sql: None,
             db_url: None,
             schema_json: None,
+            dialect: crate::cli::DialectArg::Auto,
             format: None,
             out: None,
+            profile: None,
             rules: vec![],
+            exclude_rules: vec![],
+            rule_categories: vec![],
+            except_tables: vec![],
             deny: None, // Not specified - should use config
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
         };
 
         let merged = config.merge_lint_args(&args);
         assert_eq!(merged.format, LintFormat::Json);
+        assert_eq!(merged.profile, crate::cli::LintProfileArg::Default);
         assert_eq!(merged.deny, Some(crate::cli::LintSeverity::Warning));
         assert!(!merged.fail_on_warning);
     }

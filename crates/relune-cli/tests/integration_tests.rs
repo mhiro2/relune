@@ -1198,6 +1198,111 @@ mod lint_tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("PARSE004"));
     }
+
+    #[test]
+    fn lint_strict_profile_reports_missing_column_comment() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = temp.path().join("schema.sql");
+        fs::write(
+            &sql_path,
+            r"
+                CREATE TABLE users (
+                    id INT PRIMARY KEY,
+                    name TEXT
+                );
+                COMMENT ON TABLE users IS 'Application users';
+            ",
+        )
+        .expect("write SQL fixture");
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--profile")
+            .arg("strict")
+            .arg("--format")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "lint should succeed");
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("Output should be valid JSON");
+        let issues = parsed["issues"]
+            .as_array()
+            .expect("issues should be an array");
+        assert!(issues.iter().any(|issue| {
+            issue["rule_id"] == serde_json::Value::String("missing-column-comment".to_string())
+        }));
+    }
+
+    #[test]
+    fn lint_except_table_suppresses_matching_table() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = temp.path().join("schema.sql");
+        fs::write(
+            &sql_path,
+            r"
+                CREATE TABLE audit_log (
+                    event_name TEXT
+                );
+            ",
+        )
+        .expect("write SQL fixture");
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--except-table")
+            .arg("audit_*")
+            .arg("--format")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "lint should succeed");
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("Output should be valid JSON");
+        assert_eq!(parsed["stats"]["total"], 0);
+        assert!(
+            parsed["review"]["suppressed_issue_count"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
+        );
+    }
+
+    #[test]
+    fn lint_rejects_explicit_documentation_rule_for_sqlite_sql() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = temp.path().join("schema.sql");
+        fs::write(
+            &sql_path,
+            r"
+                CREATE TABLE posts (
+                    id INTEGER PRIMARY KEY
+                );
+            ",
+        )
+        .expect("write SQL fixture");
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--dialect")
+            .arg("sqlite")
+            .arg("--rules")
+            .arg("missing-table-comment")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Documentation lint rules are unavailable"));
+        assert!(stderr.contains("missing-table-comment"));
+    }
 }
 
 // ============================================================================

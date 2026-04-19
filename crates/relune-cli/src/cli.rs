@@ -587,9 +587,25 @@ pub struct LintArgs {
     #[arg(short = 'o', long = "out", value_name = "FILE")]
     pub out: Option<PathBuf>,
 
+    /// Review profile used to seed the active rule set.
+    #[arg(long = "profile", value_enum)]
+    pub profile: Option<LintProfileArg>,
+
     /// Restrict execution to specific rules (can be repeated).
     #[arg(long = "rules", value_name = "RULE")]
     pub rules: Vec<String>,
+
+    /// Remove specific rules from the active rule set (can be repeated).
+    #[arg(long = "exclude-rules", value_name = "RULE")]
+    pub exclude_rules: Vec<String>,
+
+    /// Restrict execution to specific rule categories (can be repeated).
+    #[arg(long = "rule-category", value_name = "CATEGORY", value_enum)]
+    pub rule_categories: Vec<LintRuleCategoryArg>,
+
+    /// Suppress issues for matching tables (can be repeated, supports `*`).
+    #[arg(long = "except-table", value_name = "PATTERN")]
+    pub except_tables: Vec<String>,
 
     /// Minimum severity that causes non-zero exit.
     #[arg(long = "deny", value_name = "SEVERITY", value_enum)]
@@ -609,6 +625,31 @@ pub enum LintFormat {
     Text,
     /// JSON output.
     Json,
+}
+
+/// Review profile for lint command.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintProfileArg {
+    /// Balanced schema review profile for CI and day-to-day review.
+    #[default]
+    Default,
+    /// Stricter profile with full comment coverage checks.
+    Strict,
+}
+
+/// Rule category for lint command filtering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintRuleCategoryArg {
+    /// Structural schema design rules.
+    Structure,
+    /// Foreign key and relational integrity rules.
+    Relationships,
+    /// Naming convention rules.
+    Naming,
+    /// Table and column comment coverage rules.
+    Documentation,
 }
 
 /// Severity level for lint --deny option.
