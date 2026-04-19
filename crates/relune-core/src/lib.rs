@@ -56,7 +56,10 @@ pub use graph::{
     collect_sql_relations,
 };
 pub use layout::{Cardinality, EdgeRoute, RouteStyle};
-pub use lint::{LintIssue, LintResult, LintRuleId, LintStats, lint_schema};
+pub use lint::{
+    LintIssue, LintProfile, LintResult, LintRuleCategory, LintRuleId, LintRuleMetadata, LintStats,
+    lint_schema,
+};
 pub use model::{
     Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, SchemaStats, SqlDialect,
     Table, TableId, ValidationError, View, normalize_identifier,
