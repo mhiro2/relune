@@ -6,7 +6,7 @@ catalog:
   esbuild: 0.28.0
   oxfmt: 0.44.0
   oxlint: 1.60.0
-  "@typescript/native-preview": 7.0.0-dev.20260407.1
+  "@typescript/native-preview": 7.0.0-dev.20260415.1
 
 blockExoticSubdeps: true
 minimumReleaseAge: 10080
