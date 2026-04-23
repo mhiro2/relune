@@ -221,12 +221,10 @@ fn read_sniffed_file(path: &Path, subject: &str, dialect: SqlDialect) -> CliResu
     })?;
 
     if looks_like_schema_json(&content) {
-        return ensure_input_file_metadata(path, "Failed to read schema JSON file")
-            .map(|()| InputSource::schema_json_file(path));
+        Ok(InputSource::schema_json(content))
+    } else {
+        Ok(InputSource::sql_text_with_dialect(content, dialect))
     }
-
-    ensure_input_file_metadata(path, &format!("Failed to read {subject} input file"))
-        .map(|()| InputSource::sql_file_with_dialect(path, dialect))
 }
 
 fn looks_like_schema_json(content: &str) -> bool {
