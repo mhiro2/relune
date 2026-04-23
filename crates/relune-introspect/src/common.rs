@@ -5,9 +5,7 @@
 //! (postgres, mysql, sqlite) queries its own catalog/metadata and produces these
 //! common raw types, which are then mapped uniformly.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 
 use relune_core::{
     Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, Table, TableId, View,
@@ -163,11 +161,19 @@ pub struct RawSchema {
 // Mapping functions
 // ============================================================================
 
-/// Generates a stable hash-based ID from a string.
+/// Generates a stable hash-based ID from a string using FNV-1a.
+///
+/// Unlike `DefaultHasher`, FNV-1a produces identical output across
+/// Rust toolchain versions, so IDs remain stable for diff and caching.
 fn generate_stable_id(input: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    hasher.finish()
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0100_0000_01b3;
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in input.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
 }
 
 /// Generates a `TableId` from schema name and table name.
@@ -444,5 +450,19 @@ mod tests {
 
         let table = schema.tables.first().expect("table should be mapped");
         assert!(table.columns[0].is_primary_key);
+    }
+
+    #[test]
+    fn generate_stable_id_is_deterministic() {
+        // Fixed expected values guarantee the hash algorithm is version-stable.
+        assert_eq!(generate_stable_id("public.users"), 0x10a3_9729_896e_6dda);
+        assert_eq!(
+            generate_stable_id("public.users"),
+            generate_stable_id("public.users")
+        );
+        assert_ne!(
+            generate_stable_id("public.users"),
+            generate_stable_id("public.orders")
+        );
     }
 }

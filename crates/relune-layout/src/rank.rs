@@ -195,7 +195,11 @@ fn assign_ranks_via_components(graph: &LayoutGraph) -> RankAssignment {
     build_rank_assignment(graph, node_rank)
 }
 
-#[allow(clippy::items_after_statements)] // Keep Tarjan helpers scoped to SCC construction.
+/// Iterative Tarjan's SCC algorithm.
+///
+/// Uses an explicit work stack instead of recursion so that large or
+/// long-chain graphs (especially under WASM's ~1 MB stack) cannot
+/// overflow.
 fn strongly_connected_components(graph: &LayoutGraph) -> StronglyConnectedComponents {
     let n = graph.nodes.len();
     let mut adjacency = vec![Vec::new(); n];
@@ -211,68 +215,87 @@ fn strongly_connected_components(graph: &LayoutGraph) -> StronglyConnectedCompon
         }
     }
 
-    struct TarjanState {
-        index: usize,
-        indices: Vec<Option<usize>>,
-        lowlinks: Vec<usize>,
-        stack: Vec<usize>,
-        on_stack: Vec<bool>,
-        component_of: Vec<usize>,
-        components: Vec<Vec<usize>>,
-    }
+    let mut index: usize = 0;
+    let mut indices: Vec<Option<usize>> = vec![None; n];
+    let mut lowlinks: Vec<usize> = vec![0; n];
+    let mut scc_stack: Vec<usize> = Vec::new();
+    let mut on_stack: Vec<bool> = vec![false; n];
+    let mut component_of: Vec<usize> = vec![0; n];
+    let mut components: Vec<Vec<usize>> = Vec::new();
 
-    fn strong_connect(idx: usize, adjacency: &[Vec<usize>], state: &mut TarjanState) {
-        let current_index = state.index;
-        state.indices[idx] = Some(current_index);
-        state.lowlinks[idx] = current_index;
-        state.index += 1;
-        state.stack.push(idx);
-        state.on_stack[idx] = true;
+    // Each frame: (node, neighbor_cursor). When we first visit a node
+    // we set cursor = 0 and push it onto scc_stack. On resume we pick
+    // up where we left off in its neighbor list.
+    let mut work: Vec<(usize, usize)> = Vec::new();
 
-        for &neighbor in &adjacency[idx] {
-            if state.indices[neighbor].is_none() {
-                strong_connect(neighbor, adjacency, state);
-                state.lowlinks[idx] = state.lowlinks[idx].min(state.lowlinks[neighbor]);
-            } else if state.on_stack[neighbor] {
-                state.lowlinks[idx] =
-                    state.lowlinks[idx].min(state.indices[neighbor].unwrap_or_default());
-            }
+    for root in 0..n {
+        if indices[root].is_some() {
+            continue;
         }
 
-        if state.lowlinks[idx] == current_index {
-            let component_idx = state.components.len();
-            let mut component = Vec::new();
-            while let Some(node_idx) = state.stack.pop() {
-                state.on_stack[node_idx] = false;
-                state.component_of[node_idx] = component_idx;
-                component.push(node_idx);
-                if node_idx == idx {
+        work.push((root, 0));
+
+        while let Some((node, cursor)) = work.last_mut() {
+            let node = *node;
+
+            if *cursor == 0 {
+                // First visit — initialise Tarjan state for this node.
+                indices[node] = Some(index);
+                lowlinks[node] = index;
+                index += 1;
+                scc_stack.push(node);
+                on_stack[node] = true;
+            }
+
+            let neighbors = &adjacency[node];
+            let mut descended = false;
+
+            while *cursor < neighbors.len() {
+                let neighbor = neighbors[*cursor];
+                if indices[neighbor].is_none() {
+                    // Descend into unvisited neighbor (simulates recursion).
+                    *cursor += 1;
+                    work.push((neighbor, 0));
+                    descended = true;
                     break;
                 }
+                if on_stack[neighbor] {
+                    lowlinks[node] = lowlinks[node].min(indices[neighbor].unwrap_or_default());
+                }
+                *cursor += 1;
             }
-            state.components.push(component);
-        }
-    }
+            if descended {
+                continue;
+            }
 
-    let mut state = TarjanState {
-        index: 0,
-        indices: vec![None; n],
-        lowlinks: vec![0; n],
-        stack: Vec::new(),
-        on_stack: vec![false; n],
-        component_of: vec![0; n],
-        components: Vec::new(),
-    };
+            // All neighbors processed — equivalent of the post-recursion
+            // lowlink propagation and SCC extraction.
+            if lowlinks[node] == indices[node].unwrap_or_default() {
+                let comp_idx = components.len();
+                let mut component = Vec::new();
+                while let Some(top) = scc_stack.pop() {
+                    on_stack[top] = false;
+                    component_of[top] = comp_idx;
+                    component.push(top);
+                    if top == node {
+                        break;
+                    }
+                }
+                components.push(component);
+            }
 
-    for idx in 0..n {
-        if state.indices[idx].is_none() {
-            strong_connect(idx, &adjacency, &mut state);
+            work.pop();
+
+            // Propagate lowlink to parent frame.
+            if let Some((parent, _)) = work.last() {
+                lowlinks[*parent] = lowlinks[*parent].min(lowlinks[node]);
+            }
         }
     }
 
     StronglyConnectedComponents {
-        component_of: state.component_of,
-        components: state.components,
+        component_of,
+        components,
     }
 }
 

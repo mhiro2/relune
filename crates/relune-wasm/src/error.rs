@@ -54,6 +54,12 @@ impl From<serde_wasm_bindgen::Error> for WasmError {
     }
 }
 
+/// Converts a `WasmError` into a `JsValue` for the WASM boundary.
+///
+/// JS consumers may receive errors in one of three shapes:
+/// 1. **Structured object** — `{ message: string, code?: string }` (normal path via `serde_wasm_bindgen`).
+/// 2. **Plain string** — the error message only (fallback when serialization itself fails).
+/// 3. **Panic string** — from `console_error_panic_hook` if Rust panics (unrecoverable).
 impl From<WasmError> for JsValue {
     fn from(err: WasmError) -> Self {
         serde_wasm_bindgen::to_value(&err).unwrap_or_else(|_| Self::from_str(&err.message))
@@ -74,5 +80,25 @@ mod tests {
     fn input_errors_use_stable_code() {
         let err = WasmError::input("bad request");
         assert_eq!(err.code.as_deref(), Some("INPUT_ERROR"));
+    }
+
+    #[test]
+    fn with_code_sets_both_fields() {
+        let err = WasmError::with_code("failed", "CUSTOM_CODE");
+        assert_eq!(err.message, "failed");
+        assert_eq!(err.code.as_deref(), Some("CUSTOM_CODE"));
+    }
+
+    #[test]
+    fn new_error_has_no_code() {
+        let err = WasmError::new("something went wrong");
+        assert_eq!(err.message, "something went wrong");
+        assert!(err.code.is_none());
+    }
+
+    #[test]
+    fn display_shows_message() {
+        let err = WasmError::with_code("bad input", "INPUT_ERROR");
+        assert_eq!(err.to_string(), "bad input");
     }
 }

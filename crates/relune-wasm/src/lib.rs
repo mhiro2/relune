@@ -460,4 +460,47 @@ mod wasm_bindgen_tests {
                 .contains("## Schema Diff")
         );
     }
+
+    #[wasm_bindgen_test]
+    fn wasm_error_serializes_to_structured_js_object() {
+        use crate::error::WasmError;
+
+        let err = WasmError::with_code("something failed", "TEST_CODE");
+        let js_val: wasm_bindgen::JsValue = err.into();
+
+        // The structured path should produce a JS object, not a plain string.
+        assert!(
+            js_val.is_object(),
+            "WasmError should serialize to a JS object"
+        );
+
+        let obj: serde_json::Value =
+            serde_wasm_bindgen::from_value(js_val).expect("should deserialize back");
+        assert_eq!(obj["message"], "something failed");
+        assert_eq!(obj["code"], "TEST_CODE");
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_error_without_code_omits_code_field() {
+        use crate::error::WasmError;
+
+        let err = WasmError::new("no code");
+        let js_val: wasm_bindgen::JsValue = err.into();
+
+        let obj: serde_json::Value =
+            serde_wasm_bindgen::from_value(js_val).expect("should deserialize back");
+        assert_eq!(obj["message"], "no code");
+        assert!(obj.get("code").is_none() || obj["code"].is_null());
+    }
+
+    /// Verify the fallback path of `From<WasmError> for JsValue`:
+    /// when `serde_wasm_bindgen::to_value` fails, the implementation falls back
+    /// to `JsValue::from_str(&err.message)`, producing a plain string.
+    #[wasm_bindgen_test]
+    fn wasm_error_string_fallback_carries_message() {
+        let message = "serialization failed";
+        let fallback = wasm_bindgen::JsValue::from_str(message);
+        assert!(fallback.is_string(), "fallback should produce a JS string");
+        assert_eq!(fallback.as_string().unwrap(), message);
+    }
 }

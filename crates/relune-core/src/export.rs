@@ -163,20 +163,26 @@ fn export_index(idx: &Index) -> IndexExport {
 }
 
 /// Import a Schema from the stable JSON format.
+#[must_use]
 pub fn import_schema(export: &SchemaExport) -> Schema {
     Schema {
-        tables: export.tables.iter().map(import_table).collect(),
+        tables: export
+            .tables
+            .iter()
+            .enumerate()
+            .map(|(i, t)| import_table(i, t))
+            .collect(),
         views: vec![],
         enums: vec![],
     }
 }
 
 /// Import a single Table from the stable format.
-fn import_table(export: &TableExport) -> Table {
+fn import_table(index: usize, export: &TableExport) -> Table {
     use crate::model::TableId;
 
     Table {
-        id: TableId(0), // Stable ID is in stable_id field
+        id: TableId((index as u64) + 1),
         stable_id: export.id.clone(),
         schema_name: export.schema.clone(),
         name: export.name.clone(),
@@ -363,6 +369,40 @@ mod tests {
         };
 
         assert_eq!(roundtrip_schema(&schema), export_schema(&schema));
+    }
+
+    #[test]
+    fn test_import_assigns_unique_table_ids() {
+        let export = SchemaExport::new(vec![
+            TableExport {
+                id: "public.users".to_string(),
+                schema: Some("public".to_string()),
+                name: "users".to_string(),
+                columns: vec![],
+                foreign_keys: vec![],
+                indexes: vec![],
+            },
+            TableExport {
+                id: "public.orders".to_string(),
+                schema: Some("public".to_string()),
+                name: "orders".to_string(),
+                columns: vec![],
+                foreign_keys: vec![],
+                indexes: vec![],
+            },
+            TableExport {
+                id: "public.products".to_string(),
+                schema: Some("public".to_string()),
+                name: "products".to_string(),
+                columns: vec![],
+                foreign_keys: vec![],
+                indexes: vec![],
+            },
+        ]);
+
+        let schema = import_schema(&export);
+        let ids: Vec<_> = schema.tables.iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec![TableId(1), TableId(2), TableId(3)]);
     }
 
     #[test]

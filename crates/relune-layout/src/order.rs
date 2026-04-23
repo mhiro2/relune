@@ -199,12 +199,12 @@ fn count_crossings(
     // Note: Bit-packing assumes max 65536 nodes per rank and 65536 ranks
     let mut position: BTreeMap<usize, usize> = BTreeMap::new();
     for (rank_idx, rank_nodes) in nodes_by_rank.iter().enumerate() {
-        debug_assert!(
+        assert!(
             rank_idx < 65536,
             "rank index exceeds 16-bit limit (max 65536 ranks)"
         );
         for (pos, &node_idx) in rank_nodes.iter().enumerate() {
-            debug_assert!(
+            assert!(
                 pos < 65536,
                 "position within rank exceeds 16-bit limit (max 65536 nodes per rank)"
             );

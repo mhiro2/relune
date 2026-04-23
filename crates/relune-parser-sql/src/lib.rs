@@ -75,6 +75,57 @@ impl ParseOutput {
 }
 
 /// Context for tracking parsing state and generating IDs.
+/// Pre-computed byte offsets for each line start, enabling O(1) line
+/// lookup followed by a short character walk instead of scanning the
+/// entire input for every `Location → byte offset` conversion.
+struct LineOffsets {
+    /// Byte offset of the start of each 1-based line.
+    /// `starts[0]` is unused; `starts[1]` = 0 (line 1 starts at byte 0).
+    starts: Vec<usize>,
+    /// Total byte length of the input.
+    len: usize,
+}
+
+impl LineOffsets {
+    fn new(input: &str) -> Self {
+        let mut starts = vec![0, 0]; // index 0 unused, line 1 starts at byte 0
+        for (i, byte) in input.bytes().enumerate() {
+            if byte == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        Self {
+            starts,
+            len: input.len(),
+        }
+    }
+
+    fn location_to_offset(&self, input: &str, location: Location) -> Option<usize> {
+        if location.line == 0 || location.column == 0 {
+            return None;
+        }
+        let line = usize::try_from(location.line).ok()?;
+        let col = usize::try_from(location.column).ok()?;
+        let &line_start = self.starts.get(line)?;
+
+        // Walk characters from the line start to reach the target column.
+        let line_slice = &input[line_start..];
+        let mut char_col = 1usize;
+        for (byte_off, _ch) in line_slice.char_indices() {
+            if char_col == col {
+                return Some(line_start + byte_off);
+            }
+            char_col += 1;
+        }
+        // Column just past the last character in the line (or file).
+        if char_col == col {
+            Some((line_start + line_slice.len()).min(self.len))
+        } else {
+            None
+        }
+    }
+}
+
 struct ParseContext {
     /// Next table ID to assign.
     next_table_id: u64,
@@ -380,9 +431,13 @@ fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
     }
 }
 
-fn source_span_from_sql_span(input: &str, span: SqlSpan) -> Option<SourceSpan> {
-    let start = location_to_offset(input, span.start)?;
-    let end = location_to_offset(input, span.end)?;
+fn source_span_from_sql_span(
+    input: &str,
+    offsets: &LineOffsets,
+    span: SqlSpan,
+) -> Option<SourceSpan> {
+    let start = offsets.location_to_offset(input, span.start)?;
+    let end = offsets.location_to_offset(input, span.end)?;
     debug_assert!(
         end >= start,
         "sql span end must not precede start: {span:?}"
@@ -395,47 +450,25 @@ fn source_span_from_sql_span(input: &str, span: SqlSpan) -> Option<SourceSpan> {
     Some(SourceSpan::new(start, length))
 }
 
-fn location_to_offset(input: &str, location: Location) -> Option<usize> {
-    if location.line == 0 || location.column == 0 {
-        return None;
-    }
-
-    let target_line = usize::try_from(location.line).ok()?;
-    let target_column = usize::try_from(location.column).ok()?;
-    let mut line = 1usize;
-    let mut column = 1usize;
-
-    for (byte_offset, ch) in input.char_indices() {
-        if line == target_line && column == target_column {
-            return Some(byte_offset);
-        }
-
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-
-    if line == target_line && column == target_column {
-        Some(input.len())
-    } else {
-        None
-    }
-}
-
-fn span_from_spanned<T: Spanned>(input: &str, value: &T) -> Option<SourceSpan> {
+fn span_from_spanned<T: Spanned>(
+    input: &str,
+    offsets: &LineOffsets,
+    value: &T,
+) -> Option<SourceSpan> {
     let span = value.span();
     if span == SqlSpan::empty() {
         None
     } else {
-        source_span_from_sql_span(input, span)
+        source_span_from_sql_span(input, offsets, span)
     }
 }
 
-fn span_from_ident(input: &str, ident: &sqlparser::ast::Ident) -> Option<SourceSpan> {
-    source_span_from_sql_span(input, ident.span)
+fn span_from_ident(
+    input: &str,
+    offsets: &LineOffsets,
+    ident: &sqlparser::ast::Ident,
+) -> Option<SourceSpan> {
+    source_span_from_sql_span(input, offsets, ident.span)
 }
 
 fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
@@ -627,6 +660,7 @@ fn split_object_name_parts(name: &ObjectName) -> Vec<String> {
 fn warn_truncated_object_name(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     name: &ObjectName,
     max_parts: usize,
     context: &str,
@@ -645,43 +679,48 @@ fn warn_truncated_object_name(
                 "{context}: object name `{name}` has more than {max_parts} parts; ignoring leading qualifier(s) `{ignored}` and using `{retained}`"
             ),
         )
-        .with_span_opt(span_from_spanned(input, name)),
+        .with_span_opt(span_from_spanned(input, offsets,name)),
     );
 }
 
 fn split_object_name_with_diagnostics(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     name: &ObjectName,
     context: &str,
 ) -> (Option<String>, String) {
-    warn_truncated_object_name(ctx, input, name, 2, context);
+    warn_truncated_object_name(ctx, input, offsets, name, 2, context);
     split_object_name(name)
 }
 
 fn normalized_stable_id_for_object_name_with_diagnostics(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     name: &ObjectName,
     context: &str,
 ) -> String {
-    let (schema_name, object_name) = split_object_name_with_diagnostics(ctx, input, name, context);
+    let (schema_name, object_name) =
+        split_object_name_with_diagnostics(ctx, input, offsets, name, context);
     normalized_stable_id(schema_name.as_deref(), &object_name)
 }
 
 fn foreign_key_target(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     target: &ObjectName,
     context: &str,
 ) -> (Option<String>, String) {
-    split_object_name_with_diagnostics(ctx, input, target, context)
+    split_object_name_with_diagnostics(ctx, input, offsets, target, context)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build_foreign_key(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     constraint_name: Option<&sqlparser::ast::Ident>,
     from_columns: Vec<String>,
     foreign_table: &ObjectName,
@@ -690,7 +729,7 @@ fn build_foreign_key(
     on_update: Option<sqlparser::ast::ReferentialAction>,
     context: &str,
 ) -> ForeignKey {
-    let (to_schema, to_table) = foreign_key_target(ctx, input, foreign_table, context);
+    let (to_schema, to_table) = foreign_key_target(ctx, input, offsets, foreign_table, context);
     let to_columns = referred_columns
         .iter()
         .map(|column| normalize_identifier(&column.value))
@@ -715,6 +754,7 @@ fn build_foreign_key(
 fn parse_statements_with_recovery(
     dialect: &dyn Dialect,
     input: &str,
+    offsets: &LineOffsets,
     ctx: &mut ParseContext,
 ) -> Vec<Statement> {
     // First, try the fast path: parse all at once
@@ -750,7 +790,7 @@ fn parse_statements_with_recovery(
                 let span = {
                     let tok = parser.peek_token();
                     let sql_span = tok.span;
-                    source_span_from_sql_span(input, sql_span)
+                    source_span_from_sql_span(input, offsets, sql_span)
                         .unwrap_or_else(|| SourceSpan::new(0, input.len().min(100)))
                 };
                 ctx.diagnostics
@@ -815,11 +855,16 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     let resolved_dialect = resolve_dialect(dialect, input);
     let mut ctx = ParseContext::new();
     ctx.dialect = resolved_dialect;
+    let offsets = LineOffsets::new(input);
 
     // Parse SQL statements with error recovery: parse statement-by-statement so that
     // a syntax error in one statement does not prevent parsing of subsequent statements.
-    let statements =
-        parse_statements_with_recovery(dialect_impl(resolved_dialect).as_ref(), input, &mut ctx);
+    let statements = parse_statements_with_recovery(
+        dialect_impl(resolved_dialect).as_ref(),
+        input,
+        &offsets,
+        &mut ctx,
+    );
 
     // Build schema in source order so ALTER TABLE is visible to later CREATE INDEX / COMMENT.
     let mut tables = Vec::new();
@@ -830,12 +875,12 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     for statement in &statements {
         match statement {
             Statement::CreateTable(create) => {
-                if let Some(table) = parse_create_table(&mut ctx, input, create) {
+                if let Some(table) = parse_create_table(&mut ctx, input, &offsets, create) {
                     let stable_id = table.stable_id.clone();
                     if ctx.seen_tables.contains(&stable_id) {
                         ctx.warn_duplicate_table(
                             &stable_id,
-                            source_span_from_sql_span(input, create.span()),
+                            source_span_from_sql_span(input, &offsets, create.span()),
                         );
                     } else {
                         ctx.seen_tables.insert(stable_id.clone());
@@ -850,17 +895,24 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 representation,
             } => {
                 if let Some(UserDefinedTypeRepresentation::Enum { labels }) = representation {
-                    let enum_def = parse_create_type_enum(&mut ctx, input, name, labels);
+                    let enum_def = parse_create_type_enum(&mut ctx, input, &offsets, name, labels);
                     enums.push(enum_def);
                 } else {
                     ctx.warn_unsupported(
                         "CREATE TYPE (non-enum)",
-                        source_span_from_sql_span(input, statement.span()),
+                        source_span_from_sql_span(input, &offsets, statement.span()),
                     );
                 }
             }
             Statement::CreateIndex(create_index) => {
-                parse_create_index(&mut ctx, input, create_index, &mut tables, &table_map);
+                parse_create_index(
+                    &mut ctx,
+                    input,
+                    &offsets,
+                    create_index,
+                    &mut tables,
+                    &table_map,
+                );
             }
             Statement::Comment {
                 object_type,
@@ -871,6 +923,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 parse_comment(
                     &mut ctx,
                     input,
+                    &offsets,
                     *object_type,
                     object_name,
                     comment.as_ref(),
@@ -882,6 +935,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 if let Some(view) = parse_create_view(
                     &mut ctx,
                     input,
+                    &offsets,
                     &create_view.name,
                     &create_view.columns,
                     &create_view.query,
@@ -893,6 +947,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 apply_alter_table_operations(
                     &mut ctx,
                     input,
+                    &offsets,
                     &mut tables,
                     &mut table_map,
                     &alter_table.name,
@@ -923,29 +978,32 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             Statement::CreateFunction { .. } => {
                 ctx.warn_unsupported(
                     "CREATE FUNCTION",
-                    source_span_from_sql_span(input, statement.span()),
+                    source_span_from_sql_span(input, &offsets, statement.span()),
                 );
             }
             Statement::CreateTrigger { .. } => {
                 ctx.warn_unsupported(
                     "CREATE TRIGGER",
-                    source_span_from_sql_span(input, statement.span()),
+                    source_span_from_sql_span(input, &offsets, statement.span()),
                 );
             }
             Statement::CreateSequence { .. } => {
                 ctx.warn_unsupported(
                     "CREATE SEQUENCE",
-                    source_span_from_sql_span(input, statement.span()),
+                    source_span_from_sql_span(input, &offsets, statement.span()),
                 );
             }
             Statement::CreateExtension { .. } => {
                 ctx.warn_unsupported(
                     "CREATE EXTENSION",
-                    source_span_from_sql_span(input, statement.span()),
+                    source_span_from_sql_span(input, &offsets, statement.span()),
                 );
             }
             Statement::Drop { .. } => {
-                ctx.warn_unsupported("DROP", source_span_from_sql_span(input, statement.span()));
+                ctx.warn_unsupported(
+                    "DROP",
+                    source_span_from_sql_span(input, &offsets, statement.span()),
+                );
             }
             _ => {
                 // Generic unsupported statement - truncate to avoid huge debug output
@@ -953,7 +1011,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 let truncated = truncate_unsupported_debug(&debug_str);
                 ctx.warn_unsupported(
                     &truncated,
-                    source_span_from_sql_span(input, statement.span()),
+                    source_span_from_sql_span(input, &offsets, statement.span()),
                 );
             }
         }
@@ -997,10 +1055,11 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
 fn parse_create_table(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     create: &sqlparser::ast::CreateTable,
 ) -> Option<Table> {
     let (schema_name, name) =
-        split_object_name_with_diagnostics(ctx, input, &create.name, "CREATE TABLE");
+        split_object_name_with_diagnostics(ctx, input, offsets, &create.name, "CREATE TABLE");
     let stable_id = normalized_stable_id(schema_name.as_deref(), &name);
 
     let table_id = ctx.next_table_id();
@@ -1024,6 +1083,7 @@ fn parse_create_table(
                 foreign_keys.push(build_foreign_key(
                     ctx,
                     input,
+                    offsets,
                     option.name.as_ref(),
                     vec![from_column],
                     &constraint.foreign_table,
@@ -1064,6 +1124,7 @@ fn parse_create_table(
                 foreign_keys.push(build_foreign_key(
                     ctx,
                     input,
+                    offsets,
                     foreign_key.name.as_ref(),
                     from_cols,
                     &foreign_key.foreign_table,
@@ -1079,7 +1140,7 @@ fn parse_create_table(
             TableConstraint::FulltextOrSpatial(_) => {
                 ctx.warn_unsupported(
                     "FULLTEXT/SPATIAL constraint",
-                    span_from_spanned(input, constraint),
+                    span_from_spanned(input, offsets, constraint),
                 );
             }
         }
@@ -1121,6 +1182,7 @@ fn extract_column_name(index_col: &sqlparser::ast::IndexColumn) -> String {
 fn parse_create_index(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     create_index: &CreateIndex,
     tables: &mut [Table],
     table_map: &std::collections::HashMap<String, usize>,
@@ -1129,6 +1191,7 @@ fn parse_create_index(
     let stable_id = normalized_stable_id_for_object_name_with_diagnostics(
         ctx,
         input,
+        offsets,
         &create_index.table_name,
         "CREATE INDEX",
     );
@@ -1140,7 +1203,7 @@ fn parse_create_index(
                 codes::schema_unknown_table(),
                 format!("CREATE INDEX references unknown table: {stable_id}"),
             )
-            .with_span_opt(span_from_spanned(input, create_index)),
+            .with_span_opt(span_from_spanned(input, offsets, create_index)),
         );
         return;
     };
@@ -1171,10 +1234,11 @@ fn parse_create_index(
 
 /// Parse a COMMENT ON statement and apply it to the appropriate table or column.
 #[allow(clippy::ref_option)]
-#[allow(clippy::trivially_copy_pass_by_ref)]
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::too_many_arguments)]
 fn parse_comment(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     object_type: sqlparser::ast::CommentObject,
     object_name: &ObjectName,
     comment: Option<&String>,
@@ -1191,6 +1255,7 @@ fn parse_comment(
             let stable_id = normalized_stable_id_for_object_name_with_diagnostics(
                 ctx,
                 input,
+                offsets,
                 object_name,
                 "COMMENT ON TABLE",
             );
@@ -1203,7 +1268,11 @@ fn parse_comment(
                         codes::schema_unknown_table(),
                         format!("COMMENT ON TABLE references unknown table: {stable_id}"),
                     )
-                    .with_span_opt(span_from_spanned(input, object_name)),
+                    .with_span_opt(span_from_spanned(
+                        input,
+                        offsets,
+                        object_name,
+                    )),
                 );
             }
         }
@@ -1218,12 +1287,16 @@ fn parse_comment(
                         codes::parse_unsupported(),
                         "Invalid COMMENT ON COLUMN syntax: expected table.column".to_string(),
                     )
-                    .with_span_opt(span_from_spanned(input, object_name)),
+                    .with_span_opt(span_from_spanned(
+                        input,
+                        offsets,
+                        object_name,
+                    )),
                 );
                 return;
             }
 
-            warn_truncated_object_name(ctx, input, object_name, 3, "COMMENT ON COLUMN");
+            warn_truncated_object_name(ctx, input, offsets, object_name, 3, "COMMENT ON COLUMN");
 
             let column_name = normalize_identifier(&parts[parts.len() - 1]);
             let table_parts = &parts[..parts.len() - 1];
@@ -1248,7 +1321,7 @@ fn parse_comment(
                             "COMMENT ON COLUMN references unknown column: {stable_id}.{column_name}"
                         ),
                     )
-                    .with_span_opt(span_from_spanned(input, object_name)));
+                    .with_span_opt(span_from_spanned(input, offsets,object_name)));
                 }
             } else {
                 ctx.diagnostics.push(
@@ -1256,7 +1329,11 @@ fn parse_comment(
                         codes::schema_unknown_table(),
                         format!("COMMENT ON COLUMN references unknown table: {stable_id}"),
                     )
-                    .with_span_opt(span_from_spanned(input, object_name)),
+                    .with_span_opt(span_from_spanned(
+                        input,
+                        offsets,
+                        object_name,
+                    )),
                 );
             }
         }
@@ -1264,7 +1341,7 @@ fn parse_comment(
             // Other comment types (view, function, etc.) are not supported
             ctx.warn_unsupported(
                 &format!("COMMENT ON {object_type:?}"),
-                span_from_spanned(input, object_name),
+                span_from_spanned(input, offsets, object_name),
             );
         }
     }
@@ -1274,34 +1351,126 @@ fn parse_comment(
 fn stable_id_for_alter_target(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     table_name: &ObjectName,
 ) -> String {
-    normalized_stable_id_for_object_name_with_diagnostics(ctx, input, table_name, "ALTER TABLE")
+    normalized_stable_id_for_object_name_with_diagnostics(
+        ctx,
+        input,
+        offsets,
+        table_name,
+        "ALTER TABLE",
+    )
+}
+
+fn table_name_matches_reference(table: &Table, target_table: &str) -> bool {
+    table.name.eq_ignore_ascii_case(target_table)
+        || table.stable_id.eq_ignore_ascii_case(target_table)
+}
+
+fn table_schema_matches(table: &Table, target_schema: Option<&str>) -> bool {
+    match target_schema {
+        Some(target_schema) => table
+            .schema_name
+            .as_deref()
+            .is_some_and(|schema_name| schema_name.eq_ignore_ascii_case(target_schema)),
+        None => table.schema_name.is_none(),
+    }
+}
+
+fn single_matching_table_index(
+    tables: &[Table],
+    target_table: &str,
+    target_schema: Option<&str>,
+) -> Option<usize> {
+    let mut found = None;
+    for (table_idx, table) in tables.iter().enumerate() {
+        if !table_schema_matches(table, target_schema)
+            || !table_name_matches_reference(table, target_table)
+        {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(table_idx);
+    }
+    found
+}
+
+fn single_matching_table_index_any_schema(tables: &[Table], target_table: &str) -> Option<usize> {
+    let mut found = None;
+    for (table_idx, table) in tables.iter().enumerate() {
+        if !table_name_matches_reference(table, target_table) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(table_idx);
+    }
+    found
+}
+
+fn foreign_key_resolves_to_table(
+    tables: &[Table],
+    source_idx: usize,
+    fk: &ForeignKey,
+    target_idx: usize,
+) -> bool {
+    if let Some(target_schema) = fk.to_schema.as_deref() {
+        return single_matching_table_index(tables, &fk.to_table, Some(target_schema))
+            == Some(target_idx);
+    }
+
+    if let Some(source_schema) = tables[source_idx].schema_name.as_deref()
+        && let Some(match_idx) =
+            single_matching_table_index(tables, &fk.to_table, Some(source_schema))
+    {
+        return match_idx == target_idx;
+    }
+
+    single_matching_table_index(tables, &fk.to_table, None)
+        .or_else(|| single_matching_table_index_any_schema(tables, &fk.to_table))
+        == Some(target_idx)
+}
+
+fn foreign_keys_referencing_table(tables: &[Table], target_idx: usize) -> Vec<(usize, usize)> {
+    let mut references = Vec::new();
+    for (table_idx, table) in tables.iter().enumerate() {
+        for (fk_idx, fk) in table.foreign_keys.iter().enumerate() {
+            if foreign_key_resolves_to_table(tables, table_idx, fk, target_idx) {
+                references.push((table_idx, fk_idx));
+            }
+        }
+    }
+    references
 }
 
 #[allow(clippy::too_many_lines)]
 fn apply_alter_table_operations(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     tables: &mut [Table],
     table_map: &mut HashMap<String, usize>,
     table_name: &ObjectName,
     operations: &[AlterTableOperation],
 ) {
-    let stable_id = stable_id_for_alter_target(ctx, input, table_name);
+    let stable_id = stable_id_for_alter_target(ctx, input, offsets, table_name);
     let Some(&idx) = table_map.get(&stable_id) else {
         ctx.diagnostics.push(
             Diagnostic::warning(
                 codes::schema_unknown_table(),
                 format!("ALTER TABLE references unknown table: {stable_id}"),
             )
-            .with_span_opt(span_from_spanned(input, table_name)),
+            .with_span_opt(span_from_spanned(input, offsets, table_name)),
         );
         return;
     };
 
     for op in operations {
-        apply_single_alter_operation(ctx, input, tables, table_map, idx, op);
+        apply_single_alter_operation(ctx, input, offsets, tables, table_map, idx, op);
     }
 }
 
@@ -1309,6 +1478,7 @@ fn apply_alter_table_operations(
 fn apply_single_alter_operation(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     tables: &mut [Table],
     table_map: &mut HashMap<String, usize>,
     idx: usize,
@@ -1320,7 +1490,14 @@ fn apply_single_alter_operation(
             if_not_exists,
             ..
         } => {
-            add_column_from_alter(ctx, input, &mut tables[idx], column_def, *if_not_exists);
+            add_column_from_alter(
+                ctx,
+                input,
+                offsets,
+                &mut tables[idx],
+                column_def,
+                *if_not_exists,
+            );
         }
         AlterTableOperation::DropColumn {
             column_names,
@@ -1330,15 +1507,30 @@ fn apply_single_alter_operation(
             let stable = tables[idx].stable_id.clone();
             for ident in column_names {
                 let col_name = normalize_identifier(&ident.value);
-                let table = &mut tables[idx];
-                let pos = table.columns.iter().position(|c| c.name == col_name);
+                let pos = tables[idx].columns.iter().position(|c| c.name == col_name);
                 if let Some(p) = pos {
+                    let incoming_fks_to_remove: HashSet<(usize, usize)> =
+                        foreign_keys_referencing_table(tables, idx)
+                            .into_iter()
+                            .filter(|(table_idx, fk_idx)| {
+                                tables[*table_idx].foreign_keys[*fk_idx]
+                                    .to_columns
+                                    .contains(&col_name)
+                            })
+                            .collect();
+
+                    let table = &mut tables[idx];
                     table.columns.remove(p);
-                    table
-                        .foreign_keys
-                        .retain(|fk| !fk.from_columns.contains(&col_name));
-                    for ix in &mut table.indexes {
-                        ix.columns.retain(|c| *c != col_name);
+                    table.indexes.retain(|ix| !ix.columns.contains(&col_name));
+
+                    for (table_idx, table) in tables.iter_mut().enumerate() {
+                        let mut fk_idx = 0usize;
+                        table.foreign_keys.retain(|fk| {
+                            let remove = (table_idx == idx && fk.from_columns.contains(&col_name))
+                                || incoming_fks_to_remove.contains(&(table_idx, fk_idx));
+                            fk_idx += 1;
+                            !remove
+                        });
                     }
                 } else if !if_exists {
                     ctx.diagnostics.push(
@@ -1348,13 +1540,13 @@ fn apply_single_alter_operation(
                                 "ALTER TABLE DROP COLUMN: unknown column `{col_name}` on `{stable}`"
                             ),
                         )
-                        .with_span_opt(span_from_ident(input, ident)),
+                        .with_span_opt(span_from_ident(input, offsets, ident)),
                     );
                 }
             }
         }
         AlterTableOperation::AddConstraint { constraint, .. } => {
-            apply_add_table_constraint(ctx, input, &mut tables[idx], constraint);
+            apply_add_table_constraint(ctx, input, offsets, &mut tables[idx], constraint);
         }
         AlterTableOperation::DropConstraint {
             if_exists, name, ..
@@ -1381,7 +1573,7 @@ fn apply_single_alter_operation(
                         "ALTER TABLE DROP CONSTRAINT: no constraint named `{cname}` on `{stable}`"
                     ),
                 )
-                .with_span_opt(span_from_ident(input, name)));
+                .with_span_opt(span_from_ident(input, offsets,name)));
             }
         }
         AlterTableOperation::RenameColumn {
@@ -1391,9 +1583,14 @@ fn apply_single_alter_operation(
             let old = normalize_identifier(&old_column_name.value);
             let new = normalize_identifier(&new_column_name.value);
             let stable = tables[idx].stable_id.clone();
-            let table = &mut tables[idx];
-            if let Some(col) = table.columns.iter_mut().find(|c| c.name == old) {
-                col.name.clone_from(&new);
+            let found = tables[idx].columns.iter().any(|c| c.name == old);
+            if found {
+                let referencing_fks = foreign_keys_referencing_table(tables, idx);
+                // Update the column name, from_columns in local FKs, and index columns.
+                let table = &mut tables[idx];
+                if let Some(col) = table.columns.iter_mut().find(|c| c.name == old) {
+                    col.name.clone_from(&new);
+                }
                 for fk in &mut table.foreign_keys {
                     for c in &mut fk.from_columns {
                         if *c == old {
@@ -1408,20 +1605,39 @@ fn apply_single_alter_operation(
                         }
                     }
                 }
+
+                for (table_idx, fk_idx) in referencing_fks {
+                    if let Some(fk) = tables
+                        .get_mut(table_idx)
+                        .and_then(|table| table.foreign_keys.get_mut(fk_idx))
+                    {
+                        for c in &mut fk.to_columns {
+                            if *c == old {
+                                c.clone_from(&new);
+                            }
+                        }
+                    }
+                }
             } else {
                 ctx.diagnostics.push(
                     Diagnostic::warning(
                         codes::schema_unknown_column(),
                         format!("ALTER TABLE RENAME COLUMN: unknown `{old}` on `{stable}`"),
                     )
-                    .with_span_opt(span_from_ident(input, old_column_name)),
+                    .with_span_opt(span_from_ident(
+                        input,
+                        offsets,
+                        old_column_name,
+                    )),
                 );
             }
         }
         AlterTableOperation::RenameTable {
             table_name: new_table,
         } => {
+            let referencing_fks = foreign_keys_referencing_table(tables, idx);
             let old_stable = tables[idx].stable_id.clone();
+            let old_schema = tables[idx].schema_name.clone();
             let renamed_target = match new_table {
                 sqlparser::ast::RenameTableNameKind::As(name)
                 | sqlparser::ast::RenameTableNameKind::To(name) => name,
@@ -1429,16 +1645,35 @@ fn apply_single_alter_operation(
             let (new_schema_raw, new_name_raw) = split_object_name_with_diagnostics(
                 ctx,
                 input,
+                offsets,
                 renamed_target,
                 "ALTER TABLE RENAME TO",
             );
-            let renamed_stable_id = normalized_stable_id(new_schema_raw.as_deref(), &new_name_raw);
+            let new_schema = new_schema_raw
+                .map(|schema_name| normalize_identifier(&schema_name))
+                .or_else(|| old_schema.clone());
+            let new_name = normalize_identifier(&new_name_raw);
+            let renamed_stable_id = normalized_stable_id(new_schema.as_deref(), &new_name);
             let table = &mut tables[idx];
-            table.schema_name = new_schema_raw.map(|s| normalize_identifier(&s));
-            table.name = normalize_identifier(&new_name_raw);
+            table.schema_name.clone_from(&new_schema);
+            table.name.clone_from(&new_name);
             table.stable_id.clone_from(&renamed_stable_id);
             table_map.remove(&old_stable);
-            table_map.insert(renamed_stable_id, idx);
+            table_map.insert(renamed_stable_id.clone(), idx);
+            ctx.seen_tables.remove(&old_stable);
+            ctx.seen_tables.insert(renamed_stable_id.clone());
+
+            for (table_idx, fk_idx) in referencing_fks {
+                if let Some(fk) = tables
+                    .get_mut(table_idx)
+                    .and_then(|table| table.foreign_keys.get_mut(fk_idx))
+                {
+                    fk.to_table.clone_from(&new_name);
+                    if fk.to_schema.is_some() || old_schema != new_schema {
+                        fk.to_schema.clone_from(&new_schema);
+                    }
+                }
+            }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {
             for col in &mut tables[idx].columns {
@@ -1459,7 +1694,7 @@ fn apply_single_alter_operation(
                         codes::parse_unsupported(),
                         format!("ALTER TABLE DROP FOREIGN KEY: no FK named `{sym}` on `{stable}`"),
                     )
-                    .with_span_opt(span_from_ident(input, name)),
+                    .with_span_opt(span_from_ident(input, offsets, name)),
                 );
             }
         }
@@ -1477,14 +1712,14 @@ fn apply_single_alter_operation(
                         codes::parse_unsupported(),
                         format!("ALTER TABLE DROP INDEX: no index named `{n}` on `{stable}`"),
                     )
-                    .with_span_opt(span_from_ident(input, name)),
+                    .with_span_opt(span_from_ident(input, offsets, name)),
                 );
             }
         }
         other => {
             ctx.warn_unsupported(
                 &format!("ALTER TABLE operation (unsupported): {other:?}"),
-                span_from_spanned(input, op),
+                span_from_spanned(input, offsets, op),
             );
         }
     }
@@ -1542,6 +1777,7 @@ fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedCo
 fn add_column_from_alter(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     table: &mut Table,
     column_def: &sqlparser::ast::ColumnDef,
     if_not_exists: bool,
@@ -1557,7 +1793,7 @@ fn add_column_from_alter(
                         table.stable_id
                     ),
                 )
-                .with_span_opt(span_from_spanned(input, column_def)),
+                .with_span_opt(span_from_spanned(input, offsets, column_def)),
             );
         }
         return;
@@ -1573,6 +1809,7 @@ fn add_column_from_alter(
             table.foreign_keys.push(build_foreign_key(
                 ctx,
                 input,
+                offsets,
                 option.name.as_ref(),
                 vec![from_column],
                 &constraint.foreign_table,
@@ -1588,6 +1825,7 @@ fn add_column_from_alter(
 fn apply_add_table_constraint(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     table: &mut Table,
     constraint: &TableConstraint,
 ) {
@@ -1622,6 +1860,7 @@ fn apply_add_table_constraint(
             table.foreign_keys.push(build_foreign_key(
                 ctx,
                 input,
+                offsets,
                 foreign_key.name.as_ref(),
                 from_cols,
                 &foreign_key.foreign_table,
@@ -1635,7 +1874,7 @@ fn apply_add_table_constraint(
         TableConstraint::FulltextOrSpatial(_) => {
             ctx.warn_unsupported(
                 "FULLTEXT/SPATIAL constraint",
-                span_from_spanned(input, constraint),
+                span_from_spanned(input, offsets, constraint),
             );
         }
     }
@@ -1645,11 +1884,12 @@ fn apply_add_table_constraint(
 fn parse_create_type_enum(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     name: &ObjectName,
     labels: &[sqlparser::ast::Ident],
 ) -> Enum {
     let (schema_name, type_name) =
-        split_object_name_with_diagnostics(ctx, input, name, "CREATE TYPE");
+        split_object_name_with_diagnostics(ctx, input, offsets, name, "CREATE TYPE");
 
     // Generate a stable ID for the enum
     let id = normalized_stable_id(schema_name.as_deref(), &type_name);
@@ -1674,12 +1914,13 @@ fn parse_create_type_enum(
 fn parse_create_view(
     ctx: &mut ParseContext,
     input: &str,
+    offsets: &LineOffsets,
     name: &ObjectName,
     view_columns: &[sqlparser::ast::ViewColumnDef],
     query: &sqlparser::ast::Query,
 ) -> Option<View> {
     let (schema_name, view_name) =
-        split_object_name_with_diagnostics(ctx, input, name, "CREATE VIEW");
+        split_object_name_with_diagnostics(ctx, input, offsets, name, "CREATE VIEW");
 
     // Generate a stable ID for the view
     let id = normalized_stable_id(schema_name.as_deref(), &view_name);
@@ -1717,7 +1958,7 @@ fn extract_view_columns_from_defs(defs: &[sqlparser::ast::ViewColumnDef]) -> Vec
                 .as_ref()
                 .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string);
             Column {
-                id: ColumnId(i as u64),
+                id: ColumnId((i as u64) + 1),
                 name: normalize_identifier(&def.name.value),
                 data_type,
                 nullable: true,
@@ -1749,7 +1990,7 @@ fn extract_view_columns_from_query(query: &sqlparser::ast::Query) -> Vec<Column>
         };
         if let Some(name) = col_name {
             columns.push(Column {
-                id: ColumnId(i as u64),
+                id: ColumnId((i as u64) + 1),
                 name,
                 data_type: "unknown".to_string(),
                 nullable: true,
@@ -2376,16 +2617,18 @@ mod tests {
     #[should_panic(expected = "sql span end must not precede start")]
     fn rejects_reversed_sql_spans_in_debug_builds() {
         let span = SqlSpan::new(Location::new(1, 5), Location::new(1, 3));
+        let offsets = LineOffsets::new("abcd");
 
-        let _ = source_span_from_sql_span("abcd", span);
+        let _ = source_span_from_sql_span("abcd", &offsets, span);
     }
 
     #[cfg(not(debug_assertions))]
     #[test]
     fn ignores_reversed_sql_spans_in_release_builds() {
         let span = SqlSpan::new(Location::new(1, 5), Location::new(1, 3));
+        let offsets = LineOffsets::new("abcd");
 
-        assert_eq!(source_span_from_sql_span("abcd", span), None);
+        assert_eq!(source_span_from_sql_span("abcd", &offsets, span), None);
     }
 
     #[test]
@@ -3115,5 +3358,459 @@ mod tests {
         assert_eq!("sqlite3".parse::<SqlDialect>().unwrap(), SqlDialect::Sqlite);
         assert_eq!("auto".parse::<SqlDialect>().unwrap(), SqlDialect::Auto);
         assert!("unknown".parse::<SqlDialect>().is_err());
+    }
+
+    // ========================================================================
+    // ALTER TABLE operation tests
+    // ========================================================================
+
+    #[test]
+    fn alter_table_drop_column_removes_column() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT
+        );
+        ALTER TABLE users DROP COLUMN email;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let table = &schema.tables[0];
+        assert_eq!(table.columns.len(), 2);
+        assert!(!table.columns.iter().any(|c| c.name == "email"));
+    }
+
+    #[test]
+    fn alter_table_drop_column_cascades_to_fk_and_index() {
+        let sql = r"
+        CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          org_id BIGINT,
+          CONSTRAINT fk_org FOREIGN KEY (org_id) REFERENCES orgs(id)
+        );
+        CREATE INDEX idx_org ON users (org_id);
+        ALTER TABLE users DROP COLUMN org_id;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(!users.columns.iter().any(|c| c.name == "org_id"));
+        assert!(
+            users.foreign_keys.is_empty(),
+            "FK referencing dropped column should be removed"
+        );
+        assert!(
+            users.indexes.is_empty(),
+            "index referencing dropped column should be removed"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_column_removes_incoming_fk_to_column() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        CREATE TABLE orders (
+          id BIGINT PRIMARY KEY,
+          user_id BIGINT,
+          CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        ALTER TABLE users DROP COLUMN id;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let orders = schema.tables.iter().find(|t| t.name == "orders").unwrap();
+        assert!(
+            orders.foreign_keys.is_empty(),
+            "FK referencing dropped target column should be removed"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_unknown_column_warns() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users DROP COLUMN ghost;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        assert!(output.schema.is_some());
+        assert!(output.has_warnings());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.code == codes::schema_unknown_column() && d.message.contains("ghost"))
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_column() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          name TEXT NOT NULL
+        );
+        ALTER TABLE users RENAME COLUMN name TO full_name;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let table = &schema.tables[0];
+        assert!(!table.columns.iter().any(|c| c.name == "name"));
+        assert!(table.columns.iter().any(|c| c.name == "full_name"));
+    }
+
+    #[test]
+    fn alter_table_rename_column_updates_fk_and_index() {
+        let sql = r"
+        CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          org_id BIGINT,
+          CONSTRAINT fk_org FOREIGN KEY (org_id) REFERENCES orgs(id)
+        );
+        CREATE INDEX idx_org ON users (org_id);
+        ALTER TABLE users RENAME COLUMN org_id TO organization_id;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(users.columns.iter().any(|c| c.name == "organization_id"));
+        assert!(
+            users.foreign_keys[0]
+                .from_columns
+                .contains(&"organization_id".to_string()),
+            "FK from_columns should be updated after rename"
+        );
+        assert!(
+            users.indexes[0]
+                .columns
+                .contains(&"organization_id".to_string()),
+            "index columns should be updated after rename"
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_column_updates_referring_fk_to_columns() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        CREATE TABLE orders (
+          id BIGINT PRIMARY KEY,
+          user_id BIGINT,
+          CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        ALTER TABLE users RENAME COLUMN id TO user_id;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let orders = schema.tables.iter().find(|t| t.name == "orders").unwrap();
+        assert_eq!(
+            orders.foreign_keys[0].to_columns,
+            vec!["user_id".to_string()],
+            "FK to_columns should be updated when referenced column is renamed"
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_column_updates_unqualified_same_schema_referring_fk() {
+        let sql = r"
+        CREATE TABLE public.users (id BIGINT PRIMARY KEY);
+        CREATE TABLE public.orders (
+          id BIGINT PRIMARY KEY,
+          user_id BIGINT,
+          CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        ALTER TABLE public.users RENAME COLUMN id TO user_id;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let orders = schema.tables.iter().find(|t| t.name == "orders").unwrap();
+        assert_eq!(
+            orders.foreign_keys[0].to_columns,
+            vec!["user_id".to_string()],
+            "same-schema unqualified FK to_columns should be updated"
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_column_updates_self_referencing_fk() {
+        let sql = r"
+        CREATE TABLE employees (
+          id BIGINT PRIMARY KEY,
+          manager_id BIGINT,
+          CONSTRAINT fk_manager FOREIGN KEY (manager_id) REFERENCES employees(id)
+        );
+        ALTER TABLE employees RENAME COLUMN id TO employee_id;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let emp = &schema.tables[0];
+        assert!(emp.columns.iter().any(|c| c.name == "employee_id"));
+        assert_eq!(
+            emp.foreign_keys[0].to_columns,
+            vec!["employee_id".to_string()],
+            "self-referencing FK to_columns should be updated"
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_unknown_column_warns() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users RENAME COLUMN ghost TO phantom;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        assert!(output.schema.is_some());
+        assert!(output.has_warnings());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.code == codes::schema_unknown_column() && d.message.contains("ghost"))
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_table() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users RENAME TO accounts;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        assert_eq!(schema.tables.len(), 1);
+        assert_eq!(schema.tables[0].name, "accounts");
+        assert_eq!(schema.tables[0].stable_id, "accounts");
+    }
+
+    #[test]
+    fn alter_table_rename_table_preserves_schema_when_new_name_is_unqualified() {
+        let sql = r"
+        CREATE TABLE public.users (id BIGINT PRIMARY KEY);
+        ALTER TABLE public.users RENAME TO accounts;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        assert_eq!(schema.tables.len(), 1);
+        assert_eq!(schema.tables[0].schema_name.as_deref(), Some("public"));
+        assert_eq!(schema.tables[0].name, "accounts");
+        assert_eq!(schema.tables[0].stable_id, "public.accounts");
+    }
+
+    #[test]
+    fn alter_table_rename_table_updates_referring_fk() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        CREATE TABLE orders (
+          id BIGINT PRIMARY KEY,
+          user_id BIGINT,
+          CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        ALTER TABLE users RENAME TO accounts;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let orders = schema.tables.iter().find(|t| t.name == "orders").unwrap();
+        assert_eq!(
+            orders.foreign_keys[0].to_table, "accounts",
+            "FK to_table should be updated when referenced table is renamed"
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_table_updates_unqualified_same_schema_referring_fk() {
+        let sql = r"
+        CREATE TABLE public.users (id BIGINT PRIMARY KEY);
+        CREATE TABLE public.orders (
+          id BIGINT PRIMARY KEY,
+          user_id BIGINT,
+          CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        ALTER TABLE public.users RENAME TO accounts;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let orders = schema.tables.iter().find(|t| t.name == "orders").unwrap();
+        assert_eq!(
+            orders.foreign_keys[0].to_table, "accounts",
+            "same-schema unqualified FK to_table should be updated"
+        );
+        assert_eq!(
+            orders.foreign_keys[0].to_schema, None,
+            "unqualified FK should remain unqualified when schema did not change"
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_table_allows_reusing_old_name() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users RENAME TO accounts;
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let table_names: std::collections::HashSet<&str> = schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect();
+        assert_eq!(schema.tables.len(), 2);
+        assert!(table_names.contains("accounts"));
+        assert!(table_names.contains("users"));
+    }
+
+    #[test]
+    fn alter_table_drop_constraint_removes_fk() {
+        let sql = r"
+        CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          org_id BIGINT,
+          CONSTRAINT fk_org FOREIGN KEY (org_id) REFERENCES orgs(id)
+        );
+        ALTER TABLE users DROP CONSTRAINT fk_org;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            users.foreign_keys.is_empty(),
+            "FK should be removed by DROP CONSTRAINT"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_constraint_removes_index() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          email TEXT
+        );
+        CREATE INDEX idx_email ON users (email);
+        ALTER TABLE users DROP CONSTRAINT idx_email;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            users.indexes.is_empty(),
+            "index should be removed by DROP CONSTRAINT"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_unknown_constraint_warns() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users DROP CONSTRAINT ghost;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        assert!(output.schema.is_some());
+        assert!(output.has_warnings());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("ghost"))
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_primary_key() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          name TEXT NOT NULL
+        );
+        ALTER TABLE users DROP PRIMARY KEY;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let table = &schema.tables[0];
+        assert!(
+            !table.columns.iter().any(|c| c.is_primary_key),
+            "all PK flags should be cleared after DROP PRIMARY KEY"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_foreign_key_mysql_style() {
+        let sql = r"
+        CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          org_id BIGINT,
+          CONSTRAINT fk_org FOREIGN KEY (org_id) REFERENCES orgs(id)
+        );
+        ALTER TABLE users DROP FOREIGN KEY fk_org;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let schema = output.schema.expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            users.foreign_keys.is_empty(),
+            "FK should be removed by DROP FOREIGN KEY"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_unknown_foreign_key_warns() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users DROP FOREIGN KEY ghost;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        assert!(output.schema.is_some());
+        assert!(output.has_warnings());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("ghost"))
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_index() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT PRIMARY KEY,
+          email TEXT
+        );
+        CREATE INDEX idx_email ON users (email);
+        ALTER TABLE users DROP INDEX idx_email;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let schema = output.schema.expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            users.indexes.is_empty(),
+            "index should be removed by DROP INDEX"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_unknown_index_warns() {
+        let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        ALTER TABLE users DROP INDEX ghost;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        assert!(output.schema.is_some());
+        assert!(output.has_warnings());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("ghost"))
+        );
     }
 }
