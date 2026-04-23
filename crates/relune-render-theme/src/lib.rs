@@ -56,6 +56,8 @@ pub struct ThemeColors {
     pub glow_color: &'static str,
     /// Secondary glow particle color (slightly lighter than `glow_color`).
     pub glow_particle: &'static str,
+    /// Whether this is a light theme (used for conditional rendering).
+    pub is_light: bool,
 }
 
 /// Returns the color palette for the given theme.
@@ -81,6 +83,7 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_stroke: "#334155",
             glow_color: "#f59e0b",
             glow_particle: "#fbbf24",
+            is_light: false,
         },
         Theme::Light => ThemeColors {
             background: "#f7f8fc",
@@ -101,6 +104,7 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_stroke: "#cbd5e1",
             glow_color: "#d97706",
             glow_particle: "#f59e0b",
+            is_light: true,
         },
     }
 }
