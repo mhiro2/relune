@@ -130,35 +130,17 @@ pub fn format_lint_json(result: &LintResult) -> Result<String, AppError> {
 }
 
 /// Parse a rule ID string into a `LintRuleId`.
+///
+/// Accepts both kebab-case (`no-primary-key`) and `snake_case`
+/// (`no_primary_key`) forms. The canonical set is derived from
+/// `LintRuleId::all()` so that new variants are automatically
+/// recognised without a manual match arm.
 fn parse_rule_id(s: &str) -> Option<LintRuleId> {
-    match s.to_lowercase().as_str() {
-        "no-primary-key" | "no_primary_key" => Some(LintRuleId::NoPrimaryKey),
-        "missing-table-comment" | "missing_table_comment" => Some(LintRuleId::MissingTableComment),
-        "missing-column-comment" | "missing_column_comment" => {
-            Some(LintRuleId::MissingColumnComment)
-        }
-        "orphan-table" | "orphan_table" => Some(LintRuleId::OrphanTable),
-        "too-many-nullable" | "too_many_nullable" => Some(LintRuleId::TooManyNullable),
-        "suspicious-join-table" | "suspicious_join_table" => Some(LintRuleId::SuspiciousJoinTable),
-        "duplicated-fk-pattern" | "duplicated_fk_pattern" => Some(LintRuleId::DuplicatedFkPattern),
-        "non-snake-case-identifier" | "non_snake_case_identifier" => {
-            Some(LintRuleId::NonSnakeCaseIdentifier)
-        }
-        "missing-foreign-key-index" | "missing_foreign_key_index" => {
-            Some(LintRuleId::MissingForeignKeyIndex)
-        }
-        "nullable-foreign-key-lazy-load" | "nullable_foreign_key_lazy_load" => {
-            Some(LintRuleId::NullableForeignKeyLazyLoad)
-        }
-        "foreign-key-non-unique-target" | "foreign_key_non_unique_target" => {
-            Some(LintRuleId::ForeignKeyNonUniqueTarget)
-        }
-        "unresolved-foreign-key" | "unresolved_foreign_key" => {
-            Some(LintRuleId::UnresolvedForeignKey)
-        }
-        "circular-foreign-key" | "circular_foreign_key" => Some(LintRuleId::CircularForeignKey),
-        _ => None,
-    }
+    let normalized = s.to_lowercase().replace('_', "-");
+    LintRuleId::all()
+        .iter()
+        .find(|rule| rule.as_str() == normalized)
+        .copied()
 }
 
 /// Parse and validate requested rule IDs.
