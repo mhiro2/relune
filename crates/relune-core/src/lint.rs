@@ -913,24 +913,33 @@ fn check_circular_foreign_keys(schema: &Schema, result: &mut LintResult) {
     }
 }
 
-/// `true` when `to_columns` exactly matches the referenced table PK column list or some unique index column list.
+/// `true` when `to_columns` matches the referenced table PK column set or some unique index column set,
+/// regardless of column order.
 fn referenced_columns_are_unique(ref_table: &Table, to_columns: &[String]) -> bool {
     if to_columns.is_empty() {
         return false;
     }
-    let pk_cols: Vec<String> = ref_table
+    let mut sorted_to: Vec<&str> = to_columns.iter().map(String::as_str).collect();
+    sorted_to.sort_unstable();
+
+    let mut pk_cols: Vec<&str> = ref_table
         .columns
         .iter()
         .filter(|c| c.is_primary_key)
-        .map(|c| c.name.clone())
+        .map(|c| c.name.as_str())
         .collect();
-    if !pk_cols.is_empty() && pk_cols == to_columns {
+    pk_cols.sort_unstable();
+    if !pk_cols.is_empty() && pk_cols == sorted_to {
         return true;
     }
-    ref_table
-        .indexes
-        .iter()
-        .any(|idx| idx.is_unique && idx.columns == to_columns)
+    ref_table.indexes.iter().any(|idx| {
+        if !idx.is_unique {
+            return false;
+        }
+        let mut sorted_idx: Vec<&str> = idx.columns.iter().map(String::as_str).collect();
+        sorted_idx.sort_unstable();
+        sorted_idx == sorted_to
+    })
 }
 
 fn fk_labels_for_message(fk: &ForeignKey) -> String {
@@ -1820,6 +1829,55 @@ mod tests {
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_non_unique_target_order_independent() {
+        // PK columns in different order than FK to_columns should still match.
+        let users = create_test_table(
+            "users",
+            vec![
+                create_column("tenant_id", false, true),
+                create_column("id", false, true),
+            ],
+            vec![],
+            vec![],
+        );
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_id", false, false),
+                create_column("tenant_id", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["tenant_id".to_string(), "user_id".to_string()],
+                to_schema: None,
+                to_table: "users".to_string(),
+                // Reversed order relative to PK declaration
+                to_columns: vec!["id".to_string(), "tenant_id".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![Index {
+                name: Some("idx_posts_fk".to_string()),
+                columns: vec!["tenant_id".to_string(), "user_id".to_string()],
+                is_unique: false,
+            }],
+        );
+        let schema = Schema {
+            tables: vec![users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+        assert!(
+            !result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget),
+            "should not report ForeignKeyNonUniqueTarget when to_columns match PK in different order"
         );
     }
 
