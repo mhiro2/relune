@@ -20,7 +20,7 @@ pub fn run_inspect(
     let merged = config.merge_inspect_args(args);
 
     // Resolve input source
-    let input = InputSelection::from_inspect(args).resolve(args.dialect.into(), "input")?;
+    let input = InputSelection::from_inspect(args).resolve(merged.dialect.into(), "input")?;
 
     // Build request using merged config
     let request = InspectRequest {

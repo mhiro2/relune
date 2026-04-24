@@ -47,8 +47,6 @@ Options:
           - postgres: `PostgreSQL` dialect
           - mysql:    `MySQL` dialect
           - sqlite:   `SQLite` dialect
-          
-          [default: auto]
 
   -f, --format <FORMAT>
           Output format. Defaults to `svg` after config merge

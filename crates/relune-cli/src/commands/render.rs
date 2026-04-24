@@ -25,12 +25,12 @@ pub fn run_render(
     quiet: bool,
     config: &ReluneConfig,
 ) -> CliResult<()> {
-    // Resolve input source
-    let input = InputSelection::from_render(args).resolve(args.dialect.into(), "input")?;
-
     // Merge config file with CLI args
     let merged = config.merge_render_args(args)?;
     merged.validate_semantics()?;
+
+    // Resolve input source
+    let input = InputSelection::from_render(args).resolve(merged.dialect.into(), "input")?;
 
     // Convert merged format to app format.
     // PNG is rendered as SVG internally, then rasterized after the render step.

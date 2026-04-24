@@ -2,6 +2,7 @@
 
 [render]
 format = "html"
+dialect = "postgres"
 theme = "dark"
 layout = "force-directed"
 edge_style = "orthogonal"
@@ -17,9 +18,11 @@ show_stats = true
 
 [inspect]
 format = "json"
+dialect = "postgres"
 
 [export]
 format = "graph-json"
+dialect = "postgres"
 viewpoint = "billing"
 group_by = "prefix"
 layout = "hierarchical"
@@ -32,6 +35,12 @@ exclude = ["audit_logs"]
 
 [diff]
 format = "json"
+dialect = "postgres"
+
+[doc]
+dialect = "postgres"
+
+[lint]
 dialect = "postgres"
 
 [viewpoints.billing]
