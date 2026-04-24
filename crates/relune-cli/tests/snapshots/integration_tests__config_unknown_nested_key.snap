@@ -8,4 +8,4 @@ Error: Failed to load config file '$WORKSPACE/fixtures/config/unknown_nested_key
   |
 2 | tehme = "dark"
   | ^^^^^
-unknown field `tehme`, expected one of `format`, `theme`, `layout`, `edge_style`, `direction`, `group_by`, `focus`, `viewpoint`, `depth`, `include`, `exclude`, `show_legend`, `show_stats`, `fail_on_warning`
+unknown field `tehme`, expected one of `format`, `dialect`, `theme`, `layout`, `edge_style`, `direction`, `group_by`, `focus`, `viewpoint`, `depth`, `include`, `exclude`, `show_legend`, `show_stats`, `fail_on_warning`

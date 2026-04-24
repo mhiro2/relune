@@ -106,6 +106,9 @@ pub struct RenderConfig {
     /// Output format.
     #[serde(default)]
     pub format: Option<RenderFormat>,
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
     /// Visual theme.
     #[serde(default)]
     pub theme: Option<Theme>,
@@ -154,6 +157,9 @@ pub struct InspectConfig {
     /// Output format.
     #[serde(default)]
     pub format: Option<InspectFormatConfig>,
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
     /// Exit with non-zero code if warnings are emitted.
     #[serde(default)]
     pub fail_on_warning: Option<bool>,
@@ -166,6 +172,9 @@ pub struct ExportConfig {
     /// Export format.
     #[serde(default)]
     pub format: Option<ExportFormatConfig>,
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
     /// Grouping mode.
     #[serde(default)]
     pub group_by: Option<GroupByMode>,
@@ -223,6 +232,9 @@ pub struct ViewpointConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocConfig {
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
     /// Exit with non-zero code if warnings are emitted.
     #[serde(default)]
     pub fail_on_warning: Option<bool>,
@@ -235,6 +247,9 @@ pub struct LintConfig {
     /// Output format.
     #[serde(default)]
     pub format: Option<LintFormatConfig>,
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
     /// Review profile used to seed the active rule set.
     #[serde(default)]
     pub profile: Option<LintProfileConfig>,
@@ -427,6 +442,7 @@ impl ReluneConfig {
 
         Ok(MergedRenderConfig {
             format: args.format.or(self.render.format).unwrap_or_default(),
+            dialect: args.dialect.or(self.render.dialect).unwrap_or_default(),
             theme: args.theme.or(self.render.theme).unwrap_or_default(),
             layout: args.layout.or(self.render.layout).unwrap_or_default(),
             edge_style: args
@@ -473,6 +489,7 @@ impl ReluneConfig {
                 .format
                 .or_else(|| self.inspect.format.map(Into::into))
                 .unwrap_or_default(),
+            dialect: args.dialect.or(self.inspect.dialect).unwrap_or_default(),
             fail_on_warning: args.fail_on_warning || self.inspect.fail_on_warning.unwrap_or(false),
         }
     }
@@ -499,6 +516,7 @@ impl ReluneConfig {
 
         Ok(MergedExportConfig {
             format,
+            dialect: args.dialect.or(self.export.dialect).unwrap_or_default(),
             group_by: args
                 .group_by
                 .or_else(|| viewpoint.and_then(|entry| entry.group_by))
@@ -538,6 +556,7 @@ impl ReluneConfig {
     #[allow(clippy::missing_const_for_fn)]
     pub fn merge_doc_args(&self, args: &crate::cli::DocArgs) -> MergedDocConfig {
         MergedDocConfig {
+            dialect: args.dialect.or(self.doc.dialect).unwrap_or_default(),
             fail_on_warning: args.fail_on_warning || self.doc.fail_on_warning.unwrap_or(false),
         }
     }
@@ -545,6 +564,7 @@ impl ReluneConfig {
     /// Merge CLI lint args into this config.
     pub fn merge_lint_args(&self, args: &crate::cli::LintArgs) -> MergedLintConfig {
         MergedLintConfig {
+            dialect: args.dialect.or(self.lint.dialect).unwrap_or_default(),
             format: args
                 .format
                 .or_else(|| self.lint.format.map(Into::into))
@@ -710,6 +730,7 @@ fn validate_focus_filters(
 #[derive(Debug, Clone)]
 pub struct MergedRenderConfig {
     pub format: RenderFormat,
+    pub dialect: DialectArg,
     pub theme: Theme,
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
@@ -728,6 +749,7 @@ pub struct MergedRenderConfig {
 #[derive(Debug, Clone)]
 pub struct MergedInspectConfig {
     pub format: crate::cli::InspectFormat,
+    pub dialect: DialectArg,
     pub fail_on_warning: bool,
 }
 
@@ -735,6 +757,7 @@ pub struct MergedInspectConfig {
 #[derive(Debug, Clone)]
 pub struct MergedExportConfig {
     pub format: crate::cli::ExportFormat,
+    pub dialect: DialectArg,
     pub group_by: Option<GroupByMode>,
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
@@ -749,12 +772,14 @@ pub struct MergedExportConfig {
 /// Merged doc configuration.
 #[derive(Debug, Clone)]
 pub struct MergedDocConfig {
+    pub dialect: DialectArg,
     pub fail_on_warning: bool,
 }
 
 /// Merged lint configuration.
 #[derive(Debug, Clone)]
 pub struct MergedLintConfig {
+    pub dialect: DialectArg,
     pub format: crate::cli::LintFormat,
     pub profile: crate::cli::LintProfileArg,
     pub rules: Vec<String>,
@@ -958,7 +983,7 @@ mod tests {
             direction: None,
             stats: true,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1022,7 +1047,7 @@ mod tests {
             direction: None,
             stats: false,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1081,7 +1106,7 @@ mod tests {
             direction: None,
             stats: true,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1145,7 +1170,7 @@ mod tests {
             format: Some(InspectFormat::Json),
             out: None,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config.merge_inspect_args(&args);
@@ -1192,7 +1217,7 @@ mod tests {
             edge_style: None,
             direction: None,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1229,7 +1254,7 @@ mod tests {
             edge_style: None,
             direction: None,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let error = config
@@ -1254,7 +1279,7 @@ mod tests {
             db_url: None,
             out: None,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config.merge_doc_args(&args);
@@ -1265,6 +1290,7 @@ mod tests {
     fn test_validate_render_semantics_accepts_consistent_filters() {
         let config = MergedRenderConfig {
             format: RenderFormat::Svg,
+            dialect: DialectArg::Auto,
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
@@ -1288,6 +1314,7 @@ mod tests {
     fn test_validate_render_semantics_rejects_depth_without_focus() {
         let config = MergedRenderConfig {
             format: RenderFormat::Svg,
+            dialect: DialectArg::Auto,
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
@@ -1312,6 +1339,7 @@ mod tests {
     fn test_validate_render_semantics_rejects_conflicting_include_and_exclude() {
         let config = MergedRenderConfig {
             format: RenderFormat::Svg,
+            dialect: DialectArg::Auto,
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
@@ -1340,6 +1368,7 @@ mod tests {
     fn test_validate_render_semantics_rejects_focus_not_in_include() {
         let config = MergedRenderConfig {
             format: RenderFormat::Svg,
+            dialect: DialectArg::Auto,
             theme: Theme::Light,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
@@ -1368,6 +1397,7 @@ mod tests {
     fn test_validate_export_semantics_rejects_blank_focus() {
         let config = MergedExportConfig {
             format: crate::cli::ExportFormat::SchemaJson,
+            dialect: DialectArg::Auto,
             group_by: None,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
@@ -1393,6 +1423,7 @@ mod tests {
     fn test_validate_export_semantics_rejects_depth_without_focus() {
         let config = MergedExportConfig {
             format: crate::cli::ExportFormat::SchemaJson,
+            dialect: DialectArg::Auto,
             group_by: None,
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
@@ -1420,7 +1451,7 @@ mod tests {
             sql: None,
             db_url: None,
             schema_json: None,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
             format: None,
             out: None,
             profile: None,
@@ -1464,7 +1495,7 @@ mod tests {
             direction: None,
             stats: false,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1552,7 +1583,7 @@ mod tests {
             direction: Some(DirectionArg::BottomToTop),
             stats: false,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1586,7 +1617,7 @@ mod tests {
             direction: None,
             stats: false,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1650,7 +1681,7 @@ direction = "left-to-right"
             direction: None,
             stats: false,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config
@@ -1686,7 +1717,7 @@ direction = "left-to-right"
             direction: None,
             stats: false,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let error = config
@@ -1731,7 +1762,7 @@ direction = "left-to-right"
             edge_style: None,
             direction: None,
             fail_on_warning: false,
-            dialect: crate::cli::DialectArg::Auto,
+            dialect: None,
         };
 
         let merged = config

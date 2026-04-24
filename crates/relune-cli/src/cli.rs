@@ -101,8 +101,8 @@ pub struct RenderArgs {
     pub db_url: Option<String>,
 
     /// SQL dialect for parsing (auto-detected if omitted).
-    #[arg(long = "dialect", value_enum, default_value = "auto")]
-    pub dialect: DialectArg,
+    #[arg(long = "dialect", value_enum)]
+    pub dialect: Option<DialectArg>,
 
     // -------------------------------------------------------------------------
     // Output options
@@ -345,8 +345,8 @@ pub struct InspectArgs {
     pub db_url: Option<String>,
 
     /// SQL dialect for parsing (auto-detected if omitted).
-    #[arg(long = "dialect", value_enum, default_value = "auto")]
-    pub dialect: DialectArg,
+    #[arg(long = "dialect", value_enum)]
+    pub dialect: Option<DialectArg>,
 
     // -------------------------------------------------------------------------
     // Inspect options
@@ -418,8 +418,8 @@ pub struct ExportArgs {
     pub db_url: Option<String>,
 
     /// SQL dialect for parsing (auto-detected if omitted).
-    #[arg(long = "dialect", value_enum, default_value = "auto")]
-    pub dialect: DialectArg,
+    #[arg(long = "dialect", value_enum)]
+    pub dialect: Option<DialectArg>,
 
     // -------------------------------------------------------------------------
     // Export options
@@ -527,8 +527,8 @@ pub struct DocArgs {
     pub db_url: Option<String>,
 
     /// SQL dialect for parsing (auto-detected if omitted).
-    #[arg(long = "dialect", value_enum, default_value = "auto")]
-    pub dialect: DialectArg,
+    #[arg(long = "dialect", value_enum)]
+    pub dialect: Option<DialectArg>,
 
     // -------------------------------------------------------------------------
     // Output options
@@ -573,8 +573,8 @@ pub struct LintArgs {
     pub schema_json: Option<PathBuf>,
 
     /// SQL dialect for parsing (auto-detected if omitted).
-    #[arg(long = "dialect", value_enum, default_value = "auto")]
-    pub dialect: DialectArg,
+    #[arg(long = "dialect", value_enum)]
+    pub dialect: Option<DialectArg>,
 
     // -------------------------------------------------------------------------
     // Lint options

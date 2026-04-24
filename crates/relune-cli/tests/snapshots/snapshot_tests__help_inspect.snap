@@ -47,8 +47,6 @@ Options:
           - postgres: `PostgreSQL` dialect
           - mysql:    `MySQL` dialect
           - sqlite:   `SQLite` dialect
-          
-          [default: auto]
 
       --table <NAME>
           Table to inspect

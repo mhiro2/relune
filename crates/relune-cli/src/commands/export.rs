@@ -24,7 +24,7 @@ pub fn run_export(
     merged.validate_semantics()?;
 
     // Resolve input source after config validation so invalid settings fail fast.
-    let input = InputSelection::from_export(args).resolve(args.dialect.into(), "input")?;
+    let input = InputSelection::from_export(args).resolve(merged.dialect.into(), "input")?;
 
     // Convert merged format to app format
     let export_format = match merged.format {

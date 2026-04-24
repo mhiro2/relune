@@ -47,8 +47,6 @@ Options:
           - postgres: `PostgreSQL` dialect
           - mysql:    `MySQL` dialect
           - sqlite:   `SQLite` dialect
-          
-          [default: auto]
 
   -o, --out <FILE>
           Output file path; stdout if omitted

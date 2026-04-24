@@ -21,7 +21,7 @@ pub fn run_lint(
     let merged = config.merge_lint_args(args);
 
     // Resolve input source
-    let input = InputSelection::from_lint(args).resolve(args.dialect.into(), "input")?;
+    let input = InputSelection::from_lint(args).resolve(merged.dialect.into(), "input")?;
 
     // Convert severity from CLI to core type
     let fail_on = merged.deny.map(lint_severity_to_core);

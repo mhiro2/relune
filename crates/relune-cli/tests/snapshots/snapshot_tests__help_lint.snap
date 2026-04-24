@@ -41,8 +41,6 @@ Options:
           - postgres: `PostgreSQL` dialect
           - mysql:    `MySQL` dialect
           - sqlite:   `SQLite` dialect
-          
-          [default: auto]
 
   -q, --quiet
           Reduce non-error output

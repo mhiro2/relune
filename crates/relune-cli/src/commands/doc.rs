@@ -19,7 +19,7 @@ pub fn run_doc(
     let merged = config.merge_doc_args(args);
 
     // Resolve input source
-    let input = InputSelection::from_doc(args).resolve(args.dialect.into(), "input")?;
+    let input = InputSelection::from_doc(args).resolve(merged.dialect.into(), "input")?;
 
     // Build request
     let request = DocRequest {
