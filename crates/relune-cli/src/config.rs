@@ -4,6 +4,7 @@
 //! ```toml
 //! [render]
 //! format = "svg"  # svg, html, png, graph-json, schema-json
+//! dialect = "auto" # auto, postgres, mysql, sqlite
 //! theme = "light" # light, dark
 //! layout = "hierarchical" # hierarchical, force-directed
 //! edge_style = "straight" # straight, orthogonal, curved
@@ -19,10 +20,12 @@
 //!
 //! [inspect]
 //! format = "text" # text, json
+//! dialect = "auto"
 //! fail_on_warning = false
 //!
 //! [export]
 //! format = "schema-json" # schema-json, graph-json, layout-json, mermaid, d2, dot
+//! dialect = "auto"
 //! viewpoint = "billing"
 //! group_by = "none"
 //! layout = "hierarchical"
@@ -42,14 +45,16 @@
 //! group_by = "schema"
 //!
 //! [doc]
+//! dialect = "auto"
 //! fail_on_warning = false
 //!
 //! [diff]
 //! format = "text" # text, json
-//! dialect = "auto" # auto, postgres, mysql, sqlite
+//! dialect = "auto"
 //! fail_on_warning = false
 //!
 //! [lint]
+//! dialect = "auto"
 //! profile = "default" # default, strict
 //! rules = ["missing-foreign-key-index"]
 //! exclude_rules = ["missing-column-comment"]
@@ -1556,6 +1561,206 @@ mod tests {
         assert_eq!(merged.format, DiffFormat::Json);
         assert_eq!(merged.dialect, DialectArg::Sqlite);
         assert!(!merged.fail_on_warning);
+    }
+
+    fn default_render_args() -> RenderArgs {
+        RenderArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: None,
+            out: None,
+            stdout: false,
+            focus: None,
+            viewpoint: None,
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            theme: None,
+            layout: None,
+            edge_style: None,
+            direction: None,
+            stats: false,
+            fail_on_warning: false,
+            dialect: None,
+        }
+    }
+
+    fn default_inspect_args() -> crate::cli::InspectArgs {
+        crate::cli::InspectArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            table: None,
+            summary: false,
+            format: None,
+            out: None,
+            fail_on_warning: false,
+            dialect: None,
+        }
+    }
+
+    fn default_export_args() -> crate::cli::ExportArgs {
+        crate::cli::ExportArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            format: Some(crate::cli::ExportFormat::SchemaJson),
+            out: None,
+            focus: None,
+            viewpoint: None,
+            depth: None,
+            group_by: None,
+            include: vec![],
+            exclude: vec![],
+            layout: None,
+            edge_style: None,
+            direction: None,
+            fail_on_warning: false,
+            dialect: None,
+        }
+    }
+
+    fn default_doc_args() -> crate::cli::DocArgs {
+        crate::cli::DocArgs {
+            sql: None,
+            sql_text: None,
+            schema_json: None,
+            db_url: None,
+            out: None,
+            fail_on_warning: false,
+            dialect: None,
+        }
+    }
+
+    fn default_lint_args() -> crate::cli::LintArgs {
+        crate::cli::LintArgs {
+            sql: None,
+            db_url: None,
+            schema_json: None,
+            dialect: None,
+            format: None,
+            out: None,
+            profile: None,
+            rules: vec![],
+            exclude_rules: vec![],
+            rule_categories: vec![],
+            except_tables: vec![],
+            deny: None,
+            fail_on_warning: false,
+        }
+    }
+
+    #[test]
+    fn test_merge_render_args_dialect_from_config() {
+        let mut config = ReluneConfig::default();
+        config.render.dialect = Some(DialectArg::Postgres);
+        let merged = config
+            .merge_render_args(&default_render_args())
+            .expect("merge should succeed");
+        assert_eq!(merged.dialect, DialectArg::Postgres);
+    }
+
+    #[test]
+    fn test_merge_render_args_dialect_cli_overrides_config() {
+        let mut config = ReluneConfig::default();
+        config.render.dialect = Some(DialectArg::Postgres);
+        let args = RenderArgs {
+            dialect: Some(DialectArg::Mysql),
+            ..default_render_args()
+        };
+        let merged = config
+            .merge_render_args(&args)
+            .expect("merge should succeed");
+        assert_eq!(merged.dialect, DialectArg::Mysql);
+    }
+
+    #[test]
+    fn test_merge_inspect_args_dialect_from_config() {
+        let mut config = ReluneConfig::default();
+        config.inspect.dialect = Some(DialectArg::Mysql);
+        let merged = config.merge_inspect_args(&default_inspect_args());
+        assert_eq!(merged.dialect, DialectArg::Mysql);
+    }
+
+    #[test]
+    fn test_merge_inspect_args_dialect_cli_overrides_config() {
+        let mut config = ReluneConfig::default();
+        config.inspect.dialect = Some(DialectArg::Mysql);
+        let args = crate::cli::InspectArgs {
+            dialect: Some(DialectArg::Sqlite),
+            ..default_inspect_args()
+        };
+        let merged = config.merge_inspect_args(&args);
+        assert_eq!(merged.dialect, DialectArg::Sqlite);
+    }
+
+    #[test]
+    fn test_merge_export_args_dialect_from_config() {
+        let mut config = ReluneConfig::default();
+        config.export.dialect = Some(DialectArg::Sqlite);
+        let merged = config
+            .merge_export_args(&default_export_args())
+            .expect("merge should succeed");
+        assert_eq!(merged.dialect, DialectArg::Sqlite);
+    }
+
+    #[test]
+    fn test_merge_export_args_dialect_cli_overrides_config() {
+        let mut config = ReluneConfig::default();
+        config.export.dialect = Some(DialectArg::Sqlite);
+        let args = crate::cli::ExportArgs {
+            dialect: Some(DialectArg::Postgres),
+            ..default_export_args()
+        };
+        let merged = config
+            .merge_export_args(&args)
+            .expect("merge should succeed");
+        assert_eq!(merged.dialect, DialectArg::Postgres);
+    }
+
+    #[test]
+    fn test_merge_doc_args_dialect_from_config() {
+        let mut config = ReluneConfig::default();
+        config.doc.dialect = Some(DialectArg::Postgres);
+        let merged = config.merge_doc_args(&default_doc_args());
+        assert_eq!(merged.dialect, DialectArg::Postgres);
+    }
+
+    #[test]
+    fn test_merge_doc_args_dialect_cli_overrides_config() {
+        let mut config = ReluneConfig::default();
+        config.doc.dialect = Some(DialectArg::Postgres);
+        let args = crate::cli::DocArgs {
+            dialect: Some(DialectArg::Mysql),
+            ..default_doc_args()
+        };
+        let merged = config.merge_doc_args(&args);
+        assert_eq!(merged.dialect, DialectArg::Mysql);
+    }
+
+    #[test]
+    fn test_merge_lint_args_dialect_from_config() {
+        let mut config = ReluneConfig::default();
+        config.lint.dialect = Some(DialectArg::Mysql);
+        let merged = config.merge_lint_args(&default_lint_args());
+        assert_eq!(merged.dialect, DialectArg::Mysql);
+    }
+
+    #[test]
+    fn test_merge_lint_args_dialect_cli_overrides_config() {
+        let mut config = ReluneConfig::default();
+        config.lint.dialect = Some(DialectArg::Mysql);
+        let args = crate::cli::LintArgs {
+            dialect: Some(DialectArg::Sqlite),
+            ..default_lint_args()
+        };
+        let merged = config.merge_lint_args(&args);
+        assert_eq!(merged.dialect, DialectArg::Sqlite);
     }
 
     #[test]

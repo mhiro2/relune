@@ -49,6 +49,7 @@ fail_on_warning = false
 fail_on_warning = false
 
 [lint]
+dialect = "postgres"
 deny = "warning"
 fail_on_warning = false
 
@@ -76,6 +77,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | Key | Values |
 |-----|--------|
 | `format` | `svg`, `html`, `graph-json`, `schema-json` |
+| `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `theme` | `light`, `dark` |
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
@@ -112,6 +114,7 @@ If `viewpoint` is set, Relune applies the selected named preset before CLI flags
 | Key | Values |
 |-----|--------|
 | `format` | `text`, `json` |
+| `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 ---
@@ -121,6 +124,7 @@ If `viewpoint` is set, Relune applies the selected named preset before CLI flags
 | Key | Values |
 |-----|--------|
 | `format` | `schema-json`, `graph-json`, `layout-json`, `mermaid`, `d2`, `dot` |
+| `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `viewpoint` | Name from `[viewpoints.<name>]` |
 | `group_by` | `none`, `schema`, `prefix` |
 | `layout` | `hierarchical`, `force-directed` |
@@ -155,6 +159,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 
 | Key | Values |
 |-----|--------|
+| `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 ---
@@ -164,6 +169,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | Key | Values |
 |-----|--------|
 | `format` | `text`, `json` |
+| `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `profile` | `default`, `strict` |
 | `rules` | Array of kebab-case rule IDs to run instead of the profile defaults |
 | `exclude_rules` | Array of kebab-case rule IDs to remove from the active set |
