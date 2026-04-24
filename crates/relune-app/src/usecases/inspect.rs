@@ -249,7 +249,7 @@ fn format_diagnostics_summary(diagnostics: &[relune_core::Diagnostic], output: &
     if !other.is_empty() {
         // Sort by severity descending.
         let mut other = other;
-        other.sort_by(|a, b| b.severity.cmp(&a.severity));
+        other.sort_by_key(|d| std::cmp::Reverse(d.severity));
         for d in &other {
             let _ = writeln!(output, "  [{}] {}: {}", d.severity, d.code, d.message);
         }
