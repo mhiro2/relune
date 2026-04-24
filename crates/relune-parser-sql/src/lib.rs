@@ -1066,12 +1066,10 @@ fn parse_create_table(
 
     // Parse columns
     let mut columns = Vec::new();
-    let mut next_column_id: u64 = 1;
 
-    for column in &create.columns {
+    for (next_column_id, column) in (1_u64..).zip(create.columns.iter()) {
         let parsed_column = parsed_column_from_column_def(column);
         columns.push(parsed_column.into_column(ColumnId(next_column_id)));
-        next_column_id += 1;
     }
 
     // Parse inline foreign key constraints from columns
