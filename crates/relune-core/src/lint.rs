@@ -829,12 +829,15 @@ fn is_snake_case(s: &str) -> bool {
     chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Returns whether `index_cols` has `fk_cols` as an ordered prefix (exact name match).
+/// Returns whether `index_cols` has `fk_cols` as an ordered prefix (case-insensitive).
 fn column_list_has_prefix(index_cols: &[String], fk_cols: &[String]) -> bool {
     if index_cols.len() < fk_cols.len() {
         return false;
     }
-    index_cols.iter().zip(fk_cols.iter()).all(|(a, b)| a == b)
+    index_cols
+        .iter()
+        .zip(fk_cols.iter())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Returns whether the FK column list is covered by the table PK column order or any index prefix.
@@ -914,19 +917,19 @@ fn check_circular_foreign_keys(schema: &Schema, result: &mut LintResult) {
 }
 
 /// `true` when `to_columns` matches the referenced table PK column set or some unique index column set,
-/// regardless of column order.
+/// regardless of column order (case-insensitive).
 fn referenced_columns_are_unique(ref_table: &Table, to_columns: &[String]) -> bool {
     if to_columns.is_empty() {
         return false;
     }
-    let mut sorted_to: Vec<&str> = to_columns.iter().map(String::as_str).collect();
+    let mut sorted_to: Vec<String> = to_columns.iter().map(|s| s.to_ascii_lowercase()).collect();
     sorted_to.sort_unstable();
 
-    let mut pk_cols: Vec<&str> = ref_table
+    let mut pk_cols: Vec<String> = ref_table
         .columns
         .iter()
         .filter(|c| c.is_primary_key)
-        .map(|c| c.name.as_str())
+        .map(|c| c.name.to_ascii_lowercase())
         .collect();
     pk_cols.sort_unstable();
     if !pk_cols.is_empty() && pk_cols == sorted_to {
@@ -936,7 +939,8 @@ fn referenced_columns_are_unique(ref_table: &Table, to_columns: &[String]) -> bo
         if !idx.is_unique {
             return false;
         }
-        let mut sorted_idx: Vec<&str> = idx.columns.iter().map(String::as_str).collect();
+        let mut sorted_idx: Vec<String> =
+            idx.columns.iter().map(|s| s.to_ascii_lowercase()).collect();
         sorted_idx.sort_unstable();
         sorted_idx == sorted_to
     })

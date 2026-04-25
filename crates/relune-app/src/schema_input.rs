@@ -85,8 +85,10 @@ pub(crate) fn schema_from_input_with_context(
         InputSource::SchemaJson { json } => {
             ensure_text_size_within_limit(json.len(), "Schema JSON")?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(json)?;
+            let schema = relune_core::export::import_schema(&export)
+                .map_err(|e| AppError::input_with_type("schema_json", e.to_string()))?;
             Ok((
-                relune_core::export::import_schema(&export),
+                schema,
                 vec![],
                 SchemaInputContext {
                     supports_comment_review: false,
@@ -97,8 +99,10 @@ pub(crate) fn schema_from_input_with_context(
             ensure_file_size_within_limit(path)?;
             let json = std::fs::read_to_string(path)?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(&json)?;
+            let schema = relune_core::export::import_schema(&export)
+                .map_err(|e| AppError::input_with_type("schema_json_file", e.to_string()))?;
             Ok((
-                relune_core::export::import_schema(&export),
+                schema,
                 vec![],
                 SchemaInputContext {
                     supports_comment_review: false,
