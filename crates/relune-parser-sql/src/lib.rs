@@ -677,11 +677,11 @@ fn warn_truncated_object_name(
     max_parts: usize,
     context: &str,
 ) {
-    let parts = split_object_name_parts(name);
-    if parts.len() <= max_parts {
+    if name.0.len() <= max_parts {
         return;
     }
 
+    let parts = split_object_name_parts(name);
     let ignored = parts[..parts.len() - max_parts].join(".");
     let retained = parts[parts.len() - max_parts..].join(".");
     ctx.diagnostics.push(
@@ -2028,16 +2028,13 @@ fn extract_expr_column_name(expr: &sqlparser::ast::Expr) -> Option<String> {
 
 /// Split an `ObjectName` into (`schema_name`, `table_name`).
 fn split_object_name(name: &ObjectName) -> (Option<String>, String) {
-    let parts: Vec<String> = name.0.iter().map(object_name_part_to_string).collect();
-    match parts.as_slice() {
-        [table] => (None, table.clone()),
-        [schema_name, table] => (Some(schema_name.clone()), table.clone()),
-        [.., schema_name, table] => {
-            // Handle longer qualified names by taking last two parts
-            (Some(schema_name.clone()), table.clone())
-        }
-        [] => (None, String::new()),
+    let len = name.0.len();
+    if len == 0 {
+        return (None, String::new());
     }
+    let table = object_name_part_to_string(&name.0[len - 1]);
+    let schema = (len >= 2).then(|| object_name_part_to_string(&name.0[len - 2]));
+    (schema, table)
 }
 
 /// Convert an `ObjectNamePart` to a string.
