@@ -36,7 +36,7 @@ pub(crate) const fn node_kind_label(kind: NodeKind) -> &'static str {
     }
 }
 
-pub(crate) fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
+pub(crate) const fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
     match (kind, is_light_theme(colors)) {
         (NodeKind::Table, false) => NodeStyle {
             body_fill: "#151926",
@@ -77,7 +77,7 @@ pub(crate) fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
     }
 }
 
-pub(crate) fn node_label_background(colors: &ThemeColors) -> &'static str {
+pub(crate) const fn node_label_background(colors: &ThemeColors) -> &'static str {
     if is_light_theme(colors) {
         "#ffffff"
     } else {

@@ -163,19 +163,44 @@ fn export_index(idx: &Index) -> IndexExport {
 }
 
 /// Import a Schema from the stable JSON format.
-#[must_use]
-pub fn import_schema(export: &SchemaExport) -> Schema {
-    Schema {
-        tables: export
-            .tables
-            .iter()
-            .enumerate()
-            .map(|(i, t)| import_table(i, t))
-            .collect(),
+///
+/// Returns an error if any table has an empty `stable_id`, which would
+/// corrupt downstream diff and overlay operations.
+pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
+    let tables = export
+        .tables
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if t.id.is_empty() {
+                return Err(ImportError {
+                    message: format!("table at index {i} has an empty stable_id"),
+                });
+            }
+            Ok(import_table(i, t))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Schema {
+        tables,
         views: vec![],
         enums: vec![],
+    })
+}
+
+/// Error returned when a schema import fails validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportError {
+    /// Description of the import error.
+    pub message: String,
+}
+
+impl std::fmt::Display for ImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "schema import error: {}", self.message)
     }
 }
+
+impl std::error::Error for ImportError {}
 
 /// Import a single Table from the stable format.
 fn import_table(index: usize, export: &TableExport) -> Table {
@@ -266,7 +291,7 @@ mod tests {
 
     fn roundtrip_schema(schema: &Schema) -> SchemaExport {
         let exported = export_schema(schema);
-        let imported = import_schema(&exported);
+        let imported = import_schema(&exported).unwrap();
         export_schema(&imported)
     }
 
@@ -400,7 +425,7 @@ mod tests {
             },
         ]);
 
-        let schema = import_schema(&export);
+        let schema = import_schema(&export).unwrap();
         let ids: Vec<_> = schema.tables.iter().map(|t| t.id).collect();
         assert_eq!(ids, vec![TableId(1), TableId(2), TableId(3)]);
     }
@@ -559,7 +584,7 @@ mod tests {
             },
         ]);
 
-        let schema = import_schema(&export);
+        let schema = import_schema(&export).unwrap();
         let fk = &schema.tables[1].foreign_keys[0];
         assert_eq!(fk.on_delete, ReferentialAction::Cascade);
         assert_eq!(fk.on_update, ReferentialAction::SetDefault);

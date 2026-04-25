@@ -121,6 +121,7 @@ mod tests {
             group_stroke: "#334155",
             glow_color: "#f59e0b",
             glow_particle: "#fbbf24",
+            is_light: false,
         }
     }
 

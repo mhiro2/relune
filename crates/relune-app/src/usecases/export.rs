@@ -57,21 +57,37 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
             serde_json::to_string_pretty(&export)?
         }
         ExportFormat::GraphJson => {
-            serde_json::to_string_pretty(graph.as_ref().expect("graph json requires graph"))?
+            let g = graph
+                .as_ref()
+                .ok_or_else(|| AppError::other("export", "graph json requires graph"))?;
+            serde_json::to_string_pretty(g)?
         }
         ExportFormat::LayoutJson => {
+            let g = graph
+                .as_ref()
+                .ok_or_else(|| AppError::other("export", "layout json requires graph"))?;
             let config = LayoutConfig::from(&request.layout);
-            let positioned = build_layout_from_graph_with_config(
-                graph.as_ref().expect("layout json requires graph"),
-                &config,
-            )?;
+            let positioned = build_layout_from_graph_with_config(g, &config)?;
             serde_json::to_string_pretty(&positioned)?
         }
         ExportFormat::Mermaid => {
-            layout_graph_to_mermaid(graph.as_ref().expect("mermaid requires graph"))
+            let g = graph
+                .as_ref()
+                .ok_or_else(|| AppError::other("export", "mermaid requires graph"))?;
+            layout_graph_to_mermaid(g)
         }
-        ExportFormat::D2 => layout_graph_to_d2(graph.as_ref().expect("d2 requires graph")),
-        ExportFormat::Dot => layout_graph_to_dot(graph.as_ref().expect("dot requires graph")),
+        ExportFormat::D2 => {
+            let g = graph
+                .as_ref()
+                .ok_or_else(|| AppError::other("export", "d2 requires graph"))?;
+            layout_graph_to_d2(g)
+        }
+        ExportFormat::Dot => {
+            let g = graph
+                .as_ref()
+                .ok_or_else(|| AppError::other("export", "dot requires graph"))?;
+            layout_graph_to_dot(g)
+        }
     };
 
     Ok(ExportResult {

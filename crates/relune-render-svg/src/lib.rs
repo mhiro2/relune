@@ -486,8 +486,8 @@ struct EdgeStyle {
     label_fill: Option<&'static str>,
 }
 
-pub(crate) fn is_light_theme(colors: &ThemeColors) -> bool {
-    colors.background == "#f7f8fc"
+pub(crate) const fn is_light_theme(colors: &ThemeColors) -> bool {
+    colors.is_light
 }
 
 /// Returns a display-friendly label for an overlay severity level.
@@ -503,7 +503,7 @@ pub(crate) const fn overlay_severity_label(
 }
 
 /// Returns the stroke/fill color for an overlay severity, themed for light/dark.
-pub(crate) fn overlay_severity_color(
+pub(crate) const fn overlay_severity_color(
     severity: relune_layout::OverlaySeverity,
     colors: &ThemeColors,
 ) -> &'static str {
@@ -528,7 +528,7 @@ const fn edge_kind_name(kind: EdgeKind) -> &'static str {
     }
 }
 
-fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
+const fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
     match (kind, is_light_theme(colors)) {
         (EdgeKind::ForeignKey, _) => EdgeStyle {
             stroke: if is_light_theme(colors) {

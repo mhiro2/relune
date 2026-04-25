@@ -472,13 +472,25 @@ fn span_from_ident(
 }
 
 fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
+    let norm_name = normalize_identifier(name);
     match schema_name {
-        Some(schema_name) => format!(
-            "{}.{}",
-            normalize_identifier(schema_name),
-            normalize_identifier(name)
-        ),
-        None => normalize_identifier(name),
+        Some(schema_name) => {
+            let norm_schema = normalize_identifier(schema_name);
+            // Quote components that contain '.' so that ("a.b", "c") produces
+            // "a.b".c instead of the ambiguous a.b.c.
+            let s = if norm_schema.contains('.') {
+                format!("\"{norm_schema}\"")
+            } else {
+                norm_schema
+            };
+            let n = if norm_name.contains('.') {
+                format!("\"{norm_name}\"")
+            } else {
+                norm_name
+            };
+            format!("{s}.{n}")
+        }
+        None => norm_name,
     }
 }
 

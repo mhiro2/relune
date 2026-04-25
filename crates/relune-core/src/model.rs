@@ -332,12 +332,12 @@ impl Schema {
                 });
             }
             ForeignKeyTargetResolution::Found(ref_table) => {
-                // to_columns reference existing columns in the target table
+                // to_columns reference existing columns in the target table (case-insensitive)
                 for col in &fk.to_columns {
                     if !ref_table
                         .columns
                         .iter()
-                        .any(|candidate| candidate.name == *col)
+                        .any(|candidate| candidate.name.eq_ignore_ascii_case(col))
                     {
                         errors.push(ValidationError {
                             table: Some(table.name.clone()),
