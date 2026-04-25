@@ -2521,6 +2521,23 @@ fn finalize_routed_edge(
     }
 }
 
+fn collect_node_obstacles(positioned_nodes: &[PositionedNode]) -> Vec<(&str, Rect)> {
+    positioned_nodes
+        .iter()
+        .map(|node| {
+            (
+                node.id.as_str(),
+                Rect {
+                    x: node.x,
+                    y: node.y,
+                    w: node.width,
+                    h: node.height,
+                },
+            )
+        })
+        .collect()
+}
+
 fn route_edges_with_diagnostics(
     graph: &LayoutGraph,
     positioned_nodes: &[PositionedNode],
@@ -2541,6 +2558,9 @@ fn route_edges_with_diagnostics(
 
     let mut routed_edges = vec![None; graph.edges.len()];
 
+    let node_obstacles = collect_node_obstacles(positioned_nodes);
+    let mut detour_obstacles: Vec<Rect> = Vec::with_capacity(node_obstacles.len());
+
     for &edge_index in &routing_order {
         let edge = &graph.edges[edge_index];
         let from_pos = node_positions.get(edge.from.as_str());
@@ -2555,16 +2575,15 @@ fn route_edges_with_diagnostics(
             });
         };
 
-        let detour_obstacles: Vec<Rect> = positioned_nodes
-            .iter()
-            .filter(|node| node.id != edge.from && node.id != edge.to)
-            .map(|node| Rect {
-                x: node.x,
-                y: node.y,
-                w: node.width,
-                h: node.height,
-            })
-            .collect();
+        detour_obstacles.clear();
+        let from_id = edge.from.as_str();
+        let to_id = edge.to.as_str();
+        detour_obstacles.extend(
+            node_obstacles
+                .iter()
+                .filter(|(id, _)| *id != from_id && *id != to_id)
+                .map(|(_, rect)| *rect),
+        );
 
         let ctx = SingleEdgeRoutingContext {
             graph,
