@@ -176,15 +176,39 @@ fn generate_stable_id(input: &str) -> u64 {
     hash
 }
 
+/// Builds a human-readable stable identifier from schema and object name.
+///
+/// Components that contain `.` are quoted so that `("a.b", "c")` produces
+/// `"a.b".c` instead of the ambiguous `a.b.c`.
+fn qualified_stable_id(schema_name: &str, object_name: &str) -> String {
+    fn quote_if_needed(s: &str) -> std::borrow::Cow<'_, str> {
+        if s.contains('.') {
+            std::borrow::Cow::Owned(format!("\"{s}\""))
+        } else {
+            std::borrow::Cow::Borrowed(s)
+        }
+    }
+    format!(
+        "{}.{}",
+        quote_if_needed(schema_name),
+        quote_if_needed(object_name)
+    )
+}
+
 /// Generates a `TableId` from schema name and table name.
+///
+/// Uses `\0` as separator to avoid collisions when names contain `.`
+/// (e.g. `PostgreSQL` quoted identifiers).
 fn generate_table_id(schema_name: &str, table_name: &str) -> TableId {
-    let stable_id = format!("{schema_name}.{table_name}");
+    let stable_id = format!("{schema_name}\0{table_name}");
     TableId(generate_stable_id(&stable_id))
 }
 
 /// Generates a `ColumnId` from table stable id and column name.
+///
+/// Uses `\0` as separator to avoid collisions when names contain `.`.
 fn generate_column_id(table_stable_id: &str, column_name: &str) -> ColumnId {
-    let full_id = format!("{table_stable_id}.{column_name}");
+    let full_id = format!("{table_stable_id}\0{column_name}");
     ColumnId(generate_stable_id(&full_id))
 }
 
@@ -294,7 +318,7 @@ fn map_table(
     foreign_keys: Vec<&RawForeignKey>,
     indexes: Vec<&RawIndex>,
 ) -> Table {
-    let stable_id = format!("{}.{}", raw_table.schema_name, raw_table.table_name);
+    let stable_id = qualified_stable_id(&raw_table.schema_name, &raw_table.table_name);
     let id = generate_table_id(&raw_table.schema_name, &raw_table.table_name);
 
     let mapped_columns: Vec<Column> = columns
@@ -361,7 +385,7 @@ fn map_index(raw_index: &RawIndex) -> Index {
 }
 
 fn map_view(raw_view: RawView, columns: Vec<&RawColumn>) -> View {
-    let id = format!("{}.{}", raw_view.schema_name, raw_view.view_name);
+    let id = qualified_stable_id(&raw_view.schema_name, &raw_view.view_name);
     let mapped_columns = columns
         .into_iter()
         .map(|column| map_column(column, &id, false))
@@ -377,7 +401,7 @@ fn map_view(raw_view: RawView, columns: Vec<&RawColumn>) -> View {
 }
 
 fn map_enum(raw_enum: RawEnum) -> Enum {
-    let id = format!("{}.{}", raw_enum.schema_name, raw_enum.enum_name);
+    let id = qualified_stable_id(&raw_enum.schema_name, &raw_enum.enum_name);
 
     Enum {
         id,

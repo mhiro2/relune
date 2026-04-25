@@ -114,15 +114,7 @@ pub struct WasmRenderRequest {
 impl WasmRenderRequest {
     /// Convert to a `RenderRequest` for the app layer.
     pub fn to_render_request(&self) -> Result<RenderRequest, String> {
-        // Validate input source
-        let input = match (&self.sql, &self.schema_json) {
-            (Some(sql), None) => relune_app::InputSource::sql_text(sql),
-            (None, Some(json)) => relune_app::InputSource::schema_json(json),
-            (Some(_), Some(_)) => {
-                return Err("Cannot specify both 'sql' and 'schemaJson'".to_string());
-            }
-            (None, None) => return Err("Must specify either 'sql' or 'schemaJson'".to_string()),
-        };
+        let input = wasm_input_source(self.sql.as_deref(), self.schema_json.as_deref())?;
 
         let output_format = self.format.unwrap_or(OutputFormat::Svg);
 
