@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Column, ForeignKey, Index, Schema, Table};
+use crate::model::{Column, Enum, ForeignKey, Index, Schema, Table, View};
 
 /// Stable schema export format for JSON serialization.
 /// This format is designed for long-term stability and should not
@@ -16,18 +16,26 @@ pub struct SchemaExport {
     pub version: String,
     /// Tables in the schema.
     pub tables: Vec<TableExport>,
+    /// Views in the schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<ViewExport>,
+    /// Enums in the schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enums: Vec<EnumExport>,
 }
 
 impl SchemaExport {
     /// Export format version.
     pub const VERSION: &'static str = "1.0.0";
 
-    /// Creates a new schema export.
+    /// Creates a new schema export from tables only. Views and enums default to empty.
     #[must_use]
     pub fn new(tables: Vec<TableExport>) -> Self {
         Self {
             version: Self::VERSION.to_string(),
             tables,
+            views: Vec::new(),
+            enums: Vec::new(),
         }
     }
 }
@@ -101,11 +109,44 @@ pub struct IndexExport {
     pub unique: bool,
 }
 
+/// Export format for a single view.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ViewExport {
+    /// Stable view identifier.
+    pub id: String,
+    /// Schema name, if qualified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    /// View name.
+    pub name: String,
+    /// Columns in the view.
+    pub columns: Vec<ColumnExport>,
+    /// View definition SQL, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<String>,
+}
+
+/// Export format for a single enum.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EnumExport {
+    /// Stable enum identifier.
+    pub id: String,
+    /// Schema name, if qualified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    /// Enum name.
+    pub name: String,
+    /// Enum values, in declaration order.
+    pub values: Vec<String>,
+}
+
 /// Export a Schema to a stable JSON format.
 pub fn export_schema(schema: &Schema) -> SchemaExport {
     SchemaExport {
         version: SchemaExport::VERSION.to_string(),
         tables: schema.tables.iter().map(export_table).collect(),
+        views: schema.views.iter().map(export_view).collect(),
+        enums: schema.enums.iter().map(export_enum).collect(),
     }
 }
 
@@ -162,10 +203,31 @@ fn export_index(idx: &Index) -> IndexExport {
     }
 }
 
+/// Export a View to the stable format.
+fn export_view(view: &View) -> ViewExport {
+    ViewExport {
+        id: view.id.clone(),
+        schema: view.schema_name.clone(),
+        name: view.name.clone(),
+        columns: view.columns.iter().map(export_column).collect(),
+        definition: view.definition.clone(),
+    }
+}
+
+/// Export an Enum to the stable format.
+fn export_enum(enum_: &Enum) -> EnumExport {
+    EnumExport {
+        id: enum_.id.clone(),
+        schema: enum_.schema_name.clone(),
+        name: enum_.name.clone(),
+        values: enum_.values.clone(),
+    }
+}
+
 /// Import a Schema from the stable JSON format.
 ///
-/// Returns an error if any table has an empty `stable_id`, which would
-/// corrupt downstream diff and overlay operations.
+/// Returns an error if any table, view, or enum has an empty stable identifier,
+/// which would corrupt downstream diff and overlay operations.
 pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
     let tables = export
         .tables
@@ -180,10 +242,36 @@ pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
             Ok(import_table(i, t))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let views = export
+        .views
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            if v.id.is_empty() {
+                return Err(ImportError {
+                    message: format!("view at index {i} has an empty id"),
+                });
+            }
+            Ok(import_view(v))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let enums = export
+        .enums
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            if e.id.is_empty() {
+                return Err(ImportError {
+                    message: format!("enum at index {i} has an empty id"),
+                });
+            }
+            Ok(import_enum(e))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Schema {
         tables,
-        views: vec![],
-        enums: vec![],
+        views,
+        enums,
     })
 }
 
@@ -282,6 +370,32 @@ fn import_index(export: &IndexExport) -> Index {
         name: export.name.clone(),
         columns: export.columns.clone(),
         is_unique: export.unique,
+    }
+}
+
+/// Import a View from the stable format.
+fn import_view(export: &ViewExport) -> View {
+    View {
+        id: export.id.clone(),
+        schema_name: export.schema.clone(),
+        name: export.name.clone(),
+        columns: export
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, c)| import_column(i, c))
+            .collect(),
+        definition: export.definition.clone(),
+    }
+}
+
+/// Import an Enum from the stable format.
+fn import_enum(export: &EnumExport) -> Enum {
+    Enum {
+        id: export.id.clone(),
+        schema_name: export.schema.clone(),
+        name: export.name.clone(),
+        values: export.values.clone(),
     }
 }
 
@@ -537,6 +651,82 @@ mod tests {
             export.tables[2].foreign_keys[0].on_update.as_deref(),
             Some("SET DEFAULT")
         );
+    }
+
+    #[test]
+    fn test_export_import_roundtrip_views_and_enums() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![View {
+                id: "public.active_users".to_string(),
+                schema_name: Some("public".to_string()),
+                name: "active_users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(1),
+                    name: "id".to_string(),
+                    data_type: "bigint".to_string(),
+                    nullable: false,
+                    is_primary_key: false,
+                    comment: None,
+                }],
+                definition: Some("SELECT id FROM users WHERE active".to_string()),
+            }],
+            enums: vec![Enum {
+                id: "public.status".to_string(),
+                schema_name: Some("public".to_string()),
+                name: "status".to_string(),
+                values: vec!["active".to_string(), "inactive".to_string()],
+            }],
+        };
+
+        let exported = export_schema(&schema);
+        assert_eq!(exported.views.len(), 1);
+        assert_eq!(exported.enums.len(), 1);
+
+        let imported = import_schema(&exported).unwrap();
+        assert_eq!(imported.views.len(), 1);
+        assert_eq!(imported.enums.len(), 1);
+        assert_eq!(imported.views[0].id, "public.active_users");
+        assert_eq!(
+            imported.views[0].definition.as_deref(),
+            Some("SELECT id FROM users WHERE active"),
+        );
+        assert_eq!(imported.views[0].columns.len(), 1);
+        assert_eq!(imported.views[0].columns[0].name, "id");
+        assert_eq!(imported.enums[0].id, "public.status");
+        assert_eq!(imported.enums[0].values, vec!["active", "inactive"]);
+
+        let reexported = export_schema(&imported);
+        assert_eq!(reexported, exported);
+    }
+
+    #[test]
+    fn test_import_rejects_empty_view_id() {
+        let mut export = SchemaExport::new(vec![]);
+        export.views.push(ViewExport {
+            id: String::new(),
+            schema: None,
+            name: "v".to_string(),
+            columns: vec![],
+            definition: None,
+        });
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(err.message.contains("view at index 0"));
+    }
+
+    #[test]
+    fn test_import_rejects_empty_enum_id() {
+        let mut export = SchemaExport::new(vec![]);
+        export.enums.push(EnumExport {
+            id: String::new(),
+            schema: None,
+            name: "e".to_string(),
+            values: vec!["v".to_string()],
+        });
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(err.message.contains("enum at index 0"));
     }
 
     #[test]
