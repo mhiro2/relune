@@ -501,6 +501,9 @@ pub struct Table {
     pub foreign_keys: Vec<ForeignKey>,
     /// Indexes on this table.
     pub indexes: Vec<Index>,
+    /// Optional name of the primary-key constraint, if it was declared with one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_key_name: Option<String>,
     /// Optional table comment.
     pub comment: Option<String>,
 }
@@ -674,6 +677,7 @@ mod tests {
                 .collect(),
             foreign_keys: fks,
             indexes: vec![],
+            primary_key_name: None,
             comment: None,
         }
     }

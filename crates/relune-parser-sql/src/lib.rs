@@ -1084,24 +1084,34 @@ fn parse_create_table(
         columns.push(parsed_column.into_column(ColumnId(next_column_id)));
     }
 
-    // Parse inline foreign key constraints from columns
+    // Parse inline foreign key constraints from columns and capture any
+    // column-level named PRIMARY KEY constraint.
     let mut foreign_keys = Vec::new();
+    let mut primary_key_name: Option<String> = None;
     for column in &create.columns {
         for option in &column.options {
-            if let ColumnOption::ForeignKey(constraint) = &option.option {
-                let from_column = normalize_identifier(&column.name.value);
-                foreign_keys.push(build_foreign_key(
-                    ctx,
-                    input,
-                    offsets,
-                    option.name.as_ref(),
-                    vec![from_column],
-                    &constraint.foreign_table,
-                    &constraint.referred_columns,
-                    constraint.on_delete,
-                    constraint.on_update,
-                    "CREATE TABLE inline FOREIGN KEY",
-                ));
+            match &option.option {
+                ColumnOption::ForeignKey(constraint) => {
+                    let from_column = normalize_identifier(&column.name.value);
+                    foreign_keys.push(build_foreign_key(
+                        ctx,
+                        input,
+                        offsets,
+                        option.name.as_ref(),
+                        vec![from_column],
+                        &constraint.foreign_table,
+                        &constraint.referred_columns,
+                        constraint.on_delete,
+                        constraint.on_update,
+                        "CREATE TABLE inline FOREIGN KEY",
+                    ));
+                }
+                ColumnOption::PrimaryKey(_) => {
+                    if let Some(constraint_name) = &option.name {
+                        primary_key_name = Some(normalize_identifier(&constraint_name.value));
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1117,6 +1127,9 @@ fn parse_create_table(
                         column.is_primary_key = true;
                         column.nullable = false;
                     }
+                }
+                if let Some(constraint_name) = &primary_key.name {
+                    primary_key_name = Some(normalize_identifier(&constraint_name.value));
                 }
             }
             TableConstraint::Unique(unique) => {
@@ -1168,7 +1181,8 @@ fn parse_create_table(
         columns,
         foreign_keys,
         indexes: Vec::new(), // Indexes are added in second pass
-        comment: None,       // Comments are added in third pass
+        primary_key_name,
+        comment: None, // Comments are added in third pass
     })
 }
 
@@ -1567,14 +1581,25 @@ fn apply_single_alter_operation(
             let table = &mut tables[idx];
             let before_fk = table.foreign_keys.len();
             let before_ix = table.indexes.len();
+            let pk_match = table
+                .primary_key_name
+                .as_ref()
+                .is_some_and(|n| n == &cname_norm);
             table.foreign_keys.retain(|fk| {
                 fk.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
             });
             table.indexes.retain(|ix| {
                 ix.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
             });
+            if pk_match {
+                for column in &mut table.columns {
+                    column.is_primary_key = false;
+                }
+                table.primary_key_name = None;
+            }
             if table.foreign_keys.len() == before_fk
                 && table.indexes.len() == before_ix
+                && !pk_match
                 && !if_exists
             {
                 ctx.diagnostics.push(Diagnostic::warning(
@@ -1686,9 +1711,11 @@ fn apply_single_alter_operation(
             }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {
-            for col in &mut tables[idx].columns {
+            let table = &mut tables[idx];
+            for col in &mut table.columns {
                 col.is_primary_key = false;
             }
+            table.primary_key_name = None;
         }
         AlterTableOperation::DropForeignKey { name, .. } => {
             let sym = normalize_identifier(&name.value);
@@ -1814,20 +1841,28 @@ fn add_column_from_alter(
     table.columns.push(col);
 
     for option in &column_def.options {
-        if let ColumnOption::ForeignKey(constraint) = &option.option {
-            let from_column = col_name.clone();
-            table.foreign_keys.push(build_foreign_key(
-                ctx,
-                input,
-                offsets,
-                option.name.as_ref(),
-                vec![from_column],
-                &constraint.foreign_table,
-                &constraint.referred_columns,
-                constraint.on_delete,
-                constraint.on_update,
-                "ALTER TABLE ADD COLUMN inline FOREIGN KEY",
-            ));
+        match &option.option {
+            ColumnOption::ForeignKey(constraint) => {
+                let from_column = col_name.clone();
+                table.foreign_keys.push(build_foreign_key(
+                    ctx,
+                    input,
+                    offsets,
+                    option.name.as_ref(),
+                    vec![from_column],
+                    &constraint.foreign_table,
+                    &constraint.referred_columns,
+                    constraint.on_delete,
+                    constraint.on_update,
+                    "ALTER TABLE ADD COLUMN inline FOREIGN KEY",
+                ));
+            }
+            ColumnOption::PrimaryKey(_) => {
+                if let Some(constraint_name) = &option.name {
+                    table.primary_key_name = Some(normalize_identifier(&constraint_name.value));
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1847,6 +1882,9 @@ fn apply_add_table_constraint(
                     column.is_primary_key = true;
                     column.nullable = false;
                 }
+            }
+            if let Some(constraint_name) = &primary_key.name {
+                table.primary_key_name = Some(normalize_identifier(&constraint_name.value));
             }
         }
         TableConstraint::Unique(unique) => {
@@ -3235,6 +3273,7 @@ mod tests {
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
         );
@@ -3706,6 +3745,109 @@ mod tests {
             users.indexes.is_empty(),
             "index should be removed by DROP CONSTRAINT"
         );
+    }
+
+    #[test]
+    fn alter_table_drop_constraint_removes_named_primary_key() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT,
+          name TEXT NOT NULL,
+          CONSTRAINT pk_users PRIMARY KEY (id)
+        );
+        ALTER TABLE users DROP CONSTRAINT pk_users;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let schema = output.schema.expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            !users.columns.iter().any(|c| c.is_primary_key),
+            "primary key should be cleared after DROP CONSTRAINT"
+        );
+        assert!(
+            users.primary_key_name.is_none(),
+            "primary key name should be cleared"
+        );
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("pk_users")),
+            "no warning should be emitted for valid PK drop"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_constraint_removes_column_level_named_primary_key() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT CONSTRAINT pk_users PRIMARY KEY,
+          name TEXT NOT NULL
+        );
+        ALTER TABLE users DROP CONSTRAINT pk_users;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let schema = output.schema.expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            !users.columns.iter().any(|c| c.is_primary_key),
+            "primary key should be cleared after DROP CONSTRAINT"
+        );
+        assert!(users.primary_key_name.is_none());
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("pk_users")),
+            "no warning should be emitted for valid PK drop"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_primary_key_clears_constraint_name() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT,
+          name TEXT NOT NULL,
+          CONSTRAINT pk_users PRIMARY KEY (id)
+        );
+        ALTER TABLE users DROP PRIMARY KEY;
+        ALTER TABLE users DROP CONSTRAINT pk_users;
+        ";
+
+        let output = parse_sql_to_schema_with_diagnostics(sql);
+        let schema = output.schema.expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(users.primary_key_name.is_none());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("pk_users")),
+            "second DROP CONSTRAINT should warn that pk_users no longer exists"
+        );
+    }
+
+    #[test]
+    fn alter_table_drop_constraint_named_pk_added_via_alter() {
+        let sql = r"
+        CREATE TABLE users (
+          id BIGINT NOT NULL,
+          name TEXT NOT NULL
+        );
+        ALTER TABLE users ADD CONSTRAINT pk_users PRIMARY KEY (id);
+        ALTER TABLE users DROP CONSTRAINT pk_users;
+        ";
+
+        let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+        let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+        assert!(
+            !users.columns.iter().any(|c| c.is_primary_key),
+            "primary key should be cleared after DROP CONSTRAINT"
+        );
+        assert!(users.primary_key_name.is_none());
     }
 
     #[test]

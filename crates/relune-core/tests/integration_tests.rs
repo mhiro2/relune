@@ -23,6 +23,7 @@ fn make_table(
         columns,
         foreign_keys,
         indexes,
+        primary_key_name: None,
         comment: None,
     }
 }

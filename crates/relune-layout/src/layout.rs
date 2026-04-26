@@ -4277,6 +4277,7 @@ mod tests {
                     ],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -4312,6 +4313,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -4364,6 +4366,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -4391,6 +4394,7 @@ mod tests {
                     ],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -4408,6 +4412,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -4446,6 +4451,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -4473,6 +4479,7 @@ mod tests {
                     ],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -4533,6 +4540,7 @@ mod tests {
                     columns,
                     foreign_keys,
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 }
             })
@@ -4604,6 +4612,7 @@ mod tests {
                 })
                 .unwrap_or_default(),
             indexes: vec![],
+            primary_key_name: None,
             comment: None,
         };
 
@@ -4658,6 +4667,7 @@ mod tests {
                 })
                 .unwrap_or_default(),
             indexes: vec![],
+            primary_key_name: None,
             comment: None,
         };
 
@@ -5568,6 +5578,7 @@ mod tests {
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![],
@@ -5663,6 +5674,7 @@ mod tests {
                     vec![]
                 },
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             })
             .collect();
@@ -5893,6 +5905,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -5939,6 +5952,7 @@ mod tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -5974,6 +5988,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -6020,6 +6035,7 @@ mod tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -6083,6 +6099,7 @@ mod tests {
                     on_update: ReferentialAction::NoAction,
                 }],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![],

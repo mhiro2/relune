@@ -502,6 +502,8 @@ pub struct DiffRequest {
     /// Filter specification for tables (used when format is Svg or Html).
     #[serde(default)]
     pub filter: FilterSpec,
+    /// Optional focus specification (used when format is Svg or Html).
+    pub focus: Option<FocusSpec>,
     /// Grouping specification (used when format is Svg or Html).
     #[serde(default)]
     pub grouping: GroupingSpec,

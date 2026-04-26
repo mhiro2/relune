@@ -360,6 +360,7 @@ impl TableBuilder {
                 columns: Vec::new(),
                 foreign_keys: Vec::new(),
                 indexes: Vec::new(),
+                primary_key_name: None,
                 comment: None,
             },
             next_column_id: 1,

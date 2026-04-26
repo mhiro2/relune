@@ -31,7 +31,10 @@ fn main() -> ExitCode {
         Err(e) => {
             // DiffChangesDetected is a signaling exit, not an error
             if !matches!(e, CliError::DiffChangesDetected) {
-                eprintln!("Error: {e}");
+                // The alternate Display walks the anyhow source chain so
+                // operators see the underlying sqlx / IO root cause rather
+                // than only the top-level context message.
+                eprintln!("Error: {e:#}");
             }
             ExitCode::from(e.exit_code())
         }

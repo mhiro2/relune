@@ -43,7 +43,7 @@ impl ParallelCatalogReader for MySqlCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch tables: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch tables", e))?;
 
         Ok(rows
             .into_iter()
@@ -77,7 +77,7 @@ impl ParallelCatalogReader for MySqlCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch columns: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch columns", e))?;
 
         rows.into_iter()
             .map(|row| {
@@ -129,7 +129,7 @@ impl ParallelCatalogReader for MySqlCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch views: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch views", e))?;
 
         Ok(rows
             .into_iter()
@@ -159,7 +159,7 @@ impl ParallelCatalogReader for MySqlCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch enums: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch enums", e))?;
 
         let mut seen = BTreeSet::new();
         let mut enums = Vec::new();
@@ -218,7 +218,7 @@ impl MySqlCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch foreign keys: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch foreign keys", e))?;
 
         Ok(rows)
     }
@@ -245,7 +245,7 @@ impl MySqlCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch indexes: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
 
         Ok(rows)
     }

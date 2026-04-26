@@ -219,6 +219,7 @@ fn import_table(index: usize, export: &TableExport) -> Table {
             .collect(),
         foreign_keys: export.foreign_keys.iter().map(import_fk).collect(),
         indexes: export.indexes.iter().map(import_index).collect(),
+        primary_key_name: None,
         comment: None,
     }
 }
@@ -322,6 +323,7 @@ mod tests {
             columns,
             foreign_keys,
             indexes: vec![],
+            primary_key_name: None,
             comment: None,
         }
     }

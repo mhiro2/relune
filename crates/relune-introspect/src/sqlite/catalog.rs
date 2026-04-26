@@ -76,7 +76,7 @@ async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<String>, IntrospectEr
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| IntrospectError::query(format!("Failed to list tables: {e}")))?;
+    .map_err(|e| IntrospectError::query_with_source("Failed to list tables", e))?;
 
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
@@ -93,7 +93,7 @@ async fn list_views(pool: &SqlitePool) -> Result<Vec<RawView>, IntrospectError> 
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| IntrospectError::query(format!("Failed to list views: {e}")))?;
+    .map_err(|e| IntrospectError::query_with_source("Failed to list views", e))?;
 
     Ok(rows
         .into_iter()
@@ -136,7 +136,7 @@ async fn pragma_table_info(
     sqlx::query_as::<_, SqliteTableInfoRow>(&sql)
         .fetch_all(pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("PRAGMA table_info failed: {e}")))
+        .map_err(|e| IntrospectError::query_with_source("PRAGMA table_info failed", e))
 }
 
 async fn pragma_foreign_key_list(
@@ -147,7 +147,7 @@ async fn pragma_foreign_key_list(
     sqlx::query_as::<_, SqliteFkRow>(&sql)
         .fetch_all(pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("PRAGMA foreign_key_list failed: {e}")))
+        .map_err(|e| IntrospectError::query_with_source("PRAGMA foreign_key_list failed", e))
 }
 
 async fn pragma_index_list(
@@ -158,7 +158,7 @@ async fn pragma_index_list(
     sqlx::query_as::<_, SqliteIndexListRow>(&sql)
         .fetch_all(pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("PRAGMA index_list failed: {e}")))
+        .map_err(|e| IntrospectError::query_with_source("PRAGMA index_list failed", e))
 }
 
 async fn pragma_index_info(
@@ -169,7 +169,7 @@ async fn pragma_index_info(
     sqlx::query_as::<_, SqliteIndexInfoRow>(&sql)
         .fetch_all(pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("PRAGMA index_info failed: {e}")))
+        .map_err(|e| IntrospectError::query_with_source("PRAGMA index_info failed", e))
 }
 
 #[derive(Debug, sqlx::FromRow)]
