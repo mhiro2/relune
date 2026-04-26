@@ -33,7 +33,11 @@ jobs:
             | jq -r '.packages[] | select(.name=="relune-cli") | .version')"
           test "${TAG_VERSION}" = "${CARGO_VERSION}"
       - name: Install Zig
-        run: brew install zig
+        # Pin to 0.15.x: zig 0.16.0 breaks cargo-zigbuild's `ar` wrapper when
+        # building ring/psm. See https://github.com/rust-cross/cargo-zigbuild/issues/433
+        run: |
+          brew install zig@0.15
+          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
       - name: Install cargo-zigbuild
         run: cargo install cargo-zigbuild --locked
       - name: Add Rust targets
