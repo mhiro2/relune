@@ -196,6 +196,10 @@ impl ParallelCatalogReader for PostgresCatalog {
             WHERE t.relkind = 'r'
                 AND n.nspname NOT IN ('pg_catalog', 'information_schema')
                 AND n.nspname NOT LIKE 'pg_%'
+                -- Skip expression indexes: indkey entries of 0 represent
+                -- expressions, which have no matching pg_attribute row and
+                -- would silently truncate the index column list.
+                AND 0 <> ALL(ix.indkey)
             GROUP BY i.relname, n.nspname, t.relname, ix.indisunique, ix.indisprimary
             ORDER BY n.nspname, t.relname, i.relname
             ",
