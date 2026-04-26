@@ -98,7 +98,12 @@ pub fn run_diff(
         DiffFormat::Markdown => format_diff_markdown(&result),
         DiffFormat::Json => serde_json::to_string_pretty(&result.diff)
             .context("Failed to serialize diff to JSON")?,
-        DiffFormat::Svg | DiffFormat::Html => rendered.unwrap_or_default(),
+        DiffFormat::Svg | DiffFormat::Html => rendered.ok_or_else(|| {
+            CliError::general(anyhow::anyhow!(
+                "visual diff produced no output for format `{:?}`",
+                merged.format
+            ))
+        })?,
     };
     write_output(&content, args.out.as_deref(), color)?;
 
