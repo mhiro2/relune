@@ -13,6 +13,7 @@ use crate::error::{IntrospectError, connect_error};
 
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
+const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Returns the shared acquire timeout for connection pools.
 #[must_use]
@@ -76,14 +77,30 @@ pub(crate) async fn configure_mysql_session(
 }
 
 /// Ensures explicit pool draining runs before returning from introspection.
-pub(crate) async fn close_pool_when_done<DB, T, E, F>(pool: &Pool<DB>, operation: F) -> Result<T, E>
+///
+/// Surfaces drain-timeout failures even when the operation itself succeeded:
+/// a hung close (e.g., a connection that never finishes draining) is reported
+/// as `IntrospectError::Timeout` rather than disappearing into a successful
+/// return. If the operation already failed, that error wins so the original
+/// cause is not masked by cleanup state.
+pub(crate) async fn close_pool_when_done<DB, T, F>(
+    pool: &Pool<DB>,
+    operation: F,
+) -> Result<T, IntrospectError>
 where
     DB: Database,
-    F: Future<Output = Result<T, E>>,
+    F: Future<Output = Result<T, IntrospectError>>,
 {
-    let result = operation.await;
-    pool.close().await;
-    result
+    let op_result = operation.await;
+    let close_result = tokio::time::timeout(POOL_CLOSE_TIMEOUT, pool.close()).await;
+    match (op_result, close_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(_)) => Err(IntrospectError::timeout(format!(
+            "Connection pool drain did not complete within {} seconds",
+            POOL_CLOSE_TIMEOUT.as_secs()
+        ))),
+        (Err(error), _) => Err(error),
+    }
 }
 
 fn statement_timeout_millis() -> u64 {
@@ -157,5 +174,35 @@ mod tests {
                 .expect("mysql URL should parse");
 
         assert!(matches!(options.get_ssl_mode(), MySqlSslMode::Preferred));
+    }
+
+    #[tokio::test]
+    async fn close_pool_when_done_returns_operation_error_when_close_succeeds() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory pool should connect");
+
+        let result: Result<(), IntrospectError> = close_pool_when_done(&pool, async {
+            Err(IntrospectError::query("synthetic operation failure"))
+        })
+        .await;
+
+        let err = result.expect_err("operation error should be surfaced");
+        assert!(matches!(err, IntrospectError::Query { .. }));
+        assert!(err.to_string().contains("synthetic operation failure"));
+    }
+
+    #[tokio::test]
+    async fn close_pool_when_done_returns_value_when_both_succeed() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory pool should connect");
+
+        let result = close_pool_when_done(&pool, async { Ok(42_u32) }).await;
+        assert_eq!(result.expect("operation succeeds and close completes"), 42);
     }
 }
