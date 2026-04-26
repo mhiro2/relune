@@ -1,8 +1,7 @@
 ---
 source: crates/relune-cli/tests/integration_tests.rs
-assertion_line: 45
 expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 1
 stderr:
-Error: Failed to render schema
+Error: Failed to render schema: Input error (sql_file): Failed to parse SQL: no schema produced
