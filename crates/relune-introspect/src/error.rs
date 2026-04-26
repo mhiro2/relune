@@ -18,8 +18,14 @@ pub enum IntrospectError {
     InvalidDatabaseUrl(String),
 
     /// Query execution failed.
-    #[error("Query error: {0}")]
-    Query(String),
+    #[error("Query error: {context}")]
+    Query {
+        /// Human-readable context describing what query failed.
+        context: String,
+        /// Underlying source error, when available.
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    },
 
     /// Failed to map database metadata to schema objects.
     #[error("Metadata mapping error: {0}")]
@@ -47,7 +53,21 @@ impl IntrospectError {
 
     /// Create a new query error.
     pub fn query(msg: impl Into<String>) -> Self {
-        Self::Query(msg.into())
+        Self::Query {
+            context: msg.into(),
+            source: None,
+        }
+    }
+
+    /// Create a new query error that preserves the underlying source error.
+    pub fn query_with_source<E>(msg: impl Into<String>, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Query {
+            context: msg.into(),
+            source: Some(Box::new(source)),
+        }
     }
 
     /// Create a new metadata mapping error.
@@ -70,9 +90,10 @@ impl IntrospectError {
             Self::InvalidDatabaseUrl(message) => {
                 Self::InvalidDatabaseUrl(crate::url::sanitize_error_message(database_url, &message))
             }
-            Self::Query(message) => {
-                Self::Query(crate::url::sanitize_error_message(database_url, &message))
-            }
+            Self::Query { context, source } => Self::Query {
+                context: crate::url::sanitize_error_message(database_url, &context),
+                source,
+            },
             Self::MetadataMapping(message) => {
                 Self::MetadataMapping(crate::url::sanitize_error_message(database_url, &message))
             }
@@ -195,13 +216,22 @@ mod tests {
     }
 
     #[test]
+    fn query_with_source_preserves_error_chain() {
+        let inner = std::io::Error::other("connection refused");
+        let error = IntrospectError::query_with_source("Failed to fetch tables", inner);
+        let source = std::error::Error::source(&error)
+            .expect("source should be present when constructed via query_with_source");
+        assert!(source.to_string().contains("connection refused"));
+    }
+
+    #[test]
     fn sanitized_for_url_masks_query_secrets() {
         let error = IntrospectError::query(
             "failed against postgres://user:secret@localhost/db?password=hunter2&token=abc",
         )
         .sanitized_for_url("postgres://user:secret@localhost/db?password=hunter2&token=abc");
 
-        assert!(matches!(error, IntrospectError::Query(_)));
+        assert!(matches!(error, IntrospectError::Query { .. }));
         assert!(
             error
                 .to_string()

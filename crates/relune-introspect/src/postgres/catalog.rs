@@ -92,7 +92,7 @@ impl ParallelCatalogReader for PostgresCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch tables: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch tables", e))?;
 
         Ok(rows
             .into_iter()
@@ -109,7 +109,7 @@ impl ParallelCatalogReader for PostgresCatalog {
         let rows: Vec<RawColumnRow> = sqlx::query_as(FETCH_COLUMNS_QUERY)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| IntrospectError::query(format!("Failed to fetch columns: {e}")))?;
+            .map_err(|e| IntrospectError::query_with_source("Failed to fetch columns", e))?;
 
         Ok(rows
             .into_iter()
@@ -159,7 +159,7 @@ impl ParallelCatalogReader for PostgresCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch foreign keys: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch foreign keys", e))?;
 
         Ok(rows
             .into_iter()
@@ -202,7 +202,7 @@ impl ParallelCatalogReader for PostgresCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch indexes: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
 
         Ok(rows
             .into_iter()
@@ -222,7 +222,7 @@ impl ParallelCatalogReader for PostgresCatalog {
         let rows: Vec<RawViewRow> = sqlx::query_as(FETCH_VIEWS_QUERY)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| IntrospectError::query(format!("Failed to fetch views: {e}")))?;
+            .map_err(|e| IntrospectError::query_with_source("Failed to fetch views", e))?;
 
         Ok(rows
             .into_iter()
@@ -255,7 +255,7 @@ impl ParallelCatalogReader for PostgresCatalog {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| IntrospectError::query(format!("Failed to fetch enums: {e}")))?;
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch enums", e))?;
 
         Ok(rows
             .into_iter()
