@@ -10,6 +10,7 @@ use crate::common::{
     RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
     parse_referential_action,
 };
+use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
 
 const PARALLEL_CATALOG_QUERIES: u32 = 6;
@@ -251,10 +252,14 @@ impl MySqlCatalog {
     }
 }
 
-/// Returns the number of concurrent catalog queries executed for `MySQL`.
+/// Returns the effective pool max connection count for `MySQL`.
+///
+/// Defaults to `PARALLEL_CATALOG_QUERIES` so the parallel catalog fan-out
+/// never queues on connection acquisition. Operators on constrained
+/// environments can override the cap with `RELUNE_DB_POOL_MAX_CONNECTIONS`.
 #[must_use]
-pub(crate) const fn pool_max_connections() -> u32 {
-    PARALLEL_CATALOG_QUERIES
+pub(crate) fn pool_max_connections() -> u32 {
+    pool_max_connections_with_default(PARALLEL_CATALOG_QUERIES)
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -523,8 +528,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pool_max_connections_matches_parallel_queries() {
-        assert_eq!(pool_max_connections(), PARALLEL_CATALOG_QUERIES);
+    fn pool_max_connections_is_positive() {
+        // Whichever value wins (default or env override), it must remain
+        // positive so the pool can be constructed.
+        assert!(pool_max_connections() > 0);
     }
 
     #[test]
