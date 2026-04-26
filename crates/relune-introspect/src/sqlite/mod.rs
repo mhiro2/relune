@@ -6,10 +6,10 @@ use relune_core::Schema;
 use sqlx::sqlite::SqlitePoolOptions;
 use tracing::{debug, error, info, instrument};
 
-use crate::connect::{acquire_timeout, close_pool_when_done};
+use crate::connect::{acquire_timeout, close_pool_when_done, pool_max_connections_with_default};
 use crate::error::{IntrospectError, connect_error};
 
-const POOL_MAX_CONNECTIONS: u32 = 1;
+const DEFAULT_POOL_MAX_CONNECTIONS: u32 = 1;
 
 /// Introspects a `SQLite` database and extracts its schema metadata.
 ///
@@ -68,9 +68,15 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
     .await
 }
 
+/// Returns the effective pool max connection count for `SQLite`.
+///
+/// Defaults to a single connection because `SQLite` serializes writers and
+/// the catalog reader runs queries sequentially. Operators can override the
+/// cap via `RELUNE_DB_POOL_MAX_CONNECTIONS` for unusual workloads such as
+/// concurrent attaches or read-replica setups.
 #[must_use]
-pub(crate) const fn pool_max_connections() -> u32 {
-    POOL_MAX_CONNECTIONS
+pub(crate) fn pool_max_connections() -> u32 {
+    pool_max_connections_with_default(DEFAULT_POOL_MAX_CONNECTIONS)
 }
 
 #[cfg(test)]
@@ -98,7 +104,9 @@ mod tests {
     }
 
     #[test]
-    fn test_pool_max_connections_matches_execution_model() {
-        assert_eq!(pool_max_connections(), POOL_MAX_CONNECTIONS);
+    fn pool_max_connections_is_positive() {
+        // Whichever value wins (default or env override), it must remain
+        // positive so the pool can be constructed.
+        assert!(pool_max_connections() > 0);
     }
 }

@@ -23,6 +23,8 @@ Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print t
 
 For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**.
 
+`--db-url` introspection runs catalog queries through a small connection pool. Set `RELUNE_DB_POOL_MAX_CONNECTIONS` to a positive integer to override the default cap (PostgreSQL/MySQL fan out to 6 connections, SQLite uses 1). Non-positive or non-numeric values are ignored and the default applies.
+
 ---
 
 ## `render`

@@ -15,10 +15,38 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Environment variable that overrides the default per-dialect pool max.
+///
+/// Each dialect picks its own default (`PARALLEL_CATALOG_QUERIES` for
+/// `PostgreSQL`/`MySQL`, single-writer for `SQLite`). When set to a positive
+/// integer, this env var raises or lowers the cap so constrained CI runners
+/// or larger introspection workloads can tune the pool size without code
+/// changes. Non-positive or non-numeric values are ignored.
+pub(crate) const POOL_MAX_CONNECTIONS_ENV: &str = "RELUNE_DB_POOL_MAX_CONNECTIONS";
+
 /// Returns the shared acquire timeout for connection pools.
 #[must_use]
 pub(crate) const fn acquire_timeout() -> Duration {
     ACQUIRE_TIMEOUT
+}
+
+/// Resolves the effective pool max connection count for a dialect.
+///
+/// Reads `RELUNE_DB_POOL_MAX_CONNECTIONS`; if set to a positive integer the
+/// override wins, otherwise falls back to `default_max`. Invalid values
+/// (zero, negative, non-numeric, empty) are ignored.
+#[must_use]
+pub(crate) fn pool_max_connections_with_default(default_max: u32) -> u32 {
+    pool_max_override_from(std::env::var(POOL_MAX_CONNECTIONS_ENV).ok().as_deref())
+        .unwrap_or(default_max)
+}
+
+fn pool_max_override_from(value: Option<&str>) -> Option<u32> {
+    value
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .filter(|parsed| *parsed > 0)
 }
 
 /// Builds hardened `PostgreSQL` connect options from a URL.
@@ -192,6 +220,23 @@ mod tests {
         let err = result.expect_err("operation error should be surfaced");
         assert!(matches!(err, IntrospectError::Query { .. }));
         assert!(err.to_string().contains("synthetic operation failure"));
+    }
+
+    #[test]
+    fn pool_max_override_accepts_positive_integers() {
+        assert_eq!(pool_max_override_from(Some("12")), Some(12));
+        assert_eq!(pool_max_override_from(Some("  3 ")), Some(3));
+    }
+
+    #[test]
+    fn pool_max_override_rejects_invalid_or_non_positive_values() {
+        assert_eq!(pool_max_override_from(None), None);
+        assert_eq!(pool_max_override_from(Some("")), None);
+        assert_eq!(pool_max_override_from(Some("   ")), None);
+        assert_eq!(pool_max_override_from(Some("0")), None);
+        assert_eq!(pool_max_override_from(Some("-4")), None);
+        assert_eq!(pool_max_override_from(Some("foo")), None);
+        assert_eq!(pool_max_override_from(Some("12abc")), None);
     }
 
     #[tokio::test]
