@@ -2,4 +2,4 @@
 source: crates/relune-cli/tests/snapshot_tests.rs
 expression: stdout
 ---
-relune 0.7.0
+relune 0.8.0
