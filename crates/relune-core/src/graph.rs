@@ -574,6 +574,7 @@ mod tests {
             columns,
             foreign_keys,
             indexes: Vec::new(),
+            primary_key_name: None,
             comment: None,
         }
     }

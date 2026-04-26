@@ -349,6 +349,7 @@ fn map_table(
         columns: mapped_columns,
         foreign_keys: mapped_fks,
         indexes: mapped_indexes,
+        primary_key_name: None,
         comment: raw_table.table_comment,
     }
 }

@@ -639,6 +639,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -664,6 +665,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -698,6 +700,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -723,6 +726,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -748,6 +752,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -784,6 +789,7 @@ mod tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -820,6 +826,7 @@ mod tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],

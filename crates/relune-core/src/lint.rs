@@ -1182,6 +1182,7 @@ mod tests {
             columns,
             foreign_keys,
             indexes,
+            primary_key_name: None,
             comment: None,
         }
     }
@@ -1202,6 +1203,7 @@ mod tests {
             columns,
             foreign_keys,
             indexes,
+            primary_key_name: None,
             comment: None,
         }
     }

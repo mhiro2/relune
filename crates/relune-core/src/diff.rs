@@ -1026,6 +1026,7 @@ mod tests {
                 })
                 .collect(),
             indexes: vec![],
+            primary_key_name: None,
             comment: None,
         }
     }

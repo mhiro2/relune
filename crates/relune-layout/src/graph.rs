@@ -1234,6 +1234,7 @@ mod tests {
                     columns: vec!["status".to_string()],
                     is_unique: false,
                 }],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![View {
@@ -1308,6 +1309,7 @@ mod tests {
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![View {
@@ -1348,6 +1350,7 @@ mod tests {
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![View {
@@ -1388,6 +1391,7 @@ mod tests {
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![
@@ -1446,6 +1450,7 @@ mod tests {
                 ],
                 foreign_keys: vec![],
                 indexes: vec![],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![],
@@ -1539,6 +1544,7 @@ mod tests {
                     columns: vec!["user_id".to_string()],
                     is_unique: false,
                 }],
+                primary_key_name: None,
                 comment: None,
             }],
             views: vec![],
@@ -1594,6 +1600,7 @@ mod tests {
                         columns: vec!["email".to_string()],
                         is_unique: true,
                     }],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -1619,6 +1626,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -1649,6 +1657,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -1674,6 +1683,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -1704,6 +1714,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -1725,6 +1736,7 @@ mod tests {
                         columns: vec!["email".to_string()],
                         is_unique: true,
                     }],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -1750,6 +1762,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -1780,6 +1793,7 @@ mod tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -1801,6 +1815,7 @@ mod tests {
                         columns: vec!["email".to_string()],
                         is_unique: true,
                     }],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -1826,6 +1841,7 @@ mod tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -1875,6 +1891,7 @@ mod collapse_tests {
                     ],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 // roles table
@@ -1903,6 +1920,7 @@ mod collapse_tests {
                     ],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 // user_roles join table
@@ -1950,6 +1968,7 @@ mod collapse_tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -1998,6 +2017,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2015,6 +2035,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2077,6 +2098,7 @@ mod collapse_tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2102,6 +2124,7 @@ mod collapse_tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -2134,6 +2157,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2151,6 +2175,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2168,6 +2193,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2239,6 +2265,7 @@ mod collapse_tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -2302,6 +2329,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2319,6 +2347,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2336,6 +2365,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2399,6 +2429,7 @@ mod collapse_tests {
                         },
                     ],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
@@ -2460,6 +2491,7 @@ mod collapse_tests {
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
                 Table {
@@ -2495,6 +2527,7 @@ mod collapse_tests {
                         on_update: ReferentialAction::NoAction,
                     }],
                     indexes: vec![],
+                    primary_key_name: None,
                     comment: None,
                 },
             ],
