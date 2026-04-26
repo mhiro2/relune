@@ -801,6 +801,26 @@ impl SchemaDiff {
     }
 }
 
+/// Identity key for matching views across schemas.
+///
+/// Built from the (lowercased schema, lowercased name) pair so that the
+/// match is stable regardless of how the upstream parser or introspector
+/// composes its `View.id` field.
+fn view_identity(view: &View) -> (String, String) {
+    let schema = view.schema_name.as_deref().unwrap_or("").to_lowercase();
+    (schema, view.name.to_lowercase())
+}
+
+/// Identity key for matching enums across schemas. See `view_identity`.
+fn enum_identity(enum_type: &Enum) -> (String, String) {
+    let schema = enum_type
+        .schema_name
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
+    (schema, enum_type.name.to_lowercase())
+}
+
 /// Compare two schemas and produce a diff.
 ///
 /// # Arguments
@@ -827,30 +847,30 @@ pub fn diff_schemas(before: &Schema, after: &Schema) -> SchemaDiff {
 
     let before_ids: HashSet<&str> = before_map.keys().copied().collect();
     let after_ids: HashSet<&str> = after_map.keys().copied().collect();
-    let before_view_map: HashMap<&str, &View> = before
+    let before_view_map: HashMap<(String, String), &View> = before
         .views
         .iter()
-        .map(|view| (view.id.as_str(), view))
+        .map(|view| (view_identity(view), view))
         .collect();
-    let after_view_map: HashMap<&str, &View> = after
+    let after_view_map: HashMap<(String, String), &View> = after
         .views
         .iter()
-        .map(|view| (view.id.as_str(), view))
+        .map(|view| (view_identity(view), view))
         .collect();
-    let before_view_ids: HashSet<&str> = before_view_map.keys().copied().collect();
-    let after_view_ids: HashSet<&str> = after_view_map.keys().copied().collect();
-    let before_enum_map: HashMap<&str, &Enum> = before
+    let before_view_ids: HashSet<&(String, String)> = before_view_map.keys().collect();
+    let after_view_ids: HashSet<&(String, String)> = after_view_map.keys().collect();
+    let before_enum_map: HashMap<(String, String), &Enum> = before
         .enums
         .iter()
-        .map(|enum_type| (enum_type.id.as_str(), enum_type))
+        .map(|enum_type| (enum_identity(enum_type), enum_type))
         .collect();
-    let after_enum_map: HashMap<&str, &Enum> = after
+    let after_enum_map: HashMap<(String, String), &Enum> = after
         .enums
         .iter()
-        .map(|enum_type| (enum_type.id.as_str(), enum_type))
+        .map(|enum_type| (enum_identity(enum_type), enum_type))
         .collect();
-    let before_enum_ids: HashSet<&str> = before_enum_map.keys().copied().collect();
-    let after_enum_ids: HashSet<&str> = after_enum_map.keys().copied().collect();
+    let before_enum_ids: HashSet<&(String, String)> = before_enum_map.keys().collect();
+    let after_enum_ids: HashSet<&(String, String)> = after_enum_map.keys().collect();
 
     let mut added_tables = Vec::new();
     let mut removed_tables = Vec::new();
@@ -1558,6 +1578,91 @@ mod tests {
         );
         assert_eq!(diff.summary.enums_modified, 1);
         assert_eq!(diff.summary.enum_values_changed, 3);
+    }
+
+    #[test]
+    fn test_view_diff_matches_by_qualified_name_regardless_of_id() {
+        let before = Schema {
+            tables: vec![],
+            views: vec![View {
+                id: "public.active_users".to_string(),
+                schema_name: Some("public".to_string()),
+                name: "active_users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(0),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: true,
+                    is_primary_key: false,
+                    comment: None,
+                }],
+                definition: Some("SELECT id FROM users".to_string()),
+            }],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![],
+            views: vec![View {
+                // Different `id` representation (e.g. introspect vs parser drift),
+                // but the qualified name is the same so it must match.
+                id: "v_42".to_string(),
+                schema_name: Some("Public".to_string()),
+                name: "Active_Users".to_string(),
+                columns: vec![Column {
+                    id: ColumnId(0),
+                    name: "id".to_string(),
+                    data_type: "int".to_string(),
+                    nullable: true,
+                    is_primary_key: false,
+                    comment: None,
+                }],
+                definition: Some("SELECT id FROM users WHERE active".to_string()),
+            }],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert!(diff.added_views.is_empty(), "expected no added views");
+        assert!(diff.removed_views.is_empty(), "expected no removed views");
+        assert_eq!(diff.modified_views.len(), 1);
+        assert!(diff.modified_views[0].definition_changed());
+    }
+
+    #[test]
+    fn test_enum_diff_matches_by_qualified_name_regardless_of_id() {
+        let before = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![Enum {
+                id: "public.status".to_string(),
+                schema_name: Some("public".to_string()),
+                name: "status".to_string(),
+                values: vec!["draft".to_string()],
+            }],
+        };
+        let after = Schema {
+            tables: vec![],
+            views: vec![],
+            enums: vec![Enum {
+                id: "enum_99".to_string(),
+                schema_name: Some("Public".to_string()),
+                name: "Status".to_string(),
+                values: vec!["draft".to_string(), "published".to_string()],
+            }],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        assert!(diff.added_enums.is_empty());
+        assert!(diff.removed_enums.is_empty());
+        assert_eq!(diff.modified_enums.len(), 1);
+        assert!(
+            diff.modified_enums[0]
+                .value_diffs
+                .iter()
+                .any(|value| value.value == "published")
+        );
     }
 
     #[test]
