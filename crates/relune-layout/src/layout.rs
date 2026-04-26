@@ -1662,47 +1662,106 @@ fn edge_target_distance(a: NodeSize, b: NodeSize, dx: f32, dy: f32, config: &Lay
 /// Push apart any overlapping node pairs after force simulation.
 ///
 /// Iteratively resolves rectangle-rectangle overlaps by displacing each
-/// pair along the axis of minimum penetration.
-#[allow(clippy::cast_precision_loss, clippy::similar_names)]
+/// pair along the axis of minimum penetration. Candidate pairs are pruned
+/// with a uniform spatial grid so the per-pass cost scales with the number
+/// of actually-nearby nodes rather than `N(N-1)/2`.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::similar_names
+)]
 fn resolve_force_overlaps(positions: &mut [(f32, f32)], node_sizes: &[NodeSize], padding: f32) {
+    use std::collections::HashMap;
+
     let n = positions.len();
     if n <= 1 {
         return;
     }
     let max_passes = 80;
+
+    // Pick a cell size large enough that any two padded AABBs which actually
+    // overlap fall into the same cell or into adjacent cells. Two rectangles
+    // with widths `W_a`, `W_b` and `padding` margin overlap on the X axis only
+    // when `|x_a - x_b| <= max(W_a, W_b) + padding`, so taking
+    // `cell_size = max(W, H) + padding` bounds the cell distance to <= 1.
+    let max_span = node_sizes
+        .iter()
+        .map(|s| s.width.max(s.height))
+        .fold(0.0_f32, f32::max);
+    let cell_size = (max_span + padding).max(1.0);
+    let inv_cell = 1.0 / cell_size;
+
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    // Forward neighbours only: each cross-cell pair is reported exactly once
+    // because reverse offsets are not in this list.
+    let neighbour_offsets: [(i32, i32); 4] = [(1, 0), (0, 1), (1, 1), (-1, 1)];
+
     for _ in 0..max_passes {
-        let mut moved = false;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = positions[j].0 - positions[i].0;
-                let dy = positions[j].1 - positions[i].1;
+        grid.clear();
+        candidates.clear();
 
-                let overlap_x = if dx >= 0.0 {
-                    positions[i].0 + node_sizes[i].width + padding - positions[j].0
-                } else {
-                    positions[j].0 + node_sizes[j].width + padding - positions[i].0
-                };
-                let overlap_y = if dy >= 0.0 {
-                    positions[i].1 + node_sizes[i].height + padding - positions[j].1
-                } else {
-                    positions[j].1 + node_sizes[j].height + padding - positions[i].1
-                };
+        // Bin nodes by the cell containing their top-left corner.
+        for (i, &(px, py)) in positions.iter().enumerate() {
+            let cx = (px * inv_cell).floor() as i32;
+            let cy = (py * inv_cell).floor() as i32;
+            grid.entry((cx, cy)).or_default().push(i);
+        }
 
-                if overlap_x > 0.0 && overlap_y > 0.0 {
-                    // Push apart along the axis of least overlap.
-                    if overlap_x < overlap_y {
-                        let push = overlap_x * 0.5 + 0.5;
-                        let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
-                        positions[i].0 -= push * sign;
-                        positions[j].0 += push * sign;
-                    } else {
-                        let push = overlap_y * 0.5 + 0.5;
-                        let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
-                        positions[i].1 -= push * sign;
-                        positions[j].1 += push * sign;
-                    }
-                    moved = true;
+        // Collect candidate pairs from same-cell and forward-neighbour cells.
+        for (&(cx, cy), cell_nodes) in &grid {
+            for (a, &i) in cell_nodes.iter().enumerate() {
+                for &j in &cell_nodes[a + 1..] {
+                    candidates.push((i.min(j), i.max(j)));
                 }
+            }
+            for &(dx, dy) in &neighbour_offsets {
+                if let Some(neighbour_nodes) = grid.get(&(cx + dx, cy + dy)) {
+                    for &i in cell_nodes {
+                        for &j in neighbour_nodes {
+                            candidates.push((i.min(j), i.max(j)));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort so the per-pair traversal order is deterministic regardless of
+        // `HashMap` iteration order. Forward-only neighbour walks already make
+        // each pair appear at most once, so no dedup pass is needed.
+        candidates.sort_unstable();
+
+        let mut moved = false;
+        for &(i, j) in &candidates {
+            let dx = positions[j].0 - positions[i].0;
+            let dy = positions[j].1 - positions[i].1;
+
+            let overlap_x = if dx >= 0.0 {
+                positions[i].0 + node_sizes[i].width + padding - positions[j].0
+            } else {
+                positions[j].0 + node_sizes[j].width + padding - positions[i].0
+            };
+            let overlap_y = if dy >= 0.0 {
+                positions[i].1 + node_sizes[i].height + padding - positions[j].1
+            } else {
+                positions[j].1 + node_sizes[j].height + padding - positions[i].1
+            };
+
+            if overlap_x > 0.0 && overlap_y > 0.0 {
+                // Push apart along the axis of least overlap.
+                if overlap_x < overlap_y {
+                    let push = overlap_x * 0.5 + 0.5;
+                    let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
+                    positions[i].0 -= push * sign;
+                    positions[j].0 += push * sign;
+                } else {
+                    let push = overlap_y * 0.5 + 0.5;
+                    let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
+                    positions[i].1 -= push * sign;
+                    positions[j].1 += push * sign;
+                }
+                moved = true;
             }
         }
         if !moved {
@@ -5745,6 +5804,50 @@ mod tests {
         };
 
         assert!(!nodes_overlap(&left, &right));
+    }
+
+    #[test]
+    #[allow(clippy::similar_names)]
+    fn test_resolve_force_overlaps_grid_handles_many_nodes() {
+        // Place a 6x6 grid of identical rectangles with overlapping bounds so
+        // that the spatial-grid candidate pruning has to find the overlapping
+        // pairs across same-cell and forward-neighbour cells alike.
+        let cols = 6;
+        let rows = 6;
+        let cell_w = 120.0_f32;
+        let cell_h = 80.0_f32;
+        let mut positions: Vec<(f32, f32)> = Vec::with_capacity(cols * rows);
+        let mut node_sizes: Vec<NodeSize> = Vec::with_capacity(cols * rows);
+        for r in 0..rows {
+            for c in 0..cols {
+                #[allow(clippy::cast_precision_loss)]
+                let x = c as f32 * cell_w * 0.6;
+                #[allow(clippy::cast_precision_loss)]
+                let y = r as f32 * cell_h * 0.6;
+                positions.push((x, y));
+                node_sizes.push(NodeSize {
+                    width: cell_w,
+                    height: cell_h,
+                });
+            }
+        }
+
+        resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
+
+        for i in 0..positions.len() {
+            for j in (i + 1)..positions.len() {
+                let (xi, yi) = positions[i];
+                let (xj, yj) = positions[j];
+                let dx_overlap =
+                    (xi + node_sizes[i].width).min(xj + node_sizes[j].width) - xi.max(xj);
+                let dy_overlap =
+                    (yi + node_sizes[i].height).min(yj + node_sizes[j].height) - yi.max(yj);
+                assert!(
+                    dx_overlap <= 0.0 || dy_overlap <= 0.0,
+                    "nodes {i} and {j} still overlap after resolution",
+                );
+            }
+        }
     }
 
     #[test]
