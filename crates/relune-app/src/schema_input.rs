@@ -273,23 +273,18 @@ mod tests {
 
     #[test]
     fn rejects_oversized_input_files() {
-        let path = std::env::temp_dir().join(format!(
-            "relune-schema-input-{}-{}.sql",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time went backwards")
-                .as_nanos()
-        ));
-        let file = std::fs::File::create(&path).expect("create temp file");
-        file.set_len(MAX_INPUT_FILE_SIZE_BYTES + 1)
+        let temp = tempfile::Builder::new()
+            .prefix("relune-schema-input-")
+            .suffix(".sql")
+            .tempfile()
+            .expect("create temp file");
+        temp.as_file()
+            .set_len(MAX_INPUT_FILE_SIZE_BYTES + 1)
             .expect("sparse temp file");
-        drop(file);
 
-        let err = ensure_file_size_within_limit(&path).expect_err("file size should be rejected");
+        let err =
+            ensure_file_size_within_limit(temp.path()).expect_err("file size should be rejected");
         assert!(matches!(err, AppError::Input { .. }));
-
-        let _ = std::fs::remove_file(path);
     }
 
     #[cfg(feature = "introspect")]
