@@ -91,8 +91,10 @@ pub fn run_diff(
 
     check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
-    // Format output
-    let rendered = result.rendered.take();
+    // Format output. Treat an empty rendered string the same as None —
+    // both indicate the visual pipeline produced no output, and writing
+    // zero bytes would look like a successful diff in CI.
+    let rendered = result.rendered.take().filter(|s| !s.is_empty());
     let content = match merged.format {
         DiffFormat::Text => format_diff_text(&result),
         DiffFormat::Markdown => format_diff_markdown(&result),
