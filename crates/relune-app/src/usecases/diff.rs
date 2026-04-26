@@ -64,7 +64,7 @@ fn render_diff_visual(
         input: crate::request::InputSource::default(),
         output_format,
         filter: request.filter.clone(),
-        focus: None,
+        focus: request.focus.clone(),
         grouping: request.grouping,
         layout: request.layout.clone(),
         options: request.options,

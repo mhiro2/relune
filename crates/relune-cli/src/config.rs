@@ -49,8 +49,20 @@
 //! fail_on_warning = false
 //!
 //! [diff]
-//! format = "text" # text, json
+//! format = "text" # text, json, svg, html, markdown
 //! dialect = "auto"
+//! viewpoint = "billing"
+//! group_by = "none"
+//! layout = "hierarchical"
+//! edge_style = "straight"
+//! direction = "top-to-bottom"
+//! focus = "table_name"
+//! depth = 1
+//! include = ["table1", "table2"]
+//! exclude = ["table3"]
+//! theme = "light"
+//! show_legend = false
+//! show_stats = false
 //! fail_on_warning = false
 //!
 //! [lint]
@@ -288,6 +300,42 @@ pub struct DiffConfig {
     /// SQL dialect for parsing.
     #[serde(default)]
     pub dialect: Option<DialectArg>,
+    /// Visual theme for SVG/HTML output.
+    #[serde(default)]
+    pub theme: Option<Theme>,
+    /// Layout algorithm for SVG/HTML output.
+    #[serde(default)]
+    pub layout: Option<LayoutAlgorithmArg>,
+    /// Edge routing style for SVG/HTML output.
+    #[serde(default)]
+    pub edge_style: Option<EdgeStyleArg>,
+    /// Layout direction for SVG/HTML output.
+    #[serde(default)]
+    pub direction: Option<DirectionArg>,
+    /// Grouping mode for SVG/HTML output.
+    #[serde(default)]
+    pub group_by: Option<GroupByMode>,
+    /// Named viewpoint to apply by default.
+    #[serde(default)]
+    pub viewpoint: Option<String>,
+    /// Focus table name for SVG/HTML output.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Focus depth.
+    #[serde(default)]
+    pub depth: Option<u32>,
+    /// Tables to include in SVG/HTML output.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Tables to exclude from SVG/HTML output.
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Show legend in SVG/HTML output.
+    #[serde(default)]
+    pub show_legend: Option<bool>,
+    /// Show statistics in SVG/HTML output.
+    #[serde(default)]
+    pub show_stats: Option<bool>,
     /// Exit with non-zero code if warnings are emitted.
     #[serde(default)]
     pub fail_on_warning: Option<bool>,
@@ -597,12 +645,43 @@ impl ReluneConfig {
     }
 
     /// Merge CLI diff args into this config.
-    pub fn merge_diff_args(&self, args: &crate::cli::DiffArgs) -> MergedDiffConfig {
-        MergedDiffConfig {
+    pub fn merge_diff_args(
+        &self,
+        args: &crate::cli::DiffArgs,
+    ) -> Result<MergedDiffConfig, ConfigError> {
+        let viewpoint = self.resolve_viewpoint(self.diff.viewpoint.as_deref())?;
+
+        Ok(MergedDiffConfig {
             format: args.format.or(self.diff.format).unwrap_or_default(),
             dialect: args.dialect.or(self.diff.dialect).unwrap_or_default(),
+            theme: self.diff.theme.unwrap_or_default(),
+            layout: self.diff.layout.unwrap_or_default(),
+            edge_style: self.diff.edge_style.unwrap_or_default(),
+            direction: self.diff.direction.unwrap_or_default(),
+            group_by: viewpoint
+                .and_then(|entry| entry.group_by)
+                .or(self.diff.group_by),
+            focus: viewpoint
+                .and_then(|entry| entry.focus.clone())
+                .or_else(|| self.diff.focus.clone()),
+            depth: viewpoint
+                .and_then(|entry| entry.depth)
+                .or(self.diff.depth)
+                .unwrap_or(1),
+            include: merge_table_filters(
+                &[],
+                viewpoint.map_or(&[], |entry| entry.include.as_slice()),
+                &self.diff.include,
+            ),
+            exclude: merge_table_filters(
+                &[],
+                viewpoint.map_or(&[], |entry| entry.exclude.as_slice()),
+                &self.diff.exclude,
+            ),
+            show_legend: self.diff.show_legend.unwrap_or(false),
+            show_stats: self.diff.show_stats.unwrap_or(false),
             fail_on_warning: args.fail_on_warning || self.diff.fail_on_warning.unwrap_or(false),
-        }
+        })
     }
 
     fn resolve_viewpoint(
@@ -800,7 +879,31 @@ pub struct MergedLintConfig {
 pub struct MergedDiffConfig {
     pub format: DiffFormat,
     pub dialect: DialectArg,
+    pub theme: Theme,
+    pub layout: LayoutAlgorithmArg,
+    pub edge_style: EdgeStyleArg,
+    pub direction: DirectionArg,
+    pub group_by: Option<GroupByMode>,
+    pub focus: Option<String>,
+    pub depth: u32,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    pub show_legend: bool,
+    pub show_stats: bool,
     pub fail_on_warning: bool,
+}
+
+impl MergedDiffConfig {
+    /// Validates semantic constraints for diff configuration.
+    pub fn validate_semantics(&self) -> Result<(), ConfigError> {
+        validate_focus_filters(
+            "diff",
+            self.focus.as_deref(),
+            self.depth,
+            &self.include,
+            &self.exclude,
+        )
+    }
 }
 
 impl MergedRenderConfig {
@@ -1530,7 +1633,7 @@ mod tests {
             exit_code: false,
         };
 
-        let merged = config.merge_diff_args(&args);
+        let merged = config.merge_diff_args(&args).expect("merge should succeed");
         assert_eq!(merged.format, DiffFormat::Json);
         assert_eq!(merged.dialect, DialectArg::Mysql);
         assert!(!merged.fail_on_warning);
@@ -1557,10 +1660,99 @@ mod tests {
             exit_code: false,
         };
 
-        let merged = config.merge_diff_args(&args);
+        let merged = config.merge_diff_args(&args).expect("merge should succeed");
         assert_eq!(merged.format, DiffFormat::Json);
         assert_eq!(merged.dialect, DialectArg::Sqlite);
         assert!(!merged.fail_on_warning);
+    }
+
+    #[test]
+    fn test_merge_diff_args_visual_settings_from_config() {
+        let mut config = ReluneConfig::default();
+        config.diff.layout = Some(LayoutAlgorithmArg::ForceDirected);
+        config.diff.edge_style = Some(EdgeStyleArg::Curved);
+        config.diff.direction = Some(DirectionArg::LeftToRight);
+        config.diff.group_by = Some(GroupByMode::Schema);
+        config.diff.focus = Some("orders".to_string());
+        config.diff.depth = Some(2);
+        config.diff.include = vec!["orders".to_string(), "items".to_string()];
+        config.diff.exclude = vec!["audit".to_string()];
+        config.diff.theme = Some(Theme::Light);
+        config.diff.show_legend = Some(true);
+        config.diff.show_stats = Some(true);
+
+        let args = DiffArgs {
+            before: None,
+            before_sql_text: None,
+            before_schema_json: None,
+            after: None,
+            after_sql_text: None,
+            after_schema_json: None,
+            dialect: None,
+            format: None,
+            out: None,
+            stdout: false,
+            fail_on_warning: false,
+            exit_code: false,
+        };
+
+        let merged = config.merge_diff_args(&args).expect("merge should succeed");
+        assert_eq!(merged.layout, LayoutAlgorithmArg::ForceDirected);
+        assert_eq!(merged.edge_style, EdgeStyleArg::Curved);
+        assert_eq!(merged.direction, DirectionArg::LeftToRight);
+        assert_eq!(merged.group_by, Some(GroupByMode::Schema));
+        assert_eq!(merged.focus.as_deref(), Some("orders"));
+        assert_eq!(merged.depth, 2);
+        assert_eq!(
+            merged.include,
+            vec!["orders".to_string(), "items".to_string()]
+        );
+        assert_eq!(merged.exclude, vec!["audit".to_string()]);
+        assert_eq!(merged.theme, Theme::Light);
+        assert!(merged.show_legend);
+        assert!(merged.show_stats);
+    }
+
+    #[test]
+    fn test_merge_diff_args_viewpoint_overrides_command_focus() {
+        let mut config = ReluneConfig::default();
+        config.diff.focus = Some("orders".to_string());
+        config.diff.depth = Some(1);
+        config.diff.viewpoint = Some("billing".to_string());
+        config.viewpoints.insert(
+            "billing".to_string(),
+            ViewpointConfig {
+                group_by: Some(GroupByMode::Schema),
+                focus: Some("invoices".to_string()),
+                depth: Some(3),
+                include: vec!["invoices".to_string(), "payments".to_string()],
+                exclude: vec![],
+            },
+        );
+
+        let args = DiffArgs {
+            before: None,
+            before_sql_text: None,
+            before_schema_json: None,
+            after: None,
+            after_sql_text: None,
+            after_schema_json: None,
+            dialect: None,
+            format: None,
+            out: None,
+            stdout: false,
+            fail_on_warning: false,
+            exit_code: false,
+        };
+
+        let merged = config.merge_diff_args(&args).expect("merge should succeed");
+        assert_eq!(merged.focus.as_deref(), Some("invoices"));
+        assert_eq!(merged.depth, 3);
+        assert_eq!(merged.group_by, Some(GroupByMode::Schema));
+        assert_eq!(
+            merged.include,
+            vec!["invoices".to_string(), "payments".to_string()]
+        );
     }
 
     fn default_render_args() -> RenderArgs {

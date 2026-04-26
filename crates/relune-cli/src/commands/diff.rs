@@ -5,11 +5,14 @@ use std::io::IsTerminal;
 use anyhow::Context;
 
 use super::input::DiffInputSelection;
-use crate::cli::{ColorWhen, DiffArgs, DiffFormat};
+use crate::cli::{ColorWhen, DiffArgs, DiffFormat, GroupByMode};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{check_diagnostics, print_success, validate_markup_stdout_usage, write_output};
-use relune_app::{DiffRequest, diff, format_diff_markdown, format_diff_text};
+use relune_app::{
+    DiffRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, RenderOptions,
+    RenderTheme, diff, format_diff_markdown, format_diff_text,
+};
 
 /// Run the diff command.
 pub fn run_diff(
@@ -18,7 +21,8 @@ pub fn run_diff(
     quiet: bool,
     config: &ReluneConfig,
 ) -> CliResult<()> {
-    let merged = config.merge_diff_args(args);
+    let merged = config.merge_diff_args(args)?;
+    merged.validate_semantics()?;
     let dialect = merged.dialect.into();
     validate_stdout_usage(
         merged.format,
@@ -33,6 +37,36 @@ pub fn run_diff(
     // Resolve after input source
     let after = DiffInputSelection::from_after(args).resolve(dialect, "after")?;
 
+    let filter = FilterSpec {
+        include: merged.include.clone(),
+        exclude: merged.exclude.clone(),
+    };
+    let focus = merged.focus.as_ref().map(|table| FocusSpec {
+        table: table.clone(),
+        depth: merged.depth,
+    });
+    let grouping = GroupingSpec {
+        strategy: match merged.group_by.unwrap_or(GroupByMode::None) {
+            GroupByMode::None => GroupingStrategy::None,
+            GroupByMode::Schema => GroupingStrategy::BySchema,
+            GroupByMode::Prefix => GroupingStrategy::ByPrefix,
+        },
+    };
+    let layout = LayoutSpec {
+        algorithm: merged.layout.into(),
+        edge_style: merged.edge_style.into(),
+        direction: merged.direction.into(),
+        ..Default::default()
+    };
+    let options = RenderOptions {
+        theme: match merged.theme {
+            crate::cli::Theme::Light => RenderTheme::Light,
+            crate::cli::Theme::Dark => RenderTheme::Dark,
+        },
+        show_legend: merged.show_legend,
+        show_stats: merged.show_stats,
+    };
+
     // Build request
     let request = DiffRequest {
         before,
@@ -45,7 +79,11 @@ pub fn run_diff(
             DiffFormat::Markdown => relune_app::DiffFormat::Markdown,
         },
         output_path: args.out.clone(),
-        ..Default::default()
+        options,
+        filter,
+        focus,
+        grouping,
+        layout,
     };
 
     // Execute diff

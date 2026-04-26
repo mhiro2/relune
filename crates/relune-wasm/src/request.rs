@@ -397,6 +397,7 @@ impl WasmDiffRequest {
                 show_stats: self.show_stats.unwrap_or(default_options.show_stats),
             },
             filter,
+            focus: None,
             grouping,
             layout: LayoutSpec {
                 algorithm: self.layout_algorithm.unwrap_or_default(),
