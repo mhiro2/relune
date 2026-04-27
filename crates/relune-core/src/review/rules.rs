@@ -968,3 +968,598 @@ fn resolve_table_id(
         })
         .map(|t| t.stable_id.clone())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diff::diff_schemas;
+    use crate::model::{
+        Column, ColumnId, Index as ModelIndex, ReferentialAction, Schema, Table, TableId,
+    };
+
+    fn col(name: &str, dtype: &str, nullable: bool, pk: bool) -> Column {
+        Column {
+            id: ColumnId(0),
+            name: name.into(),
+            data_type: dtype.into(),
+            nullable,
+            is_primary_key: pk,
+            comment: None,
+        }
+    }
+
+    fn fk(
+        name: &str,
+        from: &[&str],
+        to_table: &str,
+        to: &[&str],
+        on_delete: ReferentialAction,
+    ) -> ForeignKey {
+        ForeignKey {
+            name: Some(name.into()),
+            from_columns: from.iter().map(|c| (*c).to_string()).collect(),
+            to_schema: None,
+            to_table: to_table.into(),
+            to_columns: to.iter().map(|c| (*c).to_string()).collect(),
+            on_delete,
+            on_update: ReferentialAction::NoAction,
+        }
+    }
+
+    fn index(name: &str, columns: &[&str], unique: bool) -> ModelIndex {
+        ModelIndex {
+            name: Some(name.into()),
+            columns: columns.iter().map(|c| (*c).to_string()).collect(),
+            is_unique: unique,
+        }
+    }
+
+    fn table(
+        name: &str,
+        columns: Vec<Column>,
+        foreign_keys: Vec<ForeignKey>,
+        indexes: Vec<ModelIndex>,
+    ) -> Table {
+        Table {
+            id: TableId(name.len() as u64),
+            stable_id: name.into(),
+            schema_name: None,
+            name: name.into(),
+            columns,
+            foreign_keys,
+            indexes,
+            primary_key_name: None,
+            comment: None,
+        }
+    }
+
+    fn run_all(before: &Schema, after: &Schema) -> Vec<RiskFinding> {
+        let diff = diff_schemas(before, after);
+        run_rules(&diff, before, after, ReviewRuleId::all_rules())
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_fk_remains() {
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_email_idx", &["user_email"], false)],
+        );
+        let before = Schema {
+            tables: vec![users, orders.clone()],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropColumnReferenced)
+            .expect("expected DropColumnReferenced finding");
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.column_name.as_deref(), Some("email"));
+    }
+
+    #[test]
+    fn drop_column_referenced_silenced_when_fk_also_dropped() {
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
+            "FK is dropped in same migration; rule should not fire"
+        );
+    }
+
+    #[test]
+    fn drop_table_referenced_breaking_when_fk_remains() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders.clone()],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![orders],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropTableReferenced)
+            .expect("expected DropTableReferenced finding");
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.table_name.as_deref(), Some("users"));
+    }
+
+    #[test]
+    fn add_not_null_on_existing_warns() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![col("id", "BIGINT", false, true)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddNotNullOnExisting)
+            .expect("expected AddNotNullOnExisting finding");
+        assert_eq!(f.severity, ReviewSeverity::Warning);
+        assert_eq!(f.column_name.as_deref(), Some("tenant_id"));
+    }
+
+    #[test]
+    fn add_not_null_on_new_table_does_not_fire() {
+        let before = Schema::default();
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddNotNullOnExisting)
+        );
+    }
+
+    #[test]
+    fn type_narrow_breaking_for_varchar_shrink() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("username", "VARCHAR(100)", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("username", "VARCHAR(50)", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::TypeNarrow)
+            .expect("expected TypeNarrow finding");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
+    }
+
+    #[test]
+    fn type_narrow_does_not_fire_for_widen() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("username", "VARCHAR(50)", true, false)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("username", "VARCHAR(100)", true, false)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::TypeNarrow)
+        );
+    }
+
+    #[test]
+    fn drop_pk_breaking_with_referencing_fk() {
+        let users_before = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users_before, orders.clone()],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![col("id", "BIGINT", false, false)],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("expected DropPkOrUnique finding");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
+    }
+
+    #[test]
+    fn drop_unique_index_warns_without_replacement() {
+        let users_before = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", false, false),
+            ],
+            vec![],
+            vec![index("users_email_key", &["email"], true)],
+        );
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users_after],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("expected DropPkOrUnique finding for index");
+        assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn add_unique_on_existing_warns() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting)
+            .expect("expected AddUniqueOnExisting finding");
+        assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn add_cascade_delete_on_modified_fk_warns() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_idx", &["user_id"], false)],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::Cascade,
+            )],
+            vec![index("orders_user_idx", &["user_id"], false)],
+        );
+        let before = Schema {
+            tables: vec![users.clone(), orders_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddCascadeDelete)
+            .expect("expected AddCascadeDelete finding");
+        assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn fk_without_index_info_only_for_new_fk() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table(
+            "orders",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users.clone(), orders_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::FkWithoutIndex)
+            .expect("expected FkWithoutIndex finding");
+        assert_eq!(f.severity, ReviewSeverity::Info);
+    }
+
+    #[test]
+    fn fk_without_index_silenced_when_indexed() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table(
+            "orders",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_idx", &["user_id"], false)],
+        );
+        let before = Schema {
+            tables: vec![users.clone(), orders_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::FkWithoutIndex)
+        );
+    }
+}
