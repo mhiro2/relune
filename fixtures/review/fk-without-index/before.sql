@@ -1,0 +1,7 @@
+CREATE TABLE users (
+    id BIGINT PRIMARY KEY
+);
+
+CREATE TABLE orders (
+    id BIGINT PRIMARY KEY
+);

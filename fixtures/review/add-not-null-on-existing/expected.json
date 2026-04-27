@@ -1,0 +1,11 @@
+[
+  {
+    "column_name": "tenant_id",
+    "message": "NOT NULL column orders.tenant_id was added to an existing table. Existing rows may fail the constraint.",
+    "mitigation": "Add as nullable, backfill, then ALTER to NOT NULL.",
+    "rule_id": "risk/add-not-null-on-existing",
+    "severity": "warning",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

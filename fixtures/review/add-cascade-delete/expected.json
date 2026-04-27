@@ -1,0 +1,12 @@
+[
+  {
+    "fk_name": "orders_user_id_fkey",
+    "message": "FK orders_user_id_fkey on orders now uses ON DELETE CASCADE. Deleting users rows will cascade.",
+    "mitigation": "Confirm the cascade scope is intended; consider RESTRICT/SET NULL if not.",
+    "related_table_id": "users",
+    "rule_id": "risk/add-cascade-delete",
+    "severity": "warning",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

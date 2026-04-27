@@ -1,0 +1,10 @@
+[
+  {
+    "message": "UNIQUE index users_email_key on (email) is being added to existing table users. Existing duplicate rows will fail the constraint.",
+    "mitigation": "Verify no duplicates exist or deduplicate before applying.",
+    "rule_id": "risk/add-unique-on-existing",
+    "severity": "warning",
+    "table_id": "users",
+    "table_name": "users"
+  }
+]

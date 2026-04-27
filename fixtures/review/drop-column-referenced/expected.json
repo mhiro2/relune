@@ -1,0 +1,13 @@
+[
+  {
+    "column_name": "legacy_email",
+    "fk_name": "orders_user_legacy_email_fkey",
+    "message": "Column users.legacy_email is referenced by FK orders_user_legacy_email_fkey on orders. Dropping it will fail.",
+    "mitigation": "Drop or update the referencing FK in the same migration.",
+    "related_table_id": "orders",
+    "rule_id": "risk/drop-column-referenced",
+    "severity": "breaking",
+    "table_id": "users",
+    "table_name": "users"
+  }
+]
