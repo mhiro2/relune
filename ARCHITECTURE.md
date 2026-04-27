@@ -64,14 +64,14 @@ Relune is a **reusable schema graph engine** with multiple delivery surfaces (CL
 
 | Crate | Role |
 |-------|------|
-| `relune-core` | Normalized schema model, graph construction, filters, lint, diff, shared types |
+| `relune-core` | Normalized schema model, graph construction, filters, lint, diff, review, shared types |
 | `relune-layout` | Hierarchical and force-directed layout, edge routing, overlay annotations, text diagram export (Mermaid, D2, DOT) |
 | `relune-parser-sql` | DDL → `Schema` (PostgreSQL, MySQL, SQLite; auto-detection) |
 | `relune-introspect` | Live DB metadata → `Schema` (PostgreSQL, MySQL/MariaDB, SQLite; native builds only) |
 | `relune-render-theme` | Shared theme palette and render-facing theme DTOs used by SVG and HTML renderers |
 | `relune-render-svg` | Layout → SVG string |
 | `relune-render-html` | Layout → self-contained HTML + embedded SVG + viewer scripts |
-| `relune-app` | Use-cases: parse/introspect, render, doc, export, lint, diff wiring |
+| `relune-app` | Use-cases: parse/introspect, render, doc, export, lint, diff, review wiring |
 | `relune-cli` | Args, config TOML, stdin/stdout/files, exit codes |
 | `relune-wasm` | `wasm-bindgen` façade, JSON in/out |
 | `relune-testkit` | Shared test helpers (tests only) |
