@@ -13,6 +13,7 @@ Commands:
   lint     Lint schema for issues and anti-patterns
   doc      Generate schema documentation as Markdown
   diff     Compare two schemas and show differences
+  review   Review a schema migration for safety risks
   help     Print this message or the help of the given subcommand(s)
 
 Options:

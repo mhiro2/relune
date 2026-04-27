@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use relune_app::InputSource;
 use relune_core::SqlDialect;
 
-use crate::cli::{DiffArgs, DocArgs, ExportArgs, InspectArgs, LintArgs, RenderArgs};
+use crate::cli::{DiffArgs, DocArgs, ExportArgs, InspectArgs, LintArgs, RenderArgs, ReviewArgs};
 use crate::error::{CliError, CliResult};
 
 /// Input selection resolved from a CLI command.
@@ -169,6 +169,26 @@ impl<'a> DiffInputSelection<'a> {
     /// Create the `after` selection for `diff`.
     #[must_use]
     pub(crate) fn from_after(args: &'a DiffArgs) -> Self {
+        Self {
+            file: args.after.as_deref(),
+            sql_text: args.after_sql_text.as_deref(),
+            schema_json: args.after_schema_json.as_deref(),
+        }
+    }
+
+    /// Create the `before` selection for `review`.
+    #[must_use]
+    pub(crate) fn from_review_before(args: &'a ReviewArgs) -> Self {
+        Self {
+            file: args.before.as_deref(),
+            sql_text: args.before_sql_text.as_deref(),
+            schema_json: args.before_schema_json.as_deref(),
+        }
+    }
+
+    /// Create the `after` selection for `review`.
+    #[must_use]
+    pub(crate) fn from_review_after(args: &'a ReviewArgs) -> Self {
         Self {
             file: args.after.as_deref(),
             sql_text: args.after_sql_text.as_deref(),
