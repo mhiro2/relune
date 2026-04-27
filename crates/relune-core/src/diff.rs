@@ -514,6 +514,8 @@ impl TableDiff {
             || Self::fk_column_pairs(a) != Self::fk_column_pairs(b)
             || a.to_schema != b.to_schema
             || a.to_table != b.to_table
+            || a.on_delete != b.on_delete
+            || a.on_update != b.on_update
     }
 
     fn fk_column_pairs(fk: &ForeignKey) -> Vec<(String, String)> {
@@ -1414,6 +1416,61 @@ mod tests {
         let diff = diff_schemas(&before, &after);
 
         assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn test_modified_foreign_key_on_delete_action_is_detected() {
+        let mut before_table = create_test_table(
+            "posts",
+            vec![
+                ("id", "bigint", false, true),
+                ("user_id", "bigint", false, false),
+            ],
+            vec![("fk_posts_user", vec!["user_id"], "users", vec!["id"])],
+        );
+        before_table.foreign_keys[0].on_delete = ReferentialAction::NoAction;
+
+        let mut after_table = create_test_table(
+            "posts",
+            vec![
+                ("id", "bigint", false, true),
+                ("user_id", "bigint", false, false),
+            ],
+            vec![("fk_posts_user", vec!["user_id"], "users", vec!["id"])],
+        );
+        after_table.foreign_keys[0].on_delete = ReferentialAction::Cascade;
+
+        let before = Schema {
+            tables: vec![
+                create_test_table("users", vec![("id", "bigint", false, true)], vec![]),
+                before_table,
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        let after = Schema {
+            tables: vec![
+                create_test_table("users", vec![("id", "bigint", false, true)], vec![]),
+                after_table,
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&before, &after);
+
+        let posts_diff = diff
+            .modified_tables
+            .iter()
+            .find(|t| t.table_name == "posts")
+            .expect("posts should be marked as modified");
+        assert_eq!(posts_diff.fk_diffs.len(), 1);
+        assert_eq!(posts_diff.fk_diffs[0].change_kind, ChangeKind::Modified);
+        let new_value = posts_diff.fk_diffs[0]
+            .new_value
+            .as_ref()
+            .expect("modified FK should carry new value");
+        assert_eq!(new_value.on_delete.as_deref(), Some("CASCADE"));
     }
 
     #[test]
