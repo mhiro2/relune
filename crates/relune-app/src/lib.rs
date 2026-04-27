@@ -39,14 +39,14 @@ pub mod usecases;
 pub use request::{
     DiffFormat, DiffRequest, DocFormat, DocRequest, ExportFormat, ExportRequest, InputSource,
     InspectFormat, InspectRequest, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme,
+    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest,
 };
 
 // Re-export result types
 pub use result::{
     ColumnDetails, DiffResult, DocResult, ExportResult, ForeignKeyDetails, IndexDetails,
-    InspectResult, LintResult, LintReview, RenderResult, RenderStats, SchemaSummary, TableDetails,
-    TableSummary,
+    InspectResult, LintResult, LintReview, RenderResult, RenderStats, ReviewResult, SchemaSummary,
+    TableDetails, TableSummary,
 };
 
 // Re-export error type
@@ -56,7 +56,7 @@ pub use error::AppError;
 pub use schema_input::MAX_INPUT_FILE_SIZE_BYTES;
 #[cfg(feature = "introspect")]
 pub use schema_input::schema_from_db_url_async;
-pub use usecases::{diff, doc, export, inspect, lint, render};
+pub use usecases::{diff, doc, export, inspect, lint, render, review};
 
 // Re-export from usecases for convenience
 pub use usecases::diff::{
@@ -65,6 +65,7 @@ pub use usecases::diff::{
 pub use usecases::doc::format_doc_markdown;
 pub use usecases::inspect::format_inspect_text;
 pub use usecases::lint::{format_lint_json, format_lint_text};
+pub use usecases::review::{format_review_json, format_review_markdown, format_review_text};
 
 // Re-export commonly used types from relune-core for convenience
 pub use relune_core::{

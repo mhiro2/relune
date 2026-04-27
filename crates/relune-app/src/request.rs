@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use relune_core::{
-    FilterSpec, FocusSpec, GroupingSpec, LayoutSpec, LintProfile, LintRuleCategory, SqlDialect,
+    FilterSpec, FocusSpec, GroupingSpec, LayoutSpec, LintProfile, LintRuleCategory, ReviewSeverity,
+    SqlDialect,
 };
 use serde::{Deserialize, Serialize};
 
@@ -597,6 +598,98 @@ pub enum DiffFormat {
     Html,
     /// GitHub-flavored Markdown output.
     Markdown,
+}
+
+/// Output format for the review command.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewFormat {
+    /// Human-readable text output.
+    #[default]
+    Text,
+    /// GitHub-flavored Markdown output.
+    Markdown,
+    /// JSON output.
+    Json,
+}
+
+/// Request to run migration risk review on two schemas.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReviewRequest {
+    /// Input source for the baseline schema.
+    pub before: InputSource,
+    /// Input source for the updated schema.
+    pub after: InputSource,
+    /// Output format.
+    #[serde(default)]
+    pub format: ReviewFormat,
+    /// Optional output file path. If None, output goes to stdout.
+    pub output_path: Option<PathBuf>,
+    /// Specific rules to run. Empty means "all rules".
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Rules to exclude after the active set is resolved.
+    #[serde(default)]
+    pub except_rules: Vec<String>,
+    /// Table glob patterns to suppress findings for.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
+    /// Minimum severity that flips `denied = true`.
+    #[serde(default)]
+    pub deny: Option<ReviewSeverity>,
+}
+
+impl ReviewRequest {
+    /// Create a new review request from two SQL strings.
+    pub fn from_sql(before: impl Into<String>, after: impl Into<String>) -> Self {
+        Self {
+            before: InputSource::sql_text(before),
+            after: InputSource::sql_text(after),
+            ..Default::default()
+        }
+    }
+
+    /// Set the output format.
+    #[must_use]
+    pub const fn with_format(mut self, format: ReviewFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Set the output file path.
+    #[must_use]
+    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.output_path = Some(path.into());
+        self
+    }
+
+    /// Set the rule allow-list.
+    #[must_use]
+    pub fn with_rules(mut self, rules: Vec<String>) -> Self {
+        self.rules = rules;
+        self
+    }
+
+    /// Set the rule deny-list.
+    #[must_use]
+    pub fn with_except_rules(mut self, rules: Vec<String>) -> Self {
+        self.except_rules = rules;
+        self
+    }
+
+    /// Set the table suppression patterns.
+    #[must_use]
+    pub fn with_except_tables(mut self, patterns: Vec<String>) -> Self {
+        self.except_tables = patterns;
+        self
+    }
+
+    /// Set the deny severity threshold.
+    #[must_use]
+    pub const fn with_deny(mut self, severity: ReviewSeverity) -> Self {
+        self.deny = Some(severity);
+        self
+    }
 }
 
 #[cfg(test)]
