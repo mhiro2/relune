@@ -7,6 +7,7 @@
 #   AFTER         — Updated schema file path (required).
 #   FORMAT        — Output format: text|markdown|json|svg|html (required).
 #   OUTPUT_PATH   — Output file path (optional; derived from FORMAT when empty).
+#   DIALECT       — SQL dialect: auto|postgres|mysql|sqlite (optional).
 #   GITHUB_OUTPUT — Set by GitHub Actions runtime.
 
 set -euo pipefail
@@ -30,14 +31,21 @@ if [[ -z "${OUTPUT_PATH:-}" ]]; then
   esac
 fi
 
+# Build args
+args=(diff
+  --before "${BEFORE}"
+  --after  "${AFTER}"
+  --format "${FORMAT}"
+  --exit-code
+  -o "${OUTPUT_PATH}")
+
+if [[ -n "${DIALECT:-}" && "${DIALECT}" != "auto" ]]; then
+  args+=(--dialect "${DIALECT}")
+fi
+
 # Run diff with --exit-code to detect changes
 set +e
-"${relune}" diff \
-  --before "${BEFORE}" \
-  --after  "${AFTER}" \
-  --format "${FORMAT}" \
-  --exit-code \
-  -o "${OUTPUT_PATH}"
+"${relune}" "${args[@]}"
 rc=$?
 set -e
 

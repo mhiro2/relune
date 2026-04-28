@@ -61,3 +61,121 @@ jobs:
             echo "::error::Output file not found"
             exit 1
           fi
+
+      # ----------------------------------------------------------------
+      # Review mode smoke tests
+      # ----------------------------------------------------------------
+      - name: Test action (review, no findings)
+        id: review-no-findings
+        uses: ./action
+        with:
+          mode: review
+          before: fixtures/sql/simple_blog.sql
+          after: fixtures/sql/simple_blog.sql
+          deny: breaking
+          binary-path: target/release/relune
+      - name: Verify review (no findings)
+        run: |
+          if [[ "${{ steps.review-no-findings.outputs.has-findings }}" != "false" ]]; then
+            echo "::error::Expected has-findings=false for identical schemas"
+            exit 1
+          fi
+          if [[ "${{ steps.review-no-findings.outputs.has-blocking-findings }}" != "false" ]]; then
+            echo "::error::Expected has-blocking-findings=false for identical schemas"
+            exit 1
+          fi
+          if [[ ! -s "${{ steps.review-no-findings.outputs.output-path }}" ]]; then
+            echo "::error::Review output file is empty"
+            exit 1
+          fi
+
+      - name: Test action (review, warning only)
+        id: review-warning
+        uses: ./action
+        with:
+          mode: review
+          before: fixtures/review/add-not-null-on-existing/before.sql
+          after: fixtures/review/add-not-null-on-existing/after.sql
+          deny: breaking
+          binary-path: target/release/relune
+      - name: Verify review (warning only)
+        run: |
+          if [[ "${{ steps.review-warning.outputs.has-findings }}" != "true" ]]; then
+            echo "::error::Expected has-findings=true for warning fixture"
+            exit 1
+          fi
+          if [[ "${{ steps.review-warning.outputs.has-blocking-findings }}" != "false" ]]; then
+            echo "::error::Expected has-blocking-findings=false (warning is below breaking)"
+            exit 1
+          fi
+          if [[ "${{ steps.review-warning.outputs.summary-warning }}" -lt 1 ]]; then
+            echo "::error::Expected summary-warning >= 1"
+            exit 1
+          fi
+
+      - name: Test action (review, breaking, no fail)
+        id: review-breaking
+        uses: ./action
+        with:
+          mode: review
+          before: fixtures/review/drop-column-referenced/before.sql
+          after: fixtures/review/drop-column-referenced/after.sql
+          deny: breaking
+          fail-on-blocking: "false"
+          binary-path: target/release/relune
+      - name: Verify review (breaking, no fail)
+        run: |
+          if [[ "${{ steps.review-breaking.outputs.has-findings }}" != "true" ]]; then
+            echo "::error::Expected has-findings=true for breaking fixture"
+            exit 1
+          fi
+          if [[ "${{ steps.review-breaking.outputs.has-blocking-findings }}" != "true" ]]; then
+            echo "::error::Expected has-blocking-findings=true for breaking fixture"
+            exit 1
+          fi
+          if [[ "${{ steps.review-breaking.outputs.summary-breaking }}" -lt 1 ]]; then
+            echo "::error::Expected summary-breaking >= 1"
+            exit 1
+          fi
+          if [[ ! -s "${{ steps.review-breaking.outputs.output-path }}" ]]; then
+            echo "::error::Review output file is empty"
+            exit 1
+          fi
+
+      - name: Test action (review, breaking, fail-on-blocking)
+        id: review-breaking-fail
+        continue-on-error: true
+        uses: ./action
+        with:
+          mode: review
+          before: fixtures/review/drop-column-referenced/before.sql
+          after: fixtures/review/drop-column-referenced/after.sql
+          deny: breaking
+          fail-on-blocking: "true"
+          binary-path: target/release/relune
+      - name: Verify review (breaking, fail-on-blocking)
+        run: |
+          if [[ "${{ steps.review-breaking-fail.outcome }}" != "failure" ]]; then
+            echo "::error::Expected step outcome=failure when fail-on-blocking=true and breaking finding present"
+            exit 1
+          fi
+          if [[ "${{ steps.review-breaking-fail.outputs.has-blocking-findings }}" != "true" ]]; then
+            echo "::error::Expected has-blocking-findings=true even when action fails"
+            exit 1
+          fi
+
+      - name: Test action (invalid mode)
+        id: review-invalid-mode
+        continue-on-error: true
+        uses: ./action
+        with:
+          mode: bogus
+          before: fixtures/sql/simple_blog.sql
+          after: fixtures/sql/simple_blog.sql
+          binary-path: target/release/relune
+      - name: Verify invalid mode fails
+        run: |
+          if [[ "${{ steps.review-invalid-mode.outcome }}" != "failure" ]]; then
+            echo "::error::Expected step outcome=failure for unknown mode"
+            exit 1
+          fi
