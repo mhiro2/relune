@@ -82,6 +82,16 @@ pub fn run_rules(
             }
         }
 
+        if selected.contains(&ReviewRuleId::DropPkOrUnique) {
+            check_drop_pk_or_unique_widened(
+                table_diff,
+                before_table,
+                after_table,
+                &context,
+                &mut findings,
+            );
+        }
+
         for fk_diff in &table_diff.fk_diffs {
             if selected.contains(&ReviewRuleId::AddCascadeDelete) {
                 check_add_cascade_delete(table_diff, fk_diff, after_table, &context, &mut findings);
@@ -606,7 +616,7 @@ fn check_drop_pk_or_unique_column(
         .filter(|c| c.is_primary_key)
         .map(|c| c.name.to_ascii_lowercase())
         .collect();
-    if covers(&after_pk_cols, &before_pk_cols) {
+    if same_column_set(&after_pk_cols, &before_pk_cols) {
         return;
     }
     if covered_by_unique_index(after_table, &before_pk_cols) {
@@ -701,6 +711,91 @@ fn check_drop_pk_or_unique_index(
         ReviewSeverity::Breaking => "Drop or repoint the referencing FKs in the same migration.",
         _ => "Add a replacement UNIQUE in the same migration if uniqueness is still required.",
     };
+    let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
+        .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_mitigation(mitigation);
+    if let Some((_, fk_text)) = related_fk {
+        finding = finding.with_fk_name(fk_text);
+    }
+    findings.push(finding);
+}
+
+/// `risk/drop-pk-or-unique` (PK widening path) — every original PK column
+/// remains a PK column in `after`, but the PK has been widened with extra
+/// columns. The original column set is no longer guaranteed unique, so an
+/// FK that still references just the original set will not resolve.
+///
+/// The column-path check only fires when a column loses its PK status;
+/// it cannot see this case because no column actually drops out.
+fn check_drop_pk_or_unique_widened(
+    table_diff: &TableDiff,
+    before_table: Option<&Table>,
+    after_table: &Table,
+    context: &RuleContext<'_>,
+    findings: &mut Vec<RiskFinding>,
+) {
+    let Some(before_table) = before_table else {
+        return;
+    };
+
+    let before_pk_cols: Vec<String> = before_table
+        .columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.name.to_ascii_lowercase())
+        .collect();
+    if before_pk_cols.is_empty() {
+        return;
+    }
+    let after_pk_cols: Vec<String> = after_table
+        .columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.name.to_ascii_lowercase())
+        .collect();
+
+    if same_column_set(&after_pk_cols, &before_pk_cols) {
+        return;
+    }
+    // Only the strict-superset case is unique to this check; if any
+    // before-PK column is missing from after, the column-path check
+    // already fires for it.
+    if !covers(&after_pk_cols, &before_pk_cols) {
+        return;
+    }
+    if covered_by_unique_index(after_table, &before_pk_cols) {
+        return;
+    }
+
+    let (severity, related_fk) = evaluate_drop_pk_severity(before_table, &before_pk_cols, context);
+
+    let message = match (severity, &related_fk) {
+        (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
+            "Primary key on {} is being widened from ({}) to ({}). FK {} on {} still references ({}), which is no longer guaranteed unique. Migration will fail.",
+            table_diff.table_name,
+            before_pk_cols.join(","),
+            after_pk_cols.join(","),
+            fk_label,
+            other_qname,
+            before_pk_cols.join(","),
+        ),
+        _ => format!(
+            "Primary key on {} is being widened from ({}) to ({}). The original column set is no longer guaranteed unique.",
+            table_diff.table_name,
+            before_pk_cols.join(","),
+            after_pk_cols.join(","),
+        ),
+    };
+
+    let mitigation = match severity {
+        ReviewSeverity::Breaking => {
+            "Add a UNIQUE index on the original PK columns or repoint the referencing FKs in the same migration."
+        }
+        _ => {
+            "Add a UNIQUE index on the original PK columns if the uniqueness guarantee is still required."
+        }
+    };
+
     let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
         .with_table(&after_table.stable_id, &table_diff.table_name)
         .with_mitigation(mitigation);
@@ -945,6 +1040,10 @@ fn covers(set: &[String], expected: &[String]) -> bool {
     }
     let set_lookup: HashSet<&String> = set.iter().collect();
     expected.iter().all(|c| set_lookup.contains(c))
+}
+
+fn same_column_set(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && covers(a, b)
 }
 
 fn covered_by_unique_index(table: &Table, expected: &[String]) -> bool {
@@ -1461,6 +1560,116 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
             .expect("expected DropPkOrUnique finding for index");
         assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn pk_widened_to_composite_breaks_existing_fk() {
+        // Before: users(id PK, tenant_id) — orders.user_id REFERENCES users(id).
+        // After: users(id, tenant_id, PRIMARY KEY (id, tenant_id)) — composite PK.
+        // The original `(id)` is no longer guaranteed unique, so the existing
+        // FK that targets just `(id)` is unsupportable.
+        let users_before = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("tenant_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("tenant_id", "BIGINT", false, true),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users_before, orders.clone()],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("expected DropPkOrUnique finding for PK widening");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
+        assert_eq!(f.table_name.as_deref(), Some("users"));
+    }
+
+    #[test]
+    fn pk_widened_suppressed_when_unique_on_original_columns() {
+        // Same as above but after schema retains a UNIQUE index on the
+        // original `(id)` column set, so the FK still resolves.
+        let users_before = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("tenant_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("tenant_id", "BIGINT", false, true),
+            ],
+            vec![],
+            vec![index("users_id_key", &["id"], true)],
+        );
+        let before = Schema {
+            tables: vec![users_before, orders.clone()],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropPkOrUnique),
+            "PK widening should be suppressed when a UNIQUE index covers the original PK columns, got: {findings:?}"
+        );
     }
 
     #[test]
