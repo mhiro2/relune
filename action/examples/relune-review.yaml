@@ -1,0 +1,123 @@
+# Sample workflow: post `relune review` results as a sticky PR comment.
+#
+# Copy this file into your repository as `.github/workflows/schema-review.yaml`
+# and adjust the schema paths and the action version pin to match your project.
+#
+# Design notes:
+#   * The find/upsert pair is intentionally driven from a hidden marker
+#     (`<!-- relune-review -->`) instead of step outputs, so a clean run on a
+#     PR that previously had blocking findings replaces the stale comment with
+#     "No risk findings" instead of leaving the warning behind.
+#   * `peter-evans/create-or-update-comment` is given `body-path:` (not
+#     `body:`); shell substitutions like `$(cat ...)` are NOT expanded by the
+#     action, so the only safe way to ship a multi-line markdown body is via a
+#     file path.
+#   * The `concurrency` group is keyed on the PR number so that pushing twice
+#     in quick succession cancels the in-flight run. Without it, an older run
+#     can finish after a newer one and resurrect a stale "blocking" comment.
+#   * Fork PRs against public repositories receive a read-only `GITHUB_TOKEN`,
+#     so the comment steps would 403 even with `pull-requests: write`. The
+#     job-level `if:` skips fork PRs; switch to `pull_request_target` only if
+#     you understand the security implications of running with the base
+#     repository's secrets against fork-controlled code.
+#   * For a single-step alternative, swap the find + create-or-update pair for
+#     `marocchino/sticky-pull-request-comment`. The semantics are equivalent.
+
+name: Schema review
+
+on:
+  pull_request:
+    paths:
+      # Adjust to wherever your canonical schema lives.
+      - "db/schema/**.sql"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: relune-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip fork PRs — GITHUB_TOKEN is read-only there and the upsert would 403.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (PR head)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Materialize before/after schemas
+        run: |
+          mkdir -p .relune
+          # Adjust the path to your canonical schema file.
+          git show "${{ github.event.pull_request.base.sha }}:db/schema/schema.sql" > .relune/before.sql
+          cp db/schema/schema.sql .relune/after.sql
+
+      - name: Run relune review
+        id: review
+        # Replace `@main` with the next tagged release once available, e.g.
+        # `mhiro2/relune/action@v0.9.0`. For maximum reproducibility, pin to a
+        # full commit SHA — `mhiro2/relune/action@<sha> # v0.9.0` — the same
+        # convention this repository's own workflows use.
+        uses: mhiro2/relune/action@main
+        with:
+          mode: review
+          before: .relune/before.sql
+          after: .relune/after.sql
+          deny: breaking
+          format: markdown
+          output-path: .relune/review.md
+          # Keep the workflow running so the PR comment is posted before any
+          # failure step further down. Flip to "true" if you would rather block
+          # the merge immediately and skip the comment.
+          fail-on-blocking: "false"
+
+      - name: Compose comment body
+        run: |
+          {
+            # Hidden marker used by the find step below to locate the sticky.
+            echo "<!-- relune-review -->"
+            if [[ "${{ steps.review.outputs.has-blocking-findings }}" == "true" ]]; then
+              echo "> ⚠️ **Blocking findings detected.**"
+              echo ""
+            fi
+            if [[ "${{ steps.review.outputs.has-findings }}" == "true" ]]; then
+              cat .relune/review.md
+            else
+              echo "## Schema review"
+              echo ""
+              echo "✅ No risk findings."
+            fi
+          } > .relune/comment.md
+
+      # Always run find — even when has-findings=false — so a stale "blocking"
+      # comment from an earlier push is updated to "No risk findings" instead
+      # of being left behind on the PR.
+      - name: Find existing sticky comment
+        id: find
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: "<!-- relune-review -->"
+
+      - name: Upsert sticky comment
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
+        with:
+          # When find returned no match, comment-id is empty and the action
+          # creates a new comment; otherwise it edits the existing one.
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          # Use body-path (not body): action inputs do not expand `$(cat ...)`.
+          body-path: .relune/comment.md
+
+      - name: Fail when blocking
+        if: steps.review.outputs.has-blocking-findings == 'true'
+        run: |
+          echo "::error::Schema review found blocking changes. See the PR comment for details."
+          exit 1
