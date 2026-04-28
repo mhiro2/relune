@@ -1,5 +1,5 @@
 name: Relune Schema Diff
-description: Run relune diff to compare two database schemas and report changes. Supports Linux and macOS runners only.
+description: Run relune diff or review to compare two database schemas. Supports Linux and macOS runners only.
 branding:
   icon: git-pull-request
   color: blue
@@ -11,6 +11,12 @@ inputs:
       Ignored when binary-path is set.
     required: false
     default: latest
+  mode:
+    description: >
+      Operation mode: "diff" (default; renders a schema diff) or "review"
+      (runs the migration risk review). Anything else fails the action.
+    required: false
+    default: diff
   before:
     description: Path to the baseline schema file (SQL or schema JSON).
     required: true
@@ -18,16 +24,57 @@ inputs:
     description: Path to the updated schema file (SQL or schema JSON).
     required: true
   format:
-    description: "Output format: text, json, markdown, svg, or html."
+    description: >
+      Output format. diff mode accepts text|json|markdown|svg|html;
+      review mode accepts text|markdown|json (svg/html will be rejected
+      by the CLI).
     required: false
     default: markdown
   output-path:
     description: >
-      Path to write the diff output file.
-      When omitted the extension is derived from format
-      (e.g. relune-diff.md for markdown, relune-diff.svg for svg).
+      Path to write the output file.
+      When omitted the extension is derived from mode/format
+      (e.g. relune-diff.md, relune-review.md).
     required: false
     default: ""
+  dialect:
+    description: >
+      SQL dialect for parsing: auto|postgres|mysql|sqlite.
+      Applied to both diff and review modes; "auto" lets the CLI infer.
+    required: false
+    default: auto
+  deny:
+    description: >
+      review mode only. Minimum severity that counts as blocking:
+      info|warning|caution|breaking. Empty means no --deny is passed.
+    required: false
+    default: ""
+  rules:
+    description: >
+      review mode only. Newline-separated list of rule ids; each line is
+      passed to the CLI as `--rules <id>` (repeatable).
+    required: false
+    default: ""
+  except-rules:
+    description: >
+      review mode only. Newline-separated list of rule ids to suppress;
+      each line is passed to the CLI as `--except-rule <id>` (repeatable).
+    required: false
+    default: ""
+  except-tables:
+    description: >
+      review mode only. Newline-separated list of table patterns (glob ok)
+      to suppress; each line is passed to the CLI as `--except-table
+      <pattern>` (repeatable).
+    required: false
+    default: ""
+  fail-on-blocking:
+    description: >
+      review mode only. When "true", the action exits non-zero whenever
+      blocking findings are detected (CLI rc=10). Default keeps the
+      workflow running so a follow-up step can post a PR comment first.
+    required: false
+    default: "false"
   binary-path:
     description: >
       Path to a pre-built relune binary.
@@ -38,11 +85,29 @@ inputs:
 
 outputs:
   has-changes:
-    description: '"true" if schema changes were detected, "false" otherwise.'
-    value: ${{ steps.diff.outputs.has-changes }}
+    description: 'diff mode: "true" if schema changes were detected, "false" otherwise. Empty in review mode.'
+    value: ${{ steps.run.outputs.has-changes }}
+  has-findings:
+    description: 'review mode: "true" if any finding was emitted (any severity). Empty in diff mode.'
+    value: ${{ steps.run.outputs.has-findings }}
+  has-blocking-findings:
+    description: 'review mode: "true" when CLI returned rc=10 (a finding reached the --deny threshold). Empty in diff mode.'
+    value: ${{ steps.run.outputs.has-blocking-findings }}
+  summary-breaking:
+    description: 'review mode: number of breaking findings.'
+    value: ${{ steps.run.outputs.summary-breaking }}
+  summary-caution:
+    description: 'review mode: number of caution findings.'
+    value: ${{ steps.run.outputs.summary-caution }}
+  summary-warning:
+    description: 'review mode: number of warning findings.'
+    value: ${{ steps.run.outputs.summary-warning }}
+  summary-info:
+    description: 'review mode: number of info findings.'
+    value: ${{ steps.run.outputs.summary-info }}
   output-path:
-    description: Path to the diff output file.
-    value: ${{ steps.diff.outputs.output-path }}
+    description: Path to the generated output file (diff or review report).
+    value: ${{ steps.run.outputs.output-path }}
 
 runs:
   using: composite
@@ -59,15 +124,34 @@ runs:
       run: bash "${{ github.action_path }}/install.sh"
 
     # ------------------------------------------------------------------
-    # 2. Run relune diff
+    # 2. Run relune (diff or review depending on mode)
     # ------------------------------------------------------------------
-    - name: Run relune diff
-      id: diff
+    - name: Run relune
+      id: run
       shell: bash
       env:
         RELUNE_BIN: ${{ inputs.binary-path }}
+        MODE: ${{ inputs.mode }}
         BEFORE: ${{ inputs.before }}
         AFTER: ${{ inputs.after }}
         FORMAT: ${{ inputs.format }}
         OUTPUT_PATH: ${{ inputs.output-path }}
-      run: bash "${{ github.action_path }}/diff.sh"
+        DIALECT: ${{ inputs.dialect }}
+        DENY: ${{ inputs.deny }}
+        RULES: ${{ inputs.rules }}
+        EXCEPT_RULES: ${{ inputs.except-rules }}
+        EXCEPT_TABLES: ${{ inputs.except-tables }}
+        FAIL_ON_BLOCKING: ${{ inputs.fail-on-blocking }}
+      run: |
+        case "${MODE}" in
+          diff)
+            bash "${{ github.action_path }}/diff.sh"
+            ;;
+          review)
+            bash "${{ github.action_path }}/review.sh"
+            ;;
+          *)
+            echo "::error::Invalid mode '${MODE}'. Expected 'diff' or 'review'."
+            exit 2
+            ;;
+        esac
