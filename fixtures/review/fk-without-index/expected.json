@@ -1,0 +1,12 @@
+[
+  {
+    "column_name": "user_id",
+    "fk_name": "orders_user_id_fkey",
+    "message": "New FK orders_user_id_fkey on orders (user_id) has no supporting index.",
+    "mitigation": "Add an index on (user_id) to avoid full-table scans on JOIN.",
+    "rule_id": "risk/fk-without-index",
+    "severity": "info",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

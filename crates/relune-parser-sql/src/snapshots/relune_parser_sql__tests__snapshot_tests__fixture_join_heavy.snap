@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 1859
+assertion_line: 3004
 expression: snapshot_data(&output)
 ---
 {
@@ -80,6 +80,13 @@ expression: snapshot_data(&output)
         "foreign_keys": [],
         "id": 1,
         "indexes": [
+          {
+            "columns": [
+              "slug"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "slug"
@@ -192,6 +199,14 @@ expression: snapshot_data(&output)
         "indexes": [
           {
             "columns": [
+              "tenant_id",
+              "email"
+            ],
+            "is_unique": true,
+            "name": null
+          },
+          {
+            "columns": [
               "tenant_id"
             ],
             "is_unique": false,
@@ -284,6 +299,14 @@ expression: snapshot_data(&output)
         ],
         "id": 3,
         "indexes": [
+          {
+            "columns": [
+              "tenant_id",
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "tenant_id"
@@ -434,7 +457,15 @@ expression: snapshot_data(&output)
         "comment": null,
         "foreign_keys": [],
         "id": 5,
-        "indexes": [],
+        "indexes": [
+          {
+            "columns": [
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          }
+        ],
         "name": "permissions",
         "schema_name": null,
         "stable_id": "permissions"
@@ -932,6 +963,14 @@ expression: snapshot_data(&output)
         ],
         "id": 11,
         "indexes": [
+          {
+            "columns": [
+              "tenant_id",
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "tenant_id"
@@ -2036,7 +2075,15 @@ expression: snapshot_data(&output)
         "comment": null,
         "foreign_keys": [],
         "id": 21,
-        "indexes": [],
+        "indexes": [
+          {
+            "columns": [
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          }
+        ],
         "name": "integration_types",
         "schema_name": null,
         "stable_id": "integration_types"
@@ -2143,6 +2190,14 @@ expression: snapshot_data(&output)
         ],
         "id": 22,
         "indexes": [
+          {
+            "columns": [
+              "tenant_id",
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "tenant_id"

@@ -1,0 +1,12 @@
+[
+  {
+    "column_name": "id",
+    "fk_name": "orders_user_id_fkey",
+    "message": "Primary key on users (id) is being dropped while FK orders_user_id_fkey on orders still references it. Migration will fail.",
+    "mitigation": "Drop or repoint the referencing FKs in the same migration.",
+    "rule_id": "risk/drop-pk-or-unique",
+    "severity": "breaking",
+    "table_id": "users",
+    "table_name": "users"
+  }
+]

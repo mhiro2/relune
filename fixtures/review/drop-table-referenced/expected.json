@@ -1,0 +1,12 @@
+[
+  {
+    "fk_name": "orders_user_id_fkey",
+    "message": "Table legacy_users is referenced by FK orders_user_id_fkey on orders. Dropping it will fail.",
+    "mitigation": "Drop or repoint the referencing FKs in the same migration.",
+    "related_table_id": "orders",
+    "rule_id": "risk/drop-table-referenced",
+    "severity": "breaking",
+    "table_id": "legacy_users",
+    "table_name": "legacy_users"
+  }
+]

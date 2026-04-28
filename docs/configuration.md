@@ -58,6 +58,13 @@ format = "json"
 dialect = "postgres"
 fail_on_warning = false
 
+[review]
+format = "text"
+dialect = "postgres"
+deny = "breaking"
+except_rules = ["fk-without-index"]
+except_tables = ["audit_*"]
+
 [viewpoints.billing]
 focus = "orders"
 depth = 2
@@ -191,6 +198,21 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
 `diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, and `--fail-on-warning`, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
+
+---
+
+## `[review]`
+
+| Key | Values |
+|-----|--------|
+| `format` | `text`, `markdown`, `json` |
+| `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
+| `rules` | Array of rule IDs (`risk/<id>` or bare `<id>`); empty means "all rules" |
+| `except_rules` | Array of rule IDs to remove from the active set |
+| `except_tables` | Array of table patterns (`*` glob) whose findings move into `suppressed` |
+| `deny` | `info`, `warning`, `caution`, `breaking` — minimum severity that causes a non-zero exit when not overridden by `--deny` |
+
+`review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, and `--deny`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
 
 ---
 

@@ -212,3 +212,37 @@ relune diff --before old.sql --after new.sql --format html --stdout > diff.html
 relune diff --before old.sql --after new.sql --exit-code  # exits 10 if changes found
 relune --config relune.toml diff --before old.sql --after new.sql
 ```
+
+---
+
+## `review`
+
+Compare a `before` schema with an `after` schema and emit migration risk findings: dropped references, narrowing type changes, NOT NULL on existing data, missing FK indexes, etc. Findings are grouped into four severity buckets — `info < warning < caution < breaking` — so `--deny` can gate CI on the level of risk you are willing to ship.
+
+**Before:** `--before <FILE>`, `--before-sql-text '<DDL>'`, or `--before-schema-json <FILE>`.
+
+**After:** `--after <FILE>`, `--after-sql-text '<DDL>'`, or `--after-schema-json <FILE>`.
+
+| Option | Description |
+|--------|-------------|
+| `-f`, `--format text\|markdown\|json` | Output format (default `text`) |
+| `-o`, `--out <FILE>` | Optional file (else stdout) |
+| `--dialect` | For SQL parsing on both sides |
+| `--rules <RULE>` | Repeatable; run only these rules (accepts `risk/<id>` or bare `<id>`) |
+| `--except-rule <RULE>` | Repeatable; remove rules from the active set |
+| `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (supports `*` glob) |
+| `--deny info\|warning\|caution\|breaking` | Exit non-zero when findings reach this severity |
+| `--exit-code` | Exit `10` when any findings are emitted (regardless of severity) |
+
+Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
+
+```bash
+relune review --before old.sql --after new.sql
+relune review --before old.sql --after new.sql --format markdown -o review.md
+relune review --before old.sql --after new.sql --format json -o review.json
+relune review --before old.sql --after new.sql --deny breaking
+relune review --before old.sql --after new.sql --except-rule fk-without-index
+relune review --before old.sql --after new.sql --except-table audit_*
+relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
+relune --config relune.toml review --before old.sql --after new.sql
+```

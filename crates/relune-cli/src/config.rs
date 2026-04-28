@@ -86,7 +86,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::{
     DialectArg, DiffFormat, DirectionArg, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg,
-    RenderFormat, Theme,
+    RenderFormat, ReviewFormat, Theme,
 };
 
 /// Root configuration structure.
@@ -111,6 +111,9 @@ pub struct ReluneConfig {
     /// Diff command configuration.
     #[serde(default)]
     pub diff: DiffConfig,
+    /// Review command configuration.
+    #[serde(default)]
+    pub review: ReviewConfig,
     /// Named focus/filter/grouping presets shared across commands.
     #[serde(default)]
     pub viewpoints: BTreeMap<String, ViewpointConfig>,
@@ -341,6 +344,30 @@ pub struct DiffConfig {
     pub fail_on_warning: Option<bool>,
 }
 
+/// Configuration for the review command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewConfig {
+    /// Output format.
+    #[serde(default)]
+    pub format: Option<ReviewFormatConfig>,
+    /// SQL dialect for parsing.
+    #[serde(default)]
+    pub dialect: Option<DialectArg>,
+    /// Specific rules to run. Empty means "all rules".
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Rules to exclude after the active set is resolved.
+    #[serde(default)]
+    pub except_rules: Vec<String>,
+    /// Table glob patterns to suppress findings for.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
+    /// Minimum severity that flips the denied flag.
+    #[serde(default)]
+    pub deny: Option<ReviewSeverityConfig>,
+}
+
 /// Inspect format configuration (mirrors CLI `InspectFormat`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -396,6 +423,25 @@ pub enum LintSeverityConfig {
     Warning,
     Info,
     Hint,
+}
+
+/// Review format configuration (mirrors CLI `ReviewFormat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewFormatConfig {
+    Text,
+    Markdown,
+    Json,
+}
+
+/// Review severity configuration (mirrors CLI `ReviewSeverityArg`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewSeverityConfig {
+    Info,
+    Warning,
+    Caution,
+    Breaking,
 }
 
 impl From<InspectFormatConfig> for crate::cli::InspectFormat {
@@ -456,6 +502,27 @@ impl From<LintSeverityConfig> for crate::cli::LintSeverity {
             LintSeverityConfig::Warning => Self::Warning,
             LintSeverityConfig::Info => Self::Info,
             LintSeverityConfig::Hint => Self::Hint,
+        }
+    }
+}
+
+impl From<ReviewFormatConfig> for ReviewFormat {
+    fn from(value: ReviewFormatConfig) -> Self {
+        match value {
+            ReviewFormatConfig::Text => Self::Text,
+            ReviewFormatConfig::Markdown => Self::Markdown,
+            ReviewFormatConfig::Json => Self::Json,
+        }
+    }
+}
+
+impl From<ReviewSeverityConfig> for crate::cli::ReviewSeverityArg {
+    fn from(value: ReviewSeverityConfig) -> Self {
+        match value {
+            ReviewSeverityConfig::Info => Self::Info,
+            ReviewSeverityConfig::Warning => Self::Warning,
+            ReviewSeverityConfig::Caution => Self::Caution,
+            ReviewSeverityConfig::Breaking => Self::Breaking,
         }
     }
 }
@@ -684,6 +751,21 @@ impl ReluneConfig {
         })
     }
 
+    /// Merge CLI review args into this config.
+    pub fn merge_review_args(&self, args: &crate::cli::ReviewArgs) -> MergedReviewConfig {
+        MergedReviewConfig {
+            format: args
+                .format
+                .or_else(|| self.review.format.map(Into::into))
+                .unwrap_or_default(),
+            dialect: args.dialect.or(self.review.dialect).unwrap_or_default(),
+            rules: merge_string_values(&args.rules, &self.review.rules),
+            except_rules: merge_string_values(&args.except_rules, &self.review.except_rules),
+            except_tables: merge_string_values(&args.except_tables, &self.review.except_tables),
+            deny: args.deny.or_else(|| self.review.deny.map(Into::into)),
+        }
+    }
+
     fn resolve_viewpoint(
         &self,
         raw_name: Option<&str>,
@@ -904,6 +986,17 @@ impl MergedDiffConfig {
             &self.exclude,
         )
     }
+}
+
+/// Merged review configuration.
+#[derive(Debug, Clone)]
+pub struct MergedReviewConfig {
+    pub format: ReviewFormat,
+    pub dialect: DialectArg,
+    pub rules: Vec<String>,
+    pub except_rules: Vec<String>,
+    pub except_tables: Vec<String>,
+    pub deny: Option<crate::cli::ReviewSeverityArg>,
 }
 
 impl MergedRenderConfig {

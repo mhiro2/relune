@@ -1,6 +1,6 @@
 ---
 name: relune
-description: Visualize, inspect, lint, diff, and export database schemas using the relune CLI. Use when working with SQL DDL files, database ERDs, schema reviews, migration diffs, or generating diagram-as-code output (Mermaid, D2, DOT).
+description: Visualize, inspect, lint, diff, review, and export database schemas using the relune CLI. Use when working with SQL DDL files, database ERDs, schema reviews, migration diffs, migration risk reviews, or generating diagram-as-code output (Mermaid, D2, DOT).
 ---
 
 # Relune
@@ -14,6 +14,7 @@ Understand, visualize, and review database schemas from the command line.
 - **Inspect structure** -- summarize tables, columns, types, constraints, and relationships
 - **Lint for issues** -- detect missing primary keys, FK index gaps, naming inconsistencies, orphan tables
 - **Diff revisions** -- compare before/after schemas with text or visual diffs
+- **Review migrations** -- flag dropped references, narrowing types, NOT NULL on existing data, missing FK indexes, and other migration risks across `info`, `warning`, `caution`, `breaking` severities
 - **Export anywhere** -- generate Mermaid, D2, Graphviz DOT, or normalized JSON
 - **Multi-dialect** -- PostgreSQL, MySQL, MariaDB, SQLite
 - **Multiple inputs** -- SQL files, inline SQL, schema JSON, live database introspection
@@ -48,6 +49,9 @@ relune lint --sql schema.sql
 
 # Compare two schema versions
 relune diff --before old.sql --after new.sql
+
+# Review a migration for safety risks
+relune review --before old.sql --after new.sql
 ```
 
 ## Input Sources
@@ -255,6 +259,38 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
 
+### review
+
+Compare a `before` schema with an `after` schema and emit migration risk findings, grouped into `info`, `warning`, `caution`, and `breaking` severities. Both before and after inputs are required.
+
+```bash
+relune review --before old.sql --after new.sql
+relune review --before old.sql --after new.sql --format markdown -o review.md
+relune review --before old.sql --after new.sql --format json -o review.json
+relune review --before old.sql --after new.sql --deny breaking
+relune review --before old.sql --after new.sql --except-rule fk-without-index
+relune review --before old.sql --after new.sql --except-table audit_*
+relune review --before old.sql --after new.sql --exit-code
+```
+
+| Side | Flags |
+|------|-------|
+| Before | `--before <FILE>`, `--before-sql-text '<DDL>'`, `--before-schema-json <FILE>` |
+| After | `--after <FILE>`, `--after-sql-text '<DDL>'`, `--after-schema-json <FILE>` |
+
+| Option | Values | Default |
+|--------|--------|---------|
+| `-f`, `--format` | `text`, `markdown`, `json` | `text` |
+| `-o`, `--out` | Output file path | stdout |
+| `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
+| `--rules <RULE>` | Repeatable; run only these rules (`risk/<id>` or bare `<id>`) | all rules |
+| `--except-rule <RULE>` | Repeatable; remove rules from the active set | -- |
+| `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (`*` glob) | -- |
+| `--deny` | `info`, `warning`, `caution`, `breaking` -- min severity for non-zero exit | -- |
+| `--exit-code` | Exit `10` when any findings are emitted | off |
+
+Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`.
+
 ## Common Workflows
 
 ### Schema review
@@ -271,13 +307,15 @@ relune inspect --sql schema.sql --table <TABLE>          # drill into flagged ta
 
 ### Migration review
 
-Diff before/after schemas and lint the result:
+Diff before/after schemas, surface migration safety risks, and lint the result:
 
 ```bash
 relune diff --before old.sql --after new.sql                          # text diff
 relune diff --before old.sql --after new.sql --format markdown        # GFM for PR comments
 relune diff --before old.sql --after new.sql --format html -o d.html  # visual diff
 relune diff --before old.sql --after new.sql --exit-code              # exit 10 if changes
+relune review --before old.sql --after new.sql                        # migration risk findings
+relune review --before old.sql --after new.sql --deny breaking        # gate CI on breaking risks
 relune lint --sql new.sql                                             # lint new schema
 relune render --sql new.sql --focus <CHANGED_TABLE> --depth 1 -o area.svg
 ```

@@ -64,6 +64,9 @@ pub enum Command {
 
     /// Compare two schemas and show differences.
     Diff(DiffArgs),
+
+    /// Review a schema migration for safety risks.
+    Review(ReviewArgs),
 }
 
 // ============================================================================
@@ -760,4 +763,109 @@ pub enum DiffFormat {
     Html,
     /// GitHub-flavored Markdown output.
     Markdown,
+}
+
+// ============================================================================
+// Review Command
+// ============================================================================
+
+/// Review a schema migration for safety risks.
+#[derive(Debug, Args)]
+#[command(
+    group(
+        ArgGroup::new("before_input")
+            .args(["before", "before_sql_text", "before_schema_json"])
+            .required(true)
+            .multiple(false)
+    ),
+    group(
+        ArgGroup::new("after_input")
+            .args(["after", "after_sql_text", "after_schema_json"])
+            .required(true)
+            .multiple(false)
+    )
+)]
+pub struct ReviewArgs {
+    /// Baseline SQL or schema JSON file.
+    #[arg(long = "before", value_name = "FILE")]
+    pub before: Option<PathBuf>,
+
+    /// Baseline SQL DDL directly from a string.
+    #[arg(long = "before-sql-text", value_name = "TEXT")]
+    pub before_sql_text: Option<String>,
+
+    /// Baseline normalized schema JSON file.
+    #[arg(long = "before-schema-json", value_name = "FILE")]
+    pub before_schema_json: Option<PathBuf>,
+
+    /// Updated SQL or schema JSON file.
+    #[arg(long = "after", value_name = "FILE")]
+    pub after: Option<PathBuf>,
+
+    /// Updated SQL DDL directly from a string.
+    #[arg(long = "after-sql-text", value_name = "TEXT")]
+    pub after_sql_text: Option<String>,
+
+    /// Updated normalized schema JSON file.
+    #[arg(long = "after-schema-json", value_name = "FILE")]
+    pub after_schema_json: Option<PathBuf>,
+
+    /// SQL dialect for parsing (auto-detected if omitted).
+    #[arg(long = "dialect", value_enum)]
+    pub dialect: Option<DialectArg>,
+
+    /// Output format. Defaults to `text` after config merge.
+    #[arg(short = 'f', long = "format", value_enum)]
+    pub format: Option<ReviewFormat>,
+
+    /// Output file path; stdout if omitted.
+    #[arg(short = 'o', long = "out", value_name = "FILE")]
+    pub out: Option<PathBuf>,
+
+    /// Restrict execution to specific rules (can be repeated).
+    #[arg(long = "rules", value_name = "RULE")]
+    pub rules: Vec<String>,
+
+    /// Remove specific rules from the active rule set (can be repeated).
+    #[arg(long = "except-rule", value_name = "RULE")]
+    pub except_rules: Vec<String>,
+
+    /// Suppress findings for matching tables (can be repeated, supports `*`).
+    #[arg(long = "except-table", value_name = "PATTERN")]
+    pub except_tables: Vec<String>,
+
+    /// Minimum severity that causes non-zero exit.
+    #[arg(long = "deny", value_name = "SEVERITY", value_enum)]
+    pub deny: Option<ReviewSeverityArg>,
+
+    /// Exit with code 10 if any findings are emitted.
+    #[arg(long = "exit-code")]
+    pub exit_code: bool,
+}
+
+/// Output format for review command.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewFormat {
+    /// Human-readable text output.
+    #[default]
+    Text,
+    /// GitHub-flavored Markdown output.
+    Markdown,
+    /// JSON output.
+    Json,
+}
+
+/// Severity level for review --deny option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewSeverityArg {
+    /// Information-only findings.
+    Info,
+    /// Warning-level findings (semantic shifts).
+    Warning,
+    /// Caution-level findings (operational risk).
+    Caution,
+    /// Breaking findings (migration is expected to fail).
+    Breaking,
 }

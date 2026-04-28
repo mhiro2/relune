@@ -2015,3 +2015,277 @@ mod diff_tests {
         assert!(output.status.success());
     }
 }
+
+// ============================================================================
+// Review Command Tests
+// ============================================================================
+
+mod review_tests {
+    use super::*;
+
+    const DROP_FK_BEFORE: &str = "
+        CREATE TABLE users (id INT PRIMARY KEY, email TEXT);
+        CREATE TABLE orders (
+            id INT PRIMARY KEY,
+            user_email TEXT REFERENCES users(email)
+        );
+    ";
+    const DROP_FK_AFTER: &str = "
+        CREATE TABLE users (id INT PRIMARY KEY);
+        CREATE TABLE orders (
+            id INT PRIMARY KEY,
+            user_email TEXT REFERENCES users(email)
+        );
+    ";
+
+    #[test]
+    fn review_no_changes_reports_no_findings() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review with no changes should succeed"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Schema review"));
+        assert!(stdout.contains("No risk findings"));
+    }
+
+    #[test]
+    fn review_text_format_emits_buckets() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review should succeed without --deny"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("breaking"));
+        assert!(stdout.contains("risk/drop-column-referenced"));
+    }
+
+    #[test]
+    fn review_markdown_format_uses_bullet_lines() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("-f")
+            .arg("markdown")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("## Schema review"));
+        assert!(stdout.contains("- **`risk/drop-column-referenced`**"));
+    }
+
+    #[test]
+    fn review_json_format_emits_structured_payload() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success());
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("JSON output should parse");
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(findings.iter().any(|finding| {
+            finding["rule_id"]
+                == serde_json::Value::String("risk/drop-column-referenced".to_string())
+        }));
+        assert_eq!(parsed["summary"]["breaking"], serde_json::Value::from(1));
+        assert_eq!(parsed["denied"], serde_json::Value::from(false));
+    }
+
+    #[test]
+    fn review_quiet_suppresses_findings_body() {
+        let output = relune()
+            .arg("--quiet")
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review --quiet should succeed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Schema review"));
+        assert!(stdout.contains("breaking"));
+        assert!(
+            !stdout.contains("risk/drop-column-referenced"),
+            "findings detail should be suppressed under --quiet, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn review_deny_breaking_returns_exit_code_10() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("--deny")
+            .arg("breaking")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(10));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("--deny"));
+    }
+
+    #[test]
+    fn review_exit_code_signals_findings() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY); CREATE TABLE orders (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY); CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));")
+            .arg("--exit-code")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(10));
+    }
+
+    #[test]
+    fn review_except_rule_suppresses_finding() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY); CREATE TABLE orders (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY); CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));")
+            .arg("--except-rule")
+            .arg("fk-without-index")
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review with --except-rule should succeed"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("JSON output should parse");
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(findings.is_empty(), "fk-without-index should be suppressed");
+    }
+
+    #[test]
+    fn review_except_table_moves_finding_to_suppressed() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE audit_log (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE audit_log (id INT PRIMARY KEY, created_at TIMESTAMP NOT NULL);")
+            .arg("--except-table")
+            .arg("audit_*")
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review with --except-table should succeed"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("JSON output should parse");
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(
+            findings.is_empty(),
+            "audit_log finding should be suppressed"
+        );
+        let suppressed = parsed["suppressed"].as_array().expect("suppressed array");
+        assert!(
+            !suppressed.is_empty(),
+            "suppressed should contain the audit_log finding"
+        );
+    }
+
+    #[test]
+    fn review_writes_to_output_file() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("review.json");
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("-f")
+            .arg("json")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review should succeed");
+        assert!(
+            output.stdout.is_empty(),
+            "review should not write to stdout when --out is used"
+        );
+        let content = fs::read_to_string(&output_path).expect("Failed to read review output");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("Output file should contain valid JSON");
+        assert!(parsed["findings"].is_array());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Review report written to"));
+    }
+
+    #[test]
+    fn review_uses_config_format() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(&config_path, "[review]\nformat = \"markdown\"\n").unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review should succeed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("## Schema review"));
+        assert!(stdout.contains("- **`risk/drop-column-referenced`**"));
+    }
+}

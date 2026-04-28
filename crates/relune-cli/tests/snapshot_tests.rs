@@ -73,6 +73,15 @@ fn snapshot_help_diff() {
 }
 
 #[test]
+fn snapshot_help_review() {
+    let mut cmd = relune();
+    let output = cmd.arg("review").arg("--help").assert().success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    insta::assert_snapshot!("help_review", stdout);
+}
+
+#[test]
 fn snapshot_version() {
     let mut cmd = relune();
     let output = cmd.arg("--version").assert().success();

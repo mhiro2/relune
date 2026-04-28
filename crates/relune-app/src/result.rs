@@ -404,6 +404,33 @@ impl LintResult {
     }
 }
 
+/// Result of a review operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewResult {
+    /// Findings, suppressed findings, summary and applied rules from the core engine.
+    #[serde(flatten)]
+    pub review: relune_core::ReviewResult,
+    /// Diagnostics collected while parsing inputs.
+    #[serde(default)]
+    pub diagnostics: Vec<Diagnostic>,
+    /// Whether the configured `--deny` threshold was exceeded.
+    pub denied: bool,
+}
+
+impl ReviewResult {
+    /// Convenience accessor for the underlying findings.
+    #[must_use]
+    pub fn findings(&self) -> &[relune_core::RiskFinding] {
+        &self.review.findings
+    }
+
+    /// Convenience accessor for the underlying summary.
+    #[must_use]
+    pub const fn summary(&self) -> &relune_core::ReviewSummary {
+        &self.review.summary
+    }
+}
+
 /// Result of a diff operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffResult {

@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 1859
+assertion_line: 3004
 expression: snapshot_data(&output)
 ---
 {
@@ -92,6 +92,13 @@ expression: snapshot_data(&output)
         ],
         "id": 1,
         "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "manager_id"
@@ -194,6 +201,13 @@ expression: snapshot_data(&output)
         ],
         "id": 2,
         "indexes": [
+          {
+            "columns": [
+              "slug"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "parent_id"
@@ -628,6 +642,13 @@ expression: snapshot_data(&output)
         "indexes": [
           {
             "columns": [
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          },
+          {
+            "columns": [
               "lead_project_id"
             ],
             "is_unique": false,
@@ -783,7 +804,15 @@ expression: snapshot_data(&output)
           }
         ],
         "id": 10,
-        "indexes": [],
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": true,
+            "name": null
+          }
+        ],
         "name": "users",
         "schema_name": null,
         "stable_id": "users"

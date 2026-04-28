@@ -1,0 +1,11 @@
+[
+  {
+    "column_name": "username",
+    "message": "Column users.username is being narrowed from VARCHAR(100) to VARCHAR(50). Existing data may be truncated or rejected.",
+    "mitigation": "Verify all existing values fit the new type before applying.",
+    "rule_id": "risk/type-narrow",
+    "severity": "breaking",
+    "table_id": "users",
+    "table_name": "users"
+  }
+]

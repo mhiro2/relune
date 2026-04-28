@@ -43,6 +43,8 @@ pub mod layout;
 pub mod lint;
 /// Core data model types.
 pub mod model;
+/// Migration risk review engine.
+pub mod review;
 
 // Re-exports for convenience
 pub use config::{
@@ -63,4 +65,7 @@ pub use lint::{
 pub use model::{
     Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, SchemaStats, SqlDialect,
     Table, TableId, ValidationError, View, normalize_identifier,
+};
+pub use review::{
+    ReviewResult, ReviewRuleId, ReviewSeverity, ReviewSummary, RiskFinding, run_rules,
 };
