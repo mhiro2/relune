@@ -19,6 +19,8 @@ pub(crate) enum CliError {
     General(anyhow::Error),
     /// Diff detected schema changes (used with `--exit-code`).
     DiffChangesDetected,
+    /// Review findings reached the configured `--deny` threshold.
+    ReviewDenied(anyhow::Error),
 }
 
 impl CliError {
@@ -40,6 +42,12 @@ impl CliError {
         Self::General(error.into())
     }
 
+    /// Create a review-denied failure (exit code `10`).
+    #[must_use]
+    pub fn review_denied(error: impl Into<anyhow::Error>) -> Self {
+        Self::ReviewDenied(error.into())
+    }
+
     /// Returns the process exit code for this error.
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
@@ -47,7 +55,7 @@ impl CliError {
             Self::Usage(_) => 2,
             Self::Warning(_) => 3,
             Self::General(_) => 1,
-            Self::DiffChangesDetected => 10,
+            Self::DiffChangesDetected | Self::ReviewDenied(_) => 10,
         }
     }
 }
@@ -55,9 +63,10 @@ impl CliError {
 impl Display for CliError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Usage(error) | Self::Warning(error) | Self::General(error) => {
-                Display::fmt(error, f)
-            }
+            Self::Usage(error)
+            | Self::Warning(error)
+            | Self::General(error)
+            | Self::ReviewDenied(error) => Display::fmt(error, f),
             Self::DiffChangesDetected => {
                 write!(f, "schema changes detected")
             }
@@ -99,5 +108,11 @@ mod tests {
     fn general_errors_use_exit_code_1() {
         let error = CliError::general(anyhow::anyhow!("general error"));
         assert_eq!(error.exit_code(), 1);
+    }
+
+    #[test]
+    fn review_denied_uses_exit_code_10() {
+        let error = CliError::review_denied(anyhow::anyhow!("review denied"));
+        assert_eq!(error.exit_code(), 10);
     }
 }

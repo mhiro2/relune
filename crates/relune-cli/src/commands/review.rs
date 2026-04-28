@@ -6,8 +6,8 @@ use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult};
 use crate::output::{check_diagnostics, print_success, write_output};
 use relune_app::{
-    ReviewFormat as AppReviewFormat, ReviewRequest, format_review_json, format_review_markdown,
-    format_review_text, review,
+    ReviewFormat as AppReviewFormat, ReviewRequest, format_review_json,
+    format_review_markdown_with, format_review_text_with, review,
 };
 use relune_core::ReviewSeverity;
 
@@ -47,8 +47,8 @@ pub fn run_review(
     check_diagnostics(&result.diagnostics, color, false)?;
 
     let content = match merged.format {
-        ReviewFormat::Text => format_review_text(&result),
-        ReviewFormat::Markdown => format_review_markdown(&result),
+        ReviewFormat::Text => format_review_text_with(&result, quiet),
+        ReviewFormat::Markdown => format_review_markdown_with(&result, quiet),
         ReviewFormat::Json => format_review_json(&result).map_err(|error| {
             CliError::general(anyhow::anyhow!(
                 "Failed to serialize review result to JSON: {error}"
@@ -73,7 +73,7 @@ pub fn run_review(
     }
 
     if result.denied {
-        return Err(CliError::general(anyhow::anyhow!(
+        return Err(CliError::review_denied(anyhow::anyhow!(
             "Review findings reached the configured --deny threshold"
         )));
     }

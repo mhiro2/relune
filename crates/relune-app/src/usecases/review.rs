@@ -43,12 +43,23 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
 /// Render the review result as plain text.
 #[must_use]
 pub fn format_review_text(result: &ReviewResult) -> String {
+    format_review_text_with(result, false)
+}
+
+/// Render the review result as plain text, optionally suppressing
+/// findings detail bodies when `quiet` is true (summary only).
+#[must_use]
+pub fn format_review_text_with(result: &ReviewResult, quiet: bool) -> String {
     let mut output = String::new();
     let _ = writeln!(output, "Schema review");
     output.push('\n');
 
     write_summary_line(&mut output, &result.review.summary);
     output.push('\n');
+
+    if quiet {
+        return output;
+    }
 
     if result.review.findings.is_empty() {
         output.push_str("No risk findings.\n");
@@ -83,6 +94,13 @@ pub fn format_review_text(result: &ReviewResult) -> String {
 /// Render the review result as markdown.
 #[must_use]
 pub fn format_review_markdown(result: &ReviewResult) -> String {
+    format_review_markdown_with(result, false)
+}
+
+/// Render the review result as markdown, optionally suppressing
+/// findings detail bodies when `quiet` is true (summary only).
+#[must_use]
+pub fn format_review_markdown_with(result: &ReviewResult, quiet: bool) -> String {
     let mut output = String::new();
     let _ = writeln!(output, "## Schema review");
     output.push('\n');
@@ -97,6 +115,10 @@ pub fn format_review_markdown(result: &ReviewResult) -> String {
         s.info,
     );
     output.push('\n');
+
+    if quiet {
+        return output;
+    }
 
     if result.review.findings.is_empty() {
         let _ = writeln!(output, "_No risk findings._");

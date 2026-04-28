@@ -2123,7 +2123,29 @@ mod review_tests {
     }
 
     #[test]
-    fn review_deny_breaking_returns_general_error() {
+    fn review_quiet_suppresses_findings_body() {
+        let output = relune()
+            .arg("--quiet")
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review --quiet should succeed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Schema review"));
+        assert!(stdout.contains("breaking"));
+        assert!(
+            !stdout.contains("risk/drop-column-referenced"),
+            "findings detail should be suppressed under --quiet, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn review_deny_breaking_returns_exit_code_10() {
         let output = relune()
             .arg("review")
             .arg("--before-sql-text")
@@ -2135,7 +2157,7 @@ mod review_tests {
             .output()
             .expect("command should run");
 
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(10));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--deny"));
     }
