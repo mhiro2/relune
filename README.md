@@ -40,6 +40,7 @@ It helps you work with schema structure across the full lifecycle:
 - **Export** review-friendly text formats for docs and pull requests
 - **Lint** schema review issues with profiles, categories, and practical FK/comment checks
 - **Diff** schema changes between revisions
+- **Review** migrations for safety risks across `info`, `warning`, `caution`, and `breaking` severities
 - **Emit JSON** for CI, internal tools, and downstream automation
 
 Whether you are documenting a legacy database, reviewing a migration, or exploring a large schema, Relune is built to make database structure easier to understand and communicate.
@@ -181,6 +182,9 @@ relune lint --sql schema.sql --profile strict --rule-category documentation
 
 # Compare two schemas
 relune diff --before old.sql --after new.sql
+
+# Review a migration for safety risks
+relune review --before old.sql --after new.sql
 ```
 
 </details>
