@@ -1,5 +1,5 @@
-name: Relune Schema Diff
-description: Run relune diff or review to compare two database schemas. Supports Linux and macOS runners only.
+name: Relune Schema Diff & Review
+description: Run relune diff or review on two database schemas to surface diffs and migration risks. Supports Linux and macOS runners only.
 branding:
   icon: git-pull-request
   color: blue
