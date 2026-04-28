@@ -68,7 +68,14 @@ pub fn run_rules(
 
         for index_diff in &table_diff.index_diffs {
             if selected.contains(&ReviewRuleId::DropPkOrUnique) {
-                check_drop_pk_or_unique_index(table_diff, index_diff, after_table, &mut findings);
+                check_drop_pk_or_unique_index(
+                    table_diff,
+                    index_diff,
+                    before_table,
+                    after_table,
+                    &context,
+                    &mut findings,
+                );
             }
             if selected.contains(&ReviewRuleId::AddUniqueOnExisting) {
                 check_add_unique_on_existing(table_diff, index_diff, after_table, &mut findings);
@@ -274,14 +281,12 @@ fn check_drop_column_referenced(
         findings.push(finding);
     }
 
-    // Incoming FKs across the schema: another table references this column.
+    // Incoming FKs across the schema (including self-references on the
+    // same table): something references the dropped column as a FK target.
     for other_table in &context.before.tables {
-        if other_table
+        let is_same_table = other_table
             .qualified_name()
-            .eq_ignore_ascii_case(&before_qname)
-        {
-            continue;
-        }
+            .eq_ignore_ascii_case(&before_qname);
         for fk in &other_table.foreign_keys {
             // Resolve target name to detect references to before_table.
             if !fk_targets_table(fk, before_table, context.before) {
@@ -291,6 +296,17 @@ fn check_drop_column_referenced(
                 .to_columns
                 .iter()
                 .any(|c| c.eq_ignore_ascii_case(&column_lower))
+            {
+                continue;
+            }
+            // For same-table FKs, the outgoing-FK loop above already
+            // emits a finding when the dropped column is in
+            // `from_columns`. Avoid double-reporting that case here.
+            if is_same_table
+                && fk
+                    .from_columns
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(&column_diff.column_name))
             {
                 continue;
             }
@@ -634,7 +650,9 @@ fn check_drop_pk_or_unique_column(
 fn check_drop_pk_or_unique_index(
     table_diff: &TableDiff,
     index_diff: &IndexDiff,
+    before_table: Option<&Table>,
     after_table: &Table,
+    context: &RuleContext<'_>,
     findings: &mut Vec<RiskFinding>,
 ) {
     let lost_unique = match index_diff.change_kind {
@@ -657,24 +675,84 @@ fn check_drop_pk_or_unique_index(
         return;
     }
 
+    let (severity, related_fk) = before_table.map_or((ReviewSeverity::Warning, None), |bt| {
+        evaluate_unique_loss_severity(bt, &lower_cols, context)
+    });
+
     let label = old
         .name
         .clone()
         .unwrap_or_else(|| format!("({})", old.columns.join(",")));
-    findings.push(
-        RiskFinding::new(
-            ReviewRuleId::DropPkOrUnique,
-            ReviewSeverity::Warning,
-            format!(
-                "UNIQUE index {}.{} is being dropped without replacement. Application logic relying on uniqueness may break.",
-                table_diff.table_name, label,
-            ),
-        )
-        .with_table(&after_table.stable_id, &table_diff.table_name)
-        .with_mitigation(
-            "Add a replacement UNIQUE in the same migration if uniqueness is still required.",
+    let message = match (severity, &related_fk) {
+        (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
+            "UNIQUE index {}.{} is being dropped while FK {} on {} still references the column set ({}). Migration may fail.",
+            table_diff.table_name,
+            label,
+            fk_label,
+            other_qname,
+            old.columns.join(","),
         ),
-    );
+        _ => format!(
+            "UNIQUE index {}.{} is being dropped without replacement. Application logic relying on uniqueness may break.",
+            table_diff.table_name, label,
+        ),
+    };
+    let mitigation = match severity {
+        ReviewSeverity::Breaking => "Drop or repoint the referencing FKs in the same migration.",
+        _ => "Add a replacement UNIQUE in the same migration if uniqueness is still required.",
+    };
+    let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
+        .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_mitigation(mitigation);
+    if let Some((_, fk_text)) = related_fk {
+        finding = finding.with_fk_name(fk_text);
+    }
+    findings.push(finding);
+}
+
+/// Determine whether dropping the UNIQUE index over `unique_cols`
+/// breaks any incoming FK that references that exact column set.
+fn evaluate_unique_loss_severity(
+    before_table: &Table,
+    unique_cols: &[String],
+    context: &RuleContext<'_>,
+) -> (ReviewSeverity, Option<(String, String)>) {
+    if unique_cols.is_empty() {
+        return (ReviewSeverity::Warning, None);
+    }
+    let mut sorted_unique = unique_cols.to_vec();
+    sorted_unique.sort();
+
+    for other_table in &context.before.tables {
+        if context
+            .removed_tables
+            .contains(&other_table.qualified_name().to_lowercase())
+        {
+            continue;
+        }
+        for fk in &other_table.foreign_keys {
+            if !fk_targets_table(fk, before_table, context.before) {
+                continue;
+            }
+            let other_qname = other_table.qualified_name();
+            if context.fk_is_removed(&other_qname, fk) {
+                continue;
+            }
+            let mut sorted_to: Vec<String> = fk
+                .to_columns
+                .iter()
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
+            sorted_to.sort();
+            if sorted_to == sorted_unique {
+                return (
+                    ReviewSeverity::Breaking,
+                    Some((other_qname, fk_label_short(fk))),
+                );
+            }
+        }
+    }
+    (ReviewSeverity::Warning, None)
 }
 
 fn evaluate_drop_pk_severity(
@@ -1383,6 +1461,109 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
             .expect("expected DropPkOrUnique finding for index");
         assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn drop_unique_index_breaking_when_fk_references_unique_columns() {
+        let users_before = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", false, false),
+            ],
+            vec![],
+            vec![index("users_email_key", &["email"], true)],
+        );
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", false, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_email_idx", &["user_email"], false)],
+        );
+        let before = Schema {
+            tables: vec![users_before, orders.clone()],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("expected DropPkOrUnique finding for index drop with referencing FK");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
+    }
+
+    #[test]
+    fn drop_column_referenced_by_self_fk_target_is_breaking() {
+        let categories_before = table(
+            "categories",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("code", "TEXT", false, false),
+                col("parent_code", "TEXT", true, false),
+            ],
+            vec![fk(
+                "categories_parent_fkey",
+                &["parent_code"],
+                "categories",
+                &["code"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let categories_after = table(
+            "categories",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("parent_code", "TEXT", true, false),
+            ],
+            vec![fk(
+                "categories_parent_fkey",
+                &["parent_code"],
+                "categories",
+                &["code"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![categories_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![categories_after],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| {
+                f.rule_id == ReviewRuleId::DropColumnReferenced
+                    && f.column_name.as_deref() == Some("code")
+            })
+            .expect("expected DropColumnReferenced finding for self-FK target column");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
     }
 
     #[test]
