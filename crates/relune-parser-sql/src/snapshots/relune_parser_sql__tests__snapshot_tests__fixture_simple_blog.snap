@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 1859
+assertion_line: 3004
 expression: snapshot_data(&output)
 ---
 {
@@ -48,6 +48,13 @@ expression: snapshot_data(&output)
         "foreign_keys": [],
         "id": 1,
         "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "email"

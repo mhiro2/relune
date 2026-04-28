@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 1859
+assertion_line: 3004
 expression: snapshot_data(&output)
 ---
 {
@@ -80,6 +80,13 @@ expression: snapshot_data(&output)
         "foreign_keys": [],
         "id": 1,
         "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "email"
@@ -262,6 +269,13 @@ expression: snapshot_data(&output)
             "columns": [
               "sku"
             ],
+            "is_unique": true,
+            "name": null
+          },
+          {
+            "columns": [
+              "sku"
+            ],
             "is_unique": false,
             "name": "idx_inventory_products_sku"
           }
@@ -338,6 +352,14 @@ expression: snapshot_data(&output)
         ],
         "id": 4,
         "indexes": [
+          {
+            "columns": [
+              "product_id",
+              "warehouse_code"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "product_id"
@@ -441,6 +463,13 @@ expression: snapshot_data(&output)
         ],
         "id": 5,
         "indexes": [
+          {
+            "columns": [
+              "order_number"
+            ],
+            "is_unique": true,
+            "name": null
+          },
           {
             "columns": [
               "customer_id"

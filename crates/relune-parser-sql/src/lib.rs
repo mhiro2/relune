@@ -1085,9 +1085,10 @@ fn parse_create_table(
     }
 
     // Parse inline foreign key constraints from columns and capture any
-    // column-level named PRIMARY KEY constraint.
+    // column-level named PRIMARY KEY or UNIQUE constraint.
     let mut foreign_keys = Vec::new();
     let mut primary_key_name: Option<String> = None;
+    let mut indexes: Vec<Index> = Vec::new();
     for column in &create.columns {
         for option in &column.options {
             match &option.option {
@@ -1111,6 +1112,12 @@ fn parse_create_table(
                         primary_key_name = Some(normalize_identifier(&constraint_name.value));
                     }
                 }
+                ColumnOption::Unique(_) => {
+                    let col_name = normalize_identifier(&column.name.value);
+                    let constraint_name =
+                        option.name.as_ref().map(|n| normalize_identifier(&n.value));
+                    push_unique_index(&mut indexes, constraint_name, vec![col_name]);
+                }
                 _ => {}
             }
         }
@@ -1133,10 +1140,10 @@ fn parse_create_table(
                 }
             }
             TableConstraint::Unique(unique) => {
-                // UNIQUE constraints don't mark as primary key, but we could track them
-                // For now, just extract column names for informational purposes
-                let _col_names: Vec<String> =
+                let col_names: Vec<String> =
                     unique.columns.iter().map(extract_column_name).collect();
+                let constraint_name = unique.name.as_ref().map(|n| normalize_identifier(&n.value));
+                push_unique_index(&mut indexes, constraint_name, col_names);
             }
             TableConstraint::ForeignKey(foreign_key) => {
                 let from_cols: Vec<String> = foreign_key
@@ -1180,10 +1187,42 @@ fn parse_create_table(
         name: normalized_name,
         columns,
         foreign_keys,
-        indexes: Vec::new(), // Indexes are added in second pass
+        indexes, // Inline UNIQUE indexes; CREATE INDEX statements are merged in a second pass.
         primary_key_name,
         comment: None, // Comments are added in third pass
     })
+}
+
+/// Append a UNIQUE index entry to `indexes`, deduplicating by name and column set.
+fn push_unique_index(indexes: &mut Vec<Index>, name: Option<String>, columns: Vec<String>) {
+    if columns.is_empty() {
+        return;
+    }
+    let lower_cols: Vec<String> = columns.iter().map(|c| c.to_ascii_lowercase()).collect();
+    let already_present = indexes.iter().any(|existing| {
+        if !existing.is_unique {
+            return false;
+        }
+        if let (Some(a), Some(b)) = (&existing.name, &name)
+            && a.eq_ignore_ascii_case(b)
+        {
+            return true;
+        }
+        let existing_lower: Vec<String> = existing
+            .columns
+            .iter()
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        existing_lower == lower_cols
+    });
+    if already_present {
+        return;
+    }
+    indexes.push(Index {
+        name,
+        columns,
+        is_unique: true,
+    });
 }
 
 /// Extract the column name from an `IndexColumn`.
@@ -1862,6 +1901,10 @@ fn add_column_from_alter(
                     table.primary_key_name = Some(normalize_identifier(&constraint_name.value));
                 }
             }
+            ColumnOption::Unique(_) => {
+                let constraint_name = option.name.as_ref().map(|n| normalize_identifier(&n.value));
+                push_unique_index(&mut table.indexes, constraint_name, vec![col_name.clone()]);
+            }
             _ => {}
         }
     }
@@ -1893,11 +1936,7 @@ fn apply_add_table_constraint(
                 .name
                 .as_ref()
                 .map(|ident| normalize_identifier(&ident.value));
-            table.indexes.push(Index {
-                name: index_name,
-                columns: col_names,
-                is_unique: true,
-            });
+            push_unique_index(&mut table.indexes, index_name, col_names);
         }
         TableConstraint::ForeignKey(foreign_key) => {
             let from_cols: Vec<String> = foreign_key

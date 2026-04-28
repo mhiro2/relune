@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 1904
+assertion_line: 3049
 expression: snapshot_data(&output)
 ---
 {
@@ -55,7 +55,22 @@ expression: snapshot_data(&output)
         "comment": null,
         "foreign_keys": [],
         "id": 1,
-        "indexes": [],
+        "indexes": [
+          {
+            "columns": [
+              "username"
+            ],
+            "is_unique": true,
+            "name": null
+          },
+          {
+            "columns": [
+              "email"
+            ],
+            "is_unique": true,
+            "name": null
+          }
+        ],
         "name": "users",
         "schema_name": null,
         "stable_id": "users"
@@ -145,6 +160,13 @@ expression: snapshot_data(&output)
         "indexes": [
           {
             "columns": [
+              "slug"
+            ],
+            "is_unique": true,
+            "name": null
+          },
+          {
+            "columns": [
               "author_id"
             ],
             "is_unique": false,
@@ -184,7 +206,15 @@ expression: snapshot_data(&output)
         "comment": null,
         "foreign_keys": [],
         "id": 3,
-        "indexes": [],
+        "indexes": [
+          {
+            "columns": [
+              "name"
+            ],
+            "is_unique": true,
+            "name": null
+          }
+        ],
         "name": "tags",
         "schema_name": null,
         "stable_id": "tags"

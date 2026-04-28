@@ -1,5 +1,6 @@
 ---
 source: crates/relune-app/tests/fixture_render_audit.rs
+assertion_line: 425
 expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
 ---
 {
@@ -49,13 +50,13 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 424981,
+      "bytes": 426083,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 64222,
+      "bytes": 65328,
       "edge_groups": 56,
       "node_groups": 7
     }

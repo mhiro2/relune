@@ -1,5 +1,6 @@
 ---
 source: crates/relune-app/tests/fixture_render_audit.rs
+assertion_line: 423
 expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
 ---
 {
@@ -53,13 +54,13 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 451360,
+      "bytes": 452189,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 87958,
+      "bytes": 88790,
       "edge_groups": 96,
       "node_groups": 12
     }
