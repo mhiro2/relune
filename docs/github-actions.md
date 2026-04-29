@@ -10,11 +10,6 @@ every input, output, and exit code, see [`action/README.md`](../action/README.md
 > **Supported runners:** Linux (`ubuntu-latest`) and macOS (`macos-latest`). Windows
 > runners are not supported because pre-built binaries are not published for Windows.
 
-> [!IMPORTANT]
-> **Version pin:** until the first tagged release is published, `@v0` does not resolve.
-> Use `@main` or a full commit SHA until the tag exists. The snippets below assume the
-> standard post-release `@v0` pin.
-
 ---
 
 ## Quick start
@@ -22,7 +17,7 @@ every input, output, and exit code, see [`action/README.md`](../action/README.md
 ### Diff — render schema changes
 
 ```yaml
-- uses: mhiro2/relune/action@v0
+- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
   id: diff
   with:
     mode: diff   # default; passing it explicitly is recommended for clarity
@@ -36,7 +31,7 @@ outputs that downstream steps can use to post a PR comment or upload an artifact
 ### Review — surface migration risks
 
 ```yaml
-- uses: mhiro2/relune/action@v0
+- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
   id: review
   with:
     mode: review

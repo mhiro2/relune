@@ -59,11 +59,10 @@ jobs:
 
       - name: Run relune review
         id: review
-        # Replace `@main` with the next tagged release once available, e.g.
-        # `mhiro2/relune/action@v0.9.0`. For maximum reproducibility, pin to a
-        # full commit SHA — `mhiro2/relune/action@<sha> # v0.9.0` — the same
-        # convention this repository's own workflows use.
-        uses: mhiro2/relune/action@main
+        # Pinned to a full commit SHA with a trailing version comment — the
+        # same convention this repository's own workflows use. Bump both the
+        # SHA and the trailing comment together when upgrading.
+        uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
         with:
           mode: review
           before: .relune/before.sql

@@ -26,7 +26,7 @@ jobs:
 
       - name: Diff schemas
         id: diff
-        uses: mhiro2/relune/action@v0  # pin to a release tag
+        uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
         with:
           before: before-schema.sql
           after: after-schema.sql
