@@ -1,0 +1,105 @@
+# Dogfood workflow that runs `relune review` on PRs touching dogfood/schema.sql
+# and posts the report as a sticky PR comment.
+#
+# This is the live verification path for the review GitHub Action: it builds
+# relune from the same checkout, feeds the locally built binary into the
+# composite action via `binary-path`, and exercises the full sticky-comment
+# flow on real pull requests.
+
+name: Dogfood schema review
+
+on:
+  pull_request:
+    paths:
+      - "dogfood/schema.sql"
+      - ".github/workflows/dogfood-review.yaml"
+      - "action/**"
+      - "crates/relune-cli/**"
+      - "crates/relune-app/**"
+      - "crates/relune-core/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: dogfood-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  review:
+    # Skip fork PRs — GITHUB_TOKEN is read-only there and the upsert would 403.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Build relune
+        run: cargo build -p relune-cli --release
+      - name: Materialize before/after schemas
+        run: |
+          mkdir -p .relune
+          if git cat-file -e "${{ github.event.pull_request.base.sha }}:dogfood/schema.sql" 2>/dev/null; then
+            git show "${{ github.event.pull_request.base.sha }}:dogfood/schema.sql" > .relune/before.sql
+          else
+            # First introduction of the file — compare against an empty schema.
+            : > .relune/before.sql
+          fi
+          cp dogfood/schema.sql .relune/after.sql
+      - name: Run relune review
+        id: review
+        uses: ./action
+        with:
+          mode: review
+          before: .relune/before.sql
+          after: .relune/after.sql
+          deny: breaking
+          format: markdown
+          output-path: .relune/review.md
+          fail-on-blocking: "false"
+          binary-path: target/release/relune
+      - name: Compose comment body
+        run: |
+          {
+            echo "<!-- relune-dogfood-review -->"
+            if [[ "${{ steps.review.outputs.has-blocking-findings }}" == "true" ]]; then
+              echo "> ⚠️ **Blocking findings detected.**"
+              echo ""
+            fi
+            if [[ "${{ steps.review.outputs.has-findings }}" == "true" ]]; then
+              cat .relune/review.md
+            else
+              echo "## Schema review"
+              echo ""
+              echo "✅ No risk findings."
+            fi
+          } > .relune/comment.md
+      - name: Find existing sticky comment
+        id: find
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: "<!-- relune-dogfood-review -->"
+      - name: Upsert sticky comment
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
+        with:
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body-path: .relune/comment.md
+      - name: Fail when blocking
+        if: steps.review.outputs.has-blocking-findings == 'true'
+        run: |
+          echo "::error::Schema review found blocking changes. See the PR comment for details."
+          exit 1
