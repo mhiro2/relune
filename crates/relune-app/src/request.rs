@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use relune_core::{
     FilterSpec, FocusSpec, GroupingSpec, LayoutSpec, LintProfile, LintRuleCategory, ReviewSeverity,
-    SqlDialect,
+    ReviewSeverityOverride, SqlDialect,
 };
 use serde::{Deserialize, Serialize};
 
@@ -637,6 +637,13 @@ pub struct ReviewRequest {
     /// Minimum severity that flips `denied = true`.
     #[serde(default)]
     pub deny: Option<ReviewSeverity>,
+    /// Per-rule severity overrides applied AFTER rule evaluation but
+    /// BEFORE summary aggregation and the `denied` computation.
+    ///
+    /// Each `rule_id` may appear at most once; duplicates are rejected
+    /// as an input error.
+    #[serde(default)]
+    pub severity_overrides: Vec<ReviewSeverityOverride>,
 }
 
 impl ReviewRequest {
@@ -688,6 +695,13 @@ impl ReviewRequest {
     #[must_use]
     pub const fn with_deny(mut self, severity: ReviewSeverity) -> Self {
         self.deny = Some(severity);
+        self
+    }
+
+    /// Set the per-rule severity overrides.
+    #[must_use]
+    pub fn with_severity_overrides(mut self, overrides: Vec<ReviewSeverityOverride>) -> Self {
+        self.severity_overrides = overrides;
         self
     }
 }

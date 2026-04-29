@@ -73,7 +73,7 @@ pub use usecases::review::{
 // Re-export commonly used types from relune-core for convenience
 pub use relune_core::{
     FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm, LayoutCompactionSpec,
-    LayoutDirection, LayoutSpec, RouteStyle,
+    LayoutDirection, LayoutSpec, ReviewRuleMetadata, ReviewSeverityOverride, RouteStyle,
 };
 
 /// Returns whether live database introspection support is compiled in.

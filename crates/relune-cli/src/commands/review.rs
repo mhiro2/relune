@@ -18,7 +18,7 @@ pub fn run_review(
     quiet: bool,
     config: &ReluneConfig,
 ) -> CliResult<()> {
-    let merged = config.merge_review_args(args);
+    let merged = config.merge_review_args(args)?;
     let dialect = merged.dialect.into();
 
     let before = DiffInputSelection::from_review_before(args).resolve(dialect, "before")?;
@@ -39,6 +39,7 @@ pub fn run_review(
         except_rules: merged.except_rules,
         except_tables: merged.except_tables,
         deny,
+        severity_overrides: merged.severity_overrides,
     };
 
     let result = review(request)

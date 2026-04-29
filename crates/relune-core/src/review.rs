@@ -253,6 +253,20 @@ pub struct ReviewRuleMetadata {
     pub description: String,
 }
 
+/// Per-rule severity override applied after rule evaluation.
+///
+/// Replaces the case-by-case severity produced by the rule with a fixed
+/// value from configuration. Used to suppress noisy rules (downgrade) or
+/// escalate rules that the project cares about (upgrade). See
+/// `docs/configuration.md`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReviewSeverityOverride {
+    /// Rule whose finding severity should be overridden (`risk/<kebab>` form).
+    pub rule_id: ReviewRuleId,
+    /// Severity value to use in place of the rule's default / case-by-case result.
+    pub severity: ReviewSeverity,
+}
+
 /// A single review finding produced by a rule.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskFinding {
@@ -492,6 +506,19 @@ mod tests {
         assert_eq!(json["default_severity"], "info");
         let round_trip: ReviewRuleMetadata = serde_json::from_value(json).unwrap();
         assert_eq!(round_trip, metadata);
+    }
+
+    #[test]
+    fn severity_override_round_trips_via_json() {
+        let override_value = ReviewSeverityOverride {
+            rule_id: ReviewRuleId::AddNotNullOnExisting,
+            severity: ReviewSeverity::Info,
+        };
+        let json = serde_json::to_value(&override_value).unwrap();
+        assert_eq!(json["rule_id"], "risk/add-not-null-on-existing");
+        assert_eq!(json["severity"], "info");
+        let round_trip: ReviewSeverityOverride = serde_json::from_value(json).unwrap();
+        assert_eq!(round_trip, override_value);
     }
 
     #[test]

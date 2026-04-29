@@ -67,6 +67,6 @@ pub use model::{
     Table, TableId, ValidationError, View, normalize_identifier,
 };
 pub use review::{
-    ReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity, ReviewSummary, RiskFinding,
-    run_rules,
+    ReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride,
+    ReviewSummary, RiskFinding, run_rules,
 };
