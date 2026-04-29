@@ -12,11 +12,6 @@ listed here. For higher-level CI guidance and sample workflows see
 > **Supported runners:** Linux (`ubuntu-latest`) and macOS (`macos-latest`). Windows is
 > not supported because pre-built binaries are not published for Windows.
 
-> [!IMPORTANT]
-> **Version pin:** until the first tagged release is published, `@v0` does not resolve.
-> Use `@main` or a full commit SHA in the meantime. The examples below use `@v0` because
-> it is the recommended pin once the tag exists.
-
 ---
 
 ## Quick start
@@ -27,7 +22,7 @@ Render a Markdown diff for two schema files. `mode` defaults to `diff`, so passi
 optional but recommended for clarity.
 
 ```yaml
-- uses: mhiro2/relune/action@v0
+- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
   id: diff
   with:
     mode: diff
@@ -40,7 +35,7 @@ optional but recommended for clarity.
 Run the migration risk review and gate on `breaking` findings.
 
 ```yaml
-- uses: mhiro2/relune/action@v0
+- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
   id: review
   with:
     mode: review
@@ -223,7 +218,7 @@ binary via `binary-path` to skip the install step:
 - name: Build relune
   run: cargo build -p relune-cli --release
 
-- uses: mhiro2/relune/action@v0
+- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
   with:
     mode: review
     before: base.sql
