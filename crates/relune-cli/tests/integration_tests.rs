@@ -2288,4 +2288,77 @@ mod review_tests {
         assert!(stdout.contains("## Schema review"));
         assert!(stdout.contains("- **`risk/drop-column-referenced`**"));
     }
+
+    #[test]
+    fn review_severity_override_downgrades_via_config() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(
+            &config_path,
+            "[review]\n\
+             format = \"json\"\n\
+             \n\
+             [review.severity_overrides.\"risk/add-not-null-on-existing\"]\n\
+             severity = \"info\"\n",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review should succeed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("review JSON should parse");
+        assert_eq!(parsed["summary"]["warning"], 0);
+        assert_eq!(parsed["summary"]["info"], 1);
+        let findings = parsed["findings"].as_array().expect("findings array");
+        let finding = findings
+            .iter()
+            .find(|f| f["rule_id"] == "risk/add-not-null-on-existing")
+            .expect("override target finding");
+        assert_eq!(finding["severity"], "info");
+    }
+
+    #[test]
+    fn review_severity_override_unknown_rule_id_is_usage_error() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(
+            &config_path,
+            "[review.severity_overrides.\"risk/does-not-exist\"]\n\
+             severity = \"warning\"\n",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "unknown rule_id in TOML override should map to usage exit code 2"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("review.severity_overrides has unknown rule_id 'risk/does-not-exist'"),
+            "stderr should explain the unknown rule_id; got: {stderr}"
+        );
+    }
 }

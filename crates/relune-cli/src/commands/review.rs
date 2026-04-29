@@ -18,9 +18,7 @@ pub fn run_review(
     quiet: bool,
     config: &ReluneConfig,
 ) -> CliResult<()> {
-    let merged = config
-        .merge_review_args(args)
-        .map_err(|error| CliError::general(anyhow::anyhow!("{error}")))?;
+    let merged = config.merge_review_args(args)?;
     let dialect = merged.dialect.into();
 
     let before = DiffInputSelection::from_review_before(args).resolve(dialect, "before")?;
