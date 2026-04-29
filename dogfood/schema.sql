@@ -7,7 +7,7 @@
 -- sticky PR comment.
 
 CREATE TABLE users (
-    id BIGINT PRIMARY KEY,
+    id BIGINT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
