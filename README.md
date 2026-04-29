@@ -31,19 +31,26 @@
 
 ## Why Relune
 
-Relune goes beyond static ERDs.
+Relune is a schema review tool for the moments that hurt — dropped references,
+narrowing types, `NOT NULL` on existing rows, indexes lost in a rewrite — and
+still gives you a diagram, a diff, and a lint pass when you need them.
 
-It helps you work with schema structure across the full lifecycle:
+It supports schema work across the full lifecycle, with **review** at the centre:
 
+- **Review** migrations for safety risks across `info`, `warning`, `caution`,
+  and `breaking` severities — gate CI with `--deny`, then post the report as a
+  sticky pull-request comment using the [GitHub Action](docs/github-actions.md)
+  and the supplied workflow sample
+- **Diff** schema changes between revisions as text, Markdown, JSON, SVG, or HTML
+- **Lint** schema-review issues with profiles, categories, and practical FK/comment checks
 - **Visualize** tables, views, relationships, and enums
 - **Inspect** schema shape from SQL or live databases
 - **Export** review-friendly text formats for docs and pull requests
-- **Lint** schema review issues with profiles, categories, and practical FK/comment checks
-- **Diff** schema changes between revisions
-- **Review** migrations for safety risks across `info`, `warning`, `caution`, and `breaking` severities
 - **Emit JSON** for CI, internal tools, and downstream automation
 
-Whether you are documenting a legacy database, reviewing a migration, or exploring a large schema, Relune is built to make database structure easier to understand and communicate.
+Whether you are reviewing a migration before merging, documenting a legacy
+database, or exploring a large schema, Relune is built to make database
+structure easier to understand, communicate, and change safely.
 
 ## Preview
 
