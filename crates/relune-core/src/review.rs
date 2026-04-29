@@ -166,6 +166,26 @@ impl ReviewRuleId {
         }
     }
 
+    /// Build the metadata snapshot for this rule.
+    ///
+    /// Mirrors `LintRuleId::metadata` and is the single source of truth
+    /// surfaced by `relune review --list-rules`, the WASM bindings, and
+    /// the playground rule legend.
+    #[must_use]
+    pub fn metadata(&self) -> ReviewRuleMetadata {
+        ReviewRuleMetadata {
+            rule_id: *self,
+            default_severity: self.default_severity(),
+            description: self.description().to_string(),
+        }
+    }
+
+    /// Serializable metadata snapshot for every review rule.
+    #[must_use]
+    pub fn all_metadata() -> Vec<ReviewRuleMetadata> {
+        Self::all_rules().iter().map(Self::metadata).collect()
+    }
+
     /// Parse a stable rule identifier (`risk/<kebab>`).
     pub fn parse(value: &str) -> Result<Self, String> {
         for rule in Self::all_rules() {
@@ -215,6 +235,22 @@ impl<'de> Deserialize<'de> for ReviewRuleId {
         let value = String::deserialize(deserializer)?;
         Self::parse(&value).map_err(serde::de::Error::custom)
     }
+}
+
+/// Serializable metadata for a review rule.
+///
+/// Mirrors `LintRuleMetadata` (lint side) and is the single source of
+/// truth surfaced by `relune review --list-rules`, the WASM bindings,
+/// and the playground rule legend.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReviewRuleMetadata {
+    /// Stable rule identifier in `risk/<kebab>` form.
+    pub rule_id: ReviewRuleId,
+    /// Representative severity for CLI listings; the per-finding
+    /// severity may differ when a rule decides severity case-by-case.
+    pub default_severity: ReviewSeverity,
+    /// Human-readable description (1 line).
+    pub description: String,
 }
 
 /// A single review finding produced by a rule.
@@ -427,6 +463,35 @@ mod tests {
         assert_eq!(json, "\"risk/drop-column-referenced\"");
         let back: ReviewRuleId = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ReviewRuleId::DropColumnReferenced);
+    }
+
+    #[test]
+    fn metadata_matches_rule_accessors() {
+        for rule in ReviewRuleId::all_rules() {
+            let metadata = rule.metadata();
+            assert_eq!(metadata.rule_id, *rule);
+            assert_eq!(metadata.default_severity, rule.default_severity());
+            assert_eq!(metadata.description, rule.description());
+        }
+    }
+
+    #[test]
+    fn all_metadata_covers_every_rule() {
+        let metadata = ReviewRuleId::all_metadata();
+        assert_eq!(metadata.len(), ReviewRuleId::all_rules().len());
+        for (entry, rule) in metadata.iter().zip(ReviewRuleId::all_rules().iter()) {
+            assert_eq!(entry.rule_id, *rule);
+        }
+    }
+
+    #[test]
+    fn metadata_serializes_with_risk_prefix() {
+        let metadata = ReviewRuleId::FkWithoutIndex.metadata();
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["rule_id"], "risk/fk-without-index");
+        assert_eq!(json["default_severity"], "info");
+        let round_trip: ReviewRuleMetadata = serde_json::from_value(json).unwrap();
+        assert_eq!(round_trip, metadata);
     }
 
     #[test]
