@@ -82,7 +82,12 @@ jobs:
             # Hidden marker used by the find step below to locate the sticky.
             echo "<!-- relune-review -->"
             if [[ "${{ steps.review.outputs.has-blocking-findings }}" == "true" ]]; then
-              echo "> ⚠️ **Blocking findings detected.**"
+              echo "> [!CAUTION]"
+              echo "> 🛑 **Blocking findings detected.** Resolve them before merging."
+              echo ""
+            elif [[ "${{ steps.review.outputs.has-findings }}" == "true" ]]; then
+              echo "> [!WARNING]"
+              echo "> 🔍 Findings detected — review the report below."
               echo ""
             fi
             if [[ "${{ steps.review.outputs.has-findings }}" == "true" ]]; then
@@ -90,7 +95,8 @@ jobs:
             else
               echo "## Schema review"
               echo ""
-              echo "✅ No risk findings."
+              echo "> [!TIP]"
+              echo "> ✅ No risk findings — schema changes look safe to merge."
             fi
           } > .relune/comment.md
 
