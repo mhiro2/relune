@@ -866,12 +866,19 @@ fn resolve_severity_overrides(
     raw: &BTreeMap<String, ReviewRuleOverrideConfig>,
 ) -> Result<Vec<ReviewSeverityOverride>, ConfigError> {
     let mut resolved = Vec::with_capacity(raw.len());
+    let mut seen: BTreeMap<ReviewRuleId, String> = BTreeMap::new();
     for (key, value) in raw {
         let rule_id = ReviewRuleId::parse(key).map_err(|err| {
             ConfigError::InvalidValue(format!(
                 "review.severity_overrides has unknown rule_id '{key}': {err}"
             ))
         })?;
+        if let Some(previous) = seen.get(&rule_id) {
+            return Err(ConfigError::InvalidValue(format!(
+                "review.severity_overrides has duplicate rule_id: '{previous}' and '{key}' resolve to the same rule"
+            )));
+        }
+        seen.insert(rule_id, key.clone());
         resolved.push(ReviewSeverityOverride {
             rule_id,
             severity: value.severity.into(),
@@ -2353,6 +2360,39 @@ direction = "left-to-right"
         assert!(
             message.contains("review.severity_overrides has unknown rule_id 'risk/does-not-exist'"),
             "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn test_merge_review_args_duplicate_severity_override_rule_id_errors() {
+        // Two TOML keys that normalize to the same `ReviewRuleId` (case-insensitive
+        // parse) must be rejected as a config usage error rather than slipping
+        // through to the app layer.
+        let mut config = ReluneConfig::default();
+        config.review.severity_overrides.insert(
+            "risk/fk-without-index".to_string(),
+            ReviewRuleOverrideConfig {
+                severity: ReviewSeverityConfig::Info,
+            },
+        );
+        config.review.severity_overrides.insert(
+            "RISK/FK-WITHOUT-INDEX".to_string(),
+            ReviewRuleOverrideConfig {
+                severity: ReviewSeverityConfig::Warning,
+            },
+        );
+
+        let err = config
+            .merge_review_args(&default_review_args())
+            .expect_err("duplicate rule_id must surface as a usage error");
+        let message = err.to_string();
+        assert!(
+            message.contains("review.severity_overrides has duplicate rule_id"),
+            "unexpected error message: {message}"
+        );
+        assert!(
+            message.contains("risk/fk-without-index") && message.contains("RISK/FK-WITHOUT-INDEX"),
+            "duplicate error should name both keys: {message}"
         );
     }
 

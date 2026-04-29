@@ -2361,4 +2361,41 @@ mod review_tests {
             "stderr should explain the unknown rule_id; got: {stderr}"
         );
     }
+
+    #[test]
+    fn review_severity_override_duplicate_rule_id_is_usage_error() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(
+            &config_path,
+            "[review.severity_overrides.\"risk/fk-without-index\"]\n\
+             severity = \"info\"\n\
+             \n\
+             [review.severity_overrides.\"RISK/FK-WITHOUT-INDEX\"]\n\
+             severity = \"warning\"\n",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "duplicate rule_id in TOML override should map to usage exit code 2"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("review.severity_overrides has duplicate rule_id"),
+            "stderr should explain the duplicate rule_id; got: {stderr}"
+        );
+    }
 }
