@@ -82,6 +82,7 @@
 use std::path::Path;
 use std::{collections::BTreeMap, fmt::Write as _};
 
+use relune_core::{ReviewRuleId, ReviewSeverity, ReviewSeverityOverride};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
@@ -366,6 +367,21 @@ pub struct ReviewConfig {
     /// Minimum severity that flips the denied flag.
     #[serde(default)]
     pub deny: Option<ReviewSeverityConfig>,
+    /// Per-rule severity overrides applied after rule evaluation.
+    ///
+    /// Keys are full rule identifiers in `risk/<kebab>` form. Values
+    /// must specify the replacement severity. Unknown rule IDs are
+    /// rejected as a usage error during merge.
+    #[serde(default)]
+    pub severity_overrides: BTreeMap<String, ReviewRuleOverrideConfig>,
+}
+
+/// TOML representation of a single per-rule severity override.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReviewRuleOverrideConfig {
+    /// Severity value to apply to the rule's findings.
+    pub severity: ReviewSeverityConfig,
 }
 
 /// Inspect format configuration (mirrors CLI `InspectFormat`).
@@ -517,6 +533,17 @@ impl From<ReviewFormatConfig> for ReviewFormat {
 }
 
 impl From<ReviewSeverityConfig> for crate::cli::ReviewSeverityArg {
+    fn from(value: ReviewSeverityConfig) -> Self {
+        match value {
+            ReviewSeverityConfig::Info => Self::Info,
+            ReviewSeverityConfig::Warning => Self::Warning,
+            ReviewSeverityConfig::Caution => Self::Caution,
+            ReviewSeverityConfig::Breaking => Self::Breaking,
+        }
+    }
+}
+
+impl From<ReviewSeverityConfig> for ReviewSeverity {
     fn from(value: ReviewSeverityConfig) -> Self {
         match value {
             ReviewSeverityConfig::Info => Self::Info,
@@ -752,8 +779,17 @@ impl ReluneConfig {
     }
 
     /// Merge CLI review args into this config.
-    pub fn merge_review_args(&self, args: &crate::cli::ReviewArgs) -> MergedReviewConfig {
-        MergedReviewConfig {
+    ///
+    /// Returns a `ConfigError` if the TOML `[review.severity_overrides]`
+    /// table references an unknown rule ID; this lets typos surface as
+    /// a usage error instead of silently no-op'ing.
+    pub fn merge_review_args(
+        &self,
+        args: &crate::cli::ReviewArgs,
+    ) -> Result<MergedReviewConfig, ConfigError> {
+        let severity_overrides = resolve_severity_overrides(&self.review.severity_overrides)?;
+
+        Ok(MergedReviewConfig {
             format: args
                 .format
                 .or_else(|| self.review.format.map(Into::into))
@@ -763,7 +799,8 @@ impl ReluneConfig {
             except_rules: merge_string_values(&args.except_rules, &self.review.except_rules),
             except_tables: merge_string_values(&args.except_tables, &self.review.except_tables),
             deny: args.deny.or_else(|| self.review.deny.map(Into::into)),
-        }
+            severity_overrides,
+        })
     }
 
     fn resolve_viewpoint(
@@ -823,6 +860,24 @@ fn validate_named_value<'a>(label: &str, raw_value: &'a str) -> Result<&'a str, 
     }
 
     Ok(trimmed)
+}
+
+fn resolve_severity_overrides(
+    raw: &BTreeMap<String, ReviewRuleOverrideConfig>,
+) -> Result<Vec<ReviewSeverityOverride>, ConfigError> {
+    let mut resolved = Vec::with_capacity(raw.len());
+    for (key, value) in raw {
+        let rule_id = ReviewRuleId::parse(key).map_err(|err| {
+            ConfigError::InvalidValue(format!(
+                "review.severity_overrides has unknown rule_id '{key}': {err}"
+            ))
+        })?;
+        resolved.push(ReviewSeverityOverride {
+            rule_id,
+            severity: value.severity.into(),
+        });
+    }
+    Ok(resolved)
 }
 
 fn validate_table_list(label: &str, values: &[String]) -> Result<(), ConfigError> {
@@ -997,6 +1052,10 @@ pub struct MergedReviewConfig {
     pub except_rules: Vec<String>,
     pub except_tables: Vec<String>,
     pub deny: Option<crate::cli::ReviewSeverityArg>,
+    /// Per-rule severity overrides resolved from `[review.severity_overrides]`.
+    /// Order is stable (TOML key ascending) so wasm/CLI consumers see a
+    /// deterministic vector.
+    pub severity_overrides: Vec<ReviewSeverityOverride>,
 }
 
 impl MergedRenderConfig {
@@ -2218,6 +2277,119 @@ direction = "left-to-right"
                 .to_string()
                 .contains("unknown viewpoint 'missing'; no viewpoints are defined")
         );
+    }
+
+    fn default_review_args() -> crate::cli::ReviewArgs {
+        crate::cli::ReviewArgs {
+            before: None,
+            before_sql_text: None,
+            before_schema_json: None,
+            after: None,
+            after_sql_text: None,
+            after_schema_json: None,
+            dialect: None,
+            format: None,
+            out: None,
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            exit_code: false,
+        }
+    }
+
+    #[test]
+    fn test_merge_review_args_severity_overrides_resolved_in_key_order() {
+        let mut config = ReluneConfig::default();
+        config.review.severity_overrides.insert(
+            "risk/fk-without-index".to_string(),
+            ReviewRuleOverrideConfig {
+                severity: ReviewSeverityConfig::Warning,
+            },
+        );
+        config.review.severity_overrides.insert(
+            "risk/add-not-null-on-existing".to_string(),
+            ReviewRuleOverrideConfig {
+                severity: ReviewSeverityConfig::Info,
+            },
+        );
+
+        let merged = config
+            .merge_review_args(&default_review_args())
+            .expect("merge should succeed");
+
+        // BTreeMap key ordering: add-not-null-on-existing < fk-without-index
+        assert_eq!(merged.severity_overrides.len(), 2);
+        assert_eq!(
+            merged.severity_overrides[0],
+            ReviewSeverityOverride {
+                rule_id: ReviewRuleId::AddNotNullOnExisting,
+                severity: ReviewSeverity::Info,
+            }
+        );
+        assert_eq!(
+            merged.severity_overrides[1],
+            ReviewSeverityOverride {
+                rule_id: ReviewRuleId::FkWithoutIndex,
+                severity: ReviewSeverity::Warning,
+            }
+        );
+    }
+
+    #[test]
+    fn test_merge_review_args_unknown_severity_override_rule_id_errors() {
+        let mut config = ReluneConfig::default();
+        config.review.severity_overrides.insert(
+            "risk/does-not-exist".to_string(),
+            ReviewRuleOverrideConfig {
+                severity: ReviewSeverityConfig::Warning,
+            },
+        );
+
+        let err = config
+            .merge_review_args(&default_review_args())
+            .expect_err("unknown rule_id must surface as a usage error");
+        let message = err.to_string();
+        assert!(
+            message.contains("review.severity_overrides has unknown rule_id 'risk/does-not-exist'"),
+            "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
+    fn test_review_severity_overrides_parse_from_toml() {
+        let toml_str = r#"
+            [review]
+            deny = "warning"
+
+            [review.severity_overrides."risk/add-not-null-on-existing"]
+            severity = "info"
+
+            [review.severity_overrides."risk/fk-without-index"]
+            severity = "warning"
+        "#;
+
+        let config: ReluneConfig = toml::from_str(toml_str).expect("toml should parse");
+        assert_eq!(config.review.severity_overrides.len(), 2);
+        let entry = config
+            .review
+            .severity_overrides
+            .get("risk/add-not-null-on-existing")
+            .expect("override entry");
+        assert!(matches!(entry.severity, ReviewSeverityConfig::Info));
+    }
+
+    #[test]
+    fn test_review_severity_override_rejects_extra_keys() {
+        let toml_str = r#"
+            [review.severity_overrides."risk/fk-without-index"]
+            severity = "warning"
+            extra = "boom"
+        "#;
+
+        let err = toml::from_str::<ReluneConfig>(toml_str)
+            .expect_err("unknown key in override entry must error");
+        assert!(err.to_string().contains("extra"));
     }
 
     #[test]

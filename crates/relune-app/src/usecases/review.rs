@@ -1,11 +1,11 @@
 //! Review use case: compare two schemas and flag migration risks.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use relune_core::{
-    ReviewResult as CoreReviewResult, ReviewRuleId, ReviewSeverity, ReviewSummary, RiskFinding,
-    diff_schemas,
+    ReviewResult as CoreReviewResult, ReviewRuleId, ReviewSeverity, ReviewSeverityOverride,
+    ReviewSummary, RiskFinding, diff_schemas,
 };
 
 use crate::error::AppError;
@@ -23,8 +23,10 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
     let schema_diff = diff_schemas(&before_schema, &after_schema);
 
     let applied_rules = resolve_active_rules(&request.rules, &request.except_rules)?;
-    let raw_findings =
+    let override_map = build_override_map(&request.severity_overrides)?;
+    let mut raw_findings =
         relune_core::run_rules(&schema_diff, &before_schema, &after_schema, &applied_rules);
+    apply_severity_overrides(&mut raw_findings, &override_map);
 
     let (findings, suppressed) = partition_suppressed(raw_findings, &request.except_tables);
 
@@ -38,6 +40,35 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         diagnostics,
         denied,
     })
+}
+
+fn build_override_map(
+    overrides: &[ReviewSeverityOverride],
+) -> Result<HashMap<ReviewRuleId, ReviewSeverity>, AppError> {
+    let mut map = HashMap::with_capacity(overrides.len());
+    for entry in overrides {
+        if map.insert(entry.rule_id, entry.severity).is_some() {
+            return Err(AppError::input(format!(
+                "duplicate severity override for rule_id {}",
+                entry.rule_id.as_str()
+            )));
+        }
+    }
+    Ok(map)
+}
+
+fn apply_severity_overrides(
+    findings: &mut [RiskFinding],
+    overrides: &HashMap<ReviewRuleId, ReviewSeverity>,
+) {
+    if overrides.is_empty() {
+        return;
+    }
+    for finding in findings.iter_mut() {
+        if let Some(severity) = overrides.get(&finding.rule_id) {
+            finding.severity = *severity;
+        }
+    }
 }
 
 /// Render the review result as plain text.
@@ -444,6 +475,96 @@ mod tests {
         assert!(text.contains("Schema review"));
         assert!(text.contains("info"));
         assert!(text.contains("risk/fk-without-index"));
+    }
+
+    #[test]
+    fn severity_override_downgrades_warning_to_info() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);";
+
+        // Sanity: the baseline produces a warning-level finding.
+        let baseline = run(ReviewRequest::from_sql(before, after));
+        assert!(
+            baseline
+                .review
+                .findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::AddNotNullOnExisting
+                    && f.severity == ReviewSeverity::Warning),
+            "baseline should produce add-not-null-on-existing at warning",
+        );
+        assert_eq!(baseline.review.summary.warning, 1);
+
+        let request = ReviewRequest::from_sql(before, after).with_severity_overrides(vec![
+            ReviewSeverityOverride {
+                rule_id: ReviewRuleId::AddNotNullOnExisting,
+                severity: ReviewSeverity::Info,
+            },
+        ]);
+        let result = run(request);
+
+        assert_eq!(result.review.summary.warning, 0);
+        assert_eq!(result.review.summary.info, 1);
+        let finding = result
+            .review
+            .findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddNotNullOnExisting)
+            .expect("override should not drop the finding");
+        assert_eq!(finding.severity, ReviewSeverity::Info);
+    }
+
+    #[test]
+    fn severity_override_upgrades_info_to_warning_and_trips_deny() {
+        let before = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (id INT PRIMARY KEY);
+        ";
+        let after = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
+        ";
+
+        // Without override the info-level finding does not trip --deny=warning.
+        let baseline = ReviewRequest::from_sql(before, after).with_deny(ReviewSeverity::Warning);
+        assert!(!run(baseline).denied);
+
+        let request = ReviewRequest::from_sql(before, after)
+            .with_deny(ReviewSeverity::Warning)
+            .with_severity_overrides(vec![ReviewSeverityOverride {
+                rule_id: ReviewRuleId::FkWithoutIndex,
+                severity: ReviewSeverity::Warning,
+            }]);
+        let result = run(request);
+
+        assert_eq!(result.review.summary.warning, 1);
+        assert_eq!(result.review.summary.info, 0);
+        assert!(result.denied);
+    }
+
+    #[test]
+    fn severity_override_rejects_duplicate_rule_id() {
+        let request =
+            ReviewRequest::from_sql("CREATE TABLE t (id INT);", "CREATE TABLE t (id INT);")
+                .with_severity_overrides(vec![
+                    ReviewSeverityOverride {
+                        rule_id: ReviewRuleId::AddNotNullOnExisting,
+                        severity: ReviewSeverity::Info,
+                    },
+                    ReviewSeverityOverride {
+                        rule_id: ReviewRuleId::AddNotNullOnExisting,
+                        severity: ReviewSeverity::Warning,
+                    },
+                ]);
+
+        let err = review(request).expect_err("duplicate override should fail");
+        match err {
+            AppError::Input { message, .. } => {
+                assert!(message.contains("duplicate severity override"));
+                assert!(message.contains("risk/add-not-null-on-existing"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
