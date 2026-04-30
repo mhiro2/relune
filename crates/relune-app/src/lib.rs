@@ -66,8 +66,8 @@ pub use usecases::doc::format_doc_markdown;
 pub use usecases::inspect::format_inspect_text;
 pub use usecases::lint::{format_lint_json, format_lint_text};
 pub use usecases::review::{
-    format_review_json, format_review_markdown, format_review_markdown_with, format_review_text,
-    format_review_text_with,
+    applied_rule_metadata, format_review_json, format_review_markdown, format_review_markdown_with,
+    format_review_text, format_review_text_with,
 };
 
 // Re-export commonly used types from relune-core for convenience
