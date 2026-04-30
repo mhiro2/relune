@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use relune_core::{
-    ReviewResult as CoreReviewResult, ReviewRuleId, ReviewSeverity, ReviewSeverityOverride,
-    ReviewSummary, RiskFinding, diff_schemas,
+    ReviewResult as CoreReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity,
+    ReviewSeverityOverride, ReviewSummary, RiskFinding, diff_schemas,
 };
 
 use crate::error::AppError;
@@ -184,6 +184,21 @@ pub fn format_review_markdown_with(result: &ReviewResult, quiet: bool) -> String
 /// Render the review result as JSON.
 pub fn format_review_json(result: &ReviewResult) -> Result<String, AppError> {
     Ok(serde_json::to_string_pretty(result)?)
+}
+
+/// Expand the applied rules of a review result into per-rule metadata snapshots.
+///
+/// Used by the WASM bindings (and any future CLI surface) to surface the
+/// `rule_id` / `default_severity` / `description` triple alongside the review
+/// payload without bloating the core `ReviewResult` JSON shape.
+#[must_use]
+pub fn applied_rule_metadata(result: &ReviewResult) -> Vec<ReviewRuleMetadata> {
+    result
+        .review
+        .applied_rules
+        .iter()
+        .map(ReviewRuleId::metadata)
+        .collect()
 }
 
 fn write_summary_line(output: &mut String, summary: &ReviewSummary) {
