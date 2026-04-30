@@ -23,9 +23,13 @@ mod error;
 mod request;
 
 use error::WasmError;
-use relune_app::{diff, export, format_diff_markdown, format_diff_text, inspect, lint, render};
+use relune_app::{
+    applied_rule_metadata, diff, export, format_diff_markdown, format_diff_text,
+    format_review_json, format_review_markdown, format_review_text, inspect, lint, render, review,
+};
 use request::{
     WasmDiffRequest, WasmExportRequest, WasmInspectRequest, WasmLintRequest, WasmRenderRequest,
+    WasmReviewRequest,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -38,6 +42,16 @@ struct WasmDiffResponse {
     rendered: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WasmReviewResponse {
+    review: relune_core::ReviewResult,
+    diagnostics: Vec<relune_core::Diagnostic>,
+    denied: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    applied_rule_details: Vec<relune_core::ReviewRuleMetadata>,
 }
 
 /// Set the panic hook for better error messages in the browser.
@@ -271,6 +285,70 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
     diff_from_sql(input)
 }
 
+/// Run a migration risk review on two schemas from SQL text.
+///
+/// Accepts a JSON request object with the following fields:
+/// - `beforeSql`: Baseline SQL DDL text (required if `beforeSchemaJson` not provided)
+/// - `beforeSchemaJson`: Baseline schema JSON (required if `beforeSql` not provided)
+/// - `afterSql`: Updated SQL DDL text (required if `afterSchemaJson` not provided)
+/// - `afterSchemaJson`: Updated schema JSON (required if `afterSql` not provided)
+/// - `format`: Output format - "text", "markdown", or "json" (default: "json")
+/// - `rules`: Optional rule allowlist (`risk/<kebab>` or short form)
+/// - `exceptRules`: Rules to remove from the active set
+/// - `exceptTables`: Table glob patterns whose findings move into `suppressed`
+/// - `deny`: Minimum severity that flips `denied = true`
+/// - `severityOverrides`: Per-rule severity overrides applied after rule
+///   evaluation (`[{ rule_id, severity }]`)
+/// - `dialect`: Optional dialect hint forwarded to the SQL parser
+///   ("auto" | "postgres" | "mysql" | "sqlite", default "auto")
+///
+/// Returns a JSON result object with:
+/// - `review`: Structured review payload (`findings`, `suppressed`,
+///   `summary`, `applied_rules`)
+/// - `diagnostics`: Array of parser / schema diagnostics
+/// - `denied`: Whether the configured `deny` threshold was exceeded
+/// - `content`: CLI-equivalent rendering for the requested `format`
+///   (the `format = "json"` payload matches `relune review --format json`)
+/// - `applied_rule_details`: Metadata snapshots for each applied rule,
+///   suitable for rendering the playground rule legend
+#[wasm_bindgen]
+pub fn review_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
+    let req: WasmReviewRequest = serde_wasm_bindgen::from_value(input)
+        .map_err(|e| WasmError::input(format!("Invalid request: {e}")))?;
+
+    let review_req = req.to_review_request().map_err(WasmError::input)?;
+    let format = review_req.format;
+    let result = review(review_req).map_err(WasmError::from)?;
+
+    let content = match format {
+        relune_app::ReviewFormat::Text => Some(format_review_text(&result)),
+        relune_app::ReviewFormat::Markdown => Some(format_review_markdown(&result)),
+        relune_app::ReviewFormat::Json => {
+            Some(format_review_json(&result).map_err(WasmError::from)?)
+        }
+    };
+
+    let applied_rule_details = applied_rule_metadata(&result);
+    let response = WasmReviewResponse {
+        review: result.review,
+        diagnostics: result.diagnostics,
+        denied: result.denied,
+        content,
+        applied_rule_details,
+    };
+
+    Ok(serde_wasm_bindgen::to_value(&response).map_err(WasmError::from)?)
+}
+
+/// Run a migration risk review on two schemas from schema JSON.
+///
+/// This is an alias for `review_from_sql` that expects schema JSON inputs.
+/// See `review_from_sql` for full parameter documentation.
+#[wasm_bindgen]
+pub fn review_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
+    review_from_sql(input)
+}
+
 // ============================================================================
 // Convenience functions for simpler use cases
 // ============================================================================
@@ -359,11 +437,12 @@ mod tests {
 
 #[cfg(all(test, target_arch = "wasm32"))]
 mod wasm_bindgen_tests {
-    use crate::request::{WasmDiffRequest, WasmLintRequest};
-    use relune_app::{DiffFormat, LintFormat};
+    use crate::request::{WasmDiffRequest, WasmLintRequest, WasmReviewRequest};
+    use relune_app::{DiffFormat, LintFormat, ReviewFormat};
+    use relune_core::ReviewSeverity;
     use wasm_bindgen_test::*;
 
-    use super::{diff_from_sql, lint_from_sql, version};
+    use super::{diff_from_sql, lint_from_sql, review_from_schema_json, review_from_sql, version};
 
     #[wasm_bindgen_test]
     fn wasm_version_is_non_empty() {
@@ -459,6 +538,211 @@ mod wasm_bindgen_tests {
                 .unwrap_or_default()
                 .contains("## Schema Diff")
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_from_sql_no_findings() {
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: Some(sql.to_string()),
+            before_schema_json: None,
+            after_sql: Some(sql.to_string()),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: None,
+        })
+        .expect("serialize review request");
+
+        let result = review_from_sql(input).expect("review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        assert_eq!(value["denied"], false);
+        assert_eq!(
+            value["review"]["findings"]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or(usize::MAX),
+            0
+        );
+        assert_eq!(value["review"]["summary"]["breaking"], 0);
+        assert_eq!(value["review"]["summary"]["caution"], 0);
+        assert_eq!(value["review"]["summary"]["warning"], 0);
+        assert_eq!(value["review"]["summary"]["info"], 0);
+
+        // The CLI-equivalent JSON content should round-trip to the
+        // `relune-app::ReviewResult` shape (flattened summary / findings /
+        // applied_rules / diagnostics / denied at the top level).
+        let content = value["content"]
+            .as_str()
+            .expect("content should be populated for format=json");
+        let parsed: relune_app::ReviewResult =
+            serde_json::from_str(content).expect("CLI JSON should deserialize as ReviewResult");
+        assert!(parsed.review.findings.is_empty());
+        assert_eq!(parsed.review.summary.total(), 0);
+        assert!(!parsed.denied);
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_from_sql_breaking() {
+        let before = "
+            CREATE TABLE users (id INT PRIMARY KEY, email TEXT);
+            CREATE TABLE orders (
+                id INT PRIMARY KEY,
+                user_email TEXT REFERENCES users(email)
+            );
+        ";
+        let after = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (
+                id INT PRIMARY KEY,
+                user_email TEXT REFERENCES users(email)
+            );
+        ";
+
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: Some(before.to_string()),
+            before_schema_json: None,
+            after_sql: Some(after.to_string()),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: Some(ReviewSeverity::Breaking),
+            severity_overrides: vec![],
+            dialect: None,
+        })
+        .expect("serialize review request");
+
+        let result = review_from_sql(input).expect("review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        assert_eq!(value["denied"], true);
+        assert_eq!(value["review"]["summary"]["breaking"], 1);
+        let applied_details = value["applied_rule_details"]
+            .as_array()
+            .expect("applied_rule_details array");
+        assert_eq!(
+            applied_details.len(),
+            relune_core::ReviewRuleId::all_rules().len(),
+            "applied_rule_details should expose every review rule"
+        );
+
+        // Round-trip the embedded CLI JSON content into the typed shape so
+        // the wasm payload stays in lockstep with `relune review --format json`.
+        let content = value["content"]
+            .as_str()
+            .expect("content should be populated for format=json");
+        let parsed: relune_app::ReviewResult =
+            serde_json::from_str(content).expect("CLI JSON should deserialize as ReviewResult");
+        assert_eq!(parsed.review.summary.breaking, 1);
+        assert!(parsed.denied);
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_from_schema_json_no_findings() {
+        // Identical schemas through the schema_json path. Verifies that the
+        // schema_json branch of `wasm_input_source_with_dialect` is wired and
+        // that `review_from_schema_json` (the alias) reaches the same code
+        // path as `review_from_sql`.
+        let schema = r#"
+        {
+          "version": "1.0.0",
+          "tables": [
+            {
+              "id": "users",
+              "schema": null,
+              "name": "users",
+              "columns": [
+                {
+                  "name": "id",
+                  "data_type": "INT",
+                  "nullable": false,
+                  "primary_key": true
+                }
+              ],
+              "foreign_keys": [],
+              "indexes": []
+            }
+          ]
+        }
+        "#;
+
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: None,
+            before_schema_json: Some(schema.to_string()),
+            after_sql: None,
+            after_schema_json: Some(schema.to_string()),
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: None,
+        })
+        .expect("serialize review request");
+
+        let result =
+            review_from_schema_json(input).expect("schema_json review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        assert_eq!(value["denied"], false);
+        assert_eq!(
+            value["review"]["findings"]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or(usize::MAX),
+            0
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_content_text_and_markdown() {
+        // Smoke-check the non-JSON content paths. The text and markdown
+        // formatters are shared with the CLI, so we only verify the wasm
+        // boundary populates `content` with the expected header text.
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+
+        for (format, expected_header) in [
+            (ReviewFormat::Text, "Schema review"),
+            (ReviewFormat::Markdown, "## Schema review"),
+        ] {
+            let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+                before_sql: Some(sql.to_string()),
+                before_schema_json: None,
+                after_sql: Some(sql.to_string()),
+                after_schema_json: None,
+                format: Some(format),
+                rules: vec![],
+                except_rules: vec![],
+                except_tables: vec![],
+                deny: None,
+                severity_overrides: vec![],
+                dialect: None,
+            })
+            .expect("serialize review request");
+
+            let result = review_from_sql(input).expect("review request should succeed");
+            let value: serde_json::Value =
+                serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+            let content = value["content"]
+                .as_str()
+                .expect("content should be populated for text/markdown");
+            assert!(
+                content.contains(expected_header),
+                "expected `{expected_header}` in {format:?} content, got: {content}"
+            );
+        }
     }
 
     #[wasm_bindgen_test]

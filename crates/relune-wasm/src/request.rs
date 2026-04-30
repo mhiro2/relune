@@ -7,9 +7,9 @@ use relune_app::{
     DiffFormat, DiffRequest, ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec,
     LayoutDirection, LayoutSpec, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme, RouteStyle,
+    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewSeverityOverride, RouteStyle,
 };
-use relune_core::{LintProfile, LintRuleCategory, Severity};
+use relune_core::{LintProfile, LintRuleCategory, ReviewSeverity, Severity, SqlDialect};
 use serde::{Deserialize, Serialize};
 
 /// Grouping strategy as exposed to the WASM/JS API.
@@ -174,6 +174,25 @@ fn wasm_input_source(
 ) -> Result<relune_app::InputSource, String> {
     match (sql, schema_json) {
         (Some(sql), None) => Ok(relune_app::InputSource::sql_text(sql)),
+        (None, Some(json)) => Ok(relune_app::InputSource::schema_json(json)),
+        (Some(_), Some(_)) => Err("Cannot specify both 'sql' and 'schemaJson'".to_string()),
+        (None, None) => Err("Must specify either 'sql' or 'schemaJson'".to_string()),
+    }
+}
+
+/// Like [`wasm_input_source`] but threads a `SqlDialect` hint through to the
+/// SQL parser. The dialect is only meaningful for the SQL path; schema JSON
+/// inputs bypass the parser entirely.
+fn wasm_input_source_with_dialect(
+    sql: Option<&str>,
+    schema_json: Option<&str>,
+    dialect: Option<SqlDialect>,
+) -> Result<relune_app::InputSource, String> {
+    match (sql, schema_json) {
+        (Some(sql), None) => Ok(relune_app::InputSource::sql_text_with_dialect(
+            sql,
+            dialect.unwrap_or_default(),
+        )),
         (None, Some(json)) => Ok(relune_app::InputSource::schema_json(json)),
         (Some(_), Some(_)) => Err("Cannot specify both 'sql' and 'schemaJson'".to_string()),
         (None, None) => Err("Must specify either 'sql' or 'schemaJson'".to_string()),
@@ -420,6 +439,78 @@ fn validated_spacing(value: Option<f32>, default: f32, field: &str) -> Result<f3
     }
 }
 
+/// WASM-friendly review request that can be deserialized from JavaScript.
+///
+/// Mirrors `relune review` on the CLI side: takes two schemas (SQL or
+/// schema JSON) plus the same rule / suppression / severity controls and
+/// returns a structured review payload along with a CLI-equivalent JSON
+/// rendering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmReviewRequest {
+    /// Baseline SQL DDL text.
+    pub before_sql: Option<String>,
+    /// Baseline schema JSON.
+    pub before_schema_json: Option<String>,
+    /// Updated SQL DDL text.
+    pub after_sql: Option<String>,
+    /// Updated schema JSON.
+    pub after_schema_json: Option<String>,
+    /// Output format. `"text" | "markdown" | "json"` (default `json`).
+    #[serde(default)]
+    pub format: Option<ReviewFormat>,
+    /// Optional rule allowlist. Each entry accepts the full `risk/<kebab>`
+    /// form or the bare kebab name.
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Rules to remove from the active set after `rules` is resolved.
+    #[serde(default)]
+    pub except_rules: Vec<String>,
+    /// Table glob patterns whose findings should be moved into
+    /// `suppressed` rather than reported.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
+    /// Minimum severity that flips `denied = true`.
+    #[serde(default)]
+    pub deny: Option<ReviewSeverity>,
+    /// Per-rule severity overrides applied after rule evaluation but
+    /// before summary aggregation.
+    #[serde(default)]
+    pub severity_overrides: Vec<ReviewSeverityOverride>,
+    /// Optional dialect hint forwarded to the SQL parser. Ignored when
+    /// schema JSON inputs are used.
+    #[serde(default)]
+    pub dialect: Option<SqlDialect>,
+}
+
+impl WasmReviewRequest {
+    /// Convert to a `ReviewRequest` for the app layer.
+    pub fn to_review_request(&self) -> Result<ReviewRequest, String> {
+        let before = wasm_input_source_with_dialect(
+            self.before_sql.as_deref(),
+            self.before_schema_json.as_deref(),
+            self.dialect,
+        )?;
+        let after = wasm_input_source_with_dialect(
+            self.after_sql.as_deref(),
+            self.after_schema_json.as_deref(),
+            self.dialect,
+        )?;
+
+        Ok(ReviewRequest {
+            before,
+            after,
+            format: self.format.unwrap_or(ReviewFormat::Json),
+            output_path: None,
+            rules: self.rules.clone(),
+            except_rules: self.except_rules.clone(),
+            except_tables: self.except_tables.clone(),
+            deny: self.deny,
+            severity_overrides: self.severity_overrides.clone(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -617,6 +708,101 @@ mod tests {
         assert_eq!(diff_req.options.theme, RenderTheme::Light);
         assert!(!diff_req.options.show_legend);
         assert!(!diff_req.options.show_stats);
+    }
+
+    #[test]
+    fn test_wasm_review_request() {
+        let req = WasmReviewRequest {
+            before_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
+            before_schema_json: None,
+            after_sql: Some(
+                "CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);".to_string(),
+            ),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec!["risk/fk-without-index".to_string()],
+            except_tables: vec![],
+            deny: Some(ReviewSeverity::Warning),
+            severity_overrides: vec![],
+            dialect: Some(SqlDialect::Postgres),
+        };
+
+        let review_req = req.to_review_request().unwrap();
+        assert_eq!(review_req.format, ReviewFormat::Json);
+        assert_eq!(review_req.except_rules, vec!["risk/fk-without-index"]);
+        assert_eq!(review_req.deny, Some(ReviewSeverity::Warning));
+
+        // Dialect should be threaded through the SQL input source.
+        match review_req.before {
+            relune_app::InputSource::SqlText { dialect, .. } => {
+                assert_eq!(dialect, SqlDialect::Postgres);
+            }
+            _ => panic!("expected SqlText input"),
+        }
+    }
+
+    #[test]
+    fn test_wasm_review_request_severity_override() {
+        use relune_core::ReviewRuleId;
+
+        let req = WasmReviewRequest {
+            before_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
+            before_schema_json: None,
+            after_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
+            after_schema_json: None,
+            format: None,
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![ReviewSeverityOverride {
+                rule_id: ReviewRuleId::AddNotNullOnExisting,
+                severity: ReviewSeverity::Info,
+            }],
+            dialect: None,
+        };
+
+        // Round-trip the request through serde to make sure JS callers can
+        // serialize it with the same shape we round-trip via wasm-bindgen.
+        let json = serde_json::to_value(&req).expect("serialize");
+        let restored: WasmReviewRequest = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(restored.severity_overrides.len(), 1);
+        assert_eq!(
+            restored.severity_overrides[0].rule_id,
+            ReviewRuleId::AddNotNullOnExisting
+        );
+        assert_eq!(
+            restored.severity_overrides[0].severity,
+            ReviewSeverity::Info
+        );
+
+        // Default format should fall back to JSON when omitted.
+        let review_req = restored.to_review_request().unwrap();
+        assert_eq!(review_req.format, ReviewFormat::Json);
+        assert_eq!(review_req.severity_overrides.len(), 1);
+    }
+
+    #[test]
+    fn test_wasm_review_request_rejects_missing_inputs() {
+        let req = WasmReviewRequest {
+            before_sql: None,
+            before_schema_json: None,
+            after_sql: Some("CREATE TABLE users (id INT);".to_string()),
+            after_schema_json: None,
+            format: None,
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: None,
+        };
+
+        let err = req
+            .to_review_request()
+            .expect_err("missing before input should fail");
+        assert!(err.contains("Must specify either"));
     }
 
     #[test]
