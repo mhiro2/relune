@@ -2398,4 +2398,202 @@ mod review_tests {
             "stderr should explain the duplicate rule_id; got: {stderr}"
         );
     }
+
+    #[test]
+    fn review_list_rules_text_lists_every_rule() {
+        let output = relune()
+            .arg("review")
+            .arg("--list-rules")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review --list-rules should succeed without before/after"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for rule in [
+            "risk/drop-column-referenced",
+            "risk/drop-table-referenced",
+            "risk/add-not-null-on-existing",
+            "risk/type-narrow",
+            "risk/drop-pk-or-unique",
+            "risk/add-unique-on-existing",
+            "risk/add-cascade-delete",
+            "risk/fk-without-index",
+        ] {
+            assert!(
+                stdout.contains(rule),
+                "text listing should mention {rule}; got: {stdout}"
+            );
+        }
+        assert!(stdout.contains("breaking"));
+        assert!(stdout.contains("warning"));
+        assert!(stdout.contains("info"));
+    }
+
+    #[test]
+    fn review_list_rules_json_emits_metadata_array() {
+        let output = relune()
+            .arg("review")
+            .arg("--list-rules")
+            .arg("--format")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review --list-rules --format json should succeed"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("list-rules output should be valid JSON");
+        let entries = parsed
+            .as_array()
+            .expect("--list-rules JSON should be an array");
+        assert_eq!(entries.len(), 8, "expected metadata for every review rule");
+        let first = &entries[0];
+        assert_eq!(first["rule_id"], "risk/drop-column-referenced");
+        assert_eq!(first["default_severity"], "breaking");
+        assert!(
+            first["description"].as_str().is_some_and(|d| !d.is_empty()),
+            "description should be populated"
+        );
+    }
+
+    #[test]
+    fn review_list_rules_rejects_markdown_format() {
+        let output = relune()
+            .arg("review")
+            .arg("--list-rules")
+            .arg("--format")
+            .arg("markdown")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "--list-rules with markdown should fail as a usage error"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("markdown is not a supported format for --list-rules"),
+            "stderr should explain the rejection; got: {stderr}"
+        );
+    }
+
+    #[test]
+    fn review_emit_summary_writes_json_even_when_denied() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let summary_path = temp.path().join("review-summary.json");
+        let main_out_path = temp.path().join("review-main.txt");
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("--deny")
+            .arg("breaking")
+            .arg("--emit-summary")
+            .arg(&summary_path)
+            .arg("--out")
+            .arg(&main_out_path)
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(10),
+            "--deny breaking should still trip rc=10 with --emit-summary"
+        );
+        assert!(
+            main_out_path.exists(),
+            "main --out file should be written before deny short-circuit"
+        );
+        assert!(
+            summary_path.exists(),
+            "--emit-summary file should be written even when --deny short-circuits"
+        );
+        let summary = fs::read_to_string(&summary_path).expect("Failed to read summary");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&summary).expect("emit-summary file should contain valid JSON");
+        assert_eq!(parsed["denied"], true);
+        assert_eq!(parsed["summary"]["breaking"], 1);
+        assert!(parsed["findings"].is_array());
+        assert!(parsed["applied_rules"].is_array());
+    }
+
+    #[test]
+    fn review_emit_summary_rejects_path_collision_with_out() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let shared_path = temp.path().join("shared.json");
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&shared_path)
+            .arg("--emit-summary")
+            .arg(&shared_path)
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "reusing --out as --emit-summary should be a usage error"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Cannot reuse --out path as --emit-summary"),
+            "stderr should explain the path collision; got: {stderr}"
+        );
+    }
+
+    #[test]
+    fn review_emit_summary_rejects_path_collision_when_files_do_not_exist() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let absolute_path = temp.path().join("only.json");
+
+        // Same logical target expressed two different ways. Neither file
+        // exists yet, so the literal strings differ but the resolved path is
+        // identical — the collision must still be rejected.
+        let mut relative_path = PathBuf::from("./");
+        relative_path.push(absolute_path.file_name().expect("file name"));
+
+        let output = relune()
+            .current_dir(temp.path())
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&relative_path)
+            .arg("--emit-summary")
+            .arg(&absolute_path)
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "logical path collision should be detected even when neither file exists"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Cannot reuse --out path as --emit-summary"),
+            "stderr should explain the path collision; got: {stderr}"
+        );
+    }
 }

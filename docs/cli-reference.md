@@ -233,8 +233,12 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (supports `*` glob) |
 | `--deny info\|warning\|caution\|breaking` | Exit non-zero when findings reach this severity |
 | `--exit-code` | Exit `10` when any findings are emitted (regardless of severity) |
+| `--list-rules` | List every review rule (with default severity and description) and exit; honors `--format text\|json` only |
+| `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` short-circuits with rc=10 |
 
 Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
+
+`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq`). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
 
 ```bash
 relune review --before old.sql --after new.sql
@@ -244,5 +248,8 @@ relune review --before old.sql --after new.sql --deny breaking
 relune review --before old.sql --after new.sql --except-rule fk-without-index
 relune review --before old.sql --after new.sql --except-table audit_*
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
+relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
+relune review --list-rules                       # text listing
+relune review --list-rules --format json | jq '.[0]'
 relune --config relune.toml review --before old.sql --after new.sql
 ```

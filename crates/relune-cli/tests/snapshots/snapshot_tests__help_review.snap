@@ -1,11 +1,10 @@
 ---
 source: crates/relune-cli/tests/snapshot_tests.rs
-assertion_line: 81
 expression: stdout
 ---
 Review a schema migration for safety risks
 
-Usage: relune review [OPTIONS] <--before <FILE>|--before-sql-text <TEXT>|--before-schema-json <FILE>> <--after <FILE>|--after-sql-text <TEXT>|--after-schema-json <FILE>>
+Usage: relune review [OPTIONS]
 
 Options:
       --before <FILE>
@@ -85,6 +84,17 @@ Options:
 
       --exit-code
           Exit with code 10 if any findings are emitted
+
+      --list-rules
+          List all review rules (with default severity and description) and exit.
+          
+          Honors `--format text|json` only (default `text`); `markdown` is rejected. When set,
+          `--before` / `--after` are ignored.
+
+      --emit-summary <PATH>
+          Write the full review JSON (same shape as `--format json`) to PATH in addition to the
+          user-visible output. The file is always written, even when `--deny` short-circuits the
+          user-visible run with rc=10
 
   -h, --help
           Print help (see a summary with '-h')

@@ -2302,6 +2302,8 @@ direction = "left-to-right"
             except_tables: vec![],
             deny: None,
             exit_code: false,
+            list_rules: false,
+            emit_summary: None,
         }
     }
 

@@ -775,13 +775,13 @@ pub enum DiffFormat {
     group(
         ArgGroup::new("before_input")
             .args(["before", "before_sql_text", "before_schema_json"])
-            .required(true)
+            .required(false)
             .multiple(false)
     ),
     group(
         ArgGroup::new("after_input")
             .args(["after", "after_sql_text", "after_schema_json"])
-            .required(true)
+            .required(false)
             .multiple(false)
     )
 )]
@@ -841,6 +841,19 @@ pub struct ReviewArgs {
     /// Exit with code 10 if any findings are emitted.
     #[arg(long = "exit-code")]
     pub exit_code: bool,
+
+    /// List all review rules (with default severity and description) and exit.
+    ///
+    /// Honors `--format text|json` only (default `text`); `markdown` is rejected.
+    /// When set, `--before` / `--after` are ignored.
+    #[arg(long = "list-rules")]
+    pub list_rules: bool,
+
+    /// Write the full review JSON (same shape as `--format json`) to PATH in
+    /// addition to the user-visible output. The file is always written, even
+    /// when `--deny` short-circuits the user-visible run with rc=10.
+    #[arg(long = "emit-summary", value_name = "PATH")]
+    pub emit_summary: Option<PathBuf>,
 }
 
 /// Output format for review command.

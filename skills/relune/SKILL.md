@@ -261,7 +261,7 @@ File inputs are auto-detected by content (schema JSON works even without `.json`
 
 ### review
 
-Compare a `before` schema with an `after` schema and emit migration risk findings, grouped into `info`, `warning`, `caution`, and `breaking` severities. Both before and after inputs are required.
+Compare a `before` schema with an `after` schema and emit migration risk findings, grouped into `info`, `warning`, `caution`, and `breaking` severities. Both before and after inputs are required (except in `--list-rules` mode).
 
 ```bash
 relune review --before old.sql --after new.sql
@@ -271,6 +271,9 @@ relune review --before old.sql --after new.sql --deny breaking
 relune review --before old.sql --after new.sql --except-rule fk-without-index
 relune review --before old.sql --after new.sql --except-table audit_*
 relune review --before old.sql --after new.sql --exit-code
+relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
+relune review --list-rules                       # text catalog of every rule
+relune review --list-rules --format json         # JSON catalog (for CI / docs)
 ```
 
 | Side | Flags |
@@ -288,8 +291,10 @@ relune review --before old.sql --after new.sql --exit-code
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (`*` glob) | -- |
 | `--deny` | `info`, `warning`, `caution`, `breaking` -- min severity for non-zero exit | -- |
 | `--exit-code` | Exit `10` when any findings are emitted | off |
+| `--list-rules` | List every rule (with default severity and description) and exit; honors `--format text\|json` only | off |
+| `--emit-summary <PATH>` | Always write the full review JSON to `PATH`, even when `--deny` short-circuits with rc=10 | off |
 
-Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`.
+Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. `--list-rules` is the canonical source of every rule for CI / docs automation. `--emit-summary` is intended for CI jobs that need the structured report in a single pass (PR comment generation that still wants `--deny` to gate the build); reusing the `--out` path is rejected as a usage error.
 
 ## Common Workflows
 
@@ -316,6 +321,7 @@ relune diff --before old.sql --after new.sql --format html -o d.html  # visual d
 relune diff --before old.sql --after new.sql --exit-code              # exit 10 if changes
 relune review --before old.sql --after new.sql                        # migration risk findings
 relune review --before old.sql --after new.sql --deny breaking        # gate CI on breaking risks
+relune review --list-rules                                            # catalog of every review rule
 relune lint --sql new.sql                                             # lint new schema
 relune render --sql new.sql --focus <CHANGED_TABLE> --depth 1 -o area.svg
 ```
