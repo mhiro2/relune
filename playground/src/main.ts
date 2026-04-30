@@ -4,6 +4,7 @@ import initWasm, {
   inspect_from_sql,
   lint_from_sql,
   render_from_sql,
+  review_from_sql,
   set_panic_hook,
   version,
 } from "../pkg/relune_wasm.js";
@@ -17,7 +18,7 @@ type EdgeStyle = "curved" | "orthogonal" | "straight";
 type GroupBy = "none" | "schema" | "prefix";
 type WorkbenchMode = "render" | "inspect" | "export" | "lint" | "compare";
 type ExportFormat = "schema-json" | "graph-json" | "layout-json" | "mermaid" | "d2" | "dot";
-type CompareView = "visual" | "text" | "markdown" | "json";
+type CompareView = "visual" | "text" | "markdown" | "json" | "review";
 type ViewpointId = string;
 type WasmSeverity = "error" | "warning" | "info" | "hint";
 
@@ -204,6 +205,46 @@ type WasmDiffResult = {
   diagnostics: WasmDiagnostic[];
   rendered?: string | null;
   content?: string | null;
+};
+
+type ReviewSeverity = "breaking" | "caution" | "warning" | "info";
+
+type ReviewFinding = {
+  rule_id: string;
+  severity: ReviewSeverity;
+  message: string;
+  mitigation?: string | null;
+  table_id?: string | null;
+  table_name?: string | null;
+  column_name?: string | null;
+  fk_name?: string | null;
+  related_table_id?: string | null;
+};
+
+type ReviewSummary = {
+  breaking: number;
+  caution: number;
+  warning: number;
+  info: number;
+};
+
+type ReviewRuleMetadata = {
+  rule_id: string;
+  default_severity: ReviewSeverity;
+  description: string;
+};
+
+type WasmReviewResult = {
+  review: {
+    findings: ReviewFinding[];
+    suppressed: ReviewFinding[];
+    summary: ReviewSummary;
+    applied_rules: string[];
+  };
+  diagnostics: WasmDiagnostic[];
+  denied: boolean;
+  content?: string | null;
+  applied_rule_details: ReviewRuleMetadata[];
 };
 
 type WasmErrorShape = {
@@ -495,6 +536,11 @@ const compareSummaryPanel = getElement<HTMLElement>("compare-summary-panel");
 const compareSummary = getElement<HTMLElement>("compare-summary");
 const compareSummaryCount = getElement<HTMLElement>("compare-summary-count");
 const compareObjectList = getElement<HTMLUListElement>("compare-object-list");
+const reviewPanel = getElement<HTMLElement>("review-panel");
+const reviewSummaryBadges = getElement<HTMLElement>("review-summary-badges");
+const reviewFindingList = getElement<HTMLUListElement>("review-finding-list");
+const reviewSuppressedPanel = getElement<HTMLDetailsElement>("review-suppressed-panel");
+const reviewSuppressedList = getElement<HTMLUListElement>("review-suppressed-list");
 const textOutputPanel = getElement<HTMLElement>("text-output-panel");
 const textOutputLabel = getElement<HTMLElement>("text-output-label");
 const textOutputMeta = getElement<HTMLElement>("text-output-meta");
@@ -1313,6 +1359,12 @@ async function runCompareMode(currentSerial: number): Promise<void> {
   }
 
   const compareView = compareFormatSelect.value as CompareView;
+
+  if (compareView === "review") {
+    await runReviewView(currentSerial);
+    return;
+  }
+
   setStatus("Comparing…");
   const result = diff_from_sql(buildDiffRequest(compareView)) as WasmDiffResult;
   if (currentSerial !== renderSerial) {
@@ -1391,6 +1443,164 @@ async function runCompareMode(currentSerial: number): Promise<void> {
 
   const totalChanges = totalDiffChanges(result.diff.summary);
   setStatus(totalChanges === 0 ? "No changes detected" : `${totalChanges} changes detected`);
+}
+
+async function runReviewView(currentSerial: number): Promise<void> {
+  setStatus("Reviewing…");
+  const result = review_from_sql(buildReviewRequest()) as WasmReviewResult;
+  if (currentSerial !== renderSerial) {
+    return;
+  }
+
+  const summary = result.review.summary;
+  renderMetricCards([
+    ["Findings", `${summary.breaking + summary.caution + summary.warning + summary.info}`],
+    ["Breaking", `${summary.breaking}`],
+    ["Caution", `${summary.caution}`],
+    ["Warning", `${summary.warning}`],
+    ["Info", `${summary.info}`],
+    ["Suppressed", `${result.review.suppressed.length}`],
+    ["Rules", `${result.review.applied_rules.length}`],
+    ["Denied", result.denied ? "yes" : "no"],
+  ]);
+  renderDiagnostics(result.diagnostics);
+  renderReviewPanel(result);
+
+  const reviewJson = result.content ?? JSON.stringify(result, null, 2);
+  configureActions({
+    copy: {
+      label: "Copy JSON",
+      run: () => copyText(reviewJson, "Copied review JSON"),
+    },
+    primary: {
+      label: "JSON",
+      run: () => downloadText("relune-review.json", reviewJson, "application/json;charset=utf-8"),
+    },
+  });
+
+  const total = summary.breaking + summary.caution + summary.warning + summary.info;
+  if (total === 0) {
+    setStatus("No risk findings");
+  } else {
+    setStatus(`${total} risk findings`);
+  }
+}
+
+function buildReviewRequest(): Record<string, unknown> {
+  return {
+    beforeSql: compareBeforeEditor.getValue(),
+    afterSql: compareAfterEditor.getValue(),
+    format: "json",
+    rules: [],
+    exceptRules: [],
+    exceptTables: [],
+  };
+}
+
+function renderReviewPanel(result: WasmReviewResult): void {
+  reviewPanel.hidden = false;
+
+  const summary = result.review.summary;
+  reviewSummaryBadges.innerHTML = [
+    buildSeverityBadge("breaking", summary.breaking),
+    buildSeverityBadge("caution", summary.caution),
+    buildSeverityBadge("warning", summary.warning),
+    buildSeverityBadge("info", summary.info),
+  ].join("");
+
+  const sortedFindings = [...result.review.findings].sort(
+    (left, right) => severityRank(left.severity) - severityRank(right.severity),
+  );
+  reviewFindingList.innerHTML =
+    sortedFindings.length === 0
+      ? '<li class="finding-card finding-card--empty"><p class="empty-state">No risk findings.</p></li>'
+      : sortedFindings.map(buildFindingCard).join("");
+
+  if (result.review.suppressed.length === 0) {
+    reviewSuppressedPanel.hidden = true;
+    reviewSuppressedList.innerHTML = "";
+  } else {
+    reviewSuppressedPanel.hidden = false;
+    reviewSuppressedList.innerHTML = result.review.suppressed.map(buildFindingCard).join("");
+  }
+}
+
+function severityRank(severity: ReviewSeverity): number {
+  switch (severity) {
+    case "breaking":
+      return 0;
+    case "caution":
+      return 1;
+    case "warning":
+      return 2;
+    case "info":
+      return 3;
+  }
+}
+
+function severityEmoji(severity: ReviewSeverity): string {
+  switch (severity) {
+    case "breaking":
+      return "🔴";
+    case "caution":
+      return "🟡";
+    case "warning":
+      return "🟠";
+    case "info":
+      return "⚪";
+  }
+}
+
+function buildSeverityBadge(severity: ReviewSeverity, count: number): string {
+  return `
+    <span class="severity-badge severity-badge--${severity}">
+      <span class="severity-badge__dot" aria-hidden="true"></span>
+      <span class="severity-badge__emoji" aria-hidden="true">${severityEmoji(severity)}</span>
+      <span class="severity-badge__count">${count}</span>
+      <span class="severity-badge__label">${severity}</span>
+    </span>
+  `;
+}
+
+function buildFindingCard(finding: ReviewFinding): string {
+  const target = formatFindingTarget(finding);
+  const mitigationMarkup = finding.mitigation
+    ? `<div class="finding-card__mitigation">💡 ${escapeHtml(finding.mitigation)}</div>`
+    : "";
+  return `
+    <li class="finding-card finding-card--${finding.severity}">
+      <div class="finding-card__meta">
+        <span class="severity-badge severity-badge--${finding.severity}">
+          <span class="severity-badge__dot" aria-hidden="true"></span>
+          <span class="severity-badge__emoji" aria-hidden="true">${severityEmoji(finding.severity)}</span>
+          <span class="severity-badge__label">${finding.severity}</span>
+        </span>
+        <code class="finding-card__rule">${escapeHtml(finding.rule_id)}</code>
+        <code class="finding-card__target">${escapeHtml(target)}</code>
+      </div>
+      <div class="finding-card__body">${escapeHtml(finding.message)}</div>
+      ${mitigationMarkup}
+    </li>
+  `;
+}
+
+function formatFindingTarget(finding: ReviewFinding): string {
+  const table = finding.table_name ?? "";
+  const column = finding.column_name ?? "";
+  const fk = finding.fk_name ?? "";
+  if (table && column) {
+    return `${table}.${column}`;
+  }
+  if (table && fk) {
+    return `${table}.${fk}`;
+  }
+  if (table) {
+    return table;
+  }
+  if (fk) {
+    return fk;
+  }
+  return "(schema)";
 }
 
 function buildRenderRequest(format: "html" | "svg"): Record<string, unknown> {
@@ -1816,6 +2026,8 @@ function resetOutputPanels(): void {
   lintPanel.hidden = true;
   compareSummaryPanel.hidden = true;
   textOutputPanel.hidden = true;
+  reviewPanel.hidden = true;
+  reviewSuppressedPanel.hidden = true;
   previewFrame.srcdoc = "";
   inspectTableList.innerHTML = "";
   inspectDetail.innerHTML = "";
@@ -1824,6 +2036,9 @@ function resetOutputPanels(): void {
   compareObjectList.innerHTML = "";
   textOutput.textContent = "";
   textOutputMeta.textContent = "";
+  reviewSummaryBadges.textContent = "";
+  reviewFindingList.innerHTML = "";
+  reviewSuppressedList.innerHTML = "";
   resetActions();
 }
 
@@ -2226,7 +2441,13 @@ function isExportFormat(value: unknown): value is ExportFormat {
 }
 
 function isCompareView(value: unknown): value is CompareView {
-  return value === "visual" || value === "text" || value === "markdown" || value === "json";
+  return (
+    value === "visual" ||
+    value === "text" ||
+    value === "markdown" ||
+    value === "json" ||
+    value === "review"
+  );
 }
 
 function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, "custom"> {
