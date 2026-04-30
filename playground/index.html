@@ -279,6 +279,7 @@
                     <option value="text">Text</option>
                     <option value="markdown">Markdown</option>
                     <option value="json">Structured JSON</option>
+                    <option value="review">Risk review</option>
                   </select>
                   <span class="ctrl__hint">
                     Compare keeps before and after as separate editors instead of squeezing diff into the viewer mode.
@@ -405,6 +406,18 @@
             <div id="compare-summary" class="change-grid"></div>
             <ul id="compare-object-list" class="change-list"></ul>
           </details>
+
+          <section class="surface" id="review-panel" hidden>
+            <div class="surface__head">
+              <span class="surface__label">Schema Risk Review</span>
+              <span id="review-summary-badges" class="surface__meta"></span>
+            </div>
+            <ul id="review-finding-list" class="finding-list"></ul>
+            <details id="review-suppressed-panel" hidden>
+              <summary>Suppressed findings</summary>
+              <ul id="review-suppressed-list" class="finding-list finding-list--suppressed"></ul>
+            </details>
+          </section>
 
           <section class="surface" id="text-output-panel" hidden>
             <div class="surface__head">

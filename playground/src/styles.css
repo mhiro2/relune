@@ -1312,6 +1312,163 @@ details[open] > .ctrl-section__title::before {
   font-style: italic;
 }
 
+/* --- Review (Risk review) findings ----------------------------- */
+.finding-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+  max-height: 480px;
+  overflow-y: auto;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.finding-list--suppressed {
+  border-radius: var(--radius-md);
+  margin-top: 8px;
+}
+
+.finding-card {
+  padding: 12px 14px;
+  background: var(--surface-0);
+  border-left: 3px solid transparent;
+}
+
+.finding-card--breaking {
+  border-left-color: var(--danger);
+}
+
+.finding-card--caution {
+  border-left-color: var(--accent);
+}
+
+.finding-card--warning {
+  border-left-color: var(--warning);
+}
+
+.finding-card--info {
+  border-left-color: var(--info);
+}
+
+.finding-card--empty {
+  border-left-color: transparent;
+}
+
+.finding-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.finding-card__rule {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.finding-card__target {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.finding-card__body {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.finding-card__mitigation {
+  margin-top: 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#review-suppressed-panel {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+#review-suppressed-panel summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+#review-suppressed-panel[open] summary {
+  margin-bottom: 8px;
+}
+
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.severity-badge + .severity-badge {
+  margin-left: 6px;
+}
+
+.severity-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.severity-badge__emoji {
+  font-size: 11px;
+}
+
+.severity-badge__count {
+  font-weight: 700;
+}
+
+.severity-badge--breaking {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.severity-badge--caution {
+  color: var(--accent);
+  background: var(--accent-glow);
+  border-color: var(--accent);
+}
+
+.severity-badge--warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+}
+
+.severity-badge--info {
+  color: var(--info);
+  background: rgba(13, 148, 136, 0.08);
+  border-color: var(--info-border);
+}
+
 /* --- Responsive ------------------------------------------------ */
 @media (max-width: 900px) {
   .workspace {

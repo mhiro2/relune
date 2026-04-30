@@ -17,3 +17,5 @@ export function inspect_from_sql(input: unknown): unknown;
 export function export_from_sql(input: unknown): unknown;
 export function lint_from_sql(input: unknown): unknown;
 export function diff_from_sql(input: unknown): unknown;
+export function review_from_sql(input: unknown): unknown;
+export function review_from_schema_json(input: unknown): unknown;
