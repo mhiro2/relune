@@ -28,6 +28,7 @@ introspect = ["dep:relune-introspect", "dep:tokio"]
 insta.workspace = true
 relune-testkit = { path = "../relune-testkit" }
 tempfile = "3"
+toml = "1.1"
 
 [lints]
 workspace = true
