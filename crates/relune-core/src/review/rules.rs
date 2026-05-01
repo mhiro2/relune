@@ -1570,6 +1570,15 @@ mod tests {
         )
     }
 
+    fn run_with_dialect(
+        before: &Schema,
+        after: &Schema,
+        dialect: EffectiveDialect,
+    ) -> Vec<RiskFinding> {
+        let diff = diff_schemas(before, after);
+        run_rules(&diff, before, after, ReviewRuleId::all_rules(), dialect)
+    }
+
     #[test]
     fn drop_column_referenced_breaking_when_fk_remains() {
         let users = table(
@@ -2305,6 +2314,364 @@ mod tests {
             findings
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::FkWithoutIndex)
+        );
+    }
+
+    #[test]
+    fn add_index_on_large_table_caution_under_postgres() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("user_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("user_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("orders_user_id_idx", &["user_id"], false)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddIndexOnLargeTable)
+            .expect("expected AddIndexOnLargeTable finding");
+        assert_eq!(f.severity, ReviewSeverity::Caution);
+        assert_eq!(f.table_name.as_deref(), Some("orders"));
+        assert_eq!(f.column_name.as_deref(), Some("user_id"));
+        assert!(f.message.contains("CREATE INDEX"));
+    }
+
+    #[test]
+    fn add_index_on_large_table_does_not_fire_for_new_table() {
+        let before = Schema::default();
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("user_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("orders_user_id_idx", &["user_id"], false)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddIndexOnLargeTable)
+        );
+    }
+
+    #[test]
+    fn add_index_on_large_table_skipped_under_auto_dialect() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("user_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("user_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("orders_user_id_idx", &["user_id"], false)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddIndexOnLargeTable),
+            "Auto dialect must not fire lock-risk rules; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_fk_on_existing_caution_under_postgres() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users.clone(), orders_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddFkOnExisting)
+            .expect("expected AddFkOnExisting finding");
+        assert_eq!(f.severity, ReviewSeverity::Caution);
+        assert_eq!(f.fk_name.as_deref(), Some("orders_user_fkey"));
+        assert_eq!(f.related_table_id.as_deref(), Some("users"));
+    }
+
+    #[test]
+    fn add_fk_on_existing_skipped_when_referencing_table_is_new() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users.clone()],
+            ..Default::default()
+        };
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddFkOnExisting),
+            "FK on a brand-new table is creation cost, not lock risk; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn alter_column_type_caution_under_postgres() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("external_id", "VARCHAR(64)", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("external_id", "UUID", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AlterColumnType)
+            .expect("expected AlterColumnType finding");
+        assert_eq!(f.severity, ReviewSeverity::Caution);
+        assert_eq!(f.column_name.as_deref(), Some("external_id"));
+    }
+
+    #[test]
+    fn alter_column_type_does_not_fire_for_nullability_only_change() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("nickname", "VARCHAR(255)", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("nickname", "VARCHAR(255)", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AlterColumnType),
+            "Same-type nullability flip should not raise alter-column-type lock risk; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn rewrite_table_pk_rotation_caution_under_mysql() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("public_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("public_id", "BIGINT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Mysql);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::RewriteTable)
+            .expect("expected RewriteTable finding for PK rotation");
+        assert_eq!(f.severity, ReviewSeverity::Caution);
+        assert!(f.message.contains("Primary key on orders is being rotated"));
+        assert!(f.message.contains("(id,public_id)"));
+    }
+
+    #[test]
+    fn rewrite_table_column_drop_caution_under_mysql() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("legacy_handle", "VARCHAR(64)", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("id", "BIGINT", false, true)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Mysql);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::RewriteTable)
+            .expect("expected RewriteTable finding for column drop");
+        assert_eq!(f.severity, ReviewSeverity::Caution);
+        assert_eq!(f.column_name.as_deref(), Some("legacy_handle"));
+    }
+
+    #[test]
+    fn rewrite_table_skipped_under_postgres() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("public_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("public_id", "BIGINT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::RewriteTable),
+            "rewrite-table is MySQL-only; got {findings:?}"
         );
     }
 }
