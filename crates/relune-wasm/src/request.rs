@@ -477,8 +477,11 @@ pub struct WasmReviewRequest {
     /// before summary aggregation.
     #[serde(default)]
     pub severity_overrides: Vec<ReviewSeverityOverride>,
-    /// Optional dialect hint forwarded to the SQL parser. Ignored when
-    /// schema JSON inputs are used.
+    /// Optional dialect hint that drives both the SQL parser and the
+    /// review-evaluation dialect. Lock-risk rules require `postgres`
+    /// or `mysql`; under `auto` / `sqlite` they emit no findings.
+    /// Ignored by the parser when schema JSON inputs are used, but the
+    /// review dialect is still honored.
     #[serde(default)]
     pub dialect: Option<SqlDialect>,
 }
@@ -507,7 +510,7 @@ impl WasmReviewRequest {
             except_tables: self.except_tables.clone(),
             deny: self.deny,
             severity_overrides: self.severity_overrides.clone(),
-            dialect: SqlDialect::default(),
+            dialect: self.dialect.unwrap_or_default(),
         })
     }
 }
@@ -741,6 +744,48 @@ mod tests {
             }
             _ => panic!("expected SqlText input"),
         }
+    }
+
+    #[test]
+    fn test_wasm_review_request_dialect_propagation() {
+        // Postgres dialect on the wasm request flows into both the parser
+        // input source and `ReviewRequest.dialect` so lock-risk rules fire.
+        let req = WasmReviewRequest {
+            before_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
+            before_schema_json: None,
+            after_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
+            after_schema_json: None,
+            format: None,
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: Some(SqlDialect::Postgres),
+        };
+        let review_req = req.to_review_request().unwrap();
+        assert_eq!(review_req.dialect, SqlDialect::Postgres);
+
+        // Mysql is forwarded as-is.
+        let mysql_req = WasmReviewRequest {
+            dialect: Some(SqlDialect::Mysql),
+            ..req.clone()
+        };
+        assert_eq!(
+            mysql_req.to_review_request().unwrap().dialect,
+            SqlDialect::Mysql
+        );
+
+        // Omitted dialect falls back to the default (Auto), keeping
+        // lock-risk rules silent unless callers opt in explicitly.
+        let auto_req = WasmReviewRequest {
+            dialect: None,
+            ..req
+        };
+        assert_eq!(
+            auto_req.to_review_request().unwrap().dialect,
+            SqlDialect::default()
+        );
     }
 
     #[test]

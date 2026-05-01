@@ -2647,4 +2647,175 @@ mod review_tests {
             "stderr should explain the path collision; got: {stderr}"
         );
     }
+
+    // Lock-risk fixture used by the dialect-aware smoke tests below: a new
+    // index is added on an existing table, which triggers
+    // `risk/add-index-on-large-table` only when the effective dialect is
+    // postgres or mysql.
+    const LOCK_RISK_BEFORE: &str =
+        "CREATE TABLE orders (\n    id BIGINT PRIMARY KEY,\n    user_id BIGINT NOT NULL\n);";
+    const LOCK_RISK_AFTER: &str = "CREATE TABLE orders (\n    id BIGINT PRIMARY KEY,\n    user_id BIGINT NOT NULL\n);\n\nCREATE INDEX orders_user_id_idx ON orders (user_id);";
+
+    #[test]
+    fn review_dialect_postgres_emits_lock_risk_caution() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(LOCK_RISK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(LOCK_RISK_AFTER)
+            .arg("--dialect")
+            .arg("postgres")
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review --dialect postgres should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("review JSON should parse");
+        assert_eq!(parsed["summary"]["caution"], 1);
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(
+            findings
+                .iter()
+                .any(|f| f["rule_id"] == "risk/add-index-on-large-table"
+                    && f["severity"] == "caution"),
+            "expected a caution finding for risk/add-index-on-large-table; got: {parsed}"
+        );
+        let diagnostics = parsed["diagnostics"].as_array().expect("diagnostics array");
+        assert!(
+            diagnostics.is_empty(),
+            "no skip diagnostic should fire when lock-risk rules are active; got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn review_dialect_auto_explicit_optin_emits_skip_diagnostic() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(LOCK_RISK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(LOCK_RISK_AFTER)
+            .arg("--rules")
+            .arg("risk/add-index-on-large-table")
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review with explicit lock-risk opt-in should succeed under --dialect auto: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("review JSON should parse");
+        assert_eq!(parsed["summary"]["caution"], 0);
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(
+            findings.is_empty(),
+            "lock-risk rule should be skipped under --dialect auto; got: {findings:?}"
+        );
+        let diagnostics = parsed["diagnostics"].as_array().expect("diagnostics array");
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "explicit opt-in should produce exactly one skip diagnostic; got: {diagnostics:?}"
+        );
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic["severity"], "info");
+        assert_eq!(diagnostic["code"]["prefix"], "REVIEW");
+        assert_eq!(diagnostic["code"]["number"], 1);
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("Lock-risk review rules require an explicit --dialect")),
+            "diagnostic message should explain the auto-skip; got: {diagnostic}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Lock-risk review rules require an explicit --dialect"),
+            "info diagnostic should also surface on stderr; got: {stderr}"
+        );
+    }
+
+    #[test]
+    fn review_dialect_auto_default_profile_stays_silent() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(LOCK_RISK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(LOCK_RISK_AFTER)
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review under --dialect auto with default profile should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("review JSON should parse");
+        assert_eq!(parsed["summary"]["caution"], 0);
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(
+            findings.is_empty(),
+            "default profile should not raise lock-risk findings under auto; got: {findings:?}"
+        );
+        let diagnostics = parsed["diagnostics"].as_array().expect("diagnostics array");
+        assert!(
+            diagnostics.is_empty(),
+            "default profile should not emit a skip diagnostic; got: {diagnostics:?}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("Lock-risk"),
+            "default profile should keep stderr free of lock-risk noise; got: {stderr}"
+        );
+    }
+
+    #[test]
+    fn review_dialect_from_config_drives_lock_risk() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(&config_path, "[review]\ndialect = \"postgres\"\n").unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(LOCK_RISK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(LOCK_RISK_AFTER)
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "review with [review.dialect] = postgres should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("review JSON should parse");
+        assert_eq!(parsed["summary"]["caution"], 1);
+        let findings = parsed["findings"].as_array().expect("findings array");
+        assert!(
+            findings
+                .iter()
+                .any(|f| f["rule_id"] == "risk/add-index-on-large-table"),
+            "config-supplied dialect should drive lock-risk evaluation; got: {findings:?}"
+        );
+    }
 }
