@@ -17,7 +17,7 @@ every input, output, and exit code, see [`action/README.md`](../action/README.md
 ### Diff — render schema changes
 
 ```yaml
-- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   id: diff
   with:
     mode: diff   # default; passing it explicitly is recommended for clarity
@@ -31,7 +31,7 @@ outputs that downstream steps can use to post a PR comment or upload an artifact
 ### Review — surface migration risks
 
 ```yaml
-- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   id: review
   with:
     mode: review
