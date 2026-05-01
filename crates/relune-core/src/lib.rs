@@ -68,5 +68,5 @@ pub use model::{
 };
 pub use review::{
     EffectiveDialect, ReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity,
-    ReviewSeverityOverride, ReviewSummary, RiskFinding, run_rules,
+    ReviewSeverityOverride, ReviewSummary, RiskFinding, lock_risk_skip_diagnostic, run_rules,
 };
