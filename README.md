@@ -41,6 +41,8 @@ It supports schema work across the full lifecycle, with **review** at the centre
   and `breaking` severities — gate CI with `--deny`, then post the report as a
   sticky pull-request comment using the [GitHub Action](docs/github-actions.md)
   and the supplied workflow sample
+  - **Lock-risk caution rules** for postgres / mysql (`CREATE INDEX`, `ADD FK`,
+    `ALTER COLUMN TYPE`) plus mysql-only table rewrites — opt-in via `--dialect`
 - **Diff** schema changes between revisions as text, Markdown, JSON, SVG, or HTML
 - **Lint** schema-review issues with profiles, categories, and practical FK/comment checks
 - **Visualize** tables, views, relationships, and enums
