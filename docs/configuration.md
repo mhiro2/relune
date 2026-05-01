@@ -220,6 +220,8 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 
 `review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, and `--deny`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
 
+`dialect` is consumed twice: by the SQL parser when reading `before` / `after`, and by the review rule dispatcher. Setting `dialect = "postgres"` or `"mysql"` activates the lock-risk caution rules (`risk/add-index-on-large-table`, `risk/add-fk-on-existing`, `risk/alter-column-type`, and on MySQL `risk/rewrite-table`); `dialect = "auto"` (the default) and `"sqlite"` skip them. The setting works whether the dialect comes from this TOML key or from the CLI `--dialect` flag, so `relune review` can run lock-risk-aware in CI with config alone.
+
 ### `[review.severity_overrides."<rule-id>"]`
 
 Per-rule severity overrides let you downgrade noisy rules or escalate rules your project cares about without disabling them.
@@ -236,6 +238,12 @@ severity = "info"
 # Upgrade — treat missing FK indexes as warnings (so --deny=warning fails the build).
 [review.severity_overrides."risk/fk-without-index"]
 severity = "warning"
+
+# Downgrade — silence alter-column-type when most of the team's type changes
+# are aliases that compile to a no-op rewrite (e.g. CHARACTER VARYING ↔ TEXT
+# on PostgreSQL); flag them as info instead of caution.
+[review.severity_overrides."risk/alter-column-type"]
+severity = "info"
 ```
 
 Rules:
