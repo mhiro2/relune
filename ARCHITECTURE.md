@@ -158,6 +158,8 @@ relune-wasm ───► relune-app
 - **`relune-app`** composes adapters; avoid duplicating domain rules that belong in core or layout.
 - **`relune-testkit`** is for tests; it must not become a default production dependency of shipped crates.
 
+The boundary itself is unchanged, but `run_rules` now takes an `EffectiveDialect` argument so dialect-scoped rules dispatch from `relune-core` while CLI / WASM keep the request DTO surface.
+
 ---
 
 ## 6. Input adapters
@@ -201,6 +203,8 @@ Diagnostics are a first-class stream: parse errors, recoverable warnings, unsupp
 
 Migration risk review (`relune review`) reuses the same diagnostic stream and adds `RiskFinding` with `rule_id` (`risk/<kebab>`), `severity` (`breaking` / `caution` / `warning` / `info`), and stable target identifiers (`table_id`, `column_name`, `fk_name`). `ReviewRuleId::metadata()` / `ReviewRuleId::all_metadata()` expose a serializable `ReviewRuleMetadata { rule_id, default_severity, description }` snapshot — the single source of truth for `relune review --list-rules`, the WASM bindings (returned alongside each response as `applied_rule_details`), and any downstream rule-legend UI. Per-rule severity overrides from `[review.severity_overrides."<rule-id>"]` are applied as a post-processing step after rule evaluation and before summary aggregation, so `summary` counts and the `--deny` decision both reflect overridden severities.
 
+Lock-risk rules are dialect-scoped: `run_rules` reads `EffectiveDialect` and skips a rule whenever its `dialect_scope` does not include the resolved dialect. `risk/add-index-on-large-table`, `risk/add-fk-on-existing`, and `risk/alter-column-type` activate for `Postgres` or `Mysql`; `risk/rewrite-table` is MySQL-only because the rule encodes MySQL's full-table-rebuild semantics (PostgreSQL handles the same edits without a rewrite). The `default` profile stays silent in skip cases, but when a caller pins a lock-risk rule via `--rules` / `[review.rules]` and the dialect does not match (including `Auto`, `Sqlite`, or a `Postgres`-vs-`risk/rewrite-table` mismatch), the skip surfaces as a single info-level diagnostic (`REVIEW001`) so the response explains why no findings were produced.
+
 ---
 
 ## 10. Layout
@@ -243,7 +247,7 @@ The two crates are separate to keep low-level vector output apart from document 
 
 ## 13. CLI
 
-`relune-cli` should stay **thin**: argument parsing, config load, reading inputs, calling `relune-app`, writing outputs, mapping errors to exit codes. Parsing, layout, and rendering belong in other crates.
+`relune-cli` should stay **thin**: argument parsing, config load, reading inputs, calling `relune-app`, writing outputs, mapping errors to exit codes. Parsing, layout, and rendering belong in other crates. `--dialect` (and the equivalent TOML `[review.dialect]`) is consumed in two places: the SQL parser uses it to disambiguate dialect-specific syntax, and `relune review` forwards it as `EffectiveDialect` so dialect-scoped rule evaluation activates without a separate flag.
 
 The composite GitHub Action under `action/` is a thin shell over the same `relune-cli` binary — it carries **no review or domain pipeline logic** in YAML or shell. `mode: review` shells `relune review --emit-summary <PATH>` once (`action/review.sh`): the same invocation writes the user-visible report at `output-path` and a structured JSON summary to a runner-temp path, so `has-findings` / `summary-*` can be derived from the summary file independently of the `--deny` exit code while `has-blocking-findings` follows the rc directly. This single-pass behavior is purely CI-side orchestration; surface boundaries (CLI, WASM, action) translate requests, while the review pipeline itself stays in `relune-app` / `relune-core`.
 
