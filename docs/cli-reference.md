@@ -17,7 +17,7 @@ Every command requires **at least one input**. Typical inputs:
 | SQL string | `--sql-text '<DDL>'` | Not available on `lint` |
 | Normalized schema JSON | `--schema-json <FILE>` | From a previous export |
 | Live DB | `--db-url <URL>` | Read-only introspection; PostgreSQL/MySQL/MariaDB use a 30s statement deadline, and remote TCP connections require TLS by default |
-| SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | For SQL parsing |
+| SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | Drives both SQL parsing and `relune review` rule evaluation (`postgres` / `mysql` activate the lock-risk caution rules; `auto` and `sqlite` skip them) |
 
 Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly.
 
@@ -227,7 +227,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 |--------|-------------|
 | `-f`, `--format text\|markdown\|json` | Output format (default `text`) |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
-| `--dialect` | For SQL parsing on both sides |
+| `--dialect` | Drives both SQL parsing and review rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `auto` (default) and `sqlite` skip them. |
 | `--rules <RULE>` | Repeatable; run only these rules (accepts `risk/<id>` or bare `<id>`) |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set |
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (supports `*` glob) |
@@ -236,9 +236,30 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--list-rules` | List every review rule (with default severity and description) and exit; honors `--format text\|json` only |
 | `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` short-circuits with rc=10 |
 
-Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
+Rule IDs are kebab-case under the `risk/` namespace. The catalog covers twelve rules:
 
-`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq`). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
+| Rule ID | Default severity | Dialect |
+|---------|------------------|---------|
+| `risk/drop-column-referenced` | breaking | any |
+| `risk/drop-table-referenced` | breaking | any |
+| `risk/add-not-null-on-existing` | warning | any |
+| `risk/type-narrow` | breaking | any |
+| `risk/drop-pk-or-unique` | warning (breaking with referencing FK) | any |
+| `risk/add-unique-on-existing` | warning | any |
+| `risk/add-cascade-delete` | warning | any |
+| `risk/fk-without-index` | info | any |
+| `risk/add-index-on-large-table` | caution | postgres / mysql |
+| `risk/add-fk-on-existing` | caution | postgres / mysql |
+| `risk/alter-column-type` | caution | postgres / mysql |
+| `risk/rewrite-table` | caution | mysql |
+
+`--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
+
+`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all twelve rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
+
+> [!NOTE]
+> **Lock-risk caution rules read schema state, not migration SQL.**
+> Lock-risk caution rules are based on **schema state-change diff**, not on the migration SQL itself. They flag a state change that — if executed naively — would acquire a problematic lock; they **do not** read your migration script and cannot detect that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder.
 
 ```bash
 relune review --before old.sql --after new.sql
@@ -249,7 +270,8 @@ relune review --before old.sql --after new.sql --except-rule fk-without-index
 relune review --before old.sql --after new.sql --except-table audit_*
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
 relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
-relune review --list-rules                       # text listing
+relune review --before old.sql --after new.sql --dialect postgres --deny caution
+relune review --list-rules                       # text listing of all 12 rules
 relune review --list-rules --format json | jq '.[0]'
 relune --config relune.toml review --before old.sql --after new.sql
 ```
