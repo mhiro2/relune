@@ -330,6 +330,10 @@ relune render --sql new.sql --focus <CHANGED_TABLE> --depth 1 -o area.svg
 
 The public playground also exposes example-specific named viewpoints. Pick a built-in example, switch the `Viewpoint` control, and the playground will apply the corresponding focus, filter, and grouping preset while keeping the selection in the URL.
 
+### Playground risk review view
+
+The playground's compare workbench has a fifth output mode, **Risk review**, alongside the existing visual / text / markdown / JSON views. Paste a baseline schema on the left, the proposed migration on the right, and switch the compare-format control to `Risk review` — the playground calls the same review pipeline as the CLI through WASM and renders severity badges, finding cards (rule ID, target, message, mitigation), and a collapsible suppressed-findings panel. The `Copy JSON` / `Download JSON` actions emit the same shape as `relune review --format json`, so playground exports drop into the same tooling as CLI output. The view is JSON-only in this release; rule allowlists, table exceptions, and `--deny` are not yet exposed in the UI.
+
 ### Embed ERDs in documentation
 
 Export as Mermaid for GitHub/GitLab Markdown:
@@ -348,9 +352,10 @@ relune lint --sql schema.sql --deny warning
 
 ### GitHub Actions
 
-A composite action is available at `mhiro2/relune/action` (Linux and macOS runners).
+A composite action is available at `mhiro2/relune/action` (Linux and macOS runners). It runs either `relune diff` or `relune review` against two schema files and exposes structured outputs for follow-up steps such as PR comments.
 
 ```yaml
+# diff mode (default) -- render a schema diff
 - uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   id: diff
   with:
@@ -358,7 +363,6 @@ A composite action is available at `mhiro2/relune/action` (Linux and macOS runne
     after: head-schema.sql
     format: markdown        # text, json, markdown, svg, html
 
-# Post comment only when changes are detected
 - if: steps.diff.outputs.has-changes == 'true'
   uses: actions/github-script@v7
   with:
@@ -367,10 +371,44 @@ A composite action is available at `mhiro2/relune/action` (Linux and macOS runne
       // ... create or update PR comment
 ```
 
-Action inputs: `version`, `before`, `after`, `format`, `output-path`, `binary-path`.
-Action outputs: `has-changes` (`"true"` / `"false"`), `output-path`.
+```yaml
+# review mode -- run the migration risk review
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+  id: review
+  with:
+    mode: review
+    before: base-schema.sql
+    after: head-schema.sql
+    deny: breaking          # gate on breaking findings
+    fail-on-blocking: false # let the next step post the comment first
 
-See `docs/github-actions.md` for full reference and sample workflows.
+- if: steps.review.outputs.has-findings == 'true'
+  uses: actions/github-script@v7
+  with:
+    script: |
+      const body = require('fs').readFileSync('${{ steps.review.outputs.output-path }}', 'utf8');
+      // ... post sticky review comment
+
+# Fail the job after the comment has been posted
+- if: steps.review.outputs.has-blocking-findings == 'true'
+  run: exit 1
+```
+
+Common inputs: `version`, `mode` (`diff` | `review`), `before`, `after`, `format`, `output-path`, `dialect`, `binary-path`.
+
+Review-only inputs: `deny` (`info` | `warning` | `caution` | `breaking`), `rules`, `except-rules`, `except-tables` (newline-separated lists), `fail-on-blocking` (`"true"` | `"false"`).
+
+| Output | diff mode | review mode |
+|--------|-----------|-------------|
+| `output-path` | path to rendered diff | path to review report |
+| `has-changes` | `"true"` / `"false"` | empty |
+| `has-findings` | empty | `"true"` if any finding |
+| `has-blocking-findings` | empty | `"true"` when CLI returned rc=10 |
+| `summary-breaking` / `summary-caution` / `summary-warning` / `summary-info` | empty | per-severity counts |
+
+Internally, review mode shells `relune review --emit-summary` once: `has-findings` and `summary-*` are derived from the structured JSON; `has-blocking-findings` follows the CLI exit code so it stays in sync with `--deny`.
+
+See `docs/github-actions.md` for full reference and sample workflows; a complete review workflow lives at `action/examples/relune-review.yaml`.
 
 ## Configuration
 
@@ -410,9 +448,22 @@ fail_on_warning = false
 format = "markdown"
 dialect = "postgres"
 fail_on_warning = false
+
+[review]
+format = "text"
+dialect = "postgres"
+deny = "breaking"
+except_rules = ["fk-without-index"]
+except_tables = ["audit_*"]
+
+# Per-rule severity overrides. Key is the full `risk/<id>` rule ID.
+[review.severity_overrides."risk/add-not-null-on-existing"]
+severity = "info"
 ```
 
 Merge order: built-in defaults -> config file -> CLI arguments.
+
+`[review.severity_overrides."<rule-id>"]` is applied **after** rule evaluation and before summary aggregation, so `summary` counts and the `--deny` decision both reflect the overridden severity. Unknown rule IDs are a usage error. See `docs/configuration.md` for the full reference.
 
 ## Troubleshooting
 
