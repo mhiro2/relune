@@ -242,7 +242,7 @@ The two crates are separate to keep low-level vector output apart from document 
 
 `relune-cli` should stay **thin**: argument parsing, config load, reading inputs, calling `relune-app`, writing outputs, mapping errors to exit codes. Parsing, layout, and rendering belong in other crates.
 
-The composite GitHub Action under `action/` is a thin shell over the same `relune-cli` binary — it carries **no review or domain pipeline logic** in YAML or shell. `mode: review` shells `relune review` twice (`action/review.sh`): a user pass with `--deny` for the visible report, and a summary pass without `--deny` to derive `has-findings` and per-severity counts independently of the deny exit code. This 2-pass behavior is purely CI-side orchestration; surface boundaries (CLI, WASM, action) translate requests, while the review pipeline itself stays in `relune-app` / `relune-core`.
+The composite GitHub Action under `action/` is a thin shell over the same `relune-cli` binary — it carries **no review or domain pipeline logic** in YAML or shell. `mode: review` shells `relune review --emit-summary <PATH>` once (`action/review.sh`): the same invocation writes the user-visible report at `output-path` and a structured JSON summary to a runner-temp path, so `has-findings` / `summary-*` can be derived from the summary file independently of the `--deny` exit code while `has-blocking-findings` follows the rc directly. This single-pass behavior is purely CI-side orchestration; surface boundaries (CLI, WASM, action) translate requests, while the review pipeline itself stays in `relune-app` / `relune-core`.
 
 ---
 

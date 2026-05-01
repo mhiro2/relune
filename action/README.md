@@ -22,7 +22,7 @@ Render a Markdown diff for two schema files. `mode` defaults to `diff`, so passi
 optional but recommended for clarity.
 
 ```yaml
-- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   id: diff
   with:
     mode: diff
@@ -35,7 +35,7 @@ optional but recommended for clarity.
 Run the migration risk review and gate on `breaking` findings.
 
 ```yaml
-- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   id: review
   with:
     mode: review
@@ -58,7 +58,7 @@ instead.
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `mode` | no | `diff` | `diff` or `review`. Any other value fails the action with a usage error. |
-| `version` | no | `latest` | Relune version to install (for example `0.7.0`). Ignored when `binary-path` is set. |
+| `version` | no | `latest` | Relune version to install (for example `0.10.0`). Ignored when `binary-path` is set. |
 | `before` | **yes** | — | Path to the baseline schema file (SQL DDL or schema JSON). |
 | `after` | **yes** | — | Path to the updated schema file (SQL DDL or schema JSON). |
 | `format` | no | `markdown` | Output format. Mode-specific accepted values: see below. |
@@ -109,7 +109,7 @@ When `output-path` is omitted, the action derives a default from `mode` and `for
 | `output-path` | both | Path to the generated report file. |
 | `has-changes` | diff | `"true"` when the diff detected any change, `"false"` otherwise. Empty in `review` mode. |
 | `has-findings` | review | `"true"` when at least one finding was emitted at any severity, `"false"` otherwise. Empty in `diff` mode. |
-| `has-blocking-findings` | review | `"true"` when the user-pass CLI returned `rc=10` (a finding reached the `--deny` threshold). Always `"false"` when `deny` is empty. Empty in `diff` mode. |
+| `has-blocking-findings` | review | `"true"` when the CLI returned `rc=10` (a finding reached the `--deny` threshold). Always `"false"` when `deny` is empty. Empty in `diff` mode. |
 | `summary-breaking` | review | Number of `breaking` findings from the report summary. |
 | `summary-caution` | review | Number of `caution` findings. |
 | `summary-warning` | review | Number of `warning` findings. |
@@ -165,47 +165,40 @@ mode-specific translation. The relevant CLI exit codes are:
 
 ### Review mode
 
-The action runs `relune review` twice (see [Two-pass execution](#two-pass-execution)). The
-**user pass** drives `has-blocking-findings`; the **summary pass** drives `has-findings`
-and the per-severity counts.
+`mode: review` invokes `relune review` once with `--emit-summary` (see
+[Single-pass execution](#single-pass-execution)). The CLI's exit code drives
+`has-blocking-findings`; the summary file drives `has-findings` and the per-severity
+counts.
 
-| User-pass rc | `has-findings` | `has-blocking-findings` | Action exit |
-|--------------|----------------|-------------------------|-------------|
+| CLI rc | `has-findings` | `has-blocking-findings` | Action exit |
+|--------|----------------|-------------------------|-------------|
 | `0`, summary total `0` | `"false"` | `"false"` | success |
 | `0`, summary total ≥ 1 | `"true"` | `"false"` | success |
 | `10` (only when `--deny` is set) | `"true"` | `"true"` | success when `fail-on-blocking: "false"` (default), or `exit 10` when `fail-on-blocking: "true"` |
 | `1` / `2` / `3` / other | n/a | n/a | `::error::relune review failed with exit code N` and exit with the CLI's rc. |
 
-If the summary pass itself returns non-zero (it should always be `0` because `--deny` is
-not passed), the action treats that as an internal error and fails with that rc — better
-to fail loudly than to publish wrong outputs.
+`--emit-summary` writes the JSON summary even when the user-visible run short-circuits
+with `rc=10`, so the action can populate `has-findings` and `summary-*` consistently
+with the deny gate.
 
 ---
 
-## Two-pass execution
+## Single-pass execution
 
-`mode: review` runs the CLI twice for the same input:
+`mode: review` runs the CLI once. `relune review --emit-summary <PATH>` writes the
+user-visible report at `output-path` in the requested format **and** writes the full
+JSON payload to a runner-temp path in the same pass. The action reads counts from that
+JSON to populate `has-findings` / `summary-*`, and uses the CLI rc to populate
+`has-blocking-findings`.
 
-1. **User pass** — honors all of `--deny`, `--rules`, `--except-rule`, `--except-table`,
-   and `--dialect`, writes the user-visible report at `output-path` in the requested
-   format. The exit code drives `has-blocking-findings`.
-2. **Summary pass** — same filters and dialect, but with `--deny` stripped and `--format
-   json` directed at a runner-temp path. The action parses the summary counts to populate
-   `has-findings` and `summary-*` outputs. The exit code must be `0`.
+Why a separate summary file is still needed:
 
-Why two passes:
-
-- The CLI returns `rc=10` whether a single `breaking` finding fired or fifty `info`
-  findings did, depending on `--deny`. The summary pass is the only reliable way to
-  separate "any findings" from "blocking findings" without forcing every workflow to set
-  `--deny info`.
-- Stripping `--deny` from the summary pass is required: the CLI returns `rc=10` after
-  writing output when the threshold is met, which under `set -e` would abort the script
-  before the summary outputs are written.
-
-The two passes share the same parse + diff cost, which is sub-second on schemas in the
-hundreds of tables. A future CLI flag (e.g. `--emit-summary <PATH>`) can collapse this to
-a single pass.
+- `has-blocking-findings` follows `--deny`: the CLI returns `rc=10` only when a finding
+  reaches the configured threshold. Workflows that want to surface "any findings exist"
+  without forcing `--deny info` need an out-of-band counts source — the summary JSON
+  fills that role independently of the deny rc.
+- `--emit-summary` is guaranteed to write the file even when `--deny` short-circuits
+  the user-visible run, so a single invocation is enough to drive every output.
 
 ---
 
@@ -218,7 +211,7 @@ binary via `binary-path` to skip the install step:
 - name: Build relune
   run: cargo build -p relune-cli --release
 
-- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   with:
     mode: review
     before: base.sql
@@ -238,7 +231,7 @@ explicit version to bypass the API call:
 
 ```yaml
 with:
-  version: "0.8.0"
+  version: "0.10.0"
 ```
 
 ### Install step fails with "Unsupported runner OS / architecture"
