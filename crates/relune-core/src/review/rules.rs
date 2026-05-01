@@ -1333,6 +1333,9 @@ fn check_rewrite_table(
     }
 
     if !pk_rotation_columns.is_empty() {
+        // column_diffs iteration order can be non-deterministic; sort to
+        // keep the message stable across runs and golden fixtures.
+        pk_rotation_columns.sort_unstable();
         let columns_label = pk_rotation_columns.join(",");
         let mut finding = RiskFinding::new(
             ReviewRuleId::RewriteTable,
