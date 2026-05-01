@@ -13,7 +13,8 @@
 #   AFTER             — Updated schema file path (required).
 #   FORMAT            — text|markdown|json (required).
 #   OUTPUT_PATH       — Output file path (optional; derived from FORMAT).
-#   DIALECT           — auto|postgres|mysql|sqlite (optional).
+#   DIALECT           — auto|postgres|mysql|sqlite (optional). Drives both
+#                       the SQL parser and the lock-risk rule evaluation.
 #   DENY              — info|warning|caution|breaking (optional).
 #   RULES             — Newline-separated rule ids (optional).
 #   EXCEPT_RULES      — Newline-separated rule ids to exclude (optional).
