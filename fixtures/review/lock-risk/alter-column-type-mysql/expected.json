@@ -1,0 +1,11 @@
+[
+  {
+    "column_name": "external_id",
+    "message": "Column users.external_id changed type from VARCHAR(64) to BINARY(16) (mysql). Many type changes fall back to ALGORITHM=COPY and rewrite the entire table.",
+    "mitigation": "Verify ALGORITHM=INPLACE, LOCK=NONE applies for this transition (5.6+); otherwise stage with a new-column / backfill / swap.",
+    "rule_id": "risk/alter-column-type",
+    "severity": "caution",
+    "table_id": "users",
+    "table_name": "users"
+  }
+]
