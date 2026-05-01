@@ -65,6 +65,12 @@ deny = "breaking"
 except_rules = ["fk-without-index"]
 except_tables = ["audit_*"]
 
+[review.severity_overrides."risk/add-not-null-on-existing"]
+severity = "info"
+
+[review.severity_overrides."risk/fk-without-index"]
+severity = "warning"
+
 [viewpoints.billing]
 focus = "orders"
 depth = 2
@@ -213,6 +219,35 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `deny` | `info`, `warning`, `caution`, `breaking` — minimum severity that causes a non-zero exit when not overridden by `--deny` |
 
 `review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, and `--deny`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
+
+### `[review.severity_overrides."<rule-id>"]`
+
+Per-rule severity overrides let you downgrade noisy rules or escalate rules your project cares about without disabling them.
+
+| Key | Values |
+|-----|--------|
+| `severity` | `info`, `warning`, `caution`, `breaking` |
+
+```toml
+# Downgrade — treat add-not-null-on-existing as informational only.
+[review.severity_overrides."risk/add-not-null-on-existing"]
+severity = "info"
+
+# Upgrade — treat missing FK indexes as warnings (so --deny=warning fails the build).
+[review.severity_overrides."risk/fk-without-index"]
+severity = "warning"
+```
+
+Rules:
+
+- The TOML key is the **full rule ID** (`risk/<kebab>`). Bare IDs like `add-not-null-on-existing` are rejected to avoid ambiguity.
+- Unknown rule IDs are a usage error — typos fail fast on config load instead of being silently ignored.
+- Each rule may appear at most once (TOML rejects duplicate keys).
+- Overrides are applied **after** rule evaluation and **before** summary aggregation, so `summary` counts and the `--deny` decision both reflect the overridden severity.
+- There is no CLI flag equivalent in this release; severity overrides are configured via TOML only.
+
+> [!NOTE]
+> A handful of rules pick a severity case-by-case at evaluation time. `risk/drop-pk-or-unique`, for example, returns `breaking` when an incoming FK still references the dropped key and `warning` otherwise. An override replaces *both* of those outcomes with the configured severity, so a downgrade to `warning` will also cover the breaking-with-FK case. Use overrides on case-by-case rules deliberately.
 
 ---
 
