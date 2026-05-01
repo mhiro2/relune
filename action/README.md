@@ -207,15 +207,27 @@ Why a separate summary file is still needed:
 `mode: review` with an explicit `dialect: postgres` or `dialect: mysql` activates the
 lock-risk caution rules. They surface state changes whose naive execution acquires a
 problematic lock — `CREATE INDEX` on an existing table, `ADD FOREIGN KEY` on an existing
-table, `ALTER COLUMN TYPE` on a non-equivalent type, and PK rotation / column drops that
-require a table rewrite. Each match becomes a `caution` finding in the PR comment.
-`dialect: auto` (the default) does not enable these rules; the SQL parser still runs in
-auto-detect mode but the rule set is unchanged.
+table, and `ALTER COLUMN TYPE` on a non-equivalent type for both dialects, plus PK
+rotation / column drops that require a table rewrite for `dialect: mysql`
+(`risk/rewrite-table` is MySQL-only because that engine forces a full table rebuild;
+PostgreSQL handles those edits without a rewrite). Each match becomes a `caution`
+finding in the PR comment. `dialect: auto` (the default) does not enable these rules;
+the SQL parser still runs in auto-detect mode but the rule set is unchanged.
 
 To gate the merge on lock-risk findings, pair the activation with `deny: caution`. The
-caution band is opinionated, so consider reaching for `except-rules` (e.g.
-`risk/alter-column-type`) or per-rule `severity_overrides` in `relune.toml` when a
-specific rule produces too much noise for your project.
+caution band is opinionated, so reach for `except-rules` (e.g. `risk/alter-column-type`)
+when a specific rule produces too much noise for your project. The action does not
+read `relune.toml`, so `[review.severity_overrides]` only applies when you invoke
+`relune review` directly (for example, from a custom step that runs the binary
+yourself).
+
+> [!NOTE]
+> **Lock-risk caution rules read schema state, not migration SQL.**
+> Lock-risk caution rules are based on **schema state-change diff**, not on the migration
+> SQL itself. They flag a state change that — if executed naively — would acquire a
+> problematic lock; they **do not** read your migration script and cannot detect that
+> you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a
+> "make sure you used the safe variant" reminder.
 
 ---
 
