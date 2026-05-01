@@ -6,23 +6,33 @@
 
 use std::collections::HashSet;
 
-use super::{ReviewRuleId, ReviewSeverity, RiskFinding};
+use super::{DialectScope, EffectiveDialect, ReviewRuleId, ReviewSeverity, RiskFinding};
+use crate::SqlDialect;
 use crate::diff::{ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff};
 use crate::model::{ForeignKey, Schema, Table};
 
 /// Runs every rule in `applied_rules` against the diff.
 ///
-/// The caller is responsible for filtering out suppressed rules and
-/// suppressing per-table afterwards; this function only enforces "did
-/// the user select this rule".
+/// `dialect` is the effective dialect resolved by the caller (CLI, wasm,
+/// or a direct library user). It gates the lock-risk rules that only
+/// fire on a specific dialect via `ReviewRuleId::dialect_scope`; other
+/// rules ignore it. The caller is responsible for filtering out
+/// suppressed rules and suppressing per-table afterwards; this function
+/// only enforces "did the user select this rule" and "does the dialect
+/// scope match".
+//
+// The dispatcher hits 12 rule arms; splitting it would only force the
+// shared `selected` / `context` state through helper signatures.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn run_rules(
     diff: &SchemaDiff,
     before: &Schema,
     after: &Schema,
     applied_rules: &[ReviewRuleId],
+    dialect: EffectiveDialect,
 ) -> Vec<RiskFinding> {
-    let context = RuleContext::build(diff, before, after);
+    let context = RuleContext::build(diff, before, after, dialect);
     let mut findings = Vec::new();
     let selected: HashSet<ReviewRuleId> = applied_rules.iter().copied().collect();
 
@@ -33,7 +43,7 @@ pub fn run_rules(
         let before_table = context.find_before_table(&table_diff.table_name);
 
         for column_diff in &table_diff.column_diffs {
-            if selected.contains(&ReviewRuleId::DropColumnReferenced) {
+            if context.rule_active(ReviewRuleId::DropColumnReferenced, &selected) {
                 check_drop_column_referenced(
                     table_diff,
                     column_diff,
@@ -42,7 +52,7 @@ pub fn run_rules(
                     &mut findings,
                 );
             }
-            if selected.contains(&ReviewRuleId::AddNotNullOnExisting) {
+            if context.rule_active(ReviewRuleId::AddNotNullOnExisting, &selected) {
                 check_add_not_null_on_existing(
                     table_diff,
                     column_diff,
@@ -51,10 +61,10 @@ pub fn run_rules(
                     &mut findings,
                 );
             }
-            if selected.contains(&ReviewRuleId::TypeNarrow) {
+            if context.rule_active(ReviewRuleId::TypeNarrow, &selected) {
                 check_type_narrow(table_diff, column_diff, after_table, &mut findings);
             }
-            if selected.contains(&ReviewRuleId::DropPkOrUnique) {
+            if context.rule_active(ReviewRuleId::DropPkOrUnique, &selected) {
                 check_drop_pk_or_unique_column(
                     table_diff,
                     column_diff,
@@ -64,10 +74,19 @@ pub fn run_rules(
                     &mut findings,
                 );
             }
+            if context.rule_active(ReviewRuleId::AlterColumnType, &selected) {
+                check_alter_column_type_lock(
+                    table_diff,
+                    column_diff,
+                    after_table,
+                    &context,
+                    &mut findings,
+                );
+            }
         }
 
         for index_diff in &table_diff.index_diffs {
-            if selected.contains(&ReviewRuleId::DropPkOrUnique) {
+            if context.rule_active(ReviewRuleId::DropPkOrUnique, &selected) {
                 check_drop_pk_or_unique_index(
                     table_diff,
                     index_diff,
@@ -77,12 +96,21 @@ pub fn run_rules(
                     &mut findings,
                 );
             }
-            if selected.contains(&ReviewRuleId::AddUniqueOnExisting) {
+            if context.rule_active(ReviewRuleId::AddUniqueOnExisting, &selected) {
                 check_add_unique_on_existing(table_diff, index_diff, after_table, &mut findings);
+            }
+            if context.rule_active(ReviewRuleId::AddIndexOnLargeTable, &selected) {
+                check_add_index_on_large_table(
+                    table_diff,
+                    index_diff,
+                    after_table,
+                    &context,
+                    &mut findings,
+                );
             }
         }
 
-        if selected.contains(&ReviewRuleId::DropPkOrUnique) {
+        if context.rule_active(ReviewRuleId::DropPkOrUnique, &selected) {
             check_drop_pk_or_unique_widened(
                 table_diff,
                 before_table,
@@ -93,16 +121,29 @@ pub fn run_rules(
         }
 
         for fk_diff in &table_diff.fk_diffs {
-            if selected.contains(&ReviewRuleId::AddCascadeDelete) {
+            if context.rule_active(ReviewRuleId::AddCascadeDelete, &selected) {
                 check_add_cascade_delete(table_diff, fk_diff, after_table, &context, &mut findings);
             }
-            if selected.contains(&ReviewRuleId::FkWithoutIndex) {
+            if context.rule_active(ReviewRuleId::FkWithoutIndex, &selected) {
                 check_fk_without_index(table_diff, fk_diff, after_table, &mut findings);
             }
+            if context.rule_active(ReviewRuleId::AddFkOnExisting, &selected) {
+                check_add_fk_on_existing(table_diff, fk_diff, after_table, &context, &mut findings);
+            }
+        }
+
+        if context.rule_active(ReviewRuleId::RewriteTable, &selected) {
+            check_rewrite_table(
+                table_diff,
+                before_table,
+                after_table,
+                &context,
+                &mut findings,
+            );
         }
     }
 
-    if selected.contains(&ReviewRuleId::DropTableReferenced) {
+    if context.rule_active(ReviewRuleId::DropTableReferenced, &selected) {
         check_drop_table_referenced(diff, &context, &mut findings);
     }
 
@@ -118,6 +159,8 @@ struct RuleContext<'a> {
     removed_fks: HashSet<RemovedFk>,
     /// Set of table qualified names removed by this diff (lower-cased).
     removed_tables: HashSet<String>,
+    /// Effective dialect used to gate lock-risk rules.
+    dialect: EffectiveDialect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -133,7 +176,12 @@ struct RemovedFk {
 }
 
 impl<'a> RuleContext<'a> {
-    fn build(diff: &SchemaDiff, before: &'a Schema, after: &'a Schema) -> Self {
+    fn build(
+        diff: &SchemaDiff,
+        before: &'a Schema,
+        after: &'a Schema,
+        dialect: EffectiveDialect,
+    ) -> Self {
         let mut removed_fks: HashSet<RemovedFk> = HashSet::new();
         for table_diff in &diff.modified_tables {
             for fk_diff in &table_diff.fk_diffs {
@@ -184,6 +232,28 @@ impl<'a> RuleContext<'a> {
             after,
             removed_fks,
             removed_tables: removed_table_qnames,
+            dialect,
+        }
+    }
+
+    /// Returns true when a rule is selected by the caller and its
+    /// `dialect_scope` includes the effective dialect.
+    ///
+    /// Lock-risk rules with `DialectScope::OneOf(...)` silently skip
+    /// when the dialect is `Auto` or outside the rule's scope; the
+    /// caller does not need to pre-filter `applied_rules`.
+    fn rule_active(&self, rule: ReviewRuleId, selected: &HashSet<ReviewRuleId>) -> bool {
+        if !selected.contains(&rule) {
+            return false;
+        }
+        match rule.dialect_scope() {
+            DialectScope::Any => true,
+            DialectScope::OneOf(scopes) => match self.dialect {
+                EffectiveDialect::Auto => false,
+                EffectiveDialect::Postgres => scopes.contains(&SqlDialect::Postgres),
+                EffectiveDialect::Mysql => scopes.contains(&SqlDialect::Mysql),
+                EffectiveDialect::Sqlite => scopes.contains(&SqlDialect::Sqlite),
+            },
         }
     }
 
@@ -1034,6 +1104,63 @@ fn check_fk_without_index(
     findings.push(finding);
 }
 
+/// `risk/add-index-on-large-table` — index added on an existing table;
+/// non-CONCURRENT / non-INPLACE builds block writes for the duration of
+/// the rebuild.
+#[allow(clippy::missing_const_for_fn)]
+fn check_add_index_on_large_table(
+    _table_diff: &TableDiff,
+    _index_diff: &IndexDiff,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
+/// `risk/add-fk-on-existing` — FK added between two tables that both
+/// already existed; validation locks the referencing table while every
+/// existing row is checked.
+#[allow(clippy::missing_const_for_fn)]
+fn check_add_fk_on_existing(
+    _table_diff: &TableDiff,
+    _fk_diff: &ForeignKeyDiff,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
+/// `risk/alter-column-type` — existing column's data type was changed;
+/// many type changes rewrite the entire table under an exclusive lock.
+//
+// The name carries `_lock` to keep it independent from
+// `check_type_narrow`, which fires on the same `ColumnDiff::Modified`
+// from a different (data-correctness) angle.
+#[allow(clippy::missing_const_for_fn)]
+fn check_alter_column_type_lock(
+    _table_diff: &TableDiff,
+    _column_diff: &ColumnDiff,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
+/// `risk/rewrite-table` — schema change forces a full table rebuild on
+/// `MySQL` 5.7-compatible engines (PK rotation or existing column drop).
+//
+// Operates at table-diff granularity rather than per-column /
+// per-index, so the dispatcher invokes it once per modified table.
+#[allow(clippy::missing_const_for_fn)]
+fn check_rewrite_table(
+    _table_diff: &TableDiff,
+    _before_table: Option<&Table>,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
 fn covers(set: &[String], expected: &[String]) -> bool {
     if expected.is_empty() {
         return true;
@@ -1212,7 +1339,13 @@ mod tests {
 
     fn run_all(before: &Schema, after: &Schema) -> Vec<RiskFinding> {
         let diff = diff_schemas(before, after);
-        run_rules(&diff, before, after, ReviewRuleId::all_rules())
+        run_rules(
+            &diff,
+            before,
+            after,
+            ReviewRuleId::all_rules(),
+            EffectiveDialect::Auto,
+        )
     }
 
     #[test]
