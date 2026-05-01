@@ -2421,6 +2421,10 @@ mod review_tests {
             "risk/add-unique-on-existing",
             "risk/add-cascade-delete",
             "risk/fk-without-index",
+            "risk/add-index-on-large-table",
+            "risk/add-fk-on-existing",
+            "risk/alter-column-type",
+            "risk/rewrite-table",
         ] {
             assert!(
                 stdout.contains(rule),
@@ -2429,6 +2433,7 @@ mod review_tests {
         }
         assert!(stdout.contains("breaking"));
         assert!(stdout.contains("warning"));
+        assert!(stdout.contains("caution"));
         assert!(stdout.contains("info"));
     }
 
@@ -2451,7 +2456,7 @@ mod review_tests {
         let entries = parsed
             .as_array()
             .expect("--list-rules JSON should be an array");
-        assert_eq!(entries.len(), 8, "expected metadata for every review rule");
+        assert_eq!(entries.len(), 12, "expected metadata for every review rule");
         let first = &entries[0];
         assert_eq!(first["rule_id"], "risk/drop-column-referenced");
         assert_eq!(first["default_severity"], "breaking");

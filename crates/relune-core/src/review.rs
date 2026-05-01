@@ -162,6 +162,18 @@ pub enum ReviewRuleId {
     AddCascadeDelete,
     /// New foreign key without a supporting index.
     FkWithoutIndex,
+    /// Index added on an existing table; non-CONCURRENT / non-INPLACE
+    /// builds block writes for the duration of the rebuild.
+    AddIndexOnLargeTable,
+    /// Foreign key added between two existing tables; validation locks
+    /// the referencing table while every existing row is checked.
+    AddFkOnExisting,
+    /// Existing column's data type was changed; many type changes
+    /// rewrite the entire table under an exclusive lock.
+    AlterColumnType,
+    /// Schema change forces a full table rebuild on `MySQL` 5.7-compatible
+    /// engines (PK rotation or existing column drop).
+    RewriteTable,
 }
 
 impl ReviewRuleId {
@@ -177,6 +189,12 @@ impl ReviewRuleId {
             Self::AddUniqueOnExisting,
             Self::AddCascadeDelete,
             Self::FkWithoutIndex,
+            // Phase 4 lock-risk rules. Append-only so the listing order
+            // stays stable for callers (CLI listings, fixtures, docs).
+            Self::AddIndexOnLargeTable,
+            Self::AddFkOnExisting,
+            Self::AlterColumnType,
+            Self::RewriteTable,
         ]
     }
 
@@ -192,6 +210,10 @@ impl ReviewRuleId {
             Self::AddUniqueOnExisting => "risk/add-unique-on-existing",
             Self::AddCascadeDelete => "risk/add-cascade-delete",
             Self::FkWithoutIndex => "risk/fk-without-index",
+            Self::AddIndexOnLargeTable => "risk/add-index-on-large-table",
+            Self::AddFkOnExisting => "risk/add-fk-on-existing",
+            Self::AlterColumnType => "risk/alter-column-type",
+            Self::RewriteTable => "risk/rewrite-table",
         }
     }
 
@@ -215,6 +237,18 @@ impl ReviewRuleId {
             }
             Self::AddCascadeDelete => "Foreign key now uses ON DELETE CASCADE",
             Self::FkWithoutIndex => "New foreign key has no supporting index",
+            Self::AddIndexOnLargeTable => {
+                "New index on existing table; non-CONCURRENT/INPLACE builds lock the rebuild"
+            }
+            Self::AddFkOnExisting => {
+                "New foreign key validates every existing row under a blocking lock"
+            }
+            Self::AlterColumnType => {
+                "Existing column's type change may rewrite the table under an exclusive lock"
+            }
+            Self::RewriteTable => {
+                "Schema change forces a table rebuild on MySQL 5.7-compatible engines"
+            }
         }
     }
 
@@ -233,6 +267,10 @@ impl ReviewRuleId {
             | Self::AddCascadeDelete
             | Self::DropPkOrUnique => ReviewSeverity::Warning,
             Self::FkWithoutIndex => ReviewSeverity::Info,
+            Self::AddIndexOnLargeTable
+            | Self::AddFkOnExisting
+            | Self::AlterColumnType
+            | Self::RewriteTable => ReviewSeverity::Caution,
         }
     }
 
