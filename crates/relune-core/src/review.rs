@@ -262,7 +262,7 @@ impl ReviewRuleId {
             Self::AddCascadeDelete => "Foreign key now uses ON DELETE CASCADE",
             Self::FkWithoutIndex => "New foreign key has no supporting index",
             Self::AddIndexOnLargeTable => {
-                "New index on existing table; non-CONCURRENT/INPLACE builds lock the rebuild"
+                "New index on existing table; non-CONCURRENT/INPLACE builds lock the table"
             }
             Self::AddFkOnExisting => {
                 "New foreign key validates every existing row under a blocking lock"

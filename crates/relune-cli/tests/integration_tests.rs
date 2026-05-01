@@ -2464,6 +2464,52 @@ mod review_tests {
             first["description"].as_str().is_some_and(|d| !d.is_empty()),
             "description should be populated"
         );
+
+        let by_id: std::collections::HashMap<&str, &serde_json::Value> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry["rule_id"]
+                        .as_str()
+                        .expect("rule_id should be a string"),
+                    entry,
+                )
+            })
+            .collect();
+        for (rule_id, expected_severity, expected_description) in [
+            (
+                "risk/add-index-on-large-table",
+                "caution",
+                "New index on existing table; non-CONCURRENT/INPLACE builds lock the table",
+            ),
+            (
+                "risk/add-fk-on-existing",
+                "caution",
+                "New foreign key validates every existing row under a blocking lock",
+            ),
+            (
+                "risk/alter-column-type",
+                "caution",
+                "Existing column's type change may rewrite the table under an exclusive lock",
+            ),
+            (
+                "risk/rewrite-table",
+                "caution",
+                "Schema change forces a table rebuild on MySQL 5.7-compatible engines",
+            ),
+        ] {
+            let entry = by_id
+                .get(rule_id)
+                .unwrap_or_else(|| panic!("metadata for {rule_id} should exist"));
+            assert_eq!(
+                entry["default_severity"], expected_severity,
+                "{rule_id} default_severity"
+            );
+            assert_eq!(
+                entry["description"], expected_description,
+                "{rule_id} description"
+            );
+        }
     }
 
     #[test]
