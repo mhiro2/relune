@@ -20,6 +20,10 @@ use crate::model::{ForeignKey, Schema, Table};
 /// suppressed rules and suppressing per-table afterwards; this function
 /// only enforces "did the user select this rule" and "does the dialect
 /// scope match".
+//
+// The dispatcher hits 12 rule arms; splitting it would only force the
+// shared `selected` / `context` state through helper signatures.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn run_rules(
     diff: &SchemaDiff,
@@ -70,6 +74,15 @@ pub fn run_rules(
                     &mut findings,
                 );
             }
+            if context.rule_active(ReviewRuleId::AlterColumnType, &selected) {
+                check_alter_column_type_lock(
+                    table_diff,
+                    column_diff,
+                    after_table,
+                    &context,
+                    &mut findings,
+                );
+            }
         }
 
         for index_diff in &table_diff.index_diffs {
@@ -85,6 +98,15 @@ pub fn run_rules(
             }
             if context.rule_active(ReviewRuleId::AddUniqueOnExisting, &selected) {
                 check_add_unique_on_existing(table_diff, index_diff, after_table, &mut findings);
+            }
+            if context.rule_active(ReviewRuleId::AddIndexOnLargeTable, &selected) {
+                check_add_index_on_large_table(
+                    table_diff,
+                    index_diff,
+                    after_table,
+                    &context,
+                    &mut findings,
+                );
             }
         }
 
@@ -105,6 +127,19 @@ pub fn run_rules(
             if context.rule_active(ReviewRuleId::FkWithoutIndex, &selected) {
                 check_fk_without_index(table_diff, fk_diff, after_table, &mut findings);
             }
+            if context.rule_active(ReviewRuleId::AddFkOnExisting, &selected) {
+                check_add_fk_on_existing(table_diff, fk_diff, after_table, &context, &mut findings);
+            }
+        }
+
+        if context.rule_active(ReviewRuleId::RewriteTable, &selected) {
+            check_rewrite_table(
+                table_diff,
+                before_table,
+                after_table,
+                &context,
+                &mut findings,
+            );
         }
     }
 
@@ -1067,6 +1102,63 @@ fn check_fk_without_index(
         finding = finding.with_column(new.from_columns[0].clone());
     }
     findings.push(finding);
+}
+
+/// `risk/add-index-on-large-table` — index added on an existing table;
+/// non-CONCURRENT / non-INPLACE builds block writes for the duration of
+/// the rebuild.
+#[allow(clippy::missing_const_for_fn)]
+fn check_add_index_on_large_table(
+    _table_diff: &TableDiff,
+    _index_diff: &IndexDiff,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
+/// `risk/add-fk-on-existing` — FK added between two tables that both
+/// already existed; validation locks the referencing table while every
+/// existing row is checked.
+#[allow(clippy::missing_const_for_fn)]
+fn check_add_fk_on_existing(
+    _table_diff: &TableDiff,
+    _fk_diff: &ForeignKeyDiff,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
+/// `risk/alter-column-type` — existing column's data type was changed;
+/// many type changes rewrite the entire table under an exclusive lock.
+//
+// The name carries `_lock` to keep it independent from
+// `check_type_narrow`, which fires on the same `ColumnDiff::Modified`
+// from a different (data-correctness) angle.
+#[allow(clippy::missing_const_for_fn)]
+fn check_alter_column_type_lock(
+    _table_diff: &TableDiff,
+    _column_diff: &ColumnDiff,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
+}
+
+/// `risk/rewrite-table` — schema change forces a full table rebuild on
+/// `MySQL` 5.7-compatible engines (PK rotation or existing column drop).
+//
+// Operates at table-diff granularity rather than per-column /
+// per-index, so the dispatcher invokes it once per modified table.
+#[allow(clippy::missing_const_for_fn)]
+fn check_rewrite_table(
+    _table_diff: &TableDiff,
+    _before_table: Option<&Table>,
+    _after_table: &Table,
+    _context: &RuleContext<'_>,
+    _findings: &mut Vec<RiskFinding>,
+) {
 }
 
 fn covers(set: &[String], expected: &[String]) -> bool {
