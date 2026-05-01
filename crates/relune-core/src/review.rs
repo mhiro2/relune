@@ -176,6 +176,30 @@ pub enum ReviewRuleId {
     RewriteTable,
 }
 
+/// Dialect scope of a review rule.
+///
+/// Controls when the rule fires relative to the effective dialect
+/// resolved by the review pipeline. Lock-risk rules added in Phase 4
+/// only carry an actionable signal under specific dialects, so they
+/// declare a non-`Any` scope and the rule dispatcher silently filters
+/// them out when the dialect does not match.
+///
+/// Kept `pub(crate)` because the metadata surface
+/// (`ReviewRuleMetadata`) intentionally does not expose dialect scope:
+/// CLI / wasm / playground continue to list every rule and let the
+/// pipeline gate evaluation per request.
+//
+// Consumed by `run_rules` in a follow-up commit; the type definition
+// lands first so subsequent callsite wiring stays a focused diff.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DialectScope {
+    /// Rule fires regardless of the effective dialect.
+    Any,
+    /// Rule fires only when the effective dialect is in this list.
+    OneOf(&'static [SqlDialect]),
+}
+
 impl ReviewRuleId {
     /// Returns every rule defined in this module.
     #[must_use]
@@ -271,6 +295,36 @@ impl ReviewRuleId {
             | Self::AddFkOnExisting
             | Self::AlterColumnType
             | Self::RewriteTable => ReviewSeverity::Caution,
+        }
+    }
+
+    /// Dialect scope used by the rule dispatcher to gate evaluation.
+    ///
+    /// Returns `DialectScope::Any` for rules whose semantics are
+    /// dialect-agnostic, and `DialectScope::OneOf(...)` for lock-risk
+    /// rules that only carry an actionable signal under a specific
+    /// dialect. Internal helper used by `run_rules`; intentionally
+    /// `pub(crate)` so the metadata surface stays stable.
+    //
+    // Consumed by `run_rules` in a follow-up commit; the helper lands
+    // first so subsequent callsite wiring stays a focused diff. Once
+    // wired the dead_code allow can come off; the &self receiver
+    // matches `as_str` / `default_severity` for consistency.
+    #[allow(dead_code, clippy::trivially_copy_pass_by_ref)]
+    pub(crate) const fn dialect_scope(&self) -> DialectScope {
+        match self {
+            Self::DropColumnReferenced
+            | Self::DropTableReferenced
+            | Self::AddNotNullOnExisting
+            | Self::TypeNarrow
+            | Self::DropPkOrUnique
+            | Self::AddUniqueOnExisting
+            | Self::AddCascadeDelete
+            | Self::FkWithoutIndex => DialectScope::Any,
+            Self::AddIndexOnLargeTable | Self::AddFkOnExisting | Self::AlterColumnType => {
+                DialectScope::OneOf(&[SqlDialect::Postgres, SqlDialect::Mysql])
+            }
+            Self::RewriteTable => DialectScope::OneOf(&[SqlDialect::Mysql]),
         }
     }
 
@@ -663,6 +717,52 @@ mod tests {
     #[test]
     fn effective_dialect_default_is_auto() {
         assert_eq!(EffectiveDialect::default(), EffectiveDialect::Auto);
+    }
+
+    #[test]
+    fn dialect_scope_is_any_for_phase1_through_phase3_rules() {
+        for rule in [
+            ReviewRuleId::DropColumnReferenced,
+            ReviewRuleId::DropTableReferenced,
+            ReviewRuleId::AddNotNullOnExisting,
+            ReviewRuleId::TypeNarrow,
+            ReviewRuleId::DropPkOrUnique,
+            ReviewRuleId::AddUniqueOnExisting,
+            ReviewRuleId::AddCascadeDelete,
+            ReviewRuleId::FkWithoutIndex,
+        ] {
+            assert_eq!(
+                rule.dialect_scope(),
+                DialectScope::Any,
+                "{} should have dialect-agnostic scope",
+                rule.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn dialect_scope_for_pg_and_mysql_lock_risk_rules() {
+        let pg_or_mysql: &[SqlDialect] = &[SqlDialect::Postgres, SqlDialect::Mysql];
+        for rule in [
+            ReviewRuleId::AddIndexOnLargeTable,
+            ReviewRuleId::AddFkOnExisting,
+            ReviewRuleId::AlterColumnType,
+        ] {
+            assert_eq!(
+                rule.dialect_scope(),
+                DialectScope::OneOf(pg_or_mysql),
+                "{} should fire only on postgres or mysql",
+                rule.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn dialect_scope_for_rewrite_table_is_mysql_only() {
+        assert_eq!(
+            ReviewRuleId::RewriteTable.dialect_scope(),
+            DialectScope::OneOf(&[SqlDialect::Mysql])
+        );
     }
 
     #[test]
