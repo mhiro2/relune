@@ -544,6 +544,10 @@ details[open] > .ctrl-section__title::before {
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
+.compare-review-dialect-select {
+  width: 100%;
+}
+
 /* --- Mode tabs ------------------------------------------------- */
 .mode-tabs {
   display: grid;
@@ -1313,6 +1317,16 @@ details[open] > .ctrl-section__title::before {
 }
 
 /* --- Review (Risk review) findings ----------------------------- */
+.review-dialect-note {
+  margin: 0;
+  padding: 8px 14px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .finding-list {
   margin: 0;
   padding: 0;
