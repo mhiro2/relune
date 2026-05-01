@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use relune_core::{
-    ReviewResult as CoreReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity,
-    ReviewSeverityOverride, ReviewSummary, RiskFinding, diff_schemas,
+    EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId, ReviewRuleMetadata,
+    ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding, diff_schemas,
 };
 
 use crate::error::AppError;
@@ -24,8 +24,13 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
 
     let applied_rules = resolve_active_rules(&request.rules, &request.except_rules)?;
     let override_map = build_override_map(&request.severity_overrides)?;
-    let mut raw_findings =
-        relune_core::run_rules(&schema_diff, &before_schema, &after_schema, &applied_rules);
+    let mut raw_findings = relune_core::run_rules(
+        &schema_diff,
+        &before_schema,
+        &after_schema,
+        &applied_rules,
+        EffectiveDialect::Auto,
+    );
     apply_severity_overrides(&mut raw_findings, &override_map);
 
     let (findings, suppressed) = partition_suppressed(raw_findings, &request.except_tables);

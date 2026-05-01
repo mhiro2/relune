@@ -112,7 +112,7 @@ fi
 
 # `has-blocking-findings` follows the rc of the single pass: rc=10 means a
 # finding hit the `--deny` threshold. The summary's `.denied` field carries
-# the same signal but rc keeps the contract identical to Phase 2.
+# the same signal, but rc is the canonical source.
 if [[ ${user_rc} -eq 10 ]]; then
   has_blocking="true"
 else

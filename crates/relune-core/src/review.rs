@@ -22,8 +22,7 @@ pub use rules::run_rules;
 /// Independent from the parser dialect carried by `InputSource` (which
 /// only governs SQL lexing): this is the **single source** for dialect
 /// decisions inside rule evaluation, in particular the lock-risk rules
-/// added in Phase 4 that only fire when the dialect resolves to
-/// `Postgres` or `Mysql`.
+/// that only fire when the dialect resolves to `Postgres` or `Mysql`.
 ///
 /// The value is produced by callers (`relune-app`, CLI, wasm) from
 /// `--dialect` / `WasmReviewRequest.dialect` / `[review.dialect]` and
@@ -97,8 +96,7 @@ pub enum ReviewSeverity {
     Info,
     /// Semantic shift or constraint that may reject existing data.
     Warning,
-    /// Operationally risky at scale (locking, availability). Wired up in
-    /// Phase 4 but reserved here so the ordering is stable.
+    /// Operationally risky at scale (locking, availability).
     Caution,
     /// Migration is expected to fail or destroy data.
     Breaking,
@@ -179,19 +177,15 @@ pub enum ReviewRuleId {
 /// Dialect scope of a review rule.
 ///
 /// Controls when the rule fires relative to the effective dialect
-/// resolved by the review pipeline. Lock-risk rules added in Phase 4
-/// only carry an actionable signal under specific dialects, so they
-/// declare a non-`Any` scope and the rule dispatcher silently filters
-/// them out when the dialect does not match.
+/// resolved by the review pipeline. Lock-risk rules only carry an
+/// actionable signal under specific dialects, so they declare a
+/// non-`Any` scope and the rule dispatcher silently filters them out
+/// when the dialect does not match.
 ///
 /// Kept `pub(crate)` because the metadata surface
 /// (`ReviewRuleMetadata`) intentionally does not expose dialect scope:
 /// CLI / wasm / playground continue to list every rule and let the
 /// pipeline gate evaluation per request.
-//
-// Consumed by `run_rules` in a follow-up commit; the type definition
-// lands first so subsequent callsite wiring stays a focused diff.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DialectScope {
     /// Rule fires regardless of the effective dialect.
@@ -213,8 +207,8 @@ impl ReviewRuleId {
             Self::AddUniqueOnExisting,
             Self::AddCascadeDelete,
             Self::FkWithoutIndex,
-            // Phase 4 lock-risk rules. Append-only so the listing order
-            // stays stable for callers (CLI listings, fixtures, docs).
+            // Lock-risk rules. Append-only so the listing order stays
+            // stable for callers (CLI listings, fixtures, docs).
             Self::AddIndexOnLargeTable,
             Self::AddFkOnExisting,
             Self::AlterColumnType,
@@ -306,11 +300,9 @@ impl ReviewRuleId {
     /// dialect. Internal helper used by `run_rules`; intentionally
     /// `pub(crate)` so the metadata surface stays stable.
     //
-    // Consumed by `run_rules` in a follow-up commit; the helper lands
-    // first so subsequent callsite wiring stays a focused diff. Once
-    // wired the dead_code allow can come off; the &self receiver
-    // matches `as_str` / `default_severity` for consistency.
-    #[allow(dead_code, clippy::trivially_copy_pass_by_ref)]
+    // The &self receiver matches `as_str` / `default_severity` for
+    // consistency across rule introspection helpers.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub(crate) const fn dialect_scope(&self) -> DialectScope {
         match self {
             Self::DropColumnReferenced
@@ -720,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn dialect_scope_is_any_for_phase1_through_phase3_rules() {
+    fn dialect_scope_is_any_for_dialect_agnostic_rules() {
         for rule in [
             ReviewRuleId::DropColumnReferenced,
             ReviewRuleId::DropTableReferenced,
