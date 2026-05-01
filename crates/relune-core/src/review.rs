@@ -8,6 +8,7 @@
 //! `crate::Severity`: review severity describes "migration safety", while
 //! lint severity describes "schema quality".
 
+use crate::SqlDialect;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -15,6 +16,75 @@ use std::str::FromStr;
 mod rules;
 
 pub use rules::run_rules;
+
+/// Dialect that the review pipeline actually evaluates against.
+///
+/// Independent from the parser dialect carried by `InputSource` (which
+/// only governs SQL lexing): this is the **single source** for dialect
+/// decisions inside rule evaluation, in particular the lock-risk rules
+/// added in Phase 4 that only fire when the dialect resolves to
+/// `Postgres` or `Mysql`.
+///
+/// The value is produced by callers (`relune-app`, CLI, wasm) from
+/// `--dialect` / `WasmReviewRequest.dialect` / `[review.dialect]` and
+/// passed into `run_rules`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum EffectiveDialect {
+    /// Dialect is not pinned; lock-risk rules do not fire.
+    #[default]
+    Auto,
+    /// `PostgreSQL` semantics for lock-risk evaluation.
+    Postgres,
+    /// `MySQL` semantics for lock-risk evaluation.
+    Mysql,
+    /// `SQLite`; lock-risk rules do not fire (sqlite has no online DDL
+    /// to opt into, so a caution would carry no actionable signal).
+    Sqlite,
+}
+
+impl EffectiveDialect {
+    /// Returns true when the dialect supports any lock-risk rule.
+    ///
+    /// Currently `Postgres` and `Mysql` only; `Auto` and `Sqlite` always
+    /// skip the lock-risk rule set.
+    #[must_use]
+    pub const fn is_lock_risk_capable(&self) -> bool {
+        matches!(self, Self::Postgres | Self::Mysql)
+    }
+}
+
+impl fmt::Display for EffectiveDialect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::Postgres => write!(f, "postgres"),
+            Self::Mysql => write!(f, "mysql"),
+            Self::Sqlite => write!(f, "sqlite"),
+        }
+    }
+}
+
+impl From<SqlDialect> for EffectiveDialect {
+    fn from(value: SqlDialect) -> Self {
+        match value {
+            SqlDialect::Auto => Self::Auto,
+            SqlDialect::Postgres => Self::Postgres,
+            SqlDialect::Mysql => Self::Mysql,
+            SqlDialect::Sqlite => Self::Sqlite,
+        }
+    }
+}
+
+impl From<EffectiveDialect> for SqlDialect {
+    fn from(value: EffectiveDialect) -> Self {
+        match value {
+            EffectiveDialect::Auto => Self::Auto,
+            EffectiveDialect::Postgres => Self::Postgres,
+            EffectiveDialect::Mysql => Self::Mysql,
+            EffectiveDialect::Sqlite => Self::Sqlite,
+        }
+    }
+}
 
 /// Severity scale for migration risk findings.
 ///
@@ -92,6 +162,42 @@ pub enum ReviewRuleId {
     AddCascadeDelete,
     /// New foreign key without a supporting index.
     FkWithoutIndex,
+    /// Index added on an existing table; non-CONCURRENT / non-INPLACE
+    /// builds block writes for the duration of the rebuild.
+    AddIndexOnLargeTable,
+    /// Foreign key added between two existing tables; validation locks
+    /// the referencing table while every existing row is checked.
+    AddFkOnExisting,
+    /// Existing column's data type was changed; many type changes
+    /// rewrite the entire table under an exclusive lock.
+    AlterColumnType,
+    /// Schema change forces a full table rebuild on `MySQL` 5.7-compatible
+    /// engines (PK rotation or existing column drop).
+    RewriteTable,
+}
+
+/// Dialect scope of a review rule.
+///
+/// Controls when the rule fires relative to the effective dialect
+/// resolved by the review pipeline. Lock-risk rules added in Phase 4
+/// only carry an actionable signal under specific dialects, so they
+/// declare a non-`Any` scope and the rule dispatcher silently filters
+/// them out when the dialect does not match.
+///
+/// Kept `pub(crate)` because the metadata surface
+/// (`ReviewRuleMetadata`) intentionally does not expose dialect scope:
+/// CLI / wasm / playground continue to list every rule and let the
+/// pipeline gate evaluation per request.
+//
+// Consumed by `run_rules` in a follow-up commit; the type definition
+// lands first so subsequent callsite wiring stays a focused diff.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DialectScope {
+    /// Rule fires regardless of the effective dialect.
+    Any,
+    /// Rule fires only when the effective dialect is in this list.
+    OneOf(&'static [SqlDialect]),
 }
 
 impl ReviewRuleId {
@@ -107,6 +213,12 @@ impl ReviewRuleId {
             Self::AddUniqueOnExisting,
             Self::AddCascadeDelete,
             Self::FkWithoutIndex,
+            // Phase 4 lock-risk rules. Append-only so the listing order
+            // stays stable for callers (CLI listings, fixtures, docs).
+            Self::AddIndexOnLargeTable,
+            Self::AddFkOnExisting,
+            Self::AlterColumnType,
+            Self::RewriteTable,
         ]
     }
 
@@ -122,6 +234,10 @@ impl ReviewRuleId {
             Self::AddUniqueOnExisting => "risk/add-unique-on-existing",
             Self::AddCascadeDelete => "risk/add-cascade-delete",
             Self::FkWithoutIndex => "risk/fk-without-index",
+            Self::AddIndexOnLargeTable => "risk/add-index-on-large-table",
+            Self::AddFkOnExisting => "risk/add-fk-on-existing",
+            Self::AlterColumnType => "risk/alter-column-type",
+            Self::RewriteTable => "risk/rewrite-table",
         }
     }
 
@@ -145,6 +261,18 @@ impl ReviewRuleId {
             }
             Self::AddCascadeDelete => "Foreign key now uses ON DELETE CASCADE",
             Self::FkWithoutIndex => "New foreign key has no supporting index",
+            Self::AddIndexOnLargeTable => {
+                "New index on existing table; non-CONCURRENT/INPLACE builds lock the table"
+            }
+            Self::AddFkOnExisting => {
+                "New foreign key validates every existing row under a blocking lock"
+            }
+            Self::AlterColumnType => {
+                "Existing column's type change may rewrite the table under an exclusive lock"
+            }
+            Self::RewriteTable => {
+                "Schema change forces a table rebuild on MySQL 5.7-compatible engines"
+            }
         }
     }
 
@@ -163,6 +291,40 @@ impl ReviewRuleId {
             | Self::AddCascadeDelete
             | Self::DropPkOrUnique => ReviewSeverity::Warning,
             Self::FkWithoutIndex => ReviewSeverity::Info,
+            Self::AddIndexOnLargeTable
+            | Self::AddFkOnExisting
+            | Self::AlterColumnType
+            | Self::RewriteTable => ReviewSeverity::Caution,
+        }
+    }
+
+    /// Dialect scope used by the rule dispatcher to gate evaluation.
+    ///
+    /// Returns `DialectScope::Any` for rules whose semantics are
+    /// dialect-agnostic, and `DialectScope::OneOf(...)` for lock-risk
+    /// rules that only carry an actionable signal under a specific
+    /// dialect. Internal helper used by `run_rules`; intentionally
+    /// `pub(crate)` so the metadata surface stays stable.
+    //
+    // Consumed by `run_rules` in a follow-up commit; the helper lands
+    // first so subsequent callsite wiring stays a focused diff. Once
+    // wired the dead_code allow can come off; the &self receiver
+    // matches `as_str` / `default_severity` for consistency.
+    #[allow(dead_code, clippy::trivially_copy_pass_by_ref)]
+    pub(crate) const fn dialect_scope(&self) -> DialectScope {
+        match self {
+            Self::DropColumnReferenced
+            | Self::DropTableReferenced
+            | Self::AddNotNullOnExisting
+            | Self::TypeNarrow
+            | Self::DropPkOrUnique
+            | Self::AddUniqueOnExisting
+            | Self::AddCascadeDelete
+            | Self::FkWithoutIndex => DialectScope::Any,
+            Self::AddIndexOnLargeTable | Self::AddFkOnExisting | Self::AlterColumnType => {
+                DialectScope::OneOf(&[SqlDialect::Postgres, SqlDialect::Mysql])
+            }
+            Self::RewriteTable => DialectScope::OneOf(&[SqlDialect::Mysql]),
         }
     }
 
@@ -528,6 +690,79 @@ mod tests {
         assert!(summary.has_findings_at_or_above(ReviewSeverity::Warning));
         assert!(!summary.has_findings_at_or_above(ReviewSeverity::Caution));
         assert!(!summary.has_findings_at_or_above(ReviewSeverity::Breaking));
+    }
+
+    #[test]
+    fn effective_dialect_round_trips_with_sql_dialect() {
+        for dialect in [
+            SqlDialect::Auto,
+            SqlDialect::Postgres,
+            SqlDialect::Mysql,
+            SqlDialect::Sqlite,
+        ] {
+            let effective: EffectiveDialect = dialect.into();
+            let back: SqlDialect = effective.into();
+            assert_eq!(back, dialect);
+        }
+    }
+
+    #[test]
+    fn effective_dialect_lock_risk_capable_is_pg_or_mysql() {
+        assert!(EffectiveDialect::Postgres.is_lock_risk_capable());
+        assert!(EffectiveDialect::Mysql.is_lock_risk_capable());
+        assert!(!EffectiveDialect::Auto.is_lock_risk_capable());
+        assert!(!EffectiveDialect::Sqlite.is_lock_risk_capable());
+    }
+
+    #[test]
+    fn effective_dialect_default_is_auto() {
+        assert_eq!(EffectiveDialect::default(), EffectiveDialect::Auto);
+    }
+
+    #[test]
+    fn dialect_scope_is_any_for_phase1_through_phase3_rules() {
+        for rule in [
+            ReviewRuleId::DropColumnReferenced,
+            ReviewRuleId::DropTableReferenced,
+            ReviewRuleId::AddNotNullOnExisting,
+            ReviewRuleId::TypeNarrow,
+            ReviewRuleId::DropPkOrUnique,
+            ReviewRuleId::AddUniqueOnExisting,
+            ReviewRuleId::AddCascadeDelete,
+            ReviewRuleId::FkWithoutIndex,
+        ] {
+            assert_eq!(
+                rule.dialect_scope(),
+                DialectScope::Any,
+                "{} should have dialect-agnostic scope",
+                rule.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn dialect_scope_for_pg_and_mysql_lock_risk_rules() {
+        let pg_or_mysql: &[SqlDialect] = &[SqlDialect::Postgres, SqlDialect::Mysql];
+        for rule in [
+            ReviewRuleId::AddIndexOnLargeTable,
+            ReviewRuleId::AddFkOnExisting,
+            ReviewRuleId::AlterColumnType,
+        ] {
+            assert_eq!(
+                rule.dialect_scope(),
+                DialectScope::OneOf(pg_or_mysql),
+                "{} should fire only on postgres or mysql",
+                rule.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn dialect_scope_for_rewrite_table_is_mysql_only() {
+        assert_eq!(
+            ReviewRuleId::RewriteTable.dialect_scope(),
+            DialectScope::OneOf(&[SqlDialect::Mysql])
+        );
     }
 
     #[test]

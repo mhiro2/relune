@@ -2421,6 +2421,10 @@ mod review_tests {
             "risk/add-unique-on-existing",
             "risk/add-cascade-delete",
             "risk/fk-without-index",
+            "risk/add-index-on-large-table",
+            "risk/add-fk-on-existing",
+            "risk/alter-column-type",
+            "risk/rewrite-table",
         ] {
             assert!(
                 stdout.contains(rule),
@@ -2429,6 +2433,7 @@ mod review_tests {
         }
         assert!(stdout.contains("breaking"));
         assert!(stdout.contains("warning"));
+        assert!(stdout.contains("caution"));
         assert!(stdout.contains("info"));
     }
 
@@ -2451,7 +2456,7 @@ mod review_tests {
         let entries = parsed
             .as_array()
             .expect("--list-rules JSON should be an array");
-        assert_eq!(entries.len(), 8, "expected metadata for every review rule");
+        assert_eq!(entries.len(), 12, "expected metadata for every review rule");
         let first = &entries[0];
         assert_eq!(first["rule_id"], "risk/drop-column-referenced");
         assert_eq!(first["default_severity"], "breaking");
@@ -2459,6 +2464,52 @@ mod review_tests {
             first["description"].as_str().is_some_and(|d| !d.is_empty()),
             "description should be populated"
         );
+
+        let by_id: std::collections::HashMap<&str, &serde_json::Value> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry["rule_id"]
+                        .as_str()
+                        .expect("rule_id should be a string"),
+                    entry,
+                )
+            })
+            .collect();
+        for (rule_id, expected_severity, expected_description) in [
+            (
+                "risk/add-index-on-large-table",
+                "caution",
+                "New index on existing table; non-CONCURRENT/INPLACE builds lock the table",
+            ),
+            (
+                "risk/add-fk-on-existing",
+                "caution",
+                "New foreign key validates every existing row under a blocking lock",
+            ),
+            (
+                "risk/alter-column-type",
+                "caution",
+                "Existing column's type change may rewrite the table under an exclusive lock",
+            ),
+            (
+                "risk/rewrite-table",
+                "caution",
+                "Schema change forces a table rebuild on MySQL 5.7-compatible engines",
+            ),
+        ] {
+            let entry = by_id
+                .get(rule_id)
+                .unwrap_or_else(|| panic!("metadata for {rule_id} should exist"));
+            assert_eq!(
+                entry["default_severity"], expected_severity,
+                "{rule_id} default_severity"
+            );
+            assert_eq!(
+                entry["description"], expected_description,
+                "{rule_id} description"
+            );
+        }
     }
 
     #[test]
