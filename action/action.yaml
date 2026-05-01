@@ -7,7 +7,7 @@ branding:
 inputs:
   version:
     description: >
-      Relune version to install (e.g. "0.7.0").
+      Relune version to install (e.g. "0.10.0").
       Ignored when binary-path is set.
     required: false
     default: latest

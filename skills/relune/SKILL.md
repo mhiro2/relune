@@ -351,7 +351,7 @@ relune lint --sql schema.sql --deny warning
 A composite action is available at `mhiro2/relune/action` (Linux and macOS runners).
 
 ```yaml
-- uses: mhiro2/relune/action@f8be3e419d61e3b364e84dcaa0c4c0ae8ec148ce # v0.9.0
+- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
   id: diff
   with:
     before: base-schema.sql

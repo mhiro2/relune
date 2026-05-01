@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # review.sh — Run `relune review` for the GitHub Action.
 #
-# Implements the 2-pass strategy described in ROADMAP_REVIEW_PHASE2.md §3.2.1:
-#   1. User pass: honors --deny / --rules / --except-* / --dialect, writes the
-#      user-visible report at OUTPUT_PATH. rc determines has-blocking-findings.
-#   2. Summary pass: same filters but WITHOUT --deny, writes a JSON to a
-#      runner-temp path, drives has-findings / summary-* outputs. rc must be 0;
-#      anything else is treated as an internal action error.
+# Single-pass implementation backed by `relune review --emit-summary`. The
+# user-visible report is written at OUTPUT_PATH while the same run also writes
+# a structured JSON summary to a runner-temp path. The summary file is produced
+# even when `--deny` short-circuits the user-visible run with rc=10, so
+# `has-findings` / `summary-*` outputs stay independent of the deny gate.
 #
 # Environment variables:
 #   RELUNE_BIN        — Path to a pre-built relune binary (optional).
@@ -43,41 +42,45 @@ if [[ -z "${OUTPUT_PATH:-}" ]]; then
   esac
 fi
 
-# Build the shared args (filters + dialect) used by both passes.
-common_args=(
+summary_path="${RUNNER_TEMP:-/tmp}/relune-review.summary.json"
+
+# Build CLI args (filters + dialect + emit-summary).
+args=(
+  review
   --before "${BEFORE}"
   --after  "${AFTER}"
+  --format "${FORMAT}"
+  -o "${OUTPUT_PATH}"
+  --emit-summary "${summary_path}"
 )
 
 if [[ -n "${DIALECT:-}" && "${DIALECT}" != "auto" ]]; then
-  common_args+=(--dialect "${DIALECT}")
+  args+=(--dialect "${DIALECT}")
 fi
 
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
-  common_args+=(--rules "${line}")
+  args+=(--rules "${line}")
 done <<< "${RULES:-}"
 
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
-  common_args+=(--except-rule "${line}")
+  args+=(--except-rule "${line}")
 done <<< "${EXCEPT_RULES:-}"
 
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
-  common_args+=(--except-table "${line}")
+  args+=(--except-table "${line}")
 done <<< "${EXCEPT_TABLES:-}"
 
-# ---------------------------------------------------------------------------
-# Pass 1: user-visible run (honors --deny). rc drives has-blocking-findings.
-# ---------------------------------------------------------------------------
-user_args=(review "${common_args[@]}" --format "${FORMAT}" -o "${OUTPUT_PATH}")
 if [[ -n "${DENY:-}" ]]; then
-  user_args+=(--deny "${DENY}")
+  args+=(--deny "${DENY}")
 fi
 
+# Run the review. rc=0 → no blocking findings; rc=10 → `--deny` threshold met
+# (the summary file is still written). Any other rc is an internal failure.
 set +e
-"${relune}" "${user_args[@]}"
+"${relune}" "${args[@]}"
 user_rc=$?
 set -e
 
@@ -89,19 +92,9 @@ case "${user_rc}" in
     ;;
 esac
 
-# ---------------------------------------------------------------------------
-# Pass 2: summary pass (no --deny, JSON output). rc must be 0.
-# ---------------------------------------------------------------------------
-summary_path="${RUNNER_TEMP:-/tmp}/relune-review.summary.json"
-
-set +e
-"${relune}" review "${common_args[@]}" --format json -o "${summary_path}"
-summary_rc=$?
-set -e
-
-if [[ ${summary_rc} -ne 0 ]]; then
-  echo "::error::relune review summary pass failed with exit code ${summary_rc}"
-  exit "${summary_rc}"
+if [[ ! -s "${summary_path}" ]]; then
+  echo "::error::relune review did not write the --emit-summary file at ${summary_path}"
+  exit 1
 fi
 
 # Parse summary counts. jq is preinstalled on GitHub-hosted runners.
@@ -117,6 +110,9 @@ else
   has_findings="false"
 fi
 
+# `has-blocking-findings` follows the rc of the single pass: rc=10 means a
+# finding hit the `--deny` threshold. The summary's `.denied` field carries
+# the same signal but rc keeps the contract identical to Phase 2.
 if [[ ${user_rc} -eq 10 ]]; then
   has_blocking="true"
 else
