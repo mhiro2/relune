@@ -63,7 +63,7 @@ instead.
 | `after` | **yes** | — | Path to the updated schema file (SQL DDL or schema JSON). |
 | `format` | no | `markdown` | Output format. Mode-specific accepted values: see below. |
 | `output-path` | no | auto | Path for the generated file. Defaults are derived from `mode` and `format` (see [Output paths](#output-paths)). |
-| `dialect` | no | `auto` | SQL dialect: `auto`, `postgres`, `mysql`, or `sqlite`. Applied to **both** `diff` and `review`. `auto` lets the CLI infer the dialect from the file contents. |
+| `dialect` | no | `auto` | SQL dialect: `auto`, `postgres`, `mysql`, or `sqlite`. Applied to **both** `diff` and `review`. `auto` lets the CLI infer the dialect from the file contents. In `review` mode, an explicit `postgres` or `mysql` value also activates the lock-risk caution rules — see [Lock-risk findings](#lock-risk-findings). |
 | `binary-path` | no | `""` | Path to a pre-built `relune` binary. Skips the install step — useful for testing unreleased builds in CI. |
 
 `format` accepted values:
@@ -199,6 +199,23 @@ Why a separate summary file is still needed:
   fills that role independently of the deny rc.
 - `--emit-summary` is guaranteed to write the file even when `--deny` short-circuits
   the user-visible run, so a single invocation is enough to drive every output.
+
+---
+
+## Lock-risk findings
+
+`mode: review` with an explicit `dialect: postgres` or `dialect: mysql` activates the
+lock-risk caution rules. They surface state changes whose naive execution acquires a
+problematic lock — `CREATE INDEX` on an existing table, `ADD FOREIGN KEY` on an existing
+table, `ALTER COLUMN TYPE` on a non-equivalent type, and PK rotation / column drops that
+require a table rewrite. Each match becomes a `caution` finding in the PR comment.
+`dialect: auto` (the default) does not enable these rules; the SQL parser still runs in
+auto-detect mode but the rule set is unchanged.
+
+To gate the merge on lock-risk findings, pair the activation with `deny: caution`. The
+caution band is opinionated, so consider reaching for `except-rules` (e.g.
+`risk/alter-column-type`) or per-rule `severity_overrides` in `relune.toml` when a
+specific rule produces too much noise for your project.
 
 ---
 
