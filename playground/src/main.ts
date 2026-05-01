@@ -19,6 +19,7 @@ type GroupBy = "none" | "schema" | "prefix";
 type WorkbenchMode = "render" | "inspect" | "export" | "lint" | "compare";
 type ExportFormat = "schema-json" | "graph-json" | "layout-json" | "mermaid" | "d2" | "dot";
 type CompareView = "visual" | "text" | "markdown" | "json" | "review";
+type ReviewDialect = "auto" | "postgres" | "mysql" | "sqlite";
 type ViewpointId = string;
 type WasmSeverity = "error" | "warning" | "info" | "hint";
 
@@ -269,6 +270,7 @@ type PersistedState = {
   inspectTable: string;
   lintRules: string;
   compareView: CompareView;
+  compareReviewDialect: ReviewDialect;
   sql: string;
   compareBeforeSql: string;
   compareAfterSql: string;
@@ -466,6 +468,7 @@ const DEFAULT_STATE: PersistedState = {
   inspectTable: "",
   lintRules: "",
   compareView: "visual",
+  compareReviewDialect: "auto",
   sql: "",
   compareBeforeSql: "",
   compareAfterSql: "",
@@ -487,6 +490,8 @@ const inspectTableSelect = getElement<HTMLSelectElement>("inspect-table-select")
 const exportFormatSelect = getElement<HTMLSelectElement>("export-format-select");
 const lintRulesInput = getElement<HTMLInputElement>("lint-rules-input");
 const compareFormatSelect = getElement<HTMLSelectElement>("compare-format-select");
+const compareReviewDialectSelect = getElement<HTMLSelectElement>("compare-review-dialect-select");
+const compareReviewDialectRow = getElement<HTMLElement>("compare-review-dialect-row");
 
 const appearanceSection = getElement<HTMLElement>("appearance-section");
 const layoutSection = getElement<HTMLElement>("layout-section");
@@ -538,6 +543,7 @@ const compareSummaryCount = getElement<HTMLElement>("compare-summary-count");
 const compareObjectList = getElement<HTMLUListElement>("compare-object-list");
 const reviewPanel = getElement<HTMLElement>("review-panel");
 const reviewSummaryBadges = getElement<HTMLElement>("review-summary-badges");
+const reviewDialectNote = getElement<HTMLElement>("review-dialect-note");
 const reviewFindingList = getElement<HTMLUListElement>("review-finding-list");
 const reviewSuppressedPanel = getElement<HTMLDetailsElement>("review-suppressed-panel");
 const reviewSuppressedList = getElement<HTMLUListElement>("review-suppressed-list");
@@ -805,6 +811,7 @@ function attachEventListeners(): void {
     exportFormatSelect,
     lintRulesInput,
     compareFormatSelect,
+    compareReviewDialectSelect,
   ];
 
   for (const control of controls) {
@@ -1056,6 +1063,7 @@ function applyState(state: PersistedState): void {
   inspectTableSelect.value = state.inspectTable;
   lintRulesInput.value = state.lintRules;
   compareFormatSelect.value = state.compareView;
+  compareReviewDialectSelect.value = state.compareReviewDialect;
 
   populateViewpointOptions(state.example, state.viewpoint);
   const selectedViewpoint = getSelectedViewpoint();
@@ -1105,6 +1113,9 @@ function applyModeVisibility(): void {
   exportSection.hidden = currentMode !== "export";
   lintSection.hidden = currentMode !== "lint";
   compareSection.hidden = currentMode !== "compare";
+  compareReviewDialectRow.hidden = !(
+    currentMode === "compare" && compareFormatSelect.value === "review"
+  );
   viewpointRow.hidden = !(currentMode === "render" || currentMode === "export");
   focusRow.hidden = currentMode === "compare";
 
@@ -1487,7 +1498,8 @@ async function runReviewView(currentSerial: number): Promise<void> {
 }
 
 function buildReviewRequest(): Record<string, unknown> {
-  return {
+  const dialect = compareReviewDialectSelect.value as ReviewDialect;
+  const request: Record<string, unknown> = {
     beforeSql: compareBeforeEditor.getValue(),
     afterSql: compareAfterEditor.getValue(),
     format: "json",
@@ -1495,6 +1507,10 @@ function buildReviewRequest(): Record<string, unknown> {
     exceptRules: [],
     exceptTables: [],
   };
+  if (dialect !== "auto") {
+    request.dialect = dialect;
+  }
+  return request;
 }
 
 function renderReviewPanel(result: WasmReviewResult): void {
@@ -1507,6 +1523,15 @@ function renderReviewPanel(result: WasmReviewResult): void {
     buildSeverityBadge("warning", summary.warning),
     buildSeverityBadge("info", summary.info),
   ].join("");
+
+  if ((compareReviewDialectSelect.value as ReviewDialect) === "auto") {
+    reviewDialectNote.textContent =
+      "Lock-risk rules are inactive. Select Postgres or MySQL to enable lock-risk review.";
+    reviewDialectNote.hidden = false;
+  } else {
+    reviewDialectNote.textContent = "";
+    reviewDialectNote.hidden = true;
+  }
 
   const sortedFindings = [...result.review.findings].sort(
     (left, right) => severityRank(left.severity) - severityRank(right.severity),
@@ -2037,6 +2062,8 @@ function resetOutputPanels(): void {
   textOutput.textContent = "";
   textOutputMeta.textContent = "";
   reviewSummaryBadges.textContent = "";
+  reviewDialectNote.hidden = true;
+  reviewDialectNote.textContent = "";
   reviewFindingList.innerHTML = "";
   reviewSuppressedList.innerHTML = "";
   resetActions();
@@ -2238,6 +2265,7 @@ function readQueryState(): Partial<PersistedState> {
     inspectTable: params.get("table") ?? undefined,
     lintRules: params.get("rules") ?? undefined,
     compareView: (params.get("compare") as CompareView | null) ?? undefined,
+    compareReviewDialect: (params.get("reviewDialect") as ReviewDialect | null) ?? undefined,
   });
 }
 
@@ -2292,6 +2320,9 @@ function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> 
   if (isCompareView(state.compareView)) {
     sanitized.compareView = state.compareView;
   }
+  if (isReviewDialect(state.compareReviewDialect)) {
+    sanitized.compareReviewDialect = state.compareReviewDialect;
+  }
   if (typeof state.sql === "string") {
     sanitized.sql = state.sql;
   }
@@ -2329,6 +2360,7 @@ function collectState(): PersistedState {
     inspectTable: inspectTableSelect.value,
     lintRules: lintRulesInput.value.trim(),
     compareView: compareFormatSelect.value as CompareView,
+    compareReviewDialect: compareReviewDialectSelect.value as ReviewDialect,
     sql: sqlEditor.getValue(),
     compareBeforeSql: compareBeforeEditor.getValue(),
     compareAfterSql: compareAfterEditor.getValue(),
@@ -2371,6 +2403,12 @@ function syncQueryString(state: PersistedState): void {
   }
   if (state.mode === "compare") {
     params.set("compare", state.compareView);
+    if (
+      state.compareView === "review" &&
+      state.compareReviewDialect !== DEFAULT_STATE.compareReviewDialect
+    ) {
+      params.set("reviewDialect", state.compareReviewDialect);
+    }
   }
 
   const nextQuery = params.toString();
@@ -2448,6 +2486,10 @@ function isCompareView(value: unknown): value is CompareView {
     value === "json" ||
     value === "review"
   );
+}
+
+function isReviewDialect(value: unknown): value is ReviewDialect {
+  return value === "auto" || value === "postgres" || value === "mysql" || value === "sqlite";
 }
 
 function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, "custom"> {

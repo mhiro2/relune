@@ -285,6 +285,22 @@
                     Compare keeps before and after as separate editors instead of squeezing diff into the viewer mode.
                   </span>
                 </label>
+                <label class="ctrl" id="compare-review-dialect-row" hidden>
+                  <span class="ctrl__label">Review dialect</span>
+                  <select
+                    id="compare-review-dialect-select"
+                    class="compare-review-dialect-select"
+                    aria-label="Review dialect"
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="postgres">PostgreSQL</option>
+                    <option value="mysql">MySQL</option>
+                    <option value="sqlite">SQLite</option>
+                  </select>
+                  <span class="ctrl__hint">
+                    Lock-risk rules require an explicit Postgres or MySQL dialect.
+                  </span>
+                </label>
               </div>
             </details>
 
@@ -412,6 +428,7 @@
               <span class="surface__label">Schema Risk Review</span>
               <span id="review-summary-badges" class="surface__meta"></span>
             </div>
+            <p id="review-dialect-note" class="review-dialect-note" hidden></p>
             <ul id="review-finding-list" class="finding-list"></ul>
             <details id="review-suppressed-panel" hidden>
               <summary>Suppressed findings</summary>
