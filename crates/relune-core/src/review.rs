@@ -8,6 +8,7 @@
 //! `crate::Severity`: review severity describes "migration safety", while
 //! lint severity describes "schema quality".
 
+use crate::SqlDialect;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -15,6 +16,75 @@ use std::str::FromStr;
 mod rules;
 
 pub use rules::run_rules;
+
+/// Dialect that the review pipeline actually evaluates against.
+///
+/// Independent from the parser dialect carried by `InputSource` (which
+/// only governs SQL lexing): this is the **single source** for dialect
+/// decisions inside rule evaluation, in particular the lock-risk rules
+/// added in Phase 4 that only fire when the dialect resolves to
+/// `Postgres` or `Mysql`.
+///
+/// The value is produced by callers (`relune-app`, CLI, wasm) from
+/// `--dialect` / `WasmReviewRequest.dialect` / `[review.dialect]` and
+/// passed into `run_rules`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum EffectiveDialect {
+    /// Dialect is not pinned; lock-risk rules do not fire.
+    #[default]
+    Auto,
+    /// `PostgreSQL` semantics for lock-risk evaluation.
+    Postgres,
+    /// `MySQL` semantics for lock-risk evaluation.
+    Mysql,
+    /// `SQLite`; lock-risk rules do not fire (sqlite has no online DDL
+    /// to opt into, so a caution would carry no actionable signal).
+    Sqlite,
+}
+
+impl EffectiveDialect {
+    /// Returns true when the dialect supports any lock-risk rule.
+    ///
+    /// Currently `Postgres` and `Mysql` only; `Auto` and `Sqlite` always
+    /// skip the lock-risk rule set.
+    #[must_use]
+    pub const fn is_lock_risk_capable(&self) -> bool {
+        matches!(self, Self::Postgres | Self::Mysql)
+    }
+}
+
+impl fmt::Display for EffectiveDialect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::Postgres => write!(f, "postgres"),
+            Self::Mysql => write!(f, "mysql"),
+            Self::Sqlite => write!(f, "sqlite"),
+        }
+    }
+}
+
+impl From<SqlDialect> for EffectiveDialect {
+    fn from(value: SqlDialect) -> Self {
+        match value {
+            SqlDialect::Auto => Self::Auto,
+            SqlDialect::Postgres => Self::Postgres,
+            SqlDialect::Mysql => Self::Mysql,
+            SqlDialect::Sqlite => Self::Sqlite,
+        }
+    }
+}
+
+impl From<EffectiveDialect> for SqlDialect {
+    fn from(value: EffectiveDialect) -> Self {
+        match value {
+            EffectiveDialect::Auto => Self::Auto,
+            EffectiveDialect::Postgres => Self::Postgres,
+            EffectiveDialect::Mysql => Self::Mysql,
+            EffectiveDialect::Sqlite => Self::Sqlite,
+        }
+    }
+}
 
 /// Severity scale for migration risk findings.
 ///
@@ -528,6 +598,33 @@ mod tests {
         assert!(summary.has_findings_at_or_above(ReviewSeverity::Warning));
         assert!(!summary.has_findings_at_or_above(ReviewSeverity::Caution));
         assert!(!summary.has_findings_at_or_above(ReviewSeverity::Breaking));
+    }
+
+    #[test]
+    fn effective_dialect_round_trips_with_sql_dialect() {
+        for dialect in [
+            SqlDialect::Auto,
+            SqlDialect::Postgres,
+            SqlDialect::Mysql,
+            SqlDialect::Sqlite,
+        ] {
+            let effective: EffectiveDialect = dialect.into();
+            let back: SqlDialect = effective.into();
+            assert_eq!(back, dialect);
+        }
+    }
+
+    #[test]
+    fn effective_dialect_lock_risk_capable_is_pg_or_mysql() {
+        assert!(EffectiveDialect::Postgres.is_lock_risk_capable());
+        assert!(EffectiveDialect::Mysql.is_lock_risk_capable());
+        assert!(!EffectiveDialect::Auto.is_lock_risk_capable());
+        assert!(!EffectiveDialect::Sqlite.is_lock_risk_capable());
+    }
+
+    #[test]
+    fn effective_dialect_default_is_auto() {
+        assert_eq!(EffectiveDialect::default(), EffectiveDialect::Auto);
     }
 
     #[test]
