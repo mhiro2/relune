@@ -810,11 +810,12 @@ pub struct ReviewArgs {
     #[arg(long = "after-schema-json", value_name = "FILE")]
     pub after_schema_json: Option<PathBuf>,
 
-    /// SQL dialect for parsing AND review evaluation (auto-detected if
-    /// omitted). Lock-risk rules require `postgres` or `mysql`; under
-    /// `auto` / `sqlite` they emit no findings, and an info-level
-    /// diagnostic is reported only when a lock-risk rule was explicitly
-    /// listed via `--rules`.
+    /// SQL dialect for parsing AND review evaluation (defaults to
+    /// `auto`, which auto-detects the parser dialect). Lock-risk rules
+    /// require an explicit `postgres` or `mysql`; under `auto` /
+    /// `sqlite` they emit no findings, and an info-level diagnostic is
+    /// reported only when a lock-risk rule was explicitly listed via
+    /// `--rules`.
     #[arg(long = "dialect", value_enum)]
     pub dialect: Option<DialectArg>,
 

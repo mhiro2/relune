@@ -299,8 +299,10 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 /// - `deny`: Minimum severity that flips `denied = true`
 /// - `severityOverrides`: Per-rule severity overrides applied after rule
 ///   evaluation (`[{ rule_id, severity }]`)
-/// - `dialect`: Optional dialect hint forwarded to the SQL parser
-///   ("auto" | "postgres" | "mysql" | "sqlite", default "auto")
+/// - `dialect`: Optional dialect hint that drives both the SQL parser and
+///   the review-evaluation dialect ("auto" | "postgres" | "mysql" |
+///   "sqlite", default "auto"). Lock-risk rules require `postgres` or
+///   `mysql`; under `auto` / `sqlite` they emit no findings.
 ///
 /// Returns a JSON result object with:
 /// - `review`: Structured review payload (`findings`, `suppressed`,
