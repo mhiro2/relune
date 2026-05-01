@@ -1,0 +1,3 @@
+CREATE TABLE accounts (
+    id BIGINT PRIMARY KEY
+);

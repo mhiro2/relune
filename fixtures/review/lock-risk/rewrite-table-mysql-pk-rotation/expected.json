@@ -1,0 +1,10 @@
+[
+  {
+    "message": "Primary key on orders is being rotated on column(s) (id,public_id) (mysql). Pre-8.0 MySQL rebuilds the entire table; 8.0+ may still copy under ALGORITHM=COPY.",
+    "mitigation": "Schedule a maintenance window or use a tool such as gh-ost / pt-online-schema-change.",
+    "rule_id": "risk/rewrite-table",
+    "severity": "caution",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

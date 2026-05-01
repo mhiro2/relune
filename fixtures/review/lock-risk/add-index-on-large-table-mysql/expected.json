@@ -1,0 +1,11 @@
+[
+  {
+    "column_name": "user_id",
+    "message": "New index orders_user_id_idx on existing table orders (user_id) (mysql). Default ALGORITHM=INPLACE may still block writes during rebuild on large tables.",
+    "mitigation": "Use ALGORITHM=INPLACE, LOCK=NONE explicitly (5.6+) and verify the column type supports it.",
+    "rule_id": "risk/add-index-on-large-table",
+    "severity": "caution",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

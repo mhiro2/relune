@@ -1,0 +1,11 @@
+[
+  {
+    "column_name": "user_id",
+    "message": "New index orders_user_id_idx on existing table orders (user_id) (postgres). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
+    "mitigation": "Use CREATE INDEX CONCURRENTLY (and DROP INDEX CONCURRENTLY for rollback) in postgres.",
+    "rule_id": "risk/add-index-on-large-table",
+    "severity": "caution",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]
