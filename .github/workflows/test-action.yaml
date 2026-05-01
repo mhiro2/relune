@@ -113,6 +113,31 @@ jobs:
             exit 1
           fi
 
+      - name: Test action (review, lock-risk caution with dialect)
+        id: review-lock-risk
+        uses: ./action
+        with:
+          mode: review
+          before: fixtures/review/lock-risk/add-index-on-large-table-postgres/before.sql
+          after: fixtures/review/lock-risk/add-index-on-large-table-postgres/after.sql
+          dialect: postgres
+          deny: breaking
+          binary-path: target/release/relune
+      - name: Verify review (lock-risk caution)
+        run: |
+          if [[ "${{ steps.review-lock-risk.outputs.has-findings }}" != "true" ]]; then
+            echo "::error::Expected has-findings=true for lock-risk fixture under dialect: postgres"
+            exit 1
+          fi
+          if [[ "${{ steps.review-lock-risk.outputs.has-blocking-findings }}" != "false" ]]; then
+            echo "::error::Expected has-blocking-findings=false (caution is below breaking)"
+            exit 1
+          fi
+          if [[ "${{ steps.review-lock-risk.outputs.summary-caution }}" -lt 1 ]]; then
+            echo "::error::Expected summary-caution >= 1 when lock-risk rules are active"
+            exit 1
+          fi
+
       - name: Test action (review, breaking, no fail)
         id: review-breaking
         uses: ./action
