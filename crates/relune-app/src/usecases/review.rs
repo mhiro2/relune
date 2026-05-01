@@ -6,6 +6,7 @@ use std::fmt::Write;
 use relune_core::{
     EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId, ReviewRuleMetadata,
     ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding, diff_schemas,
+    lock_risk_skip_diagnostic,
 };
 
 use crate::error::AppError;
@@ -24,13 +25,25 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
 
     let applied_rules = resolve_active_rules(&request.rules, &request.except_rules)?;
     let override_map = build_override_map(&request.severity_overrides)?;
+    let effective: EffectiveDialect = request.dialect.into();
     let mut raw_findings = relune_core::run_rules(
         &schema_diff,
         &before_schema,
         &after_schema,
         &applied_rules,
-        EffectiveDialect::Auto,
+        effective,
     );
+
+    // Surface a single info-level diagnostic when the caller explicitly
+    // opted in to a lock-risk rule that the resolved dialect cannot
+    // evaluate. Default profiles stay silent to avoid CI noise.
+    let explicit_rule_ids = parse_explicit_rule_ids(&request.rules)?;
+    if let Some(diagnostic) =
+        lock_risk_skip_diagnostic(&explicit_rule_ids, &applied_rules, effective)
+    {
+        diagnostics.push(diagnostic);
+    }
+
     apply_severity_overrides(&mut raw_findings, &override_map);
 
     let (findings, suppressed) = partition_suppressed(raw_findings, &request.except_tables);
@@ -293,6 +306,10 @@ fn parse_rule_id(value: &str) -> Result<ReviewRuleId, AppError> {
         format!("risk/{value}")
     };
     ReviewRuleId::parse(&normalized).map_err(AppError::input)
+}
+
+fn parse_explicit_rule_ids(rules: &[String]) -> Result<Vec<ReviewRuleId>, AppError> {
+    rules.iter().map(|s| parse_rule_id(s)).collect()
 }
 
 fn partition_suppressed(
@@ -585,6 +602,80 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn dialect_default_is_auto_and_emits_no_diagnostic() {
+        // Default profile (no `request.rules`) under `Auto` should
+        // produce zero findings and zero lock-risk skip diagnostics.
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let result = run(ReviewRequest::from_sql(sql, sql));
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            relune_core::SqlDialect::default(),
+            relune_core::SqlDialect::Auto,
+        );
+    }
+
+    #[test]
+    fn explicit_lock_risk_opt_in_under_auto_emits_skip_diagnostic() {
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let request = ReviewRequest::from_sql(sql, sql)
+            .with_rules(vec!["risk/add-index-on-large-table".to_string()]);
+        let result = run(request);
+        assert_eq!(result.diagnostics.len(), 1);
+        let diag = &result.diagnostics[0];
+        assert_eq!(diag.severity, relune_core::Severity::Info);
+        assert!(
+            diag.message
+                .contains("Lock-risk review rules require an explicit --dialect"),
+            "unexpected message: {}",
+            diag.message,
+        );
+    }
+
+    #[test]
+    fn explicit_opt_in_under_postgres_does_not_emit_skip_diagnostic() {
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let request = ReviewRequest::from_sql(sql, sql)
+            .with_rules(vec!["risk/add-index-on-large-table".to_string()])
+            .with_dialect(relune_core::SqlDialect::Postgres);
+        let result = run(request);
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn explicit_opt_in_dialect_mismatch_emits_skip_diagnostic() {
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let request = ReviewRequest::from_sql(sql, sql)
+            .with_rules(vec!["risk/rewrite-table".to_string()])
+            .with_dialect(relune_core::SqlDialect::Postgres);
+        let result = run(request);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("require dialect mysql"),
+            "unexpected message: {}",
+            result.diagnostics[0].message,
+        );
+    }
+
+    #[test]
+    fn except_rule_suppresses_skip_diagnostic_for_opted_in_lock_risk() {
+        // The user opted in via `--rules`, then removed the same rule
+        // via `--except-rule`. Nothing was actually attempted, so no
+        // skip diagnostic should fire (and the request must keep at
+        // least one active rule to avoid the "no rules remain" error).
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let request = ReviewRequest::from_sql(sql, sql)
+            .with_rules(vec![
+                "risk/add-index-on-large-table".to_string(),
+                "risk/fk-without-index".to_string(),
+            ])
+            .with_except_rules(vec!["risk/add-index-on-large-table".to_string()]);
+        let result = run(request);
+        assert!(result.diagnostics.is_empty());
     }
 
     #[test]

@@ -507,6 +507,7 @@ impl WasmReviewRequest {
             except_tables: self.except_tables.clone(),
             deny: self.deny,
             severity_overrides: self.severity_overrides.clone(),
+            dialect: SqlDialect::default(),
         })
     }
 }

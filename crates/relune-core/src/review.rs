@@ -9,7 +9,9 @@
 //! lint severity describes "schema quality".
 
 use crate::SqlDialect;
+use crate::diagnostic::{Diagnostic, codes};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
 
@@ -83,6 +85,105 @@ impl From<EffectiveDialect> for SqlDialect {
             EffectiveDialect::Sqlite => Self::Sqlite,
         }
     }
+}
+
+/// Build the info-level diagnostic that explains why explicitly
+/// opted-in lock-risk rules produced no findings under the resolved
+/// effective dialect.
+///
+/// Returns `Some(diagnostic)` only when:
+/// 1. `explicit_rule_ids` is non-empty (the user opted in to a specific
+///    rule set via `--rules` / `[review.rules]` — default profile runs
+///    return `None` to avoid CI noise), AND
+/// 2. at least one `applied_rules` entry that is also in
+///    `explicit_rule_ids` is dialect-scoped and would not fire under
+///    `dialect`.
+///
+/// The single returned diagnostic aggregates every skipped rule. The
+/// caller pushes it into the result `diagnostics` vector untouched.
+#[must_use]
+pub fn lock_risk_skip_diagnostic(
+    explicit_rule_ids: &[ReviewRuleId],
+    applied_rules: &[ReviewRuleId],
+    dialect: EffectiveDialect,
+) -> Option<Diagnostic> {
+    if explicit_rule_ids.is_empty() {
+        return None;
+    }
+
+    let explicit: HashSet<ReviewRuleId> = explicit_rule_ids.iter().copied().collect();
+    let mut skipped: Vec<(ReviewRuleId, &'static [SqlDialect])> = applied_rules
+        .iter()
+        .copied()
+        .filter(|rule| explicit.contains(rule))
+        .filter_map(|rule| match rule.dialect_scope() {
+            DialectScope::Any => None,
+            DialectScope::OneOf(scopes) => {
+                if scope_matches(scopes, dialect) {
+                    None
+                } else {
+                    Some((rule, scopes))
+                }
+            }
+        })
+        .collect();
+
+    if skipped.is_empty() {
+        return None;
+    }
+
+    skipped.sort_by_key(|(rule, _)| rule.as_str());
+    let count = skipped.len();
+
+    let message = match dialect {
+        EffectiveDialect::Auto => format!(
+            "Lock-risk review rules require an explicit --dialect (postgres or mysql); skipped {count} rule(s)."
+        ),
+        EffectiveDialect::Sqlite => {
+            format!("Lock-risk review rules are not defined for sqlite; skipped {count} rule(s).")
+        }
+        EffectiveDialect::Postgres | EffectiveDialect::Mysql => {
+            // Case (b): effective dialect is lock-risk-capable but the
+            // opted-in rule's scope still does not include it.
+            let detail = if let [(rule, scopes)] = skipped.as_slice() {
+                format!(
+                    "{} require dialect {}",
+                    rule.as_str(),
+                    join_dialects(scopes),
+                )
+            } else {
+                skipped
+                    .iter()
+                    .map(|(rule, scopes)| {
+                        format!("{} requires {}", rule.as_str(), join_dialects(scopes))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+            format!(
+                "Lock-risk rule(s) {detail}; effective dialect is {dialect}. Skipped {count} rule(s).",
+            )
+        }
+    };
+
+    Some(Diagnostic::info(codes::review_lock_risk_skipped(), message))
+}
+
+fn scope_matches(scopes: &[SqlDialect], dialect: EffectiveDialect) -> bool {
+    match dialect {
+        EffectiveDialect::Auto => false,
+        EffectiveDialect::Postgres => scopes.contains(&SqlDialect::Postgres),
+        EffectiveDialect::Mysql => scopes.contains(&SqlDialect::Mysql),
+        EffectiveDialect::Sqlite => scopes.contains(&SqlDialect::Sqlite),
+    }
+}
+
+fn join_dialects(scopes: &[SqlDialect]) -> String {
+    scopes
+        .iter()
+        .map(SqlDialect::to_string)
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 /// Severity scale for migration risk findings.
@@ -765,5 +866,75 @@ mod tests {
         assert!(summary.has_findings_at_or_above(ReviewSeverity::Caution));
         assert!(summary.has_findings_at_or_above(ReviewSeverity::Warning));
         assert!(summary.has_findings_at_or_above(ReviewSeverity::Info));
+    }
+
+    #[test]
+    fn lock_risk_skip_diagnostic_silent_on_default_profile() {
+        // Empty `explicit_rule_ids` represents the default profile path
+        // where every rule is active by default but no rule was opted
+        // in by name. The diagnostic must stay silent to avoid CI noise.
+        let applied = ReviewRuleId::all_rules().to_vec();
+        assert!(lock_risk_skip_diagnostic(&[], &applied, EffectiveDialect::Auto).is_none());
+        assert!(lock_risk_skip_diagnostic(&[], &applied, EffectiveDialect::Sqlite).is_none());
+    }
+
+    #[test]
+    fn lock_risk_skip_diagnostic_for_auto_dialect() {
+        let explicit = vec![ReviewRuleId::AddIndexOnLargeTable];
+        let applied = explicit.clone();
+        let diagnostic = lock_risk_skip_diagnostic(&explicit, &applied, EffectiveDialect::Auto)
+            .expect("auto + lock-risk opt-in should produce a diagnostic");
+        assert_eq!(diagnostic.severity, crate::Severity::Info);
+        assert_eq!(diagnostic.code, codes::review_lock_risk_skipped());
+        assert_eq!(
+            diagnostic.message,
+            "Lock-risk review rules require an explicit --dialect (postgres or mysql); skipped 1 rule(s)."
+        );
+    }
+
+    #[test]
+    fn lock_risk_skip_diagnostic_for_sqlite() {
+        let explicit = vec![
+            ReviewRuleId::AddIndexOnLargeTable,
+            ReviewRuleId::AlterColumnType,
+        ];
+        let applied = explicit.clone();
+        let diagnostic = lock_risk_skip_diagnostic(&explicit, &applied, EffectiveDialect::Sqlite)
+            .expect("sqlite + lock-risk opt-in should produce a diagnostic");
+        assert_eq!(
+            diagnostic.message,
+            "Lock-risk review rules are not defined for sqlite; skipped 2 rule(s)."
+        );
+    }
+
+    #[test]
+    fn lock_risk_skip_diagnostic_for_dialect_mismatch_single() {
+        let explicit = vec![ReviewRuleId::RewriteTable];
+        let applied = explicit.clone();
+        let diagnostic = lock_risk_skip_diagnostic(&explicit, &applied, EffectiveDialect::Postgres)
+            .expect("postgres + mysql-only opt-in should produce a diagnostic");
+        assert_eq!(
+            diagnostic.message,
+            "Lock-risk rule(s) risk/rewrite-table require dialect mysql; effective dialect is postgres. Skipped 1 rule(s)."
+        );
+    }
+
+    #[test]
+    fn lock_risk_skip_diagnostic_returns_none_when_scope_matches() {
+        let explicit = vec![ReviewRuleId::AddIndexOnLargeTable];
+        let applied = explicit.clone();
+        assert!(
+            lock_risk_skip_diagnostic(&explicit, &applied, EffectiveDialect::Postgres).is_none()
+        );
+        assert!(lock_risk_skip_diagnostic(&explicit, &applied, EffectiveDialect::Mysql).is_none());
+    }
+
+    #[test]
+    fn lock_risk_skip_diagnostic_ignores_rules_dropped_from_applied() {
+        // User opted in but `--except-rule` removed it: nothing to
+        // diagnose because the rule was never going to be evaluated.
+        let explicit = vec![ReviewRuleId::AddIndexOnLargeTable];
+        let applied: Vec<ReviewRuleId> = vec![];
+        assert!(lock_risk_skip_diagnostic(&explicit, &applied, EffectiveDialect::Auto).is_none());
     }
 }

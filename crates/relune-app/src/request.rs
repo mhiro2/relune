@@ -644,6 +644,19 @@ pub struct ReviewRequest {
     /// as an input error.
     #[serde(default)]
     pub severity_overrides: Vec<ReviewSeverityOverride>,
+    /// Effective SQL dialect used by lock-risk rule evaluation.
+    ///
+    /// Independent from the parser dialect carried inside each
+    /// `InputSource`: that one only governs lexing of the supplied SQL,
+    /// while this field is the single source for rule-evaluation
+    /// dialect. Lock-risk rules require this to resolve to `Postgres`
+    /// or `Mysql`; under `Auto` / `Sqlite` they are silently skipped
+    /// (an info-level diagnostic is emitted only when a lock-risk rule
+    /// was explicitly opted in via `rules`).
+    ///
+    /// Defaults to `SqlDialect::Auto`.
+    #[serde(default)]
+    pub dialect: SqlDialect,
 }
 
 impl ReviewRequest {
@@ -702,6 +715,13 @@ impl ReviewRequest {
     #[must_use]
     pub fn with_severity_overrides(mut self, overrides: Vec<ReviewSeverityOverride>) -> Self {
         self.severity_overrides = overrides;
+        self
+    }
+
+    /// Set the effective dialect used by lock-risk rule evaluation.
+    #[must_use]
+    pub const fn with_dialect(mut self, dialect: SqlDialect) -> Self {
+        self.dialect = dialect;
         self
     }
 }

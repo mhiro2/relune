@@ -55,6 +55,7 @@ pub fn run_review(
         except_tables: merged.except_tables,
         deny,
         severity_overrides: merged.severity_overrides,
+        dialect: relune_core::SqlDialect::default(),
     };
 
     let result = review(request)

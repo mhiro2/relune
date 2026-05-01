@@ -206,4 +206,11 @@ pub mod codes {
     pub fn lint_orphan_table() -> DiagnosticCode {
         DiagnosticCode::new("LINT", 2)
     }
+
+    /// Returns the code emitted when lock-risk review rules are skipped
+    /// because the effective dialect is not in their dialect scope.
+    #[must_use]
+    pub fn review_lock_risk_skipped() -> DiagnosticCode {
+        DiagnosticCode::new("REVIEW", 1)
+    }
 }
