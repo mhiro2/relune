@@ -706,6 +706,54 @@ mod wasm_bindgen_tests {
     }
 
     #[wasm_bindgen_test]
+    fn wasm_review_lock_risk_postgres() {
+        // CREATE INDEX on an existing postgres table is a caution-level
+        // lock-risk finding. The wasm dialect must reach
+        // `ReviewRequest.dialect` for the rule to fire.
+        let before = "CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL);";
+        let after = "CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL); \
+             CREATE INDEX orders_user_id_idx ON orders (user_id);";
+
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: Some(before.to_string()),
+            before_schema_json: None,
+            after_sql: Some(after.to_string()),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: Some(relune_core::SqlDialect::Postgres),
+        })
+        .expect("serialize review request");
+
+        let result = review_from_sql(input).expect("review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        assert_eq!(value["review"]["summary"]["caution"], 1);
+        let findings = value["review"]["findings"]
+            .as_array()
+            .expect("findings array");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["rule_id"], "risk/add-index-on-large-table");
+        assert_eq!(findings[0]["severity"], "caution");
+
+        // Round-trip the embedded CLI JSON content into the typed shape so
+        // the wasm payload stays in lockstep with `relune review --format
+        // json` for caution-band findings as well.
+        let content = value["content"]
+            .as_str()
+            .expect("content should be populated for format=json");
+        let parsed: relune_app::ReviewResult =
+            serde_json::from_str(content).expect("CLI JSON should deserialize as ReviewResult");
+        assert_eq!(parsed.review.summary.caution, 1);
+        assert!(parsed.diagnostics.is_empty());
+    }
+
+    #[wasm_bindgen_test]
     fn wasm_review_content_text_and_markdown() {
         // Smoke-check the non-JSON content paths. The text and markdown
         // formatters are shared with the CLI, so we only verify the wasm
