@@ -45,7 +45,10 @@ Options:
           Updated normalized schema JSON file
 
       --dialect <DIALECT>
-          SQL dialect for parsing (auto-detected if omitted)
+          SQL dialect for parsing AND review evaluation (auto-detected if omitted). Lock-risk rules
+          require `postgres` or `mysql`; under `auto` / `sqlite` they emit no findings, and an
+          info-level diagnostic is reported only when a lock-risk rule was explicitly listed via
+          `--rules`
 
           Possible values:
           - auto:     Automatically detect dialect from SQL content
