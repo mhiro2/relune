@@ -375,11 +375,14 @@ impl<'a> RuleContext<'a> {
     }
 }
 
-/// Returns true when an FK on `owner_qname` in `before` (described by
-/// `removed`) still has an equivalent shape on the same owner table in
-/// `after`. "Equivalent" means resolved target table id + column pairs
-/// are the same. Used to suppress `RemovedFk` registration when a FK is
-/// just renamed or dropped-and-recreated with the same shape.
+/// Returns true when at least one FK with `removed`'s shape survives
+/// in `after` *over and above* what already existed in `before`. In
+/// other words, `after_count(shape) >= before_count(shape)`. Used to
+/// suppress `RemovedFk` registration when a FK is just renamed or
+/// dropped-and-recreated with the same shape — without
+/// over-suppressing when `before` had multiple same-shape FKs and only
+/// some of them are dropped (in which case `after_count < before_count`
+/// and the dropped FK is a genuine loss).
 fn fk_shape_survives_in_after(
     removed: &crate::export::ForeignKeyExport,
     owner_qname: &str,
@@ -406,10 +409,10 @@ fn fk_shape_survives_in_after(
         .zip(removed.to_columns.iter())
         .map(|(f, t)| (f.to_ascii_lowercase(), t.to_ascii_lowercase()))
         .collect();
-    after_owner.foreign_keys.iter().any(|fk| {
-        let after_target =
-            resolve_table_id(after, fk.to_schema.as_deref(), &fk.to_table, owner_schema);
-        let target_eq = match (&removed_target, &after_target) {
+    let shape_matches = |fk: &ForeignKey, schema: &Schema, target: &Option<String>| {
+        let candidate_target =
+            resolve_table_id(schema, fk.to_schema.as_deref(), &fk.to_table, owner_schema);
+        let target_eq = match (target, &candidate_target) {
             (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
             (None, None) => {
                 let normalize = |s: Option<&str>| s.or(owner_schema).map(str::to_ascii_lowercase);
@@ -429,7 +432,23 @@ fn fk_shape_survives_in_after(
             .zip(fk.to_columns.iter())
             .zip(removed_pairs.iter())
             .all(|((f, t), (rf, rt))| f.eq_ignore_ascii_case(rf) && t.eq_ignore_ascii_case(rt))
-    })
+    };
+    let before_count = before
+        .tables
+        .iter()
+        .find(|t| t.qualified_name().eq_ignore_ascii_case(owner_qname))
+        .map_or(0, |t| {
+            t.foreign_keys
+                .iter()
+                .filter(|fk| shape_matches(fk, before, &removed_target))
+                .count()
+        });
+    let after_count = after_owner
+        .foreign_keys
+        .iter()
+        .filter(|fk| shape_matches(fk, after, &removed_target))
+        .count();
+    after_count >= before_count
 }
 
 /// Returns true when an FK's reference shape (target table + column
@@ -3212,6 +3231,144 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn drop_column_referenced_silenced_when_all_same_shape_fks_dropped() {
+        // before: public.orders has TWO FKs with identical shape
+        //         (user_id -> public.users.id), differing only by name.
+        // after:  both FKs are dropped, and public.users itself is dropped.
+        // No FK survives that references public.users — drop-table-referenced
+        // must NOT fire (the survival check accounts for the multiset of
+        // same-shape FKs and recognizes both were dropped).
+        let users = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut fk_a = fk(
+            "orders_user_a_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_a.to_schema = Some("public".into());
+        let mut fk_b = fk(
+            "orders_user_b_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_b.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk_a, fk_b],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders_before],
+            ..Default::default()
+        };
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropTableReferenced),
+            "All same-shape FKs were dropped; drop-table-referenced should not fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_table_referenced_breaking_when_only_one_of_same_shape_fks_dropped() {
+        // before: public.orders has TWO FKs with identical shape
+        //         (user_id -> public.users.id) named A and B.
+        // after:  FK A is dropped; FK B survives. public.users is dropped.
+        // The reference still exists (FK B), so drop-table-referenced must
+        // fire — and the survival check must not over-suppress just because
+        // *one* FK with that shape exists in after.
+        let users = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut fk_a = fk(
+            "orders_user_a_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_a.to_schema = Some("public".into());
+        let mut fk_b = fk(
+            "orders_user_b_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_b.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk_a, fk_b.clone()],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders_before],
+            ..Default::default()
+        };
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk_b],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropTableReferenced),
+            "Surviving FK B still references public.users; drop-table-referenced must fire, got: {findings:?}"
+        );
     }
 
     #[test]
