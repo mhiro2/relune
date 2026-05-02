@@ -98,8 +98,6 @@ pub fn run_render(
     // Execute render
     let result = render(request).context("Failed to render schema")?;
 
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
-
     // Write output (PNG needs byte-level writer for rasterized data)
     if is_png {
         let png_data =
@@ -113,6 +111,8 @@ pub fn run_render(
     } else {
         write_output(&result.content, args.out.as_deref(), color)?;
     }
+
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     // Print stats if requested (from merged config)
     if merged.show_stats {

@@ -59,8 +59,6 @@ pub fn run_lint(
         })
         .unwrap_or(Severity::Error);
 
-    check_diagnostics_at_or_above(&result.diagnostics, color, diagnostic_threshold)?;
-
     // Format and write output.
     let output = match merged.format {
         LintFormat::Json => serde_json::to_string_pretty(&result).map_err(|error| {
@@ -71,6 +69,8 @@ pub fn run_lint(
         LintFormat::Text => format_lint_text(&result),
     };
     write_output(&output, args.out.as_deref(), color)?;
+
+    check_diagnostics_at_or_above(&result.diagnostics, color, diagnostic_threshold)?;
 
     // Check if we should exit with non-zero code based on --deny
     if result.has_failures(fail_on) {

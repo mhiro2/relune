@@ -75,8 +75,8 @@ pub fn run_export(
     // Execute export
     let result = export(request).context("Failed to export schema")?;
 
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
     write_output(&result.content, args.out.as_deref(), color)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {
