@@ -51,7 +51,11 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
         .connect_with(connect_options)
         .await
         .map_err(|e| {
-            error!(error = %e, "Failed to connect to database");
+            // Sanitize the raw sqlx error before logging: variants such as
+            // `Configuration`/`Tls`/`Io` may include the original DSN with
+            // credentials in their `Display` output.
+            let sanitized = crate::url::sanitize_error_message(&connect_url, &e.to_string());
+            error!(error = %sanitized, "Failed to connect to database");
             connect_error("MySQL", &connect_url, e)
         })?;
 
