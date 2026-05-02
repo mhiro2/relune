@@ -1298,6 +1298,7 @@ fn parse_create_index(
 /// Parse a COMMENT ON statement and apply it to the appropriate table or column.
 #[allow(clippy::ref_option)]
 #[allow(clippy::trivially_copy_pass_by_ref, clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn parse_comment(
     ctx: &mut ParseContext,
     input: &str,
@@ -1367,7 +1368,21 @@ fn parse_comment(
             let stable_id = match table_parts {
                 [table] => normalize_identifier(table),
                 [schema, table] | [.., schema, table] => normalized_stable_id(Some(schema), table),
-                _ => unreachable!("COMMENT ON COLUMN must have at least two parts"),
+                [] => {
+                    ctx.diagnostics.push(
+                        Diagnostic::warning(
+                            codes::parse_unsupported(),
+                            "Unsupported COMMENT ON COLUMN syntax: missing table qualifier"
+                                .to_string(),
+                        )
+                        .with_span_opt(span_from_spanned(
+                            input,
+                            offsets,
+                            object_name,
+                        )),
+                    );
+                    return;
+                }
             };
 
             if let Some(&table_idx) = table_map.get(&stable_id) {
