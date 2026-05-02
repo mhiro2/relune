@@ -97,7 +97,13 @@ pub fn run_rules(
                 );
             }
             if context.rule_active(ReviewRuleId::AddUniqueOnExisting, &selected) {
-                check_add_unique_on_existing(table_diff, index_diff, after_table, &mut findings);
+                check_add_unique_on_existing(
+                    table_diff,
+                    index_diff,
+                    before_table,
+                    after_table,
+                    &mut findings,
+                );
             }
             if context.rule_active(ReviewRuleId::AddIndexOnLargeTable, &selected) {
                 check_add_index_on_large_table(
@@ -985,6 +991,7 @@ fn evaluate_drop_pk_severity(
 fn check_add_unique_on_existing(
     table_diff: &TableDiff,
     index_diff: &IndexDiff,
+    before_table: Option<&Table>,
     after_table: &Table,
     findings: &mut Vec<RiskFinding>,
 ) {
@@ -995,6 +1002,16 @@ fn check_add_unique_on_existing(
         return;
     };
     if !new.unique {
+        return;
+    }
+    // Suppress when the column set is already guaranteed unique in
+    // `before`: e.g. replacing PRIMARY KEY(id) with UNIQUE(id), or
+    // adding UNIQUE(id, tenant_id) on a table that already declared
+    // PRIMARY KEY(id). No new uniqueness invariant is being introduced,
+    // so existing rows cannot fail the new constraint.
+    if let Some(before) = before_table
+        && already_unique_in(before, &new.columns)
+    {
         return;
     }
 
@@ -1016,6 +1033,36 @@ fn check_add_unique_on_existing(
         .with_table(&after_table.stable_id, &table_diff.table_name)
         .with_mitigation("Verify no duplicates exist or deduplicate before applying."),
     );
+}
+
+/// Returns true when `columns` are already guaranteed unique in `table`
+/// — i.e. there exists a primary key or unique index whose column set
+/// is a subset of `columns`. Subset suffices because uniqueness on
+/// `(a)` implies uniqueness on `(a, b)`.
+fn already_unique_in(table: &Table, columns: &[String]) -> bool {
+    if columns.is_empty() {
+        return false;
+    }
+    let new_cols: HashSet<String> = columns.iter().map(|c| c.to_ascii_lowercase()).collect();
+
+    let pk_cols: Vec<String> = table
+        .columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.name.to_ascii_lowercase())
+        .collect();
+    if !pk_cols.is_empty() && pk_cols.iter().all(|c| new_cols.contains(c)) {
+        return true;
+    }
+
+    table.indexes.iter().any(|idx| {
+        if !idx.is_unique || idx.columns.is_empty() {
+            return false;
+        }
+        idx.columns
+            .iter()
+            .all(|c| new_cols.contains(&c.to_ascii_lowercase()))
+    })
 }
 
 /// `risk/add-cascade-delete` — FK gains `ON DELETE CASCADE`.
@@ -2322,6 +2369,125 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting)
             .expect("expected AddUniqueOnExisting finding");
         assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn add_unique_suppressed_when_column_set_already_pk() {
+        // Replacing PRIMARY KEY(id) with UNIQUE(id) introduces no new
+        // uniqueness invariant — the PK already guarantees no duplicates,
+        // so no row can fail the new constraint.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddUniqueOnExisting),
+            "PK->UNIQUE on the same column set must not warn; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_unique_suppressed_when_subset_already_unique() {
+        // UNIQUE(id) already exists; adding UNIQUE(id, tenant_id) does
+        // not introduce a new invariant because uniqueness on (id)
+        // implies uniqueness on (id, tenant_id).
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![
+                    index("users_id_key", &["id"], true),
+                    index("users_id_tenant_key", &["id", "tenant_id"], true),
+                ],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddUniqueOnExisting),
+            "UNIQUE(id, tenant_id) on top of existing UNIQUE(id) must not warn; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_unique_still_warns_when_no_existing_uniqueness_covers_columns() {
+        // Existing UNIQUE(id, tenant_id) does NOT imply uniqueness on
+        // just (id) alone, so adding UNIQUE(id) can still fail.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_tenant_key", &["id", "tenant_id"], true)],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![
+                    index("users_id_tenant_key", &["id", "tenant_id"], true),
+                    index("users_id_key", &["id"], true),
+                ],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting),
+            "narrowing UNIQUE column set must still warn; got {findings:?}"
+        );
     }
 
     #[test]
