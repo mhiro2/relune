@@ -185,9 +185,16 @@ impl<'a> RuleContext<'a> {
         let mut removed_fks: HashSet<RemovedFk> = HashSet::new();
         for table_diff in &diff.modified_tables {
             for fk_diff in &table_diff.fk_diffs {
-                if fk_diff.change_kind == ChangeKind::Removed
-                    && let Some(old) = fk_diff.old_value.as_ref()
-                {
+                // A Modified FK retargets the column pairs / target table, so
+                // the *old* shape is effectively gone in `after`. Treat it as
+                // removed so cross-table rules (drop-column-referenced,
+                // drop-pk-or-unique, drop-table-referenced) don't fire when a
+                // safe migration repoints the FK in the same step.
+                let is_removed_shape = matches!(
+                    fk_diff.change_kind,
+                    ChangeKind::Removed | ChangeKind::Modified
+                );
+                if is_removed_shape && let Some(old) = fk_diff.old_value.as_ref() {
                     removed_fks.insert(RemovedFk {
                         table_name: table_diff.table_name.to_lowercase(),
                         fk_name: old.name.as_ref().map(|n| n.to_lowercase()),
@@ -1685,6 +1692,78 @@ mod tests {
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
             "FK is dropped in same migration; rule should not fire"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_silenced_when_fk_modified_to_other_column() {
+        // Same migration: drop users.email, add users.new_email, and
+        // retarget orders.user_email_fkey from email to new_email.
+        // The Modified FK's old shape (referencing email) is gone, so the
+        // drop is safe and the rule should not fire.
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("new_email", "TEXT", false, false),
+            ],
+            vec![],
+            vec![index("users_new_email_key", &["new_email"], true)],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["new_email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
+            "FK is retargeted in same migration; drop-column-referenced should not fire, got: {findings:?}"
         );
     }
 
