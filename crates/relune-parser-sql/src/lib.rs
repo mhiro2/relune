@@ -774,10 +774,10 @@ fn parse_statements_with_recovery(
         Ok(p) => p,
         Err(e) => {
             // Tokenizer error — nothing can be parsed
-            ctx.diagnostics.push(
-                Diagnostic::error(codes::parse_error(), format!("SQL parse error: {e}"))
-                    .with_span(SourceSpan::new(0, input.len().min(100))),
-            );
+            ctx.diagnostics.push(Diagnostic::error(
+                codes::parse_error(),
+                format!("SQL parse error: {e}"),
+            ));
             return Vec::new();
         }
     };
@@ -801,12 +801,13 @@ fn parse_statements_with_recovery(
                 // Try to extract location from the error token's current position
                 let span = {
                     let tok = parser.peek_token();
-                    let sql_span = tok.span;
-                    source_span_from_sql_span(input, offsets, sql_span)
-                        .unwrap_or_else(|| SourceSpan::new(0, input.len().min(100)))
+                    source_span_from_sql_span(input, offsets, tok.span)
                 };
-                ctx.diagnostics
-                    .push(Diagnostic::error(codes::parse_error(), error_msg).with_span(span));
+                let mut diagnostic = Diagnostic::error(codes::parse_error(), error_msg);
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_span(span);
+                }
+                ctx.diagnostics.push(diagnostic);
 
                 // Skip tokens until the next semicolon or EOF for recovery
                 loop {
