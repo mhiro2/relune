@@ -43,7 +43,15 @@ if [[ -z "${OUTPUT_PATH:-}" ]]; then
   esac
 fi
 
-summary_path="${RUNNER_TEMP:-/tmp}/relune-review.summary.json"
+# Use a unique temp file per invocation so concurrent jobs on a self-hosted
+# runner cannot stomp on each other's summary, and a pre-existing symlink at a
+# predictable path cannot redirect the write. BSD `mktemp` (macOS) only
+# substitutes the trailing `XXXXXX`, so the placeholder must be the final
+# segment of the template; a fixed suffix would leave the filename literal
+# and break uniqueness. GNU `mktemp` (Ubuntu) accepts the same shape.
+summary_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+summary_path=$(mktemp "${summary_dir}/relune-review.summary.XXXXXX")
+trap 'rm -f "${summary_path}"' EXIT
 
 # Build CLI args (filters + dialect + emit-summary).
 args=(
@@ -59,17 +67,22 @@ if [[ -n "${DIALECT:-}" && "${DIALECT}" != "auto" ]]; then
   args+=(--dialect "${DIALECT}")
 fi
 
+# Strip a trailing CR so workflow YAMLs authored with CRLF line endings do
+# not produce rule ids / table patterns that the CLI rejects as unknown.
 while IFS= read -r line; do
+  line="${line%$'\r'}"
   [[ -z "${line}" ]] && continue
   args+=(--rules "${line}")
 done <<< "${RULES:-}"
 
 while IFS= read -r line; do
+  line="${line%$'\r'}"
   [[ -z "${line}" ]] && continue
   args+=(--except-rule "${line}")
 done <<< "${EXCEPT_RULES:-}"
 
 while IFS= read -r line; do
+  line="${line%$'\r'}"
   [[ -z "${line}" ]] && continue
   args+=(--except-table "${line}")
 done <<< "${EXCEPT_TABLES:-}"
