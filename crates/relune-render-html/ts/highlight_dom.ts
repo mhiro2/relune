@@ -139,6 +139,7 @@ export function applyHoverPreviewClasses(
 export interface DrawerElements {
   drawer: HTMLElement;
   title: HTMLElement;
+  titleBadges: HTMLElement;
   kind: HTMLElement;
   subtitle: HTMLElement;
   metrics: HTMLElement;
@@ -172,6 +173,7 @@ export function renderDrawer(
 ): void {
   if (table === undefined) {
     elements.drawer.setAttribute('hidden', '');
+    clearChildren(elements.titleBadges);
     clearChildren(elements.metrics);
     clearChildren(elements.columns);
     clearChildren(elements.relations);
@@ -190,16 +192,17 @@ export function renderDrawer(
     ? `${table.schema_name}.${table.table_name}`
     : table.table_name;
 
-  // Badges (join table candidate, diff)
-  clearChildren(elements.metrics);
-  if (table.is_join_table_candidate) {
-    elements.metrics.append(joinTableBadge());
-  }
+  // Title-row badges (diff status, join table candidate)
+  clearChildren(elements.titleBadges);
   if (table.diff_kind) {
-    elements.metrics.append(diffBadge(table.diff_kind));
+    elements.titleBadges.append(diffBadge(table.diff_kind));
+  }
+  if (table.is_join_table_candidate) {
+    elements.titleBadges.append(joinTableBadge());
   }
 
   // Metrics
+  clearChildren(elements.metrics);
   const totalRelations = table.inbound_count + table.outbound_count;
   elements.metrics.append(
     metricCard('Columns', String(table.columns.length)),

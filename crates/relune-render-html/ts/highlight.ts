@@ -38,6 +38,7 @@ import {
   const drawerEls: DrawerElements | null = (() => {
     const drawer = document.getElementById('detail-drawer');
     const title = document.getElementById('detail-title');
+    const titleBadges = document.getElementById('detail-title-badges');
     const kind = document.getElementById('detail-kind');
     const subtitle = document.getElementById('detail-subtitle');
     const metrics = document.getElementById('detail-metrics');
@@ -48,6 +49,7 @@ import {
     if (
       drawer instanceof HTMLElement &&
       title instanceof HTMLElement &&
+      titleBadges instanceof HTMLElement &&
       kind instanceof HTMLElement &&
       subtitle instanceof HTMLElement &&
       metrics instanceof HTMLElement &&
@@ -59,6 +61,7 @@ import {
       return {
         drawer,
         title,
+        titleBadges,
         kind,
         subtitle,
         metrics,

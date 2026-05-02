@@ -135,6 +135,30 @@ textarea {
   color: inherit;
 }
 
+/* UI chrome (buttons, tabs, badges, section labels) is non-selectable so
+   double-click and drag don't snag on it. Content surfaces (headings,
+   descriptions, hints, finding bodies, output text) keep default selection. */
+.btn,
+.mode-tab,
+.severity-badge,
+.pill,
+.topbar__tag,
+.topbar__badge,
+.topbar__status,
+.sidebar__label,
+.ctrl__label,
+.surface__label,
+.surface-head__eyebrow,
+.diagnostics__label,
+.diagnostics__count,
+.compare-summary__label,
+.compare-summary__count,
+.compare-editors__label,
+.stat-card__label {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 code,
 textarea {
   font-family: var(--font-mono);
