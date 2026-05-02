@@ -51,20 +51,58 @@ fi
 VERSION="${VERSION#v}"
 
 # ---------------------------------------------------------------------------
-# Download and install
+# Download, verify, and install
 # ---------------------------------------------------------------------------
 archive="relune_${VERSION}_${os}_${arch}.tar.gz"
-url="https://github.com/${REPO}/releases/download/v${VERSION}/${archive}"
+base_url="https://github.com/${REPO}/releases/download/v${VERSION}"
 
 install_dir="${RUNNER_TOOL_CACHE}/relune/${VERSION}/${os}-${arch}"
 mkdir -p "${install_dir}"
 
-echo "Downloading ${url} ..."
-curl -fsSL "${url}" -o "${install_dir}/${archive}"
-tar -xzf "${install_dir}/${archive}" -C "${install_dir}"
-rm -f "${install_dir}/${archive}"
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
 
+echo "Downloading ${base_url}/${archive} ..."
+curl -fsSL "${base_url}/${archive}" -o "${tmp}/${archive}"
+curl -fsSL "${base_url}/checksums.txt" -o "${tmp}/checksums.txt"
+
+matches=$(awk -v a="${archive}" '$2 == a {print $1}' "${tmp}/checksums.txt")
+match_count=$(printf '%s' "${matches}" | grep -c . || true)
+if [[ "${match_count}" -eq 0 ]]; then
+  echo "::error::Archive ${archive} not found in checksums.txt"
+  exit 1
+fi
+if [[ "${match_count}" -gt 1 ]]; then
+  echo "::error::Multiple checksum entries for ${archive} in checksums.txt"
+  exit 1
+fi
+expected="${matches}"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum "${tmp}/${archive}" | awk '{print $1}')
+else
+  actual=$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')
+fi
+
+if [[ "${expected}" != "${actual}" ]]; then
+  echo "::error::Checksum mismatch for ${archive}: expected ${expected}, got ${actual}"
+  exit 1
+fi
+echo "Checksum verified: ${actual}"
+
+tar -xzf "${tmp}/${archive}" -C "${install_dir}"
+if [[ ! -f "${install_dir}/relune" ]]; then
+  echo "::error::Archive ${archive} did not contain a 'relune' binary"
+  exit 1
+fi
 chmod +x "${install_dir}/relune"
 echo "${install_dir}" >> "${GITHUB_PATH}"
+
+version_output=$("${install_dir}/relune" --version)
+echo "${version_output}"
+if [[ "${version_output}" != *"${VERSION}"* ]]; then
+  echo "::error::Installed binary reports '${version_output}' but expected version ${VERSION}"
+  exit 1
+fi
 
 echo "Installed relune ${VERSION} to ${install_dir}"
