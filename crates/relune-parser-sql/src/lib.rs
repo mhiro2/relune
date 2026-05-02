@@ -2174,13 +2174,6 @@ fn error_summary(output: &ParseOutput) -> String {
     }
 }
 
-// Keep the old function name for backward compatibility
-/// Legacy function - use `parse_sql_to_schema` instead.
-#[deprecated(since = "0.2.0", note = "Use `parse_sql_to_schema` instead")]
-pub fn parse_schema(sql: &str) -> Result<Schema, ParseError> {
-    parse_sql_to_schema(sql)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
