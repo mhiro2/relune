@@ -217,7 +217,13 @@ impl<'a> RuleContext<'a> {
                     ChangeKind::Modified => {
                         match (fk_diff.old_value.as_ref(), fk_diff.new_value.as_ref()) {
                             (Some(old), Some(new))
-                                if fk_shape_changed(old, new, owner_schema.as_deref()) =>
+                                if fk_shape_changed(
+                                    old,
+                                    new,
+                                    owner_schema.as_deref(),
+                                    before,
+                                    after,
+                                ) =>
                             {
                                 Some(old)
                             }
@@ -227,6 +233,21 @@ impl<'a> RuleContext<'a> {
                     ChangeKind::Added => None,
                 };
                 if let Some(old) = removed_shape {
+                    // If the after side still has an FK on the same owner
+                    // table that resolves to the same target and column
+                    // pairs, the reference survives (e.g. an FK rename
+                    // shows up as Removed + Added). Skip — otherwise
+                    // cross-table rules would be silenced for the
+                    // surviving reference.
+                    if fk_shape_survives_in_after(
+                        old,
+                        &table_diff.table_name,
+                        owner_schema.as_deref(),
+                        before,
+                        after,
+                    ) {
+                        continue;
+                    }
                     removed_fks.insert(RemovedFk {
                         table_name: table_diff.table_name.to_lowercase(),
                         fk_name: old.name.as_ref().map(|n| n.to_lowercase()),
@@ -354,25 +375,103 @@ impl<'a> RuleContext<'a> {
     }
 }
 
+/// Returns true when an FK on `owner_qname` in `before` (described by
+/// `removed`) still has an equivalent shape on the same owner table in
+/// `after`. "Equivalent" means resolved target table id + column pairs
+/// are the same. Used to suppress `RemovedFk` registration when a FK is
+/// just renamed or dropped-and-recreated with the same shape.
+fn fk_shape_survives_in_after(
+    removed: &crate::export::ForeignKeyExport,
+    owner_qname: &str,
+    owner_schema: Option<&str>,
+    before: &Schema,
+    after: &Schema,
+) -> bool {
+    let Some(after_owner) = after
+        .tables
+        .iter()
+        .find(|t| t.qualified_name().eq_ignore_ascii_case(owner_qname))
+    else {
+        return false;
+    };
+    let removed_target = resolve_table_id(
+        before,
+        removed.to_schema.as_deref(),
+        &removed.to_table,
+        owner_schema,
+    );
+    let removed_pairs: Vec<(String, String)> = removed
+        .from_columns
+        .iter()
+        .zip(removed.to_columns.iter())
+        .map(|(f, t)| (f.to_ascii_lowercase(), t.to_ascii_lowercase()))
+        .collect();
+    after_owner.foreign_keys.iter().any(|fk| {
+        let after_target =
+            resolve_table_id(after, fk.to_schema.as_deref(), &fk.to_table, owner_schema);
+        let target_eq = match (&removed_target, &after_target) {
+            (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+            (None, None) => {
+                let normalize = |s: Option<&str>| s.or(owner_schema).map(str::to_ascii_lowercase);
+                normalize(removed.to_schema.as_deref()) == normalize(fk.to_schema.as_deref())
+                    && removed.to_table.eq_ignore_ascii_case(&fk.to_table)
+            }
+            _ => false,
+        };
+        if !target_eq {
+            return false;
+        }
+        if fk.from_columns.len() != removed_pairs.len() {
+            return false;
+        }
+        fk.from_columns
+            .iter()
+            .zip(fk.to_columns.iter())
+            .zip(removed_pairs.iter())
+            .all(|((f, t), (rf, rt))| f.eq_ignore_ascii_case(rf) && t.eq_ignore_ascii_case(rt))
+    })
+}
+
 /// Returns true when an FK's reference shape (target table + column
 /// pairs) differs between `old` and `new`. Used to distinguish a true
 /// retarget (old shape is gone in `after`) from a referential-action
 /// only change (`ON DELETE` / `ON UPDATE`) that preserves the
 /// reference.
 ///
-/// `owner_schema` is the schema of the FK's owning table. When
-/// supplied, an unqualified `to_schema = None` is treated as referring
-/// to the owner schema, so flipping `REFERENCES users` to
-/// `REFERENCES public.users` (where `public` is the owner) does not
-/// register as a shape change.
+/// Comparison goes through [`resolve_table_id`] using the same
+/// owner-schema-preferred + bare-name fallback policy that
+/// [`fk_targets_table`] uses, so an unqualified `REFERENCES users`
+/// that resolves to `auth.users` via fallback is treated as the same
+/// shape when the FK is later spelled `REFERENCES auth.users`. The
+/// `before` / `after` schemas are used to resolve the old/new sides
+/// respectively, since a same-name homonym may have appeared between
+/// states.
 fn fk_shape_changed(
     old: &crate::export::ForeignKeyExport,
     new: &crate::export::ForeignKeyExport,
     owner_schema: Option<&str>,
+    before: &Schema,
+    after: &Schema,
 ) -> bool {
-    let resolve = |s: Option<&str>| s.or(owner_schema).map(str::to_ascii_lowercase);
-    let schema_eq = resolve(old.to_schema.as_deref()) == resolve(new.to_schema.as_deref());
-    let table_eq = old.to_table.eq_ignore_ascii_case(&new.to_table);
+    let old_target = resolve_table_id(
+        before,
+        old.to_schema.as_deref(),
+        &old.to_table,
+        owner_schema,
+    );
+    let new_target = resolve_table_id(after, new.to_schema.as_deref(), &new.to_table, owner_schema);
+    let target_eq = match (&old_target, &new_target) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => {
+            // Neither side resolves to a known table — fall back to the
+            // raw `(schema, table)` pair, normalizing `None` against the
+            // owner schema.
+            let resolve_raw = |s: Option<&str>| s.or(owner_schema).map(str::to_ascii_lowercase);
+            resolve_raw(old.to_schema.as_deref()) == resolve_raw(new.to_schema.as_deref())
+                && old.to_table.eq_ignore_ascii_case(&new.to_table)
+        }
+        _ => false,
+    };
     let columns_eq = old.from_columns.len() == new.from_columns.len()
         && old.to_columns.len() == new.to_columns.len()
         && old
@@ -385,7 +484,7 @@ fn fk_shape_changed(
             .iter()
             .zip(new.to_columns.iter())
             .all(|(a, b)| a.eq_ignore_ascii_case(b));
-    !(schema_eq && table_eq && columns_eq)
+    !(target_eq && columns_eq)
 }
 
 fn fk_label(fk: &ForeignKey, owner_qname: &str) -> String {
@@ -3113,6 +3212,167 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_modified_fk_qualifies_fallback_target() {
+        // before: auth.users (id, email) + public.orders with FK
+        //         REFERENCES users(email) — bare name, resolves to
+        //         auth.users via search-path fallback (no public.users).
+        // after:  auth.users (id) — email dropped.
+        //         public.orders with same FK, now spelled
+        //         REFERENCES auth.users(email).
+        // The FK Modified: schema went None -> "auth", but the resolved
+        // target is the same auth.users in both states. Shape is
+        // semantically unchanged, so the FK must NOT be in removed_fks
+        // and drop-column-referenced must still fire on the dropped
+        // auth.users.email.
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let bare_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![bare_fk],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users, orders_before],
+            ..Default::default()
+        };
+        let auth_users_after = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut qualified_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        qualified_fk.to_schema = Some("auth".into());
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![qualified_fk],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK semantically unchanged after qualifying the fallback target; drop-column-referenced must still fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_fk_renamed_with_same_shape() {
+        // public.orders has FK orders_user_email_fkey REFERENCES
+        // public.users(email). The migration renames the constraint
+        // (Removed orders_user_email_fkey + Added orders_users_email_fk)
+        // and drops public.users.email. The reference still exists in
+        // after, so drop-column-referenced must still fire.
+        let users = table_in(
+            "public",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let mut old_named_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        old_named_fk.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![old_named_fk],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders_before],
+            ..Default::default()
+        };
+        let users_after = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut renamed_fk = fk(
+            "orders_users_email_fk",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        renamed_fk.to_schema = Some("public".into());
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![renamed_fk],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK was only renamed; the reference survives in after, drop-column-referenced must fire, got: {findings:?}"
+        );
     }
 
     #[test]
