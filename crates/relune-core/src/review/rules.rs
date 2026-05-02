@@ -4,7 +4,7 @@
 //! schemas and emits zero or more `RiskFinding`s. Rules are intentionally
 //! pure: suppression, configuration, and ordering happen in the caller.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{DialectScope, EffectiveDialect, ReviewRuleId, ReviewSeverity, RiskFinding};
 use crate::SqlDialect;
@@ -159,6 +159,13 @@ pub fn run_rules(
 struct RuleContext<'a> {
     before: &'a Schema,
     after: &'a Schema,
+    /// Lower-cased `schema.table` (or bare `table`) → table in `before`.
+    /// Replaces the per-rule linear scan over `before.tables`. Built
+    /// once at `RuleContext::build` and shared across every rule.
+    before_by_qname: HashMap<String, &'a Table>,
+    /// Lower-cased qualified name → table in `after`. Same shape as
+    /// `before_by_qname`.
+    after_by_qname: HashMap<String, &'a Table>,
     /// Set of FK names + (table, columns) that are removed by this diff.
     /// Used to decide whether a referenced column / table is being
     /// "intentionally" disconnected at the same time.
@@ -167,6 +174,20 @@ struct RuleContext<'a> {
     removed_tables: HashSet<String>,
     /// Effective dialect used to gate lock-risk rules.
     dialect: EffectiveDialect,
+}
+
+/// Build a lower-cased `qualified_name` → `&Table` lookup for one side of
+/// the diff. Schemas may legally contain multiple tables that lower-case
+/// to the same key (e.g. `Users` and `users` under `PostgreSQL`'s
+/// case-folding); the first occurrence wins to mirror the prior linear
+/// `find` semantics.
+fn index_tables_by_qname(schema: &Schema) -> HashMap<String, &Table> {
+    let mut map = HashMap::with_capacity(schema.tables.len());
+    for table in &schema.tables {
+        map.entry(table.qualified_name().to_ascii_lowercase())
+            .or_insert(table);
+    }
+    map
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -192,19 +213,21 @@ impl<'a> RuleContext<'a> {
         after: &'a Schema,
         dialect: EffectiveDialect,
     ) -> Self {
+        let before_by_qname = index_tables_by_qname(before);
+        let after_by_qname = index_tables_by_qname(after);
+        let lookup_owner_schema = |qname: &str| -> Option<String> {
+            let key = qname.to_ascii_lowercase();
+            before_by_qname
+                .get(&key)
+                .or_else(|| after_by_qname.get(&key))
+                .and_then(|t| t.schema_name.clone())
+        };
+
         let mut removed_fks: HashSet<RemovedFk> = HashSet::new();
         for table_diff in &diff.modified_tables {
             // Owner schema lets us treat `REFERENCES users` and
             // `REFERENCES <owner_schema>.users` as the same shape.
-            let owner_schema = before
-                .tables
-                .iter()
-                .chain(after.tables.iter())
-                .find(|t| {
-                    t.qualified_name()
-                        .eq_ignore_ascii_case(&table_diff.table_name)
-                })
-                .and_then(|t| t.schema_name.clone());
+            let owner_schema = lookup_owner_schema(&table_diff.table_name);
             for fk_diff in &table_diff.fk_diffs {
                 // The "old shape" of an FK is gone in `after` only when its
                 // column pairs or target table actually moved. A `Modified`
@@ -300,6 +323,8 @@ impl<'a> RuleContext<'a> {
         Self {
             before,
             after,
+            before_by_qname,
+            after_by_qname,
             removed_fks,
             removed_tables: removed_table_qnames,
             dialect,
@@ -328,17 +353,15 @@ impl<'a> RuleContext<'a> {
     }
 
     fn find_before_table(&self, qualified_name: &str) -> Option<&'a Table> {
-        self.before
-            .tables
-            .iter()
-            .find(|t| t.qualified_name().eq_ignore_ascii_case(qualified_name))
+        self.before_by_qname
+            .get(&qualified_name.to_ascii_lowercase())
+            .copied()
     }
 
     fn find_after_table(&self, qualified_name: &str) -> Option<&'a Table> {
-        self.after
-            .tables
-            .iter()
-            .find(|t| t.qualified_name().eq_ignore_ascii_case(qualified_name))
+        self.after_by_qname
+            .get(&qualified_name.to_ascii_lowercase())
+            .copied()
     }
 
     /// Returns true if the FK on `table` is removed in this diff (either
@@ -348,12 +371,11 @@ impl<'a> RuleContext<'a> {
         // an unqualified `REFERENCES users` from `public.orders` only
         // matches the corresponding `RemovedFk` for `public.users`, not a
         // homonym in another schema.
+        let owner_key = owning_table_qname.to_ascii_lowercase();
         let owner_schema = self
-            .before
-            .tables
-            .iter()
-            .chain(self.after.tables.iter())
-            .find(|t| t.qualified_name().eq_ignore_ascii_case(owning_table_qname))
+            .before_by_qname
+            .get(&owner_key)
+            .or_else(|| self.after_by_qname.get(&owner_key))
             .and_then(|t| t.schema_name.as_deref());
         let key = RemovedFk {
             table_name: owning_table_qname.to_lowercase(),

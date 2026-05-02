@@ -735,6 +735,18 @@ mod tests {
     }
 
     #[test]
+    fn rule_id_deserialize_rejects_unknown_id() {
+        // Unknown ids must surface as serde errors instead of being
+        // silently dropped, otherwise typos in YAML/TOML rule lists
+        // disable the rule without warning.
+        let scalar: Result<ReviewRuleId, _> = serde_json::from_str("\"risk/typo-bogus\"");
+        assert!(scalar.is_err());
+        let listed: Result<Vec<ReviewRuleId>, _> =
+            serde_json::from_str(r#"["risk/drop-column-referenced", "risk/typo-bogus"]"#);
+        assert!(listed.is_err());
+    }
+
+    #[test]
     fn metadata_matches_rule_accessors() {
         for rule in ReviewRuleId::all_rules() {
             let metadata = rule.metadata();
