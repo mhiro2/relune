@@ -1083,10 +1083,35 @@ pub(crate) fn build_css(
       margin-bottom: 6px;
     }
 
+    .detail-title-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
     .detail-title {
       font-size: 20px;
       line-height: 1.15;
       margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-title-badges {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .detail-title-badges,
+    .detail-title-badges * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .detail-title-badges:empty {
+      display: none;
     }
 
     .detail-subtitle {
@@ -1158,9 +1183,7 @@ pub(crate) fn build_css(
     }
 
     .detail-badge {
-      grid-column: 1 / -1;
       display: inline-block;
-      width: fit-content;
       padding: 3px 10px;
       border-radius: 6px;
       font-size: 11px;

@@ -105,7 +105,10 @@ pub(crate) fn build_detail_drawer_html() -> String {
     <div class="detail-drawer-header">
       <div>
         <p class="detail-kicker" id="detail-kind">Inspector</p>
-        <h2 class="detail-title" id="detail-title">Object details</h2>
+        <div class="detail-title-row">
+          <h2 class="detail-title" id="detail-title">Object details</h2>
+          <div class="detail-title-badges" id="detail-title-badges"></div>
+        </div>
       </div>
       <button type="button" class="detail-close" id="detail-close" aria-label="Close details">&times;</button>
     </div>

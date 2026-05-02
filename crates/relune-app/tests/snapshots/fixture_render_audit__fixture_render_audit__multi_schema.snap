@@ -1,6 +1,5 @@
 ---
 source: crates/relune-app/tests/fixture_render_audit.rs
-assertion_line: 424
 expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
 ---
 {
@@ -48,7 +47,7 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 419110,
+      "bytes": 419866,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true

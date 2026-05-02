@@ -241,6 +241,7 @@
   function renderDrawer(table, state, elements, onNavigate) {
     if (table === void 0) {
       elements.drawer.setAttribute("hidden", "");
+      clearChildren(elements.titleBadges);
       clearChildren(elements.metrics);
       clearChildren(elements.columns);
       clearChildren(elements.relations);
@@ -255,13 +256,14 @@
     elements.kind.textContent = table.kind;
     elements.title.textContent = table.label || table.table_name || table.id;
     elements.subtitle.textContent = table.schema_name ? `${table.schema_name}.${table.table_name}` : table.table_name;
-    clearChildren(elements.metrics);
-    if (table.is_join_table_candidate) {
-      elements.metrics.append(joinTableBadge());
-    }
+    clearChildren(elements.titleBadges);
     if (table.diff_kind) {
-      elements.metrics.append(diffBadge(table.diff_kind));
+      elements.titleBadges.append(diffBadge(table.diff_kind));
     }
+    if (table.is_join_table_candidate) {
+      elements.titleBadges.append(joinTableBadge());
+    }
+    clearChildren(elements.metrics);
     const totalRelations = table.inbound_count + table.outbound_count;
     elements.metrics.append(
       metricCard("Columns", String(table.columns.length)),
@@ -534,6 +536,7 @@
     const drawerEls = (() => {
       const drawer = document.getElementById("detail-drawer");
       const title = document.getElementById("detail-title");
+      const titleBadges = document.getElementById("detail-title-badges");
       const kind = document.getElementById("detail-kind");
       const subtitle = document.getElementById("detail-subtitle");
       const metrics = document.getElementById("detail-metrics");
@@ -541,10 +544,11 @@
       const columnsEmpty = document.getElementById("detail-columns-empty");
       const relations = document.getElementById("detail-relations");
       const relationsEmpty = document.getElementById("detail-relationships-empty");
-      if (drawer instanceof HTMLElement && title instanceof HTMLElement && kind instanceof HTMLElement && subtitle instanceof HTMLElement && metrics instanceof HTMLElement && columns instanceof HTMLElement && columnsEmpty instanceof HTMLElement && relations instanceof HTMLElement && relationsEmpty instanceof HTMLElement) {
+      if (drawer instanceof HTMLElement && title instanceof HTMLElement && titleBadges instanceof HTMLElement && kind instanceof HTMLElement && subtitle instanceof HTMLElement && metrics instanceof HTMLElement && columns instanceof HTMLElement && columnsEmpty instanceof HTMLElement && relations instanceof HTMLElement && relationsEmpty instanceof HTMLElement) {
         return {
           drawer,
           title,
+          titleBadges,
           kind,
           subtitle,
           metrics,
