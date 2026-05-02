@@ -270,6 +270,15 @@ The install script supports `RUNNER_OS=Linux|macOS` and `RUNNER_ARCH=X64|ARM64` 
 pre-built binaries are not published for Windows; build relune from source and pass it
 via `binary-path` if you need Windows.
 
+### Install step fails with "Checksum mismatch"
+
+The install script verifies the downloaded archive's SHA-256 against the
+`checksums.txt` published alongside the release. This catches corrupted downloads and is
+a basic integrity check, but `checksums.txt` is fetched from the same release URL — it
+is not a substitute for signature verification. A mismatch most often means a transient
+download corruption (retry the job); investigate before bypassing. To skip the install
+step entirely, build relune from source and pass it via `binary-path`.
+
 ### `dialect: auto` picks the wrong SQL dialect
 
 The CLI infers the dialect from the file contents. When the heuristic guesses wrong (for
