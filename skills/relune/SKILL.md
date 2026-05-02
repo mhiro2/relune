@@ -285,7 +285,7 @@ relune review --list-rules --format json         # JSON catalog (for CI / docs)
 |--------|--------|---------|
 | `-f`, `--format` | `text`, `markdown`, `json` | `text` |
 | `-o`, `--out` | Output file path | stdout |
-| `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
+| `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` -- `postgres` / `mysql` also activate the lock-risk caution rules | `auto` |
 | `--rules <RULE>` | Repeatable; run only these rules (`risk/<id>` or bare `<id>`) | all rules |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set | -- |
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (`*` glob) | -- |
@@ -294,7 +294,9 @@ relune review --list-rules --format json         # JSON catalog (for CI / docs)
 | `--list-rules` | List every rule (with default severity and description) and exit; honors `--format text\|json` only | off |
 | `--emit-summary <PATH>` | Always write the full review JSON to `PATH`, even when `--deny` short-circuits with rc=10 | off |
 
-Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. `--list-rules` is the canonical source of every rule for CI / docs automation. `--emit-summary` is intended for CI jobs that need the structured report in a single pass (PR comment generation that still wants `--deny` to gate the build); reusing the `--out` path is rejected as a usage error.
+Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. The catalog has twelve rules; the four lock-risk caution rules (`risk/add-index-on-large-table`, `risk/add-fk-on-existing`, `risk/alter-column-type`, and `risk/rewrite-table` on MySQL) only fire when `--dialect postgres` or `--dialect mysql` is set -- `auto` and `sqlite` skip them. `--list-rules` is the canonical source of every rule for CI / docs automation. `--emit-summary` is intended for CI jobs that need the structured report in a single pass (PR comment generation that still wants `--deny` to gate the build); reusing the `--out` path is rejected as a usage error.
+
+Lock-risk caution rules are based on schema state-change diff, not on the migration SQL itself. They flag a state change that, if executed naively, would acquire a problematic lock; they do not read your migration script and cannot detect that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder.
 
 ## Common Workflows
 
@@ -321,6 +323,7 @@ relune diff --before old.sql --after new.sql --format html -o d.html  # visual d
 relune diff --before old.sql --after new.sql --exit-code              # exit 10 if changes
 relune review --before old.sql --after new.sql                        # migration risk findings
 relune review --before old.sql --after new.sql --deny breaking        # gate CI on breaking risks
+relune review --before old.sql --after new.sql --dialect postgres --deny caution  # also gate on lock-risk caution rules
 relune review --list-rules                                            # catalog of every review rule
 relune lint --sql new.sql                                             # lint new schema
 relune render --sql new.sql --focus <CHANGED_TABLE> --depth 1 -o area.svg
@@ -332,7 +335,7 @@ The public playground also exposes example-specific named viewpoints. Pick a bui
 
 ### Playground risk review view
 
-The playground's compare workbench has a fifth output mode, **Risk review**, alongside the existing visual / text / markdown / JSON views. Paste a baseline schema on the left, the proposed migration on the right, and switch the compare-format control to `Risk review` — the playground calls the same review pipeline as the CLI through WASM and renders severity badges, finding cards (rule ID, target, message, mitigation), and a collapsible suppressed-findings panel. The `Copy JSON` / `Download JSON` actions emit the same shape as `relune review --format json`, so playground exports drop into the same tooling as CLI output. The view is JSON-only in this release; rule allowlists, table exceptions, and `--deny` are not yet exposed in the UI.
+The playground's compare workbench has a fifth output mode, **Risk review**, alongside the existing visual / text / markdown / JSON views. Paste a baseline schema on the left, the proposed migration on the right, and switch the compare-format control to `Risk review` — the playground calls the same review pipeline as the CLI through WASM and renders severity badges, finding cards (rule ID, target, message, mitigation), and a collapsible suppressed-findings panel. The Risk review view also exposes a small **dialect selector** (`auto` / `postgres` / `mysql` / `sqlite`) that mirrors `--dialect`; flipping it to `postgres` or `mysql` activates the lock-risk caution rules in the WASM call, and the selection is persisted in the URL via `?reviewDialect=`. The `Copy JSON` / `Download JSON` actions emit the same shape as `relune review --format json`, so playground exports drop into the same tooling as CLI output. The view is JSON-only in this release; rule allowlists, table exceptions, and `--deny` are not yet exposed in the UI.
 
 ### Embed ERDs in documentation
 
