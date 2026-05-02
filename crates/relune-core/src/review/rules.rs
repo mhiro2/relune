@@ -97,7 +97,13 @@ pub fn run_rules(
                 );
             }
             if context.rule_active(ReviewRuleId::AddUniqueOnExisting, &selected) {
-                check_add_unique_on_existing(table_diff, index_diff, after_table, &mut findings);
+                check_add_unique_on_existing(
+                    table_diff,
+                    index_diff,
+                    before_table,
+                    after_table,
+                    &mut findings,
+                );
             }
             if context.rule_active(ReviewRuleId::AddIndexOnLargeTable, &selected) {
                 check_add_index_on_large_table(
@@ -171,7 +177,11 @@ struct RemovedFk {
     fk_name: Option<String>,
     /// Lower-cased ordered tuple of `(from_column, to_column)` pairs.
     column_pairs: Vec<(String, String)>,
-    /// Lower-cased qualified target table name.
+    /// Lower-cased target schema, normalized to the owner schema when
+    /// the FK was unqualified. Lets two homonym targets (e.g.
+    /// `auth.users` and `public.users`) be tracked separately.
+    to_schema: Option<String>,
+    /// Lower-cased target table bare name.
     to_table: String,
 }
 
@@ -184,10 +194,60 @@ impl<'a> RuleContext<'a> {
     ) -> Self {
         let mut removed_fks: HashSet<RemovedFk> = HashSet::new();
         for table_diff in &diff.modified_tables {
+            // Owner schema lets us treat `REFERENCES users` and
+            // `REFERENCES <owner_schema>.users` as the same shape.
+            let owner_schema = before
+                .tables
+                .iter()
+                .chain(after.tables.iter())
+                .find(|t| {
+                    t.qualified_name()
+                        .eq_ignore_ascii_case(&table_diff.table_name)
+                })
+                .and_then(|t| t.schema_name.clone());
             for fk_diff in &table_diff.fk_diffs {
-                if fk_diff.change_kind == ChangeKind::Removed
-                    && let Some(old) = fk_diff.old_value.as_ref()
-                {
+                // The "old shape" of an FK is gone in `after` only when its
+                // column pairs or target table actually moved. A `Modified`
+                // diff that only flips `ON DELETE` / `ON UPDATE` keeps the
+                // same reference, so we must NOT add it to `removed_fks` —
+                // doing so would silence drop-column-referenced and friends
+                // even though the FK still depends on the dropped column.
+                let removed_shape = match fk_diff.change_kind {
+                    ChangeKind::Removed => fk_diff.old_value.as_ref(),
+                    ChangeKind::Modified => {
+                        match (fk_diff.old_value.as_ref(), fk_diff.new_value.as_ref()) {
+                            (Some(old), Some(new))
+                                if fk_shape_changed(
+                                    old,
+                                    new,
+                                    owner_schema.as_deref(),
+                                    before,
+                                    after,
+                                ) =>
+                            {
+                                Some(old)
+                            }
+                            _ => None,
+                        }
+                    }
+                    ChangeKind::Added => None,
+                };
+                if let Some(old) = removed_shape {
+                    // If the after side still has an FK on the same owner
+                    // table that resolves to the same target and column
+                    // pairs, the reference survives (e.g. an FK rename
+                    // shows up as Removed + Added). Skip — otherwise
+                    // cross-table rules would be silenced for the
+                    // surviving reference.
+                    if fk_shape_survives_in_after(
+                        old,
+                        &table_diff.table_name,
+                        owner_schema.as_deref(),
+                        before,
+                        after,
+                    ) {
+                        continue;
+                    }
                     removed_fks.insert(RemovedFk {
                         table_name: table_diff.table_name.to_lowercase(),
                         fk_name: old.name.as_ref().map(|n| n.to_lowercase()),
@@ -197,6 +257,11 @@ impl<'a> RuleContext<'a> {
                             .zip(old.to_columns.iter())
                             .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
                             .collect(),
+                        to_schema: old
+                            .to_schema
+                            .as_deref()
+                            .or(owner_schema.as_deref())
+                            .map(str::to_ascii_lowercase),
                         to_table: old.to_table.to_lowercase(),
                     });
                 }
@@ -221,6 +286,11 @@ impl<'a> RuleContext<'a> {
                             .zip(fk.to_columns.iter())
                             .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
                             .collect(),
+                        to_schema: fk
+                            .to_schema
+                            .as_deref()
+                            .or(table.schema_name.as_deref())
+                            .map(str::to_ascii_lowercase),
                         to_table: fk.to_table.to_lowercase(),
                     });
                 }
@@ -274,6 +344,17 @@ impl<'a> RuleContext<'a> {
     /// Returns true if the FK on `table` is removed in this diff (either
     /// directly or because the owning table was dropped).
     fn fk_is_removed(&self, owning_table_qname: &str, fk: &ForeignKey) -> bool {
+        // Normalize the FK's target schema against the owner's schema so
+        // an unqualified `REFERENCES users` from `public.orders` only
+        // matches the corresponding `RemovedFk` for `public.users`, not a
+        // homonym in another schema.
+        let owner_schema = self
+            .before
+            .tables
+            .iter()
+            .chain(self.after.tables.iter())
+            .find(|t| t.qualified_name().eq_ignore_ascii_case(owning_table_qname))
+            .and_then(|t| t.schema_name.as_deref());
         let key = RemovedFk {
             table_name: owning_table_qname.to_lowercase(),
             fk_name: fk.name.as_ref().map(|n| n.to_lowercase()),
@@ -283,10 +364,146 @@ impl<'a> RuleContext<'a> {
                 .zip(fk.to_columns.iter())
                 .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
                 .collect(),
+            to_schema: fk
+                .to_schema
+                .as_deref()
+                .or(owner_schema)
+                .map(str::to_ascii_lowercase),
             to_table: fk.to_table.to_lowercase(),
         };
         self.removed_fks.contains(&key)
     }
+}
+
+/// Returns true when at least one FK with `removed`'s shape survives
+/// in `after` *over and above* what already existed in `before`. In
+/// other words, `after_count(shape) >= before_count(shape)`. Used to
+/// suppress `RemovedFk` registration when a FK is just renamed or
+/// dropped-and-recreated with the same shape — without
+/// over-suppressing when `before` had multiple same-shape FKs and only
+/// some of them are dropped (in which case `after_count < before_count`
+/// and the dropped FK is a genuine loss).
+fn fk_shape_survives_in_after(
+    removed: &crate::export::ForeignKeyExport,
+    owner_qname: &str,
+    owner_schema: Option<&str>,
+    before: &Schema,
+    after: &Schema,
+) -> bool {
+    let Some(after_owner) = after
+        .tables
+        .iter()
+        .find(|t| t.qualified_name().eq_ignore_ascii_case(owner_qname))
+    else {
+        return false;
+    };
+    let removed_target = resolve_table_id(
+        before,
+        removed.to_schema.as_deref(),
+        &removed.to_table,
+        owner_schema,
+    );
+    let removed_pairs: Vec<(String, String)> = removed
+        .from_columns
+        .iter()
+        .zip(removed.to_columns.iter())
+        .map(|(f, t)| (f.to_ascii_lowercase(), t.to_ascii_lowercase()))
+        .collect();
+    let shape_matches = |fk: &ForeignKey, schema: &Schema, target: &Option<String>| {
+        let candidate_target =
+            resolve_table_id(schema, fk.to_schema.as_deref(), &fk.to_table, owner_schema);
+        let target_eq = match (target, &candidate_target) {
+            (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+            (None, None) => {
+                let normalize = |s: Option<&str>| s.or(owner_schema).map(str::to_ascii_lowercase);
+                normalize(removed.to_schema.as_deref()) == normalize(fk.to_schema.as_deref())
+                    && removed.to_table.eq_ignore_ascii_case(&fk.to_table)
+            }
+            _ => false,
+        };
+        if !target_eq {
+            return false;
+        }
+        if fk.from_columns.len() != removed_pairs.len() {
+            return false;
+        }
+        fk.from_columns
+            .iter()
+            .zip(fk.to_columns.iter())
+            .zip(removed_pairs.iter())
+            .all(|((f, t), (rf, rt))| f.eq_ignore_ascii_case(rf) && t.eq_ignore_ascii_case(rt))
+    };
+    let before_count = before
+        .tables
+        .iter()
+        .find(|t| t.qualified_name().eq_ignore_ascii_case(owner_qname))
+        .map_or(0, |t| {
+            t.foreign_keys
+                .iter()
+                .filter(|fk| shape_matches(fk, before, &removed_target))
+                .count()
+        });
+    let after_count = after_owner
+        .foreign_keys
+        .iter()
+        .filter(|fk| shape_matches(fk, after, &removed_target))
+        .count();
+    after_count >= before_count
+}
+
+/// Returns true when an FK's reference shape (target table + column
+/// pairs) differs between `old` and `new`. Used to distinguish a true
+/// retarget (old shape is gone in `after`) from a referential-action
+/// only change (`ON DELETE` / `ON UPDATE`) that preserves the
+/// reference.
+///
+/// Comparison goes through [`resolve_table_id`] using the same
+/// owner-schema-preferred + bare-name fallback policy that
+/// [`fk_targets_table`] uses, so an unqualified `REFERENCES users`
+/// that resolves to `auth.users` via fallback is treated as the same
+/// shape when the FK is later spelled `REFERENCES auth.users`. The
+/// `before` / `after` schemas are used to resolve the old/new sides
+/// respectively, since a same-name homonym may have appeared between
+/// states.
+fn fk_shape_changed(
+    old: &crate::export::ForeignKeyExport,
+    new: &crate::export::ForeignKeyExport,
+    owner_schema: Option<&str>,
+    before: &Schema,
+    after: &Schema,
+) -> bool {
+    let old_target = resolve_table_id(
+        before,
+        old.to_schema.as_deref(),
+        &old.to_table,
+        owner_schema,
+    );
+    let new_target = resolve_table_id(after, new.to_schema.as_deref(), &new.to_table, owner_schema);
+    let target_eq = match (&old_target, &new_target) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => {
+            // Neither side resolves to a known table — fall back to the
+            // raw `(schema, table)` pair, normalizing `None` against the
+            // owner schema.
+            let resolve_raw = |s: Option<&str>| s.or(owner_schema).map(str::to_ascii_lowercase);
+            resolve_raw(old.to_schema.as_deref()) == resolve_raw(new.to_schema.as_deref())
+                && old.to_table.eq_ignore_ascii_case(&new.to_table)
+        }
+        _ => false,
+    };
+    let columns_eq = old.from_columns.len() == new.from_columns.len()
+        && old.to_columns.len() == new.to_columns.len()
+        && old
+            .from_columns
+            .iter()
+            .zip(new.from_columns.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        && old
+            .to_columns
+            .iter()
+            .zip(new.to_columns.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    !(target_eq && columns_eq)
 }
 
 fn fk_label(fk: &ForeignKey, owner_qname: &str) -> String {
@@ -338,7 +555,12 @@ fn check_drop_column_referenced(
         if context.fk_is_removed(&before_qname, fk) {
             continue;
         }
-        let related = resolve_table_id(context.before, fk.to_schema.as_deref(), &fk.to_table);
+        let related = resolve_table_id(
+            context.before,
+            fk.to_schema.as_deref(),
+            &fk.to_table,
+            before_table.schema_name.as_deref(),
+        );
         let mut finding = RiskFinding::new(
             ReviewRuleId::DropColumnReferenced,
             ReviewSeverity::Breaking,
@@ -369,7 +591,12 @@ fn check_drop_column_referenced(
             .eq_ignore_ascii_case(&before_qname);
         for fk in &other_table.foreign_keys {
             // Resolve target name to detect references to before_table.
-            if !fk_targets_table(fk, before_table, context.before) {
+            if !fk_targets_table(
+                fk,
+                before_table,
+                context.before,
+                other_table.schema_name.as_deref(),
+            ) {
                 continue;
             }
             if !fk
@@ -451,7 +678,12 @@ fn check_drop_table_referenced(
                 continue;
             }
             for fk in &other_table.foreign_keys {
-                if !fk_targets_table(fk, removed_table, context.before) {
+                if !fk_targets_table(
+                    fk,
+                    removed_table,
+                    context.before,
+                    other_table.schema_name.as_deref(),
+                ) {
                     continue;
                 }
                 let other_qname = other_table.qualified_name();
@@ -896,7 +1128,12 @@ fn evaluate_unique_loss_severity(
             continue;
         }
         for fk in &other_table.foreign_keys {
-            if !fk_targets_table(fk, before_table, context.before) {
+            if !fk_targets_table(
+                fk,
+                before_table,
+                context.before,
+                other_table.schema_name.as_deref(),
+            ) {
                 continue;
             }
             let other_qname = other_table.qualified_name();
@@ -945,7 +1182,12 @@ fn evaluate_drop_pk_severity(
             continue;
         }
         for fk in &other_table.foreign_keys {
-            if !fk_targets_table(fk, before_table, context.before) {
+            if !fk_targets_table(
+                fk,
+                before_table,
+                context.before,
+                other_table.schema_name.as_deref(),
+            ) {
                 continue;
             }
             let other_qname = other_table.qualified_name();
@@ -973,6 +1215,7 @@ fn evaluate_drop_pk_severity(
 fn check_add_unique_on_existing(
     table_diff: &TableDiff,
     index_diff: &IndexDiff,
+    before_table: Option<&Table>,
     after_table: &Table,
     findings: &mut Vec<RiskFinding>,
 ) {
@@ -983,6 +1226,16 @@ fn check_add_unique_on_existing(
         return;
     };
     if !new.unique {
+        return;
+    }
+    // Suppress when the column set is already guaranteed unique in
+    // `before`: e.g. replacing PRIMARY KEY(id) with UNIQUE(id), or
+    // adding UNIQUE(id, tenant_id) on a table that already declared
+    // PRIMARY KEY(id). No new uniqueness invariant is being introduced,
+    // so existing rows cannot fail the new constraint.
+    if let Some(before) = before_table
+        && already_unique_in(before, &new.columns)
+    {
         return;
     }
 
@@ -1004,6 +1257,36 @@ fn check_add_unique_on_existing(
         .with_table(&after_table.stable_id, &table_diff.table_name)
         .with_mitigation("Verify no duplicates exist or deduplicate before applying."),
     );
+}
+
+/// Returns true when `columns` are already guaranteed unique in `table`
+/// — i.e. there exists a primary key or unique index whose column set
+/// is a subset of `columns`. Subset suffices because uniqueness on
+/// `(a)` implies uniqueness on `(a, b)`.
+fn already_unique_in(table: &Table, columns: &[String]) -> bool {
+    if columns.is_empty() {
+        return false;
+    }
+    let new_cols: HashSet<String> = columns.iter().map(|c| c.to_ascii_lowercase()).collect();
+
+    let pk_cols: Vec<String> = table
+        .columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.name.to_ascii_lowercase())
+        .collect();
+    if !pk_cols.is_empty() && pk_cols.iter().all(|c| new_cols.contains(c)) {
+        return true;
+    }
+
+    table.indexes.iter().any(|idx| {
+        if !idx.is_unique || idx.columns.is_empty() {
+            return false;
+        }
+        idx.columns
+            .iter()
+            .all(|c| new_cols.contains(&c.to_ascii_lowercase()))
+    })
 }
 
 /// `risk/add-cascade-delete` — FK gains `ON DELETE CASCADE`.
@@ -1035,7 +1318,12 @@ fn check_add_cascade_delete(
         return;
     };
 
-    let related_table_id = resolve_table_id(context.after, new.to_schema.as_deref(), &new.to_table);
+    let related_table_id = resolve_table_id(
+        context.after,
+        new.to_schema.as_deref(),
+        &new.to_table,
+        after_table.schema_name.as_deref(),
+    );
     let label = new
         .name
         .clone()
@@ -1188,8 +1476,24 @@ fn check_add_fk_on_existing(
     };
     // Target table must also exist in `before`. Skip the finding when the
     // FK points at a table that is created in the same migration; an empty
-    // table has nothing to validate against.
-    if resolve_table_id(context.before, new.to_schema.as_deref(), &new.to_table).is_none() {
+    // table has nothing to validate against. Resolve the FK target on the
+    // `after` side (where the FK lives) so unqualified `REFERENCES users`
+    // picks up `public.users` first when added in the same migration, then
+    // verify the resolved table id existed in `before`.
+    let Some(target_id) = resolve_table_id(
+        context.after,
+        new.to_schema.as_deref(),
+        &new.to_table,
+        after_table.schema_name.as_deref(),
+    ) else {
+        return;
+    };
+    if !context
+        .before
+        .tables
+        .iter()
+        .any(|t| t.stable_id == target_id)
+    {
         return;
     }
 
@@ -1216,7 +1520,12 @@ fn check_add_fk_on_existing(
         EffectiveDialect::Auto | EffectiveDialect::Sqlite => return,
     };
 
-    let related_table_id = resolve_table_id(context.after, new.to_schema.as_deref(), &new.to_table);
+    let related_table_id = resolve_table_id(
+        context.after,
+        new.to_schema.as_deref(),
+        &new.to_table,
+        after_table.schema_name.as_deref(),
+    );
     let mut finding = RiskFinding::new(
         ReviewRuleId::AddFkOnExisting,
         ReviewSeverity::Caution,
@@ -1448,7 +1757,28 @@ fn column_list_has_prefix(index_cols: &[&str], fk_cols: &[String]) -> bool {
         .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
-fn fk_targets_table(fk: &ForeignKey, target: &Table, schema: &Schema) -> bool {
+/// Decide whether `fk` (owned by a table in `owner_schema`) references
+/// `target`.
+///
+/// Resolution policy for unqualified FKs (`fk.to_schema = None`):
+/// 1. If `owner_schema` is provided and any same-name table exists in
+///    that schema, treat the bare name as resolving to the
+///    owner-schema homonym only — matching the disambiguation in
+///    [`resolve_table_id`].
+/// 2. Otherwise (no owner-schema homonym, or owner has no schema),
+///    fall back to a unique bare-name match across the whole schema
+///    set. This approximates Postgres' `search_path` lookup when the
+///    owner schema does not own a homonym.
+///
+/// Note: this approximation does not model an arbitrary `search_path`
+/// chain, so dialect-specific resolution that would point at a
+/// different schema cannot be expressed here.
+fn fk_targets_table(
+    fk: &ForeignKey,
+    target: &Table,
+    schema: &Schema,
+    owner_schema: Option<&str>,
+) -> bool {
     let target_qname_lower = target.qualified_name().to_lowercase();
     if let Some(fk_schema) = fk.to_schema.as_deref() {
         let qname = format!(
@@ -1456,43 +1786,89 @@ fn fk_targets_table(fk: &ForeignKey, target: &Table, schema: &Schema) -> bool {
             fk_schema.to_lowercase(),
             fk.to_table.to_lowercase()
         );
-        if qname == target_qname_lower {
-            return true;
+        return qname == target_qname_lower;
+    }
+    if !fk.to_table.eq_ignore_ascii_case(&target.name) {
+        return false;
+    }
+    if let Some(owner) = owner_schema {
+        let owner_has_homonym = schema.tables.iter().any(|t| {
+            t.name.eq_ignore_ascii_case(&target.name)
+                && t.schema_name
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case(owner))
+        });
+        if owner_has_homonym {
+            return target
+                .schema_name
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case(owner));
         }
     }
-    if fk.to_table.eq_ignore_ascii_case(&target.name) {
-        // Consider unqualified FKs that refer to the target table by
-        // bare name when no other table in the schema shares that name.
-        if fk.to_schema.is_none() {
-            let same_name_tables = schema
-                .tables
-                .iter()
-                .filter(|t| t.name.eq_ignore_ascii_case(&target.name))
-                .count();
-            return same_name_tables == 1;
-        }
-    }
-    false
+    let same_name_tables = schema
+        .tables
+        .iter()
+        .filter(|t| t.name.eq_ignore_ascii_case(&target.name))
+        .count();
+    same_name_tables == 1
 }
 
+/// Resolve a stable id for the table named `table_name` in `schema`.
+///
+/// `schema_name` carries the FK's explicit schema qualifier when
+/// present. When the FK is unqualified, `default_schema` (typically the
+/// owner table's schema) is consulted as the search-path head so that
+/// `REFERENCES users` from `public.orders` resolves to `public.users`
+/// when one exists.
+///
+/// Resolution policy, in order:
+/// 1. Explicit qualifier (`schema_name = Some`): match only that schema.
+/// 2. Owner schema preferred (`default_schema = Some`): if a same-name
+///    table exists in that schema, return it. Otherwise fall through
+///    to (3) so an unqualified FK can still resolve to the only
+///    homonym (Postgres `search_path`-style behavior).
+/// 3. Bare-name lookup: return the unique match, or None when more
+///    than one table shares the name. Mirrors `fk_targets_table`'s
+///    disambiguation policy.
 fn resolve_table_id(
     schema: &Schema,
     schema_name: Option<&str>,
     table_name: &str,
+    default_schema: Option<&str>,
 ) -> Option<String> {
-    schema
+    if let Some(s) = schema_name {
+        return schema
+            .tables
+            .iter()
+            .find(|t| {
+                t.name.eq_ignore_ascii_case(table_name)
+                    && t.schema_name
+                        .as_deref()
+                        .is_some_and(|a| a.eq_ignore_ascii_case(s))
+            })
+            .map(|t| t.stable_id.clone());
+    }
+
+    if let Some(s) = default_schema
+        && let Some(t) = schema.tables.iter().find(|t| {
+            t.name.eq_ignore_ascii_case(table_name)
+                && t.schema_name
+                    .as_deref()
+                    .is_some_and(|a| a.eq_ignore_ascii_case(s))
+        })
+    {
+        return Some(t.stable_id.clone());
+    }
+
+    let mut matches = schema
         .tables
         .iter()
-        .find(|t| {
-            let name_match = t.name.eq_ignore_ascii_case(table_name);
-            let schema_match = match (t.schema_name.as_deref(), schema_name) {
-                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
-                (None, None) => true,
-                _ => false,
-            };
-            name_match && (schema_name.is_none() || schema_match)
-        })
-        .map(|t| t.stable_id.clone())
+        .filter(|t| t.name.eq_ignore_ascii_case(table_name));
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first.stable_id.clone())
 }
 
 #[cfg(test)]
@@ -1550,6 +1926,26 @@ mod tests {
             id: TableId(name.len() as u64),
             stable_id: name.into(),
             schema_name: None,
+            name: name.into(),
+            columns,
+            foreign_keys,
+            indexes,
+            primary_key_name: None,
+            comment: None,
+        }
+    }
+
+    fn table_in(
+        schema: &str,
+        name: &str,
+        columns: Vec<Column>,
+        foreign_keys: Vec<ForeignKey>,
+        indexes: Vec<ModelIndex>,
+    ) -> Table {
+        Table {
+            id: TableId(format!("{schema}.{name}").len() as u64),
+            stable_id: format!("{schema}.{name}"),
+            schema_name: Some(schema.into()),
             name: name.into(),
             columns,
             foreign_keys,
@@ -1685,6 +2081,147 @@ mod tests {
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
             "FK is dropped in same migration; rule should not fire"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_silenced_when_fk_modified_to_other_column() {
+        // Same migration: drop users.email, add users.new_email, and
+        // retarget orders.user_email_fkey from email to new_email.
+        // The Modified FK's old shape (referencing email) is gone, so the
+        // drop is safe and the rule should not fire.
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("new_email", "TEXT", false, false),
+            ],
+            vec![],
+            vec![index("users_new_email_key", &["new_email"], true)],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["new_email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
+            "FK is retargeted in same migration; drop-column-referenced should not fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_fk_only_changes_action() {
+        // FK is `Modified` (on_delete flips NoAction → Cascade) but still
+        // references the same dropped column. The reference shape did not
+        // move, so the FK must NOT count as "removed" — drop-column-referenced
+        // must still fire on the dangerous drop.
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::Cascade,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK still references dropped column; drop-column-referenced must fire, got: {findings:?}"
         );
     }
 
@@ -2174,6 +2711,125 @@ mod tests {
     }
 
     #[test]
+    fn add_unique_suppressed_when_column_set_already_pk() {
+        // Replacing PRIMARY KEY(id) with UNIQUE(id) introduces no new
+        // uniqueness invariant — the PK already guarantees no duplicates,
+        // so no row can fail the new constraint.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddUniqueOnExisting),
+            "PK->UNIQUE on the same column set must not warn; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_unique_suppressed_when_subset_already_unique() {
+        // UNIQUE(id) already exists; adding UNIQUE(id, tenant_id) does
+        // not introduce a new invariant because uniqueness on (id)
+        // implies uniqueness on (id, tenant_id).
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![
+                    index("users_id_key", &["id"], true),
+                    index("users_id_tenant_key", &["id", "tenant_id"], true),
+                ],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddUniqueOnExisting),
+            "UNIQUE(id, tenant_id) on top of existing UNIQUE(id) must not warn; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_unique_still_warns_when_no_existing_uniqueness_covers_columns() {
+        // Existing UNIQUE(id, tenant_id) does NOT imply uniqueness on
+        // just (id) alone, so adding UNIQUE(id) can still fail.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_tenant_key", &["id", "tenant_id"], true)],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![
+                    index("users_id_tenant_key", &["id", "tenant_id"], true),
+                    index("users_id_key", &["id"], true),
+                ],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting),
+            "narrowing UNIQUE column set must still warn; got {findings:?}"
+        );
+    }
+
+    #[test]
     fn add_cascade_delete_on_modified_fk_warns() {
         let users = table(
             "users",
@@ -2499,6 +3155,671 @@ mod tests {
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::AddFkOnExisting),
             "FK on a brand-new table is creation cost, not lock risk; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_fk_on_existing_resolves_unqualified_target_in_owner_schema() {
+        // before:  auth.users exists; public.orders has no FK.
+        // after:   auth.users + public.users (new) + public.orders with
+        //          FK REFERENCES users (unqualified).
+        // The unqualified `users` should resolve to `public.users` (the
+        // owner's schema), which is freshly added in this migration. The
+        // rule must NOT fire because the target is new.
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users.clone(), orders_before],
+            ..Default::default()
+        };
+        let public_users = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users, public_users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddFkOnExisting),
+            "Unqualified `users` from public.orders must resolve to public.users (new) and skip the rule; got {findings:?}"
+        );
+        // The cascade-delete / drop-column-referenced rules should also
+        // not see auth.users as the related target.
+        for f in &findings {
+            if let Some(rel) = f.related_table_id.as_deref() {
+                assert_ne!(
+                    rel, "auth.users",
+                    "unqualified FK target must not resolve cross-schema to auth.users; got {f:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn drop_column_referenced_silenced_when_all_same_shape_fks_dropped() {
+        // before: public.orders has TWO FKs with identical shape
+        //         (user_id -> public.users.id), differing only by name.
+        // after:  both FKs are dropped, and public.users itself is dropped.
+        // No FK survives that references public.users — drop-table-referenced
+        // must NOT fire (the survival check accounts for the multiset of
+        // same-shape FKs and recognizes both were dropped).
+        let users = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut fk_a = fk(
+            "orders_user_a_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_a.to_schema = Some("public".into());
+        let mut fk_b = fk(
+            "orders_user_b_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_b.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk_a, fk_b],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders_before],
+            ..Default::default()
+        };
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropTableReferenced),
+            "All same-shape FKs were dropped; drop-table-referenced should not fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_table_referenced_breaking_when_only_one_of_same_shape_fks_dropped() {
+        // before: public.orders has TWO FKs with identical shape
+        //         (user_id -> public.users.id) named A and B.
+        // after:  FK A is dropped; FK B survives. public.users is dropped.
+        // The reference still exists (FK B), so drop-table-referenced must
+        // fire — and the survival check must not over-suppress just because
+        // *one* FK with that shape exists in after.
+        let users = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut fk_a = fk(
+            "orders_user_a_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_a.to_schema = Some("public".into());
+        let mut fk_b = fk(
+            "orders_user_b_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        fk_b.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk_a, fk_b.clone()],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders_before],
+            ..Default::default()
+        };
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk_b],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropTableReferenced),
+            "Surviving FK B still references public.users; drop-table-referenced must fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_modified_fk_qualifies_fallback_target() {
+        // before: auth.users (id, email) + public.orders with FK
+        //         REFERENCES users(email) — bare name, resolves to
+        //         auth.users via search-path fallback (no public.users).
+        // after:  auth.users (id) — email dropped.
+        //         public.orders with same FK, now spelled
+        //         REFERENCES auth.users(email).
+        // The FK Modified: schema went None -> "auth", but the resolved
+        // target is the same auth.users in both states. Shape is
+        // semantically unchanged, so the FK must NOT be in removed_fks
+        // and drop-column-referenced must still fire on the dropped
+        // auth.users.email.
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let bare_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![bare_fk],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users, orders_before],
+            ..Default::default()
+        };
+        let auth_users_after = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut qualified_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        qualified_fk.to_schema = Some("auth".into());
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![qualified_fk],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK semantically unchanged after qualifying the fallback target; drop-column-referenced must still fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_fk_renamed_with_same_shape() {
+        // public.orders has FK orders_user_email_fkey REFERENCES
+        // public.users(email). The migration renames the constraint
+        // (Removed orders_user_email_fkey + Added orders_users_email_fk)
+        // and drops public.users.email. The reference still exists in
+        // after, so drop-column-referenced must still fire.
+        let users = table_in(
+            "public",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let mut old_named_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        old_named_fk.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![old_named_fk],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders_before],
+            ..Default::default()
+        };
+        let users_after = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut renamed_fk = fk(
+            "orders_users_email_fk",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        renamed_fk.to_schema = Some("public".into());
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![renamed_fk],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK was only renamed; the reference survives in after, drop-column-referenced must fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_fk_on_existing_fires_for_search_path_fallback_target() {
+        // before: auth.users + public.orders (no FK to users).
+        // after:  auth.users + public.orders with new FK REFERENCES users.
+        // No `public.users` exists in either side, so the unqualified FK
+        // resolves to `auth.users` via bare-name uniqueness fallback (the
+        // search-path-style behavior). Because that target existed in
+        // `before`, `add-fk-on-existing` must fire.
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users.clone(), orders_before],
+            ..Default::default()
+        };
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::AddFkOnExisting),
+            "FK targets the only `users` (auth.users) which existed in before; rule must fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_not_silenced_when_other_homonym_fk_dropped() {
+        // public.orders has two FKs referencing homonym tables:
+        //   - orders_auth_user_fkey  (user_id)   -> auth.users(id)
+        //   - orders_pub_user_fkey   (user_email)-> public.users(email)
+        // The first is dropped; the second stays.
+        // public.users.email is dropped at the same time.
+        // The dropped FK targets auth.users; the remaining FK targets
+        // public.users. drop-column-referenced for public.users.email
+        // must still fire — the schema-aware RemovedFk key prevents the
+        // dropped auth.users FK from masking the surviving public.users FK.
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let public_users = table_in(
+            "public",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let mut auth_fk = fk(
+            "orders_auth_user_fkey",
+            &["user_id"],
+            "users",
+            &["id"],
+            ReferentialAction::NoAction,
+        );
+        auth_fk.to_schema = Some("auth".into());
+        let mut pub_fk = fk(
+            "orders_pub_user_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        pub_fk.to_schema = Some("public".into());
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![auth_fk, pub_fk.clone()],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users.clone(), public_users, orders_before],
+            ..Default::default()
+        };
+        let public_users_after = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![pub_fk],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users, public_users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "Surviving FK to public.users.email must still trigger drop-column-referenced; got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_modified_fk_only_qualifies_target() {
+        // Modified FK where to_schema flips None -> Some(owner_schema)
+        // but target table and column pairs are unchanged. The "shape"
+        // is semantically identical, so the FK still references the
+        // dropped column and drop-column-referenced must fire.
+        let users = table_in(
+            "public",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders],
+            ..Default::default()
+        };
+        let users_after = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut qualified_fk = fk(
+            "orders_user_email_fkey",
+            &["user_email"],
+            "users",
+            &["email"],
+            ReferentialAction::NoAction,
+        );
+        qualified_fk.to_schema = Some("public".into());
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![qualified_fk],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "Bare->qualified-but-equivalent FK is not a true retarget; drop-column-referenced must still fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_detects_homonym_target_in_owner_schema() {
+        // before: auth.users (id) + public.users (id, email) + public.orders
+        //         with FK REFERENCES users(email) — unqualified, owner is
+        //         public, so the FK targets public.users.
+        // after:  public.users.email is dropped; FK is unchanged.
+        // Expectation: drop-column-referenced fires Breaking. The
+        // pre-fix bare-name uniqueness check would silence this because
+        // `same_name_tables == 2` (auth.users + public.users).
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let public_users = table_in(
+            "public",
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let public_orders = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users.clone(), public_users, public_orders.clone()],
+            ..Default::default()
+        };
+        let public_users_after = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users, public_users_after, public_orders],
+            ..Default::default()
+        };
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK from public.orders should resolve to public.users via owner schema; drop-column-referenced must fire, got: {findings:?}"
         );
     }
 
