@@ -1189,6 +1189,7 @@ async function runRenderMode(currentSerial: number): Promise<void> {
   }
 
   previewPanel.hidden = false;
+  void previewPanel.offsetHeight;
   previewFrame.srcdoc = result.content;
   renderMetricCards([
     ["Tables", `${result.stats.table_count}`],
@@ -1403,6 +1404,7 @@ async function runCompareMode(currentSerial: number): Promise<void> {
 
   if (compareView === "visual") {
     previewPanel.hidden = false;
+    void previewPanel.offsetHeight;
     previewFrame.srcdoc = result.rendered ?? "";
     configureActions({
       copy: {
@@ -2053,7 +2055,6 @@ function resetOutputPanels(): void {
   textOutputPanel.hidden = true;
   reviewPanel.hidden = true;
   reviewSuppressedPanel.hidden = true;
-  previewFrame.srcdoc = "";
   inspectTableList.innerHTML = "";
   inspectDetail.innerHTML = "";
   lintIssueList.innerHTML = "";
