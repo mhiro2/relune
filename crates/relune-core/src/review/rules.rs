@@ -191,16 +191,23 @@ impl<'a> RuleContext<'a> {
         let mut removed_fks: HashSet<RemovedFk> = HashSet::new();
         for table_diff in &diff.modified_tables {
             for fk_diff in &table_diff.fk_diffs {
-                // A Modified FK retargets the column pairs / target table, so
-                // the *old* shape is effectively gone in `after`. Treat it as
-                // removed so cross-table rules (drop-column-referenced,
-                // drop-pk-or-unique, drop-table-referenced) don't fire when a
-                // safe migration repoints the FK in the same step.
-                let is_removed_shape = matches!(
-                    fk_diff.change_kind,
-                    ChangeKind::Removed | ChangeKind::Modified
-                );
-                if is_removed_shape && let Some(old) = fk_diff.old_value.as_ref() {
+                // The "old shape" of an FK is gone in `after` only when its
+                // column pairs or target table actually moved. A `Modified`
+                // diff that only flips `ON DELETE` / `ON UPDATE` keeps the
+                // same reference, so we must NOT add it to `removed_fks` —
+                // doing so would silence drop-column-referenced and friends
+                // even though the FK still depends on the dropped column.
+                let removed_shape = match fk_diff.change_kind {
+                    ChangeKind::Removed => fk_diff.old_value.as_ref(),
+                    ChangeKind::Modified => {
+                        match (fk_diff.old_value.as_ref(), fk_diff.new_value.as_ref()) {
+                            (Some(old), Some(new)) if fk_shape_changed(old, new) => Some(old),
+                            _ => None,
+                        }
+                    }
+                    ChangeKind::Added => None,
+                };
+                if let Some(old) = removed_shape {
                     removed_fks.insert(RemovedFk {
                         table_name: table_diff.table_name.to_lowercase(),
                         fk_name: old.name.as_ref().map(|n| n.to_lowercase()),
@@ -300,6 +307,36 @@ impl<'a> RuleContext<'a> {
         };
         self.removed_fks.contains(&key)
     }
+}
+
+/// Returns true when an FK's reference shape (target table + column
+/// pairs) differs between `old` and `new`. Used to distinguish a true
+/// retarget (old shape is gone in `after`) from a referential-action
+/// only change (`ON DELETE` / `ON UPDATE`) that preserves the
+/// reference.
+fn fk_shape_changed(
+    old: &crate::export::ForeignKeyExport,
+    new: &crate::export::ForeignKeyExport,
+) -> bool {
+    let schema_eq = match (old.to_schema.as_deref(), new.to_schema.as_deref()) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => true,
+        _ => false,
+    };
+    let table_eq = old.to_table.eq_ignore_ascii_case(&new.to_table);
+    let columns_eq = old.from_columns.len() == new.from_columns.len()
+        && old.to_columns.len() == new.to_columns.len()
+        && old
+            .from_columns
+            .iter()
+            .zip(new.from_columns.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        && old
+            .to_columns
+            .iter()
+            .zip(new.to_columns.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    !(schema_eq && table_eq && columns_eq)
 }
 
 fn fk_label(fk: &ForeignKey, owner_qname: &str) -> String {
@@ -1883,6 +1920,75 @@ mod tests {
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
             "FK is retargeted in same migration; drop-column-referenced should not fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_fk_only_changes_action() {
+        // FK is `Modified` (on_delete flips NoAction → Cascade) but still
+        // references the same dropped column. The reference shape did not
+        // move, so the FK must NOT count as "removed" — drop-column-referenced
+        // must still fire on the dangerous drop.
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::Cascade,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders_after],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "FK still references dropped column; drop-column-referenced must fire, got: {findings:?}"
         );
     }
 
