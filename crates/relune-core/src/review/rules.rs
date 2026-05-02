@@ -345,7 +345,12 @@ fn check_drop_column_referenced(
         if context.fk_is_removed(&before_qname, fk) {
             continue;
         }
-        let related = resolve_table_id(context.before, fk.to_schema.as_deref(), &fk.to_table);
+        let related = resolve_table_id(
+            context.before,
+            fk.to_schema.as_deref(),
+            &fk.to_table,
+            before_table.schema_name.as_deref(),
+        );
         let mut finding = RiskFinding::new(
             ReviewRuleId::DropColumnReferenced,
             ReviewSeverity::Breaking,
@@ -1042,7 +1047,12 @@ fn check_add_cascade_delete(
         return;
     };
 
-    let related_table_id = resolve_table_id(context.after, new.to_schema.as_deref(), &new.to_table);
+    let related_table_id = resolve_table_id(
+        context.after,
+        new.to_schema.as_deref(),
+        &new.to_table,
+        after_table.schema_name.as_deref(),
+    );
     let label = new
         .name
         .clone()
@@ -1195,8 +1205,18 @@ fn check_add_fk_on_existing(
     };
     // Target table must also exist in `before`. Skip the finding when the
     // FK points at a table that is created in the same migration; an empty
-    // table has nothing to validate against.
-    if resolve_table_id(context.before, new.to_schema.as_deref(), &new.to_table).is_none() {
+    // table has nothing to validate against. Resolve unqualified FK
+    // references against the owner's schema first so that adding
+    // `public.users` in the same migration does not silently resolve to a
+    // pre-existing `auth.users`.
+    if resolve_table_id(
+        context.before,
+        new.to_schema.as_deref(),
+        &new.to_table,
+        after_table.schema_name.as_deref(),
+    )
+    .is_none()
+    {
         return;
     }
 
@@ -1223,7 +1243,12 @@ fn check_add_fk_on_existing(
         EffectiveDialect::Auto | EffectiveDialect::Sqlite => return,
     };
 
-    let related_table_id = resolve_table_id(context.after, new.to_schema.as_deref(), &new.to_table);
+    let related_table_id = resolve_table_id(
+        context.after,
+        new.to_schema.as_deref(),
+        &new.to_table,
+        after_table.schema_name.as_deref(),
+    );
     let mut finding = RiskFinding::new(
         ReviewRuleId::AddFkOnExisting,
         ReviewSeverity::Caution,
@@ -1482,24 +1507,51 @@ fn fk_targets_table(fk: &ForeignKey, target: &Table, schema: &Schema) -> bool {
     false
 }
 
+/// Resolve a stable id for the table named `table_name` in `schema`.
+///
+/// `schema_name` carries the FK's explicit schema qualifier when present.
+/// When the FK is unqualified, `default_schema` (typically the owner
+/// table's schema) is consulted so that `REFERENCES users` from
+/// `public.orders` does not silently resolve to `auth.users` just because
+/// no `public.users` exists yet in the target schema state.
+///
+/// Resolution policy, in order:
+/// 1. Explicit qualifier (`schema_name = Some`): match only that schema.
+/// 2. Owner schema fallback (`default_schema = Some`): match only that
+///    schema. If no match, return None — do **not** fall through to a
+///    bare-name lookup, otherwise the resolver would pick an arbitrary
+///    cross-schema homonym.
+/// 3. No schema info on either side: bare-name lookup rejected when more
+///    than one table shares the name. This mirrors `fk_targets_table`'s
+///    disambiguation policy on dialects without schema namespacing.
 fn resolve_table_id(
     schema: &Schema,
     schema_name: Option<&str>,
     table_name: &str,
+    default_schema: Option<&str>,
 ) -> Option<String> {
-    schema
+    if let Some(s) = schema_name.or(default_schema) {
+        return schema
+            .tables
+            .iter()
+            .find(|t| {
+                t.name.eq_ignore_ascii_case(table_name)
+                    && t.schema_name
+                        .as_deref()
+                        .is_some_and(|a| a.eq_ignore_ascii_case(s))
+            })
+            .map(|t| t.stable_id.clone());
+    }
+
+    let mut matches = schema
         .tables
         .iter()
-        .find(|t| {
-            let name_match = t.name.eq_ignore_ascii_case(table_name);
-            let schema_match = match (t.schema_name.as_deref(), schema_name) {
-                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
-                (None, None) => true,
-                _ => false,
-            };
-            name_match && (schema_name.is_none() || schema_match)
-        })
-        .map(|t| t.stable_id.clone())
+        .filter(|t| t.name.eq_ignore_ascii_case(table_name));
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first.stable_id.clone())
 }
 
 #[cfg(test)]
@@ -1557,6 +1609,26 @@ mod tests {
             id: TableId(name.len() as u64),
             stable_id: name.into(),
             schema_name: None,
+            name: name.into(),
+            columns,
+            foreign_keys,
+            indexes,
+            primary_key_name: None,
+            comment: None,
+        }
+    }
+
+    fn table_in(
+        schema: &str,
+        name: &str,
+        columns: Vec<Column>,
+        foreign_keys: Vec<ForeignKey>,
+        indexes: Vec<ModelIndex>,
+    ) -> Table {
+        Table {
+            id: TableId(format!("{schema}.{name}").len() as u64),
+            stable_id: format!("{schema}.{name}"),
+            schema_name: Some(schema.into()),
             name: name.into(),
             columns,
             foreign_keys,
@@ -2579,6 +2651,81 @@ mod tests {
                 .all(|f| f.rule_id != ReviewRuleId::AddFkOnExisting),
             "FK on a brand-new table is creation cost, not lock risk; got {findings:?}"
         );
+    }
+
+    #[test]
+    fn add_fk_on_existing_resolves_unqualified_target_in_owner_schema() {
+        // before:  auth.users exists; public.orders has no FK.
+        // after:   auth.users + public.users (new) + public.orders with
+        //          FK REFERENCES users (unqualified).
+        // The unqualified `users` should resolve to `public.users` (the
+        // owner's schema), which is freshly added in this migration. The
+        // rule must NOT fire because the target is new.
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![auth_users.clone(), orders_before],
+            ..Default::default()
+        };
+        let public_users = table_in(
+            "public",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_after = table_in(
+            "public",
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![auth_users, public_users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddFkOnExisting),
+            "Unqualified `users` from public.orders must resolve to public.users (new) and skip the rule; got {findings:?}"
+        );
+        // The cascade-delete / drop-column-referenced rules should also
+        // not see auth.users as the related target.
+        for f in &findings {
+            if let Some(rel) = f.related_table_id.as_deref() {
+                assert_ne!(
+                    rel, "auth.users",
+                    "unqualified FK target must not resolve cross-schema to auth.users; got {f:?}"
+                );
+            }
+        }
     }
 
     #[test]
