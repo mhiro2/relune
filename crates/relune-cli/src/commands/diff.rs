@@ -89,8 +89,6 @@ pub fn run_diff(
     // Execute diff
     let mut result = diff(request).context("Failed to compute schema diff")?;
 
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
-
     // Format output. Treat an empty rendered string the same as None —
     // both indicate the visual pipeline produced no output, and writing
     // zero bytes would look like a successful diff in CI.
@@ -108,6 +106,8 @@ pub fn run_diff(
         })?,
     };
     write_output(&content, args.out.as_deref(), color)?;
+
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {

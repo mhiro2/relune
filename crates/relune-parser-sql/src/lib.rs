@@ -774,10 +774,10 @@ fn parse_statements_with_recovery(
         Ok(p) => p,
         Err(e) => {
             // Tokenizer error — nothing can be parsed
-            ctx.diagnostics.push(
-                Diagnostic::error(codes::parse_error(), format!("SQL parse error: {e}"))
-                    .with_span(SourceSpan::new(0, input.len().min(100))),
-            );
+            ctx.diagnostics.push(Diagnostic::error(
+                codes::parse_error(),
+                format!("SQL parse error: {e}"),
+            ));
             return Vec::new();
         }
     };
@@ -801,12 +801,13 @@ fn parse_statements_with_recovery(
                 // Try to extract location from the error token's current position
                 let span = {
                     let tok = parser.peek_token();
-                    let sql_span = tok.span;
-                    source_span_from_sql_span(input, offsets, sql_span)
-                        .unwrap_or_else(|| SourceSpan::new(0, input.len().min(100)))
+                    source_span_from_sql_span(input, offsets, tok.span)
                 };
-                ctx.diagnostics
-                    .push(Diagnostic::error(codes::parse_error(), error_msg).with_span(span));
+                let mut diagnostic = Diagnostic::error(codes::parse_error(), error_msg);
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_span(span);
+                }
+                ctx.diagnostics.push(diagnostic);
 
                 // Skip tokens until the next semicolon or EOF for recovery
                 loop {
@@ -1298,6 +1299,7 @@ fn parse_create_index(
 /// Parse a COMMENT ON statement and apply it to the appropriate table or column.
 #[allow(clippy::ref_option)]
 #[allow(clippy::trivially_copy_pass_by_ref, clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn parse_comment(
     ctx: &mut ParseContext,
     input: &str,
@@ -1367,7 +1369,21 @@ fn parse_comment(
             let stable_id = match table_parts {
                 [table] => normalize_identifier(table),
                 [schema, table] | [.., schema, table] => normalized_stable_id(Some(schema), table),
-                _ => unreachable!("COMMENT ON COLUMN must have at least two parts"),
+                [] => {
+                    ctx.diagnostics.push(
+                        Diagnostic::warning(
+                            codes::parse_unsupported(),
+                            "Unsupported COMMENT ON COLUMN syntax: missing table qualifier"
+                                .to_string(),
+                        )
+                        .with_span_opt(span_from_spanned(
+                            input,
+                            offsets,
+                            object_name,
+                        )),
+                    );
+                    return;
+                }
             };
 
             if let Some(&table_idx) = table_map.get(&stable_id) {
@@ -2156,13 +2172,6 @@ fn error_summary(output: &ParseOutput) -> String {
             messages.join("; ")
         )
     }
-}
-
-// Keep the old function name for backward compatibility
-/// Legacy function - use `parse_sql_to_schema` instead.
-#[deprecated(since = "0.2.0", note = "Use `parse_sql_to_schema` instead")]
-pub fn parse_schema(sql: &str) -> Result<Schema, ParseError> {
-    parse_sql_to_schema(sql)
 }
 
 #[cfg(test)]

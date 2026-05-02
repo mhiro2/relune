@@ -195,27 +195,31 @@ fn diff_columns_with(
     new_columns: &[Column],
     differs: impl Fn(&Column, &Column) -> bool,
 ) -> Vec<ColumnDiff> {
-    let old_map: HashMap<&str, &Column> =
-        old_columns.iter().map(|c| (c.name.as_str(), c)).collect();
-    let new_map: HashMap<&str, &Column> =
-        new_columns.iter().map(|c| (c.name.as_str(), c)).collect();
+    let old_map: HashMap<String, &Column> = old_columns
+        .iter()
+        .map(|c| (c.name.to_lowercase(), c))
+        .collect();
+    let new_map: HashMap<String, &Column> = new_columns
+        .iter()
+        .map(|c| (c.name.to_lowercase(), c))
+        .collect();
 
-    let old_names: HashSet<&str> = old_map.keys().copied().collect();
-    let new_names: HashSet<&str> = new_map.keys().copied().collect();
+    let old_names: HashSet<&String> = old_map.keys().collect();
+    let new_names: HashSet<&String> = new_map.keys().collect();
 
     let mut diffs = Vec::new();
 
     for name in old_names.difference(&new_names) {
-        diffs.push(ColumnDiff::removed(old_map[name]));
+        diffs.push(ColumnDiff::removed(old_map[name.as_str()]));
     }
 
     for name in new_names.difference(&old_names) {
-        diffs.push(ColumnDiff::added(new_map[name]));
+        diffs.push(ColumnDiff::added(new_map[name.as_str()]));
     }
 
     for name in old_names.intersection(&new_names) {
-        let old_col = old_map[name];
-        let new_col = new_map[name];
+        let old_col = old_map[name.as_str()];
+        let new_col = new_map[name.as_str()];
         if differs(old_col, new_col) {
             diffs.push(ColumnDiff::modified(old_col, new_col));
         }
@@ -519,11 +523,13 @@ impl TableDiff {
     }
 
     fn fk_column_pairs(fk: &ForeignKey) -> Vec<(String, String)> {
+        // Normalize to lowercase so case-only differences in column names do not
+        // produce spurious add/remove or modified diffs.
         let mut pairs: Vec<(String, String)> = fk
             .from_columns
             .iter()
-            .cloned()
-            .zip(fk.to_columns.iter().cloned())
+            .map(|c| c.to_lowercase())
+            .zip(fk.to_columns.iter().map(|c| c.to_lowercase()))
             .collect();
         pairs.sort_unstable();
         pairs
@@ -572,12 +578,26 @@ impl TableDiff {
     fn index_key(idx: &crate::model::Index) -> Cow<'_, str> {
         match &idx.name {
             Some(name) if !name.is_empty() => Cow::Borrowed(name),
-            _ => Cow::Owned(format!("idx_{}", idx.columns.join("_"))),
+            // Build an unambiguous key for unnamed indexes by length-prefixing
+            // each lowercased column name. A naive `_`-join collides on
+            // boundary cases such as `["a_b", "c"]` vs `["a", "b_c"]`.
+            _ => {
+                let mut key = String::from("idx_");
+                for column in &idx.columns {
+                    let lowered = column.to_lowercase();
+                    Self::push_key_part(&mut key, &lowered);
+                }
+                Cow::Owned(key)
+            }
         }
     }
 
     fn indexes_differ(a: &crate::model::Index, b: &crate::model::Index) -> bool {
-        a.columns != b.columns || a.is_unique != b.is_unique
+        Self::index_columns_lower(a) != Self::index_columns_lower(b) || a.is_unique != b.is_unique
+    }
+
+    fn index_columns_lower(idx: &crate::model::Index) -> Vec<String> {
+        idx.columns.iter().map(|c| c.to_lowercase()).collect()
     }
 
     /// Returns true if this table has any changes.

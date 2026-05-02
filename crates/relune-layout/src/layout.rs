@@ -945,42 +945,42 @@ fn compute_repulsion_with_grid(
     // (right, below, below-right, below-left) to avoid double-counting.
     let neighbour_offsets: [(i32, i32); 4] = [(1, 0), (0, 1), (1, 1), (-1, 1)];
 
+    // Collect candidate pairs first, then apply repulsion in a sorted order so
+    // the per-pair traversal is deterministic regardless of `HashMap` iteration
+    // order. Without sorting, floating-point non-associativity would make the
+    // accumulated force values depend on the random `HashMap` seed once the
+    // graph crosses the spatial-grid threshold.
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
     for (&(cx, cy), cell_nodes) in &grid {
-        // Intra-cell pairs
         for (a, &i) in cell_nodes.iter().enumerate() {
             for &j in &cell_nodes[a + 1..] {
-                apply_repulsion_pair(
-                    i,
-                    j,
-                    positions,
-                    node_sizes,
-                    config,
-                    repulsion_strength,
-                    min_distance,
-                    forces,
-                );
+                pairs.push((i.min(j), i.max(j)));
             }
         }
-
-        // Cross-cell pairs with 4 neighbours
         for &(dx, dy) in &neighbour_offsets {
             if let Some(neighbour_nodes) = grid.get(&(cx + dx, cy + dy)) {
                 for &i in cell_nodes {
                     for &j in neighbour_nodes {
-                        apply_repulsion_pair(
-                            i,
-                            j,
-                            positions,
-                            node_sizes,
-                            config,
-                            repulsion_strength,
-                            min_distance,
-                            forces,
-                        );
+                        pairs.push((i.min(j), i.max(j)));
                     }
                 }
             }
         }
+    }
+
+    pairs.sort_unstable();
+
+    for &(i, j) in &pairs {
+        apply_repulsion_pair(
+            i,
+            j,
+            positions,
+            node_sizes,
+            config,
+            repulsion_strength,
+            min_distance,
+            forces,
+        );
     }
 }
 

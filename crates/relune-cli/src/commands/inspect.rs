@@ -35,8 +35,6 @@ pub fn run_inspect(
     // Execute inspect
     let result = inspect(request).context("Failed to inspect schema")?;
 
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
-
     // Format and write output.
     let output = match merged.format {
         InspectFormat::Json => {
@@ -45,6 +43,8 @@ pub fn run_inspect(
         InspectFormat::Text => format_inspect_text(&result),
     };
     write_output(&output, args.out.as_deref(), color)?;
+
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
 
     if !quiet && let Some(ref out_path) = args.out {
         print_success(

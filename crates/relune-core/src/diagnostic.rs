@@ -196,15 +196,10 @@ pub mod codes {
         DiagnosticCode::new("SCHEMA", 3)
     }
 
-    /// Returns the code for a missing primary key.
+    /// Returns the code for a structural schema validation failure.
     #[must_use]
-    pub fn lint_no_pk() -> DiagnosticCode {
-        DiagnosticCode::new("LINT", 1)
-    }
-    /// Returns the code for an orphan table.
-    #[must_use]
-    pub fn lint_orphan_table() -> DiagnosticCode {
-        DiagnosticCode::new("LINT", 2)
+    pub fn schema_validation() -> DiagnosticCode {
+        DiagnosticCode::new("SCHEMA", 4)
     }
 
     /// Returns the code emitted when lock-risk review rules are skipped

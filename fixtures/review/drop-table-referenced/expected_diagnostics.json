@@ -1,0 +1,12 @@
+[
+  {
+    "code": {
+      "number": 4,
+      "prefix": "SCHEMA"
+    },
+    "message": "table 'orders': FK references unknown table 'legacy_users'",
+    "severity": "warning",
+    "source": null,
+    "span": null
+  }
+]

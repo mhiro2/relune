@@ -40,7 +40,11 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
         .connect(trimmed)
         .await
         .map_err(|e| {
-            error!(error = %e, "Failed to connect to database");
+            // Sanitize the raw sqlx error before logging: variants such as
+            // `Configuration`/`Tls`/`Io` may include the original DSN with
+            // credentials in their `Display` output.
+            let sanitized = crate::url::sanitize_error_message(trimmed, &e.to_string());
+            error!(error = %sanitized, "Failed to connect to database");
             connect_error("SQLite", trimmed, e)
         })?;
 
