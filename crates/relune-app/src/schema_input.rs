@@ -31,6 +31,30 @@ pub(crate) fn schema_from_input(
 pub(crate) fn schema_from_input_with_context(
     input: &InputSource,
 ) -> Result<(Schema, Vec<Diagnostic>, SchemaInputContext), AppError> {
+    let (schema, mut diagnostics, context) = load_schema(input)?;
+    diagnostics.extend(schema_validation_diagnostics(&schema));
+    Ok((schema, diagnostics, context))
+}
+
+/// Convert structural validation errors from [`Schema::validate`] into
+/// warning diagnostics so downstream consumers (CLI, WASM, action) can
+/// surface them alongside parse-time issues.
+fn schema_validation_diagnostics(schema: &Schema) -> Vec<Diagnostic> {
+    schema
+        .validate()
+        .into_iter()
+        .map(|error| {
+            Diagnostic::warning(
+                relune_core::diagnostic::codes::schema_validation(),
+                error.to_string(),
+            )
+        })
+        .collect()
+}
+
+fn load_schema(
+    input: &InputSource,
+) -> Result<(Schema, Vec<Diagnostic>, SchemaInputContext), AppError> {
     match input {
         InputSource::SqlText { sql, dialect } => {
             ensure_text_size_within_limit(sql.len(), "SQL text")?;
@@ -180,13 +204,10 @@ fn ensure_file_size_within_limit(path: &std::path::Path) -> Result<(), AppError>
 fn schema_from_db_url(url: &str) -> Result<Schema, AppError> {
     let trimmed = normalized_db_url(url)?;
 
-    // If we're already inside a Tokio runtime, use it directly via
-    // spawn_blocking → block_in_place fallback instead of creating a
-    // second runtime (which would panic).
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        return tokio::task::block_in_place(|| handle.block_on(schema_from_db_url_impl(trimmed)));
-    }
-
+    // This path is only used by the synchronous CLI entry point, which never
+    // runs inside an existing Tokio runtime. Async callers must use
+    // [`schema_from_db_url_async`] directly; the previous `block_in_place`
+    // fallback panicked on current-thread runtimes and is therefore avoided.
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

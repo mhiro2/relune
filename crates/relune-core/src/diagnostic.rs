@@ -196,6 +196,12 @@ pub mod codes {
         DiagnosticCode::new("SCHEMA", 3)
     }
 
+    /// Returns the code for a structural schema validation failure.
+    #[must_use]
+    pub fn schema_validation() -> DiagnosticCode {
+        DiagnosticCode::new("SCHEMA", 4)
+    }
+
     /// Returns the code for a missing primary key.
     #[must_use]
     pub fn lint_no_pk() -> DiagnosticCode {
