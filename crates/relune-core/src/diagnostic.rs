@@ -202,17 +202,6 @@ pub mod codes {
         DiagnosticCode::new("SCHEMA", 4)
     }
 
-    /// Returns the code for a missing primary key.
-    #[must_use]
-    pub fn lint_no_pk() -> DiagnosticCode {
-        DiagnosticCode::new("LINT", 1)
-    }
-    /// Returns the code for an orphan table.
-    #[must_use]
-    pub fn lint_orphan_table() -> DiagnosticCode {
-        DiagnosticCode::new("LINT", 2)
-    }
-
     /// Returns the code emitted when lock-risk review rules are skipped
     /// because the effective dialect is not in their dialect scope.
     #[must_use]

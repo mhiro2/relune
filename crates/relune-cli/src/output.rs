@@ -325,17 +325,20 @@ pub fn print_success(message: &str, color: ColorWhen) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relune_core::{Diagnostic, Severity, diagnostic::codes};
+    use relune_core::{Diagnostic, LintRuleId, Severity, diagnostic::codes};
 
     #[test]
     fn diagnostic_printer_formats_plain_messages() {
         let printer = DiagnosticPrinter::new(ColorWhen::Never);
-        let diagnostic = Diagnostic::warning(codes::lint_orphan_table(), "table has no parents")
-            .with_source("schema.sql");
+        let diagnostic = Diagnostic::warning(
+            LintRuleId::OrphanTable.diagnostic_code(),
+            "table has no parents",
+        )
+        .with_source("schema.sql");
 
         assert_eq!(
             printer.format_plain(&diagnostic),
-            "warning[LINT002]: table has no parents (in schema.sql)"
+            "warning[LINT004]: table has no parents (in schema.sql)"
         );
     }
 
@@ -396,7 +399,7 @@ mod tests {
     fn diagnostic_helpers_detect_severity() {
         let diagnostics = [
             Diagnostic::info(codes::parse_skipped(), "ignored"),
-            Diagnostic::warning(codes::lint_orphan_table(), "warn"),
+            Diagnostic::warning(LintRuleId::OrphanTable.diagnostic_code(), "warn"),
             Diagnostic::error(codes::parse_error(), "err"),
         ];
 
