@@ -9,7 +9,6 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, Query, Visit, Visitor};
 use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 use thiserror::Error;
-use tracing::debug;
 
 use crate::model::{
     Enum, ForeignKeyTargetResolution, Schema, Table, TableId, View, normalize_identifier,
@@ -222,12 +221,50 @@ const fn object_name_identifier(part: &ObjectNamePart) -> Option<&str> {
     }
 }
 
+/// Error returned when no supported SQL dialect can parse a relation
+/// definition (e.g. a view's SQL body) for dependency extraction.
+///
+/// The error preserves a short snippet of the failing source so callers can
+/// surface a useful diagnostic instead of silently dropping the view's
+/// dependency edges.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "no supported SQL dialect could parse the relation definition for dependency extraction: {snippet}"
+)]
+pub struct SqlRelationParseError {
+    /// Truncated snippet of the definition that failed to parse.
+    pub snippet: String,
+}
+
+const SQL_RELATION_PARSE_SNIPPET_LIMIT: usize = 80;
+
+fn snippet_for_definition(definition: &str) -> String {
+    let trimmed = definition.trim();
+    let mut buffer = String::with_capacity(SQL_RELATION_PARSE_SNIPPET_LIMIT + 1);
+    for ch in trimmed.chars() {
+        if buffer.len() + ch.len_utf8() > SQL_RELATION_PARSE_SNIPPET_LIMIT {
+            buffer.push('…');
+            break;
+        }
+        buffer.push(ch);
+    }
+    buffer
+}
+
 /// Collects normalized table/view references from a SQL fragment.
 ///
 /// The result excludes CTE aliases so callers can reason about actual
 /// relation dependencies without comment or alias false positives.
-#[must_use]
-pub fn collect_sql_relations(definition: &str) -> HashSet<SqlRelation> {
+///
+/// # Errors
+///
+/// Returns [`SqlRelationParseError`] when no supported dialect can parse
+/// `definition`. Callers should surface this as a diagnostic rather than
+/// silently treat the view as having no dependencies, otherwise an
+/// unparsable view becomes indistinguishable from a genuinely orphan view.
+pub fn collect_sql_relations(
+    definition: &str,
+) -> Result<HashSet<SqlRelation>, SqlRelationParseError> {
     let generic = GenericDialect {};
     let postgres = PostgreSqlDialect {};
     let mysql = MySqlDialect {};
@@ -240,13 +277,12 @@ pub fn collect_sql_relations(definition: &str) -> HashSet<SqlRelation> {
         };
         let mut collector = RelationCollector::default();
         let _ = statements.visit(&mut collector);
-        return collector.references;
+        return Ok(collector.references);
     }
 
-    debug!(
-        "collect_sql_relations: no dialect could parse the definition; view dependencies may be missing"
-    );
-    HashSet::new()
+    Err(SqlRelationParseError {
+        snippet: snippet_for_definition(definition),
+    })
 }
 
 impl SchemaGraph {
@@ -432,26 +468,41 @@ impl SchemaGraph {
             });
 
             if let Some(ref definition) = view.definition {
-                let references = collect_sql_relations(definition);
-                for table in &schema.tables {
-                    if table_names.contains(&table.name.to_lowercase())
-                        && references
-                            .iter()
-                            .any(|reference| reference.matches_table(table))
-                        && let Some(&table_idx) = ids.get(&table.id)
-                    {
-                        graph.add_edge(
-                            table_idx,
-                            view_idx,
-                            GraphEdge {
-                                from: table.stable_id.clone(),
-                                to: view.id.clone(),
-                                label: "view dep".to_string(),
-                                nullable: false,
-                                from_columns: vec![],
-                                to_columns: vec![],
-                                kind: EdgeKind::ViewDependency,
-                            },
+                // SchemaGraph has no diagnostic channel, so a parse failure is
+                // surfaced as a `tracing::warn!` rather than a `debug!`. The
+                // layout-level builder (which does carry diagnostics) records
+                // this as a `parse_unsupported` Diagnostic so user-facing
+                // tools can distinguish unparsable views from orphan views.
+                match collect_sql_relations(definition) {
+                    Ok(references) => {
+                        for table in &schema.tables {
+                            if table_names.contains(&table.name.to_lowercase())
+                                && references
+                                    .iter()
+                                    .any(|reference| reference.matches_table(table))
+                                && let Some(&table_idx) = ids.get(&table.id)
+                            {
+                                graph.add_edge(
+                                    table_idx,
+                                    view_idx,
+                                    GraphEdge {
+                                        from: table.stable_id.clone(),
+                                        to: view.id.clone(),
+                                        label: "view dep".to_string(),
+                                        nullable: false,
+                                        from_columns: vec![],
+                                        to_columns: vec![],
+                                        kind: EdgeKind::ViewDependency,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            view = %view.qualified_name(),
+                            snippet = %error.snippet,
+                            "Could not parse view definition for dependency extraction; view dependency edges may be missing",
                         );
                     }
                 }
@@ -1044,5 +1095,20 @@ mod tests {
 
         assert_eq!(deps, vec![public_users]);
         assert!(!deps.contains(&analytics_users));
+    }
+
+    #[test]
+    fn collect_sql_relations_returns_err_when_no_dialect_can_parse() {
+        let definition = "this is not valid sql ;;;;";
+        let error = collect_sql_relations(definition).expect_err("definition should not parse");
+        assert!(!error.snippet.is_empty());
+        assert!(definition.starts_with(error.snippet.trim_end_matches('…')));
+    }
+
+    #[test]
+    fn collect_sql_relations_returns_ok_for_parseable_definition() {
+        let references = collect_sql_relations("select id from public.users")
+            .expect("definition should parse with at least one supported dialect");
+        assert!(references.iter().any(|reference| reference.name == "users"));
     }
 }

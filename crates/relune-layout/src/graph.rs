@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use relune_core::{
     Diagnostic, DiagnosticCode, EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec,
-    GroupingStrategy, NodeKind, Schema, Table, View, collect_sql_relations, layout::Cardinality,
+    GroupingStrategy, NodeKind, Schema, Table, View, collect_sql_relations,
+    diagnostic::codes::parse_unsupported, layout::Cardinality,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -622,7 +623,20 @@ impl LayoutGraphBuilder {
             });
 
             if let Some(definition) = &view.definition {
-                let relations = collect_sql_relations(definition);
+                let relations = match collect_sql_relations(definition) {
+                    Ok(relations) => relations,
+                    Err(error) => {
+                        diagnostics.push(Diagnostic::warning(
+                            parse_unsupported(),
+                            format!(
+                                "View '{}' definition could not be parsed; dependency edges may be missing: {}",
+                                view.qualified_name(),
+                                error.snippet
+                            ),
+                        ));
+                        continue;
+                    }
+                };
                 let mut seen_targets = BTreeSet::new();
 
                 for table in tables {
