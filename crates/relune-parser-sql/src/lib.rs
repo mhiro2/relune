@@ -212,6 +212,7 @@ impl ParsedColumn {
             nullable: self.nullable,
             is_primary_key: self.is_primary_key,
             comment: None,
+            enum_values: None,
         }
     }
 }
@@ -620,49 +621,34 @@ fn canonicalize_mysql_enum_like_type(
         .map(|(kind, values)| serialize_mysql_enum_like_type(&kind, &values)))
 }
 
-fn infer_mysql_enums(ctx: &mut ParseContext, tables: &[Table]) -> Vec<Enum> {
-    let mut enums = Vec::new();
-    let mut seen = HashSet::new();
-
-    for table in tables {
-        for column in &table.columns {
-            let parsed = match parse_mysql_enum_like_type(&column.data_type) {
-                Ok(Some(parsed)) => parsed,
-                Ok(None) => continue,
+/// Populates `Column::enum_values` for `MySQL` inline `ENUM(...)` / `SET(...)`
+/// columns, and emits warnings for malformed definitions.
+///
+/// `MySQL` inline enums/sets are anonymous, per-column value lists rather than
+/// named types, so they belong on the `Column` itself instead of being lifted
+/// into `Schema::enums` under a synthetic, non-identifier name like
+/// `enum('a','b')`.
+fn populate_mysql_enum_columns(ctx: &mut ParseContext, tables: &mut [Table]) {
+    for table in tables.iter_mut() {
+        let qualified_name = table.qualified_name();
+        for column in &mut table.columns {
+            match parse_mysql_enum_like_type(&column.data_type) {
+                Ok(Some((_kind, values))) => {
+                    column.enum_values = Some(values);
+                }
+                Ok(None) => {}
                 Err(error) => {
                     ctx.diagnostics.push(Diagnostic::warning(
                         codes::parse_unsupported(),
                         format!(
                             "Malformed MySQL enum/set definition on {}.{}: {} ({error})",
-                            table.qualified_name(),
-                            column.name,
-                            column.data_type
+                            qualified_name, column.name, column.data_type
                         ),
                     ));
-                    continue;
                 }
-            };
-            let (kind, values) = parsed;
-            let enum_name = serialize_mysql_enum_like_type(&kind, &values);
-            let key = format!(
-                "{}:{}",
-                table.schema_name.as_deref().unwrap_or_default(),
-                enum_name
-            );
-            if !seen.insert(key) {
-                continue;
             }
-
-            enums.push(Enum {
-                id: normalized_stable_id(table.schema_name.as_deref(), &enum_name),
-                schema_name: table.schema_name.clone(),
-                name: enum_name,
-                values,
-            });
         }
     }
-
-    enums
 }
 
 fn split_object_name_parts(name: &ObjectName) -> Vec<String> {
@@ -1031,13 +1017,7 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
     }
 
     if ctx.dialect == SqlDialect::Mysql {
-        let mut seen_enum_ids: HashSet<String> =
-            enums.iter().map(|enum_| enum_.id.clone()).collect();
-        for enum_ in infer_mysql_enums(&mut ctx, &tables) {
-            if seen_enum_ids.insert(enum_.id.clone()) {
-                enums.push(enum_);
-            }
-        }
+        populate_mysql_enum_columns(&mut ctx, &mut tables);
     }
 
     let is_empty_schema = tables.is_empty() && views.is_empty() && enums.is_empty();
@@ -2067,6 +2047,7 @@ fn extract_view_columns_from_defs(defs: &[sqlparser::ast::ViewColumnDef]) -> Vec
                 nullable: true,
                 is_primary_key: false,
                 comment: None,
+                enum_values: None,
             }
         })
         .collect()
@@ -2099,6 +2080,7 @@ fn extract_view_columns_from_query(query: &sqlparser::ast::Query) -> Vec<Column>
                 nullable: true,
                 is_primary_key: false,
                 comment: None,
+                enum_values: None,
             });
         }
     }
@@ -3233,7 +3215,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_mysql_enum_and_set_types_into_schema_enums() {
+    fn test_parse_mysql_enum_and_set_types_populate_column_enum_values() {
         let sql = r"
             CREATE TABLE `users` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -3245,29 +3227,25 @@ mod tests {
         let schema =
             parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
 
-        assert_eq!(schema.enums.len(), 2);
-        assert_eq!(
-            schema.tables[0].columns[1].data_type,
-            "enum('draft','published')"
-        );
-        assert_eq!(
-            schema.tables[0].columns[2].data_type,
-            "set('featured','archived')"
+        assert!(
+            schema.enums.is_empty(),
+            "inline enum/set columns must not synthesize Schema-level enum types"
         );
 
-        let status_enum = schema
-            .enums
-            .iter()
-            .find(|enum_| enum_.name == "enum('draft','published')")
-            .expect("status enum should be inferred");
-        assert_eq!(status_enum.values, vec!["draft", "published"]);
+        let users = &schema.tables[0];
+        assert_eq!(users.columns[1].data_type, "enum('draft','published')");
+        assert_eq!(
+            users.columns[1].enum_values,
+            Some(vec!["draft".to_string(), "published".to_string()])
+        );
 
-        let flags_enum = schema
-            .enums
-            .iter()
-            .find(|enum_| enum_.name == "set('featured','archived')")
-            .expect("flags set should be inferred");
-        assert_eq!(flags_enum.values, vec!["featured", "archived"]);
+        assert_eq!(users.columns[2].data_type, "set('featured','archived')");
+        assert_eq!(
+            users.columns[2].enum_values,
+            Some(vec!["featured".to_string(), "archived".to_string()])
+        );
+
+        assert!(users.columns[0].enum_values.is_none());
     }
 
     #[test]
@@ -3300,33 +3278,36 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_mysql_enums_warns_on_malformed_definitions() {
+    fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
         let mut ctx = ParseContext::new();
         ctx.dialect = SqlDialect::Mysql;
 
-        let enums = infer_mysql_enums(
-            &mut ctx,
-            &[Table {
-                id: TableId(1),
-                stable_id: "users".to_string(),
-                schema_name: None,
-                name: "users".to_string(),
-                columns: vec![Column {
-                    id: ColumnId(1),
-                    name: "status".to_string(),
-                    data_type: "enum('bad\\')".to_string(),
-                    nullable: false,
-                    is_primary_key: false,
-                    comment: None,
-                }],
-                foreign_keys: vec![],
-                indexes: vec![],
-                primary_key_name: None,
+        let mut tables = vec![Table {
+            id: TableId(1),
+            stable_id: "users".to_string(),
+            schema_name: None,
+            name: "users".to_string(),
+            columns: vec![Column {
+                id: ColumnId(1),
+                name: "status".to_string(),
+                data_type: "enum('bad\\')".to_string(),
+                nullable: false,
+                is_primary_key: false,
                 comment: None,
+                enum_values: None,
             }],
-        );
+            foreign_keys: vec![],
+            indexes: vec![],
+            primary_key_name: None,
+            comment: None,
+        }];
 
-        assert!(enums.is_empty());
+        populate_mysql_enum_columns(&mut ctx, &mut tables);
+
+        assert!(
+            tables[0].columns[0].enum_values.is_none(),
+            "malformed enum/set definitions must not populate column enum_values"
+        );
         assert!(
             ctx.diagnostics
                 .iter()
@@ -3340,7 +3321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_mysql_deduplicates_identical_enum_definitions_per_schema() {
+    fn test_parse_mysql_inline_enum_does_not_create_schema_enum_entries_across_tables() {
         let sql = r"
             CREATE TABLE `users` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -3357,8 +3338,17 @@ mod tests {
         let schema =
             parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
 
-        assert_eq!(schema.enums.len(), 1);
-        assert_eq!(schema.enums[0].name, "enum('draft','published')");
+        assert!(schema.enums.is_empty());
+
+        let expected_values = Some(vec!["draft".to_string(), "published".to_string()]);
+        for table in &schema.tables {
+            let column = table
+                .columns
+                .iter()
+                .find(|c| c.name == "status")
+                .expect("status column should exist");
+            assert_eq!(column.enum_values, expected_values);
+        }
     }
 
     #[test]

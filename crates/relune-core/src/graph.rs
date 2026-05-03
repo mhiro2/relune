@@ -586,6 +586,7 @@ mod tests {
             nullable,
             is_primary_key,
             comment: None,
+            enum_values: None,
         }
     }
 

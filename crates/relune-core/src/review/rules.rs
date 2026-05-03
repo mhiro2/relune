@@ -1909,6 +1909,7 @@ mod tests {
             nullable,
             is_primary_key: pk,
             comment: None,
+            enum_values: None,
         }
     }
 

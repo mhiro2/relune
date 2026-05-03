@@ -1,26 +1,12 @@
 ---
 source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 3049
 expression: snapshot_data(&output)
 ---
 {
   "diagnostics": [],
   "dialect": "mysql",
   "schema": {
-    "enums": [
-      {
-        "id": "enum('pending','processing','shipped','delivered','cancelled')",
-        "name": "enum('pending','processing','shipped','delivered','cancelled')",
-        "schema_name": null,
-        "values": [
-          "pending",
-          "processing",
-          "shipped",
-          "delivered",
-          "cancelled"
-        ]
-      }
-    ],
+    "enums": [],
     "tables": [
       {
         "columns": [
@@ -243,6 +229,13 @@ expression: snapshot_data(&output)
           {
             "comment": null,
             "data_type": "enum('pending','processing','shipped','delivered','cancelled')",
+            "enum_values": [
+              "pending",
+              "processing",
+              "shipped",
+              "delivered",
+              "cancelled"
+            ],
             "id": 3,
             "is_primary_key": false,
             "name": "status",

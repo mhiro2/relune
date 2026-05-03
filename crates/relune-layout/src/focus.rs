@@ -201,6 +201,7 @@ impl FocusExtractor {
 mod tests {
     use super::*;
 
+    #[allow(clippy::too_many_lines)]
     fn make_test_schema() -> Schema {
         use relune_core::{Column, ColumnId, ForeignKey, ReferentialAction, Table, TableId};
 
@@ -218,6 +219,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
@@ -237,6 +239,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: true,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(3),
@@ -245,6 +248,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![ForeignKey {
@@ -273,6 +277,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: true,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(5),
@@ -281,6 +286,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![ForeignKey {

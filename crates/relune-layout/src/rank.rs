@@ -338,6 +338,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
@@ -356,6 +357,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -382,6 +384,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -454,6 +457,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -480,6 +484,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -522,6 +527,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -548,6 +554,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -574,6 +581,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,

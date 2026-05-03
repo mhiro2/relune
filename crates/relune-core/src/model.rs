@@ -534,6 +534,17 @@ pub struct Column {
     pub is_primary_key: bool,
     /// Optional column comment.
     pub comment: Option<String>,
+    /// Inline enum/set values, when the column type carries them directly
+    /// (e.g. `MySQL` `ENUM('a','b')` or `SET('x','y')`).
+    ///
+    /// `Schema::enums` is reserved for *named* enum types that exist as
+    /// independent schema objects. Inline definitions have no separate
+    /// identity, so storing their values on the column avoids synthesising
+    /// an enum id like `enum('a','b')` (which contains characters that
+    /// break Mermaid/DOT/JSON pointer ids and silently collide across
+    /// different columns that happen to share the same literal).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
 }
 
 /// Referential action for ON DELETE / ON UPDATE clauses.
@@ -673,6 +684,7 @@ mod tests {
                     nullable: false,
                     is_primary_key: i == 0,
                     comment: None,
+                    enum_values: None,
                 })
                 .collect(),
             foreign_keys: fks,
@@ -1071,6 +1083,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 })
                 .collect(),
             definition: None,
@@ -1147,6 +1160,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 }],
                 definition: None,
             }],
@@ -1172,6 +1186,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 }],
                 definition: None,
             }],

@@ -122,13 +122,13 @@ Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
 **`Table`** — `TableId`, `stable_id`, optional `schema_name`, `name`, `columns`, `foreign_keys`, `indexes`, optional `comment`.
 
-**`Column`** — `ColumnId`, `name`, `data_type`, `nullable`, `is_primary_key`, optional `comment`.
+**`Column`** — `ColumnId`, `name`, `data_type`, `nullable`, `is_primary_key`, optional `comment`, optional `enum_values` for inline enum/set types (e.g. MySQL `ENUM('a','b')`).
 
 **`ForeignKey`** — Optional constraint `name`, `from_columns`, `to_table`, `to_columns`, `on_delete` / `on_update` (`ReferentialAction`).
 
 **`View`** — Parsed and introspected across all three dialects. Stored with the original SQL definition.
 
-**`Enum`** — PostgreSQL uses named enum types (`CREATE TYPE ... AS ENUM`). MySQL has no schema-level enum type, but live introspection lifts `ENUM(...)` / `SET(...)` column definitions into `Schema.enums` so they can participate in graphing and diffs. SQLite does not contribute enum metadata.
+**`Enum`** — PostgreSQL uses named enum types (`CREATE TYPE ... AS ENUM`). MySQL has no schema-level enum type; SQL parsing stores inline `ENUM(...)` / `SET(...)` definitions on `Column.enum_values` rather than synthesizing schema-level enum entries. Live MySQL introspection currently still lifts inline enum/set column types into `Schema.enums`. SQLite does not contribute enum metadata.
 
 **Derived artifacts** flow through the pipeline:
 

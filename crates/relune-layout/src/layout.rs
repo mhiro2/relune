@@ -4348,6 +4348,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: true,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(2),
@@ -4356,6 +4357,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![],
@@ -4376,6 +4378,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: true,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(4),
@@ -4384,6 +4387,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![ForeignKey {
@@ -4446,6 +4450,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
@@ -4465,6 +4470,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: true,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(12),
@@ -4473,6 +4479,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![],
@@ -4492,6 +4499,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: false,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
@@ -4513,6 +4521,7 @@ mod tests {
                 nullable: index % 2 == 0,
                 is_primary_key: index == 0,
                 comment: None,
+                enum_values: None,
             })
             .collect();
 
@@ -4550,6 +4559,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: true,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(201),
@@ -4558,6 +4568,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![],
@@ -4585,6 +4596,7 @@ mod tests {
                     nullable: false,
                     is_primary_key: true,
                     comment: None,
+                    enum_values: None,
                 })
                 .chain(
                     table_names
@@ -4598,6 +4610,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         }),
                 )
                 .collect();
@@ -4671,6 +4684,7 @@ mod tests {
                     nullable: false,
                     is_primary_key: true,
                     comment: None,
+                    enum_values: None,
                 },
                 Column {
                     id: ColumnId(id * 10 + 1),
@@ -4679,6 +4693,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 },
             ],
             foreign_keys: fk
@@ -4726,6 +4741,7 @@ mod tests {
                     nullable: false,
                     is_primary_key: true,
                     comment: None,
+                    enum_values: None,
                 },
                 Column {
                     id: ColumnId(id * 10 + 1),
@@ -4734,6 +4750,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 },
             ],
             foreign_keys: fk
@@ -5658,6 +5675,7 @@ mod tests {
                     nullable: false,
                     is_primary_key: true,
                     comment: None,
+                    enum_values: None,
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
@@ -5741,6 +5759,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: c == 0,
                         comment: None,
+                        enum_values: None,
                     })
                     .collect(),
                 foreign_keys: if i > 0 {
@@ -6029,6 +6048,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
@@ -6048,6 +6068,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(3),
@@ -6056,6 +6077,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![
@@ -6112,6 +6134,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
@@ -6131,6 +6154,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                         Column {
                             id: ColumnId(3),
@@ -6139,6 +6163,7 @@ mod tests {
                             nullable: false,
                             is_primary_key: false,
                             comment: None,
+                            enum_values: None,
                         },
                     ],
                     foreign_keys: vec![
@@ -6206,6 +6231,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: true,
                         comment: None,
+                        enum_values: None,
                     },
                     Column {
                         id: ColumnId(2),
@@ -6214,6 +6240,7 @@ mod tests {
                         nullable: true,
                         is_primary_key: false,
                         comment: None,
+                        enum_values: None,
                     },
                 ],
                 foreign_keys: vec![ForeignKey {
