@@ -90,6 +90,7 @@ pub fn init() {
 /// - `edgeStyle`: Edge rendering style - "straight", "orthogonal", or "curved"
 /// - `horizontalSpacing`: Horizontal spacing hint (default: 320)
 /// - `verticalSpacing`: Vertical spacing hint (default: 80)
+/// - `forceIterations`: Force-directed iteration count (default: 150, max: 10000)
 /// - `theme`: Render theme - "light" or "dark" (default: "dark")
 /// - `showLegend`: Whether to show the legend (default: true)
 /// - `showStats`: Whether to show render statistics inside the output (default: true)
@@ -238,6 +239,7 @@ pub fn lint_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 /// - `layoutDirection`: Layout direction for visual diff output
 /// - `layoutAlgorithm`: Layout algorithm for visual diff output
 /// - `edgeStyle`: Edge rendering style for visual diff output
+/// - `forceIterations`: Force-directed iteration count for visual diff output (default: 150, max: 10000)
 /// - `theme`: Render theme for visual diff output
 /// - `showLegend`: Whether to include the legend in visual diff output
 /// - `showStats`: Whether to include stats in visual diff output
@@ -375,6 +377,7 @@ pub fn render_svg_from_sql(sql: &str) -> Result<String, JsValue> {
         edge_style: None,
         horizontal_spacing: None,
         vertical_spacing: None,
+        force_iterations: None,
         theme: None,
         show_legend: None,
         show_stats: None,
@@ -407,6 +410,7 @@ pub fn render_html_from_sql(sql: &str) -> Result<String, JsValue> {
         edge_style: None,
         horizontal_spacing: None,
         vertical_spacing: None,
+        force_iterations: None,
         theme: None,
         show_legend: None,
         show_stats: None,
@@ -489,6 +493,7 @@ mod wasm_bindgen_tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            force_iterations: None,
             theme: None,
             show_legend: None,
             show_stats: None,
@@ -524,6 +529,7 @@ mod wasm_bindgen_tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            force_iterations: None,
             theme: None,
             show_legend: None,
             show_stats: None,
