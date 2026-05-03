@@ -30,6 +30,18 @@ pub(crate) const fn acquire_timeout() -> Duration {
     ACQUIRE_TIMEOUT
 }
 
+/// Returns the shared per-statement execution deadline.
+///
+/// `PostgreSQL`/`MySQL` enforce this at the database session level via
+/// `statement_timeout`/`max_execution_time`. Backends that lack a server-side
+/// equivalent (notably `SQLite`) can use this constant to wrap each query in
+/// a client-side `tokio::time::timeout`, giving them the same upper bound on
+/// hung queries.
+#[must_use]
+pub(crate) const fn statement_timeout() -> Duration {
+    STATEMENT_TIMEOUT
+}
+
 /// Resolves the effective pool max connection count for a dialect.
 ///
 /// Reads `RELUNE_DB_POOL_MAX_CONNECTIONS`; if set to a positive integer the
@@ -159,10 +171,16 @@ fn mysql_tls_is_enforced(options: &MySqlConnectOptions) -> bool {
 
 fn is_local_host(host: &str) -> bool {
     let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
-    matches!(host.as_str(), "localhost")
-        || host
-            .parse::<IpAddr>()
-            .is_ok_and(|address| address.is_loopback())
+    if host == "localhost" {
+        return true;
+    }
+    // Strip an IPv6 zone identifier (e.g. `fe80::1%eth0`) before parsing so
+    // link-local loopback addresses with explicit zone IDs are still
+    // recognised as local. `IpAddr::parse` rejects the `%zone` suffix.
+    let address_part = host.split_once('%').map_or(host.as_str(), |(addr, _)| addr);
+    address_part
+        .parse::<IpAddr>()
+        .is_ok_and(|address| address.is_loopback())
 }
 
 #[cfg(test)]
@@ -220,6 +238,22 @@ mod tests {
         let err = result.expect_err("operation error should be surfaced");
         assert!(matches!(err, IntrospectError::Query { .. }));
         assert!(err.to_string().contains("synthetic operation failure"));
+    }
+
+    #[test]
+    fn is_local_host_recognises_loopback_with_ipv6_zone_id() {
+        assert!(is_local_host("::1%lo0"));
+        assert!(is_local_host("[::1%eth0]"));
+        assert!(!is_local_host("fe80::1%eth0"));
+        assert!(!is_local_host("2001:db8::1%eth0"));
+    }
+
+    #[test]
+    fn is_local_host_recognises_plain_loopback_addresses() {
+        assert!(is_local_host("localhost"));
+        assert!(is_local_host("127.0.0.1"));
+        assert!(is_local_host("::1"));
+        assert!(is_local_host("[::1]"));
     }
 
     #[test]

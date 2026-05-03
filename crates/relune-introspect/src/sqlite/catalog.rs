@@ -1,6 +1,7 @@
 //! `SQLite` catalog introspection via `sqlite_master` and `PRAGMA`s.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 
 use sqlx::sqlite::SqlitePool;
 
@@ -8,6 +9,7 @@ use crate::catalog::raw_schema;
 use crate::common::{
     RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView, parse_referential_action,
 };
+use crate::connect::statement_timeout;
 use crate::error::IntrospectError;
 
 const MAIN_SCHEMA: &str = "main";
@@ -64,36 +66,62 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
     ))
 }
 
-async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<String>, IntrospectError> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        r"
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table'
-          AND name NOT LIKE 'sqlite_%'
-        ORDER BY name
-        ",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| IntrospectError::query_with_source("Failed to list tables", e))?;
+/// Wraps a `SQLite` query future with the shared per-statement deadline.
+///
+/// `SQLite` has no server-side `statement_timeout` equivalent, so a
+/// hostile or corrupted database file could cause `sqlx::query_as(...)
+/// .fetch_all(...)` to hang forever. Mirroring the 30s deadline used by
+/// `PostgreSQL` and `MySQL` ensures introspection always returns within
+/// a bounded time.
+async fn with_query_timeout<T, F>(context: &'static str, fut: F) -> Result<T, IntrospectError>
+where
+    F: Future<Output = Result<T, IntrospectError>>,
+{
+    match tokio::time::timeout(statement_timeout(), fut).await {
+        Ok(result) => result,
+        Err(_) => Err(IntrospectError::timeout(format!(
+            "{context} did not complete within {} seconds",
+            statement_timeout().as_secs()
+        ))),
+    }
+}
 
-    Ok(rows.into_iter().map(|r| r.0).collect())
+async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<String>, IntrospectError> {
+    with_query_timeout("Listing tables", async {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r"
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            ",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to list tables", e))?;
+
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    })
+    .await
 }
 
 async fn list_views(pool: &SqlitePool) -> Result<Vec<RawView>, IntrospectError> {
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        r"
-        SELECT name, sql
-        FROM sqlite_master
-        WHERE type = 'view'
-          AND name NOT LIKE 'sqlite_%'
-        ORDER BY name
-        ",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| IntrospectError::query_with_source("Failed to list views", e))?;
+    let rows: Vec<(String, Option<String>)> = with_query_timeout("Listing views", async {
+        sqlx::query_as(
+            r"
+            SELECT name, sql
+            FROM sqlite_master
+            WHERE type = 'view'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            ",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to list views", e))
+    })
+    .await?;
 
     Ok(rows
         .into_iter()
@@ -133,10 +161,13 @@ async fn pragma_table_info(
     quoted_table: &str,
 ) -> Result<Vec<SqliteTableInfoRow>, IntrospectError> {
     let sql = format!("PRAGMA table_info({quoted_table})");
-    sqlx::query_as::<_, SqliteTableInfoRow>(&sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| IntrospectError::query_with_source("PRAGMA table_info failed", e))
+    with_query_timeout("PRAGMA table_info", async {
+        sqlx::query_as::<_, SqliteTableInfoRow>(&sql)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| IntrospectError::query_with_source("PRAGMA table_info failed", e))
+    })
+    .await
 }
 
 async fn pragma_foreign_key_list(
@@ -144,10 +175,13 @@ async fn pragma_foreign_key_list(
     quoted_table: &str,
 ) -> Result<Vec<SqliteFkRow>, IntrospectError> {
     let sql = format!("PRAGMA foreign_key_list({quoted_table})");
-    sqlx::query_as::<_, SqliteFkRow>(&sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| IntrospectError::query_with_source("PRAGMA foreign_key_list failed", e))
+    with_query_timeout("PRAGMA foreign_key_list", async {
+        sqlx::query_as::<_, SqliteFkRow>(&sql)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| IntrospectError::query_with_source("PRAGMA foreign_key_list failed", e))
+    })
+    .await
 }
 
 async fn pragma_index_list(
@@ -155,10 +189,13 @@ async fn pragma_index_list(
     quoted_table: &str,
 ) -> Result<Vec<SqliteIndexListRow>, IntrospectError> {
     let sql = format!("PRAGMA index_list({quoted_table})");
-    sqlx::query_as::<_, SqliteIndexListRow>(&sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| IntrospectError::query_with_source("PRAGMA index_list failed", e))
+    with_query_timeout("PRAGMA index_list", async {
+        sqlx::query_as::<_, SqliteIndexListRow>(&sql)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| IntrospectError::query_with_source("PRAGMA index_list failed", e))
+    })
+    .await
 }
 
 async fn pragma_index_info(
@@ -166,10 +203,13 @@ async fn pragma_index_info(
     quoted_index: &str,
 ) -> Result<Vec<SqliteIndexInfoRow>, IntrospectError> {
     let sql = format!("PRAGMA index_info({quoted_index})");
-    sqlx::query_as::<_, SqliteIndexInfoRow>(&sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| IntrospectError::query_with_source("PRAGMA index_info failed", e))
+    with_query_timeout("PRAGMA index_info", async {
+        sqlx::query_as::<_, SqliteIndexInfoRow>(&sql)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| IntrospectError::query_with_source("PRAGMA index_info failed", e))
+    })
+    .await
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -312,5 +352,26 @@ mod tests {
         let err = ordinal_position_from_row(i64::from(i16::MAX) + 1, "users")
             .expect_err("ordinal_position should overflow");
         assert!(matches!(err, IntrospectError::MetadataMapping(_)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn with_query_timeout_returns_timeout_when_future_hangs() {
+        let result: Result<(), IntrospectError> = with_query_timeout("test query", async {
+            tokio::time::sleep(statement_timeout() * 2).await;
+            Ok(())
+        })
+        .await;
+
+        let err = result.expect_err("hung future should yield a timeout error");
+        assert!(matches!(err, IntrospectError::Timeout(_)));
+        assert!(err.to_string().contains("test query"));
+    }
+
+    #[tokio::test]
+    async fn with_query_timeout_propagates_inner_result_when_within_deadline() {
+        let value = with_query_timeout::<u32, _>("ok", async { Ok(7) })
+            .await
+            .expect("future should succeed within deadline");
+        assert_eq!(value, 7);
     }
 }

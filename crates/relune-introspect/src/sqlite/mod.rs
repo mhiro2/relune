@@ -4,7 +4,7 @@ pub mod catalog;
 
 use relune_core::Schema;
 use sqlx::sqlite::SqlitePoolOptions;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::connect::{acquire_timeout, close_pool_when_done, pool_max_connections_with_default};
 use crate::error::{IntrospectError, connect_error};
@@ -42,9 +42,11 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
         .map_err(|e| {
             // Sanitize the raw sqlx error before logging: variants such as
             // `Configuration`/`Tls`/`Io` may include the original DSN with
-            // credentials in their `Display` output.
+            // credentials in their `Display` output. Log at `warn!` so the
+            // CLI/caller can decide whether the final outcome is fatal and
+            // emit a single `error!` at that boundary instead of double-logging.
             let sanitized = crate::url::sanitize_error_message(trimmed, &e.to_string());
-            error!(error = %sanitized, "Failed to connect to database");
+            warn!(error = %sanitized, "Failed to connect to database");
             connect_error("SQLite", trimmed, e)
         })?;
 
