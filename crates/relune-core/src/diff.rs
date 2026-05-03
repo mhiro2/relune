@@ -1049,6 +1049,7 @@ mod tests {
                     nullable,
                     is_primary_key: pk,
                     comment: None,
+                    enum_values: None,
                 })
                 .collect(),
             foreign_keys: fks
@@ -1088,6 +1089,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 })
                 .collect(),
             definition: definition.map(ToString::to_string),
@@ -1570,6 +1572,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: false,
                         comment: None,
+                        enum_values: None,
                     },
                     Column {
                         id: ColumnId(1),
@@ -1578,6 +1581,7 @@ mod tests {
                         nullable: false,
                         is_primary_key: false,
                         comment: None,
+                        enum_values: None,
                     },
                 ],
                 definition: Some("SELECT id, email FROM users".to_string()),
@@ -1672,6 +1676,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 }],
                 definition: Some("SELECT id FROM users".to_string()),
             }],
@@ -1692,6 +1697,7 @@ mod tests {
                     nullable: true,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 }],
                 definition: Some("SELECT id FROM users WHERE active".to_string()),
             }],

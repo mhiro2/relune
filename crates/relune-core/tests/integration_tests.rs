@@ -36,6 +36,7 @@ fn pk_col(id: u64, name: &str) -> Column {
         nullable: false,
         is_primary_key: true,
         comment: None,
+        enum_values: None,
     }
 }
 
@@ -47,6 +48,7 @@ fn fk_col(id: u64, name: &str) -> Column {
         nullable: false,
         is_primary_key: false,
         comment: None,
+        enum_values: None,
     }
 }
 
@@ -154,6 +156,7 @@ fn view_with_table_dependency_appears_in_graph() {
                 nullable: false,
                 is_primary_key: false,
                 comment: None,
+                enum_values: None,
             }],
             definition: Some("SELECT id FROM users WHERE active".to_string()),
         }],
@@ -306,6 +309,7 @@ fn enum_types_appear_in_graph() {
                     nullable: false,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 },
             ],
             vec![],

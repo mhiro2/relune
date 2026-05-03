@@ -362,6 +362,7 @@ fn map_column(raw_column: &RawColumn, table_stable_id: &str, is_primary_key: boo
         nullable: raw_column.is_nullable,
         is_primary_key,
         comment: raw_column.column_comment.clone(),
+        enum_values: None,
     }
 }
 

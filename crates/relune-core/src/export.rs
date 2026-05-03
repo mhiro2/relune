@@ -323,6 +323,7 @@ fn import_column(index: usize, export: &ColumnExport) -> Column {
         nullable: export.nullable,
         is_primary_key: export.primary_key,
         comment: None,
+        enum_values: None,
     }
 }
 
@@ -418,6 +419,7 @@ mod tests {
             nullable: false,
             is_primary_key: primary_key,
             comment: None,
+            enum_values: None,
         }
     }
 
@@ -668,6 +670,7 @@ mod tests {
                     nullable: false,
                     is_primary_key: false,
                     comment: None,
+                    enum_values: None,
                 }],
                 definition: Some("SELECT id FROM users WHERE active".to_string()),
             }],

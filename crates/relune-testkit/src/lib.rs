@@ -377,6 +377,7 @@ impl TableBuilder {
             nullable: true,
             is_primary_key: false,
             comment: None,
+            enum_values: None,
         });
         self.next_column_id += 1;
         self
@@ -392,6 +393,7 @@ impl TableBuilder {
             nullable: false,
             is_primary_key: true,
             comment: None,
+            enum_values: None,
         });
         self.next_column_id += 1;
         self

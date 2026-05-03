@@ -43,7 +43,7 @@ pub mod map;
 
 use relune_core::Schema;
 use sqlx::postgres::PgPoolOptions;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::connect::{acquire_timeout, close_pool_when_done, postgres_connect_options};
 use crate::error::{IntrospectError, connect_error};
@@ -117,9 +117,11 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
         .map_err(|e| {
             // Sanitize the raw sqlx error before logging: variants such as
             // `Configuration`/`Tls`/`Io` may include the original DSN with
-            // credentials in their `Display` output.
+            // credentials in their `Display` output. Log at `warn!` so the
+            // CLI/caller can decide whether the final outcome is fatal and
+            // emit a single `error!` at that boundary instead of double-logging.
             let sanitized = crate::url::sanitize_error_message(&database_url, &e.to_string());
-            error!(error = %sanitized, "Failed to connect to database");
+            warn!(error = %sanitized, "Failed to connect to database");
             connect_error("PostgreSQL", &database_url, e)
         })?;
 

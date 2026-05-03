@@ -7,7 +7,7 @@ pub mod catalog;
 
 use relune_core::Schema;
 use sqlx::mysql::MySqlPoolOptions;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::connect::{
     acquire_timeout, close_pool_when_done, configure_mysql_session, mysql_connect_options,
@@ -53,9 +53,11 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
         .map_err(|e| {
             // Sanitize the raw sqlx error before logging: variants such as
             // `Configuration`/`Tls`/`Io` may include the original DSN with
-            // credentials in their `Display` output.
+            // credentials in their `Display` output. Log at `warn!` so the
+            // CLI/caller can decide whether the final outcome is fatal and
+            // emit a single `error!` at that boundary instead of double-logging.
             let sanitized = crate::url::sanitize_error_message(&connect_url, &e.to_string());
-            error!(error = %sanitized, "Failed to connect to database");
+            warn!(error = %sanitized, "Failed to connect to database");
             connect_error("MySQL", &connect_url, e)
         })?;
 
