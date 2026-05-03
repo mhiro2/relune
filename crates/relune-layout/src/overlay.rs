@@ -7,7 +7,8 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Severity level for an overlay annotation.
 ///
@@ -61,7 +62,7 @@ impl NodeOverlay {
     }
 }
 
-/// Overlay data for a single edge, identified by `"from_id->to_id"`.
+/// Overlay data for a single edge.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeOverlay {
     /// Annotations on this edge.
@@ -79,22 +80,93 @@ impl EdgeOverlay {
     }
 }
 
-/// Build the canonical edge key used in [`DiagramOverlay::edges`].
-#[must_use]
-pub fn edge_key(from: &str, to: &str) -> String {
-    format!("{from}->{to}")
+/// Stable key identifying an edge in [`DiagramOverlay::edges`].
+///
+/// Uses an explicit `(from, to)` tuple instead of a `"from->to"` string so
+/// that arbitrary identifiers (which can themselves contain `->`) cannot
+/// collide — for example `("a", "b->c")` and `("a->b", "c")` would both
+/// flatten to the same string key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct EdgeKey {
+    /// Source node stable ID.
+    pub from: String,
+    /// Destination node stable ID.
+    pub to: String,
+}
+
+impl EdgeKey {
+    /// Build an [`EdgeKey`] from string slices.
+    #[must_use]
+    pub fn new(from: impl Into<String>, to: impl Into<String>) -> Self {
+        Self {
+            from: from.into(),
+            to: to.into(),
+        }
+    }
 }
 
 /// Collection of all overlay annotations for a diagram.
 ///
-/// Keyed by stable identifiers that match `PositionedNode::id` and
-/// `PositionedEdge::from` / `PositionedEdge::to` respectively.
+/// Keyed by stable identifiers that match `PositionedNode::id` and the
+/// `PositionedEdge::from` / `PositionedEdge::to` pair respectively.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagramOverlay {
     /// Per-node overlays, keyed by `PositionedNode::id` (stable ID).
     pub nodes: BTreeMap<String, NodeOverlay>,
-    /// Per-edge overlays, keyed by `"from_id->to_id"` (see [`edge_key`]).
-    pub edges: BTreeMap<String, EdgeOverlay>,
+    /// Per-edge overlays, keyed by an explicit `(from, to)` pair (see
+    /// [`EdgeKey`]).
+    ///
+    /// Serialized as a list of entries because JSON map keys must be
+    /// strings, and we deliberately keep the key as an explicit struct
+    /// to avoid `from->to` collisions on identifiers that contain `->`.
+    #[serde(
+        serialize_with = "serialize_edges",
+        deserialize_with = "deserialize_edges"
+    )]
+    pub edges: BTreeMap<EdgeKey, EdgeOverlay>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EdgeEntry {
+    from: String,
+    to: String,
+    overlay: EdgeOverlay,
+}
+
+fn serialize_edges<S>(
+    edges: &BTreeMap<EdgeKey, EdgeOverlay>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let entries: Vec<EdgeEntry> = edges
+        .iter()
+        .map(|(key, overlay)| EdgeEntry {
+            from: key.from.clone(),
+            to: key.to.clone(),
+            overlay: overlay.clone(),
+        })
+        .collect();
+    entries.serialize(serializer)
+}
+
+fn deserialize_edges<'de, D>(deserializer: D) -> Result<BTreeMap<EdgeKey, EdgeOverlay>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let entries: Vec<EdgeEntry> = Vec::deserialize(deserializer)?;
+    let mut map = BTreeMap::new();
+    for entry in entries {
+        let key = EdgeKey::new(entry.from, entry.to);
+        if map.insert(key.clone(), entry.overlay).is_some() {
+            return Err(D::Error::custom(format!(
+                "duplicate edge overlay entry for ({}, {})",
+                key.from, key.to
+            )));
+        }
+    }
+    Ok(map)
 }
 
 impl DiagramOverlay {
@@ -119,7 +191,7 @@ impl DiagramOverlay {
     /// Look up the overlay for a specific edge.
     #[must_use]
     pub fn edge(&self, from: &str, to: &str) -> Option<&EdgeOverlay> {
-        self.edges.get(&edge_key(from, to))
+        self.edges.get(&EdgeKey::new(from, to))
     }
 
     /// Add an annotation to a node, creating the entry if needed.
@@ -134,7 +206,7 @@ impl DiagramOverlay {
     /// Add an annotation to an edge, creating the entry if needed.
     pub fn add_edge_annotation(&mut self, from_id: &str, to_id: &str, annotation: Annotation) {
         self.edges
-            .entry(edge_key(from_id, to_id))
+            .entry(EdgeKey::new(from_id, to_id))
             .or_default()
             .annotations
             .push(annotation);
@@ -214,8 +286,37 @@ mod tests {
     }
 
     #[test]
-    fn edge_key_format() {
-        assert_eq!(edge_key("posts", "users"), "posts->users");
+    fn edge_key_round_trips_components() {
+        let key = EdgeKey::new("posts", "users");
+        assert_eq!(key.from, "posts");
+        assert_eq!(key.to, "users");
+    }
+
+    #[test]
+    fn ambiguous_arrow_ids_do_not_collide() {
+        // Without an explicit tuple key, the two annotations below would have
+        // collapsed to a single `"a->b->c"` entry.
+        let mut overlay = DiagramOverlay::new();
+        overlay.add_edge_annotation("a", "b->c", warning_annotation("first"));
+        overlay.add_edge_annotation("a->b", "c", warning_annotation("second"));
+
+        assert_eq!(overlay.edges.len(), 2);
+        assert_eq!(
+            overlay
+                .edge("a", "b->c")
+                .expect("first edge present")
+                .annotations[0]
+                .message,
+            "first"
+        );
+        assert_eq!(
+            overlay
+                .edge("a->b", "c")
+                .expect("second edge present")
+                .annotations[0]
+                .message,
+            "second"
+        );
     }
 
     #[test]
@@ -235,5 +336,19 @@ mod tests {
         let json = serde_json::to_string(&overlay).unwrap();
         let deserialized: DiagramOverlay = serde_json::from_str(&json).unwrap();
         assert_eq!(overlay, deserialized);
+    }
+
+    #[test]
+    fn duplicate_edge_entries_are_rejected() {
+        let json = r#"{
+            "nodes": {},
+            "edges": [
+                {"from": "posts", "to": "users", "overlay": {"annotations": []}},
+                {"from": "posts", "to": "users", "overlay": {"annotations": []}}
+            ]
+        }"#;
+        let err = serde_json::from_str::<DiagramOverlay>(json)
+            .expect_err("duplicate (from, to) entries should fail to deserialize");
+        assert!(err.to_string().contains("duplicate"));
     }
 }
