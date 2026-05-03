@@ -15,5 +15,5 @@ pre-push:
   commands:
     test:
       run: make test
-    license-check:
-      run: make license-check
+    deny-check:
+      run: make deny-check

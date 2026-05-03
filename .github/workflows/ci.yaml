@@ -110,7 +110,7 @@ jobs:
       - name: Build playground
         run: make build-playground
 
-  license-check:
+  deny-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -121,5 +121,5 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
-      - name: Run license check
-        run: make license-check
+      - name: Run cargo-deny
+        run: make deny-check

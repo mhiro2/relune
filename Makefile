@@ -1,4 +1,4 @@
-.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-update test-coverage test-wasm test-playground test-ci build-frontend build license-check
+.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-update test-coverage test-wasm test-playground test-ci build-frontend build deny-check
 
 .DEFAULT_GOAL := help
 
@@ -66,5 +66,5 @@ build: ## Build Rust and wasm artifacts using committed HTML viewer bundles.
 	cargo build
 	cargo build -p relune-wasm --target $(WASM_TARGET)
 
-license-check: ## Validate dependency licenses.
-	cargo deny check licenses
+deny-check: ## Run cargo-deny across advisories, bans, licenses, and sources.
+	cargo deny check all

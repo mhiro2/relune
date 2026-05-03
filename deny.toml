@@ -11,3 +11,34 @@ allow = [
   "Zlib",
 ]
 confidence-threshold = 0.8
+
+[advisories]
+yanked = "deny"
+ignore = [
+  # rsa: Marvin Attack timing sidechannel. Pulled in transitively by
+  # sqlx-mysql and not yet fixed upstream. Revisit when sqlx adopts a
+  # patched rsa release.
+  "RUSTSEC-2023-0071",
+  # rustls-pemfile: marked unmaintained. Reached transitively via
+  # sqlx-postgres / hyper-rustls; replacement landed in newer sqlx
+  # releases.
+  "RUSTSEC-2025-0134",
+  # tokio-tar: PAX header smuggling. Used only by testcontainers
+  # (dev-dep). Maintainer recommends astral-tokio-tar; testcontainers
+  # has not migrated yet.
+  "RUSTSEC-2025-0111",
+]
+
+[bans]
+multiple-versions = "warn"
+# Workspace internal crates are referenced by path without explicit
+# versions, which cargo-deny reports as wildcards. Keep this as "warn"
+# until the workspace adopts `publish = false` per crate; external
+# wildcard deps will still surface in CI logs.
+wildcards = "warn"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
