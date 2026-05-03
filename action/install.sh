@@ -66,7 +66,14 @@ echo "Downloading ${base_url}/${archive} ..."
 curl -fsSL "${base_url}/${archive}" -o "${tmp}/${archive}"
 curl -fsSL "${base_url}/checksums.txt" -o "${tmp}/checksums.txt"
 
-matches=$(awk -v a="${archive}" '$2 == a {print $1}' "${tmp}/checksums.txt")
+matches=$(awk -v a="${archive}" '
+  {
+    name = $2
+    sub(/^[*]/, "", name)
+    sub(/^\.\//, "", name)
+    if (name == a) print $1
+  }
+' "${tmp}/checksums.txt")
 match_count=$(printf '%s' "${matches}" | grep -c . || true)
 if [[ "${match_count}" -eq 0 ]]; then
   echo "::error::Archive ${archive} not found in checksums.txt"
