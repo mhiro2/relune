@@ -246,6 +246,8 @@ type WasmReviewResult = {
   denied: boolean;
   content?: string | null;
   applied_rule_details: ReviewRuleMetadata[];
+  requested_dialect: ReviewDialect;
+  effective_dialect: ReviewDialect;
 };
 
 type WasmErrorShape = {
@@ -1526,9 +1528,9 @@ function renderReviewPanel(result: WasmReviewResult): void {
     buildSeverityBadge("info", summary.info),
   ].join("");
 
-  if ((compareReviewDialectSelect.value as ReviewDialect) === "auto") {
-    reviewDialectNote.textContent =
-      "Lock-risk rules are inactive. Select Postgres or MySQL to enable lock-risk review.";
+  const noteText = effectiveDialectNote(result.requested_dialect, result.effective_dialect);
+  if (noteText) {
+    reviewDialectNote.textContent = noteText;
     reviewDialectNote.hidden = false;
   } else {
     reviewDialectNote.textContent = "";
@@ -1550,6 +1552,19 @@ function renderReviewPanel(result: WasmReviewResult): void {
     reviewSuppressedPanel.hidden = false;
     reviewSuppressedList.innerHTML = result.review.suppressed.map(buildFindingCard).join("");
   }
+}
+
+function effectiveDialectNote(requested: ReviewDialect, effective: ReviewDialect): string | null {
+  if (requested !== "auto") {
+    return null;
+  }
+  if (effective === "postgres" || effective === "mysql") {
+    return `auto resolved to ${effective}; lock-risk review active.`;
+  }
+  if (effective === "sqlite") {
+    return "auto resolved to sqlite; lock-risk rules are inactive on this dialect.";
+  }
+  return "Auto could not infer a single dialect; lock-risk rules are inactive.";
 }
 
 function severityRank(severity: ReviewSeverity): number {

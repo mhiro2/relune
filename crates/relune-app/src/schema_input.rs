@@ -17,6 +17,15 @@ const MAX_TEXT_INPUT_SIZE_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) struct SchemaInputContext {
     /// Whether table/column comments can be reviewed reliably for this input.
     pub supports_comment_review: bool,
+    /// Concrete dialect resolved from the input, if any.
+    ///
+    /// Populated for SQL inputs (where the parser auto-detects when the
+    /// caller passes `Auto`) and for DB URL inputs (derived from the URL
+    /// scheme). `None` for schema-JSON inputs, which carry no parser
+    /// dialect signal. Used by the review pipeline to promote `Auto` to
+    /// the concrete dialect (`Postgres`, `Mysql`, or `Sqlite`) when both
+    /// sides agree.
+    pub resolved_dialect: Option<SqlDialect>,
 }
 
 /// Load a schema from the given input source.
@@ -25,6 +34,19 @@ pub(crate) fn schema_from_input(
 ) -> Result<(Schema, Vec<Diagnostic>), AppError> {
     let (schema, diagnostics, _context) = schema_from_input_with_context(input)?;
     Ok((schema, diagnostics))
+}
+
+/// Load a schema together with the resolved parser dialect.
+///
+/// Returns the same `(schema, diagnostics)` pair as
+/// [`schema_from_input`], plus the concrete `SqlDialect` resolved by the
+/// SQL parser (or derived from a DB URL scheme). Returns `None` for
+/// schema-JSON inputs, which carry no parser dialect signal.
+pub(crate) fn schema_from_input_with_dialect(
+    input: &InputSource,
+) -> Result<(Schema, Vec<Diagnostic>, Option<SqlDialect>), AppError> {
+    let (schema, diagnostics, context) = schema_from_input_with_context(input)?;
+    Ok((schema, diagnostics, context.resolved_dialect))
 }
 
 /// Load a schema plus resolved input capabilities.
@@ -72,6 +94,7 @@ fn load_schema(
                     output.diagnostics,
                     SchemaInputContext {
                         supports_comment_review: supports_comment_review_for_sql(output.dialect),
+                        resolved_dialect: Some(output.dialect),
                     },
                 )),
                 None => Err(AppError::input_with_type(
@@ -98,6 +121,7 @@ fn load_schema(
                     output.diagnostics,
                     SchemaInputContext {
                         supports_comment_review: supports_comment_review_for_sql(output.dialect),
+                        resolved_dialect: Some(output.dialect),
                     },
                 )),
                 None => Err(AppError::input_with_type(
@@ -116,6 +140,7 @@ fn load_schema(
                 vec![],
                 SchemaInputContext {
                     supports_comment_review: false,
+                    resolved_dialect: None,
                 },
             ))
         }
@@ -130,6 +155,7 @@ fn load_schema(
                 vec![],
                 SchemaInputContext {
                     supports_comment_review: false,
+                    resolved_dialect: None,
                 },
             ))
         }
@@ -142,6 +168,7 @@ fn load_schema(
                 vec![],
                 SchemaInputContext {
                     supports_comment_review: dialect.is_some_and(supports_comment_review_for_db),
+                    resolved_dialect: dialect,
                 },
             ))
         }

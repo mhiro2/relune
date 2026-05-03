@@ -812,10 +812,12 @@ pub struct ReviewArgs {
 
     /// SQL dialect for parsing AND review evaluation (defaults to
     /// `auto`, which auto-detects the parser dialect). Lock-risk rules
-    /// require an explicit `postgres` or `mysql`; under `auto` /
-    /// `sqlite` they emit no findings, and an info-level diagnostic is
-    /// reported only when a lock-risk rule was explicitly listed via
-    /// `--rules`.
+    /// activate on `postgres` or `mysql`. Under `auto` the review uses
+    /// the parser-resolved dialect when both inputs agree (so lock-risk
+    /// runs automatically when both sides parse to postgres/mysql); a
+    /// `REVIEW002` warning is emitted when the two sides disagree, and
+    /// `sqlite` keeps lock-risk inactive (with an info-level skip
+    /// diagnostic when a lock-risk rule was pinned via `--rules`).
     #[arg(long = "dialect", value_enum)]
     pub dialect: Option<DialectArg>,
 

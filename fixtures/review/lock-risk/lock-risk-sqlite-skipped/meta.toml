@@ -1,1 +1,2 @@
+dialect = "sqlite"
 rules = ["risk/add-index-on-large-table"]

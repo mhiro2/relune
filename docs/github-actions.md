@@ -48,8 +48,12 @@ blocking findings are detected so a follow-up step can still post a PR comment; 
 `dialect` is forwarded to the CLI for both SQL parsing and review rule evaluation —
 setting `dialect: postgres` or `dialect: mysql` activates the lock-risk caution rules
 (see [`action/README.md`'s Lock-risk findings](../action/README.md#lock-risk-findings)).
-The `summary-caution` output stays at `0` for the default `dialect: auto`; pair the
-input with `deny: caution` when the workflow should gate on lock-risk findings.
+With the default `dialect: auto`, lock-risk rules now run automatically whenever both
+the before and after SQL inputs parse to the same concrete dialect — so SQL-only
+workflows usually no longer need to pin `dialect` explicitly. When the two sides
+resolve to different dialects, the run stays lock-risk-inactive and emits a
+`REVIEW002` warning instead of silently skipping. Pair the input with `deny: caution`
+when the workflow should gate on lock-risk findings.
 
 The full input / output reference lives in [`action/README.md`](../action/README.md).
 

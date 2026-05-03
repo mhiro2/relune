@@ -17,7 +17,7 @@ Every command requires **at least one input**. Typical inputs:
 | SQL string | `--sql-text '<DDL>'` | Not available on `lint` |
 | Normalized schema JSON | `--schema-json <FILE>` | From a previous export |
 | Live DB | `--db-url <URL>` | Read-only introspection; PostgreSQL/MySQL/MariaDB use a 30s statement deadline, and remote TCP connections require TLS by default |
-| SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | Drives both SQL parsing and `relune review` rule evaluation (`postgres` / `mysql` activate the lock-risk caution rules; `auto` and `sqlite` skip them) |
+| SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | Drives both SQL parsing and `relune review` rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree (so SQL inputs that both look like Postgres run lock-risk under `Postgres`); when the two sides disagree, `auto` stays inactive and a `REVIEW002` warning is emitted. |
 
 Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly.
 
@@ -227,7 +227,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 |--------|-------------|
 | `-f`, `--format text\|markdown\|json` | Output format (default `text`) |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
-| `--dialect` | Drives both SQL parsing and review rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `auto` (default) and `sqlite` skip them. |
+| `--dialect` | Drives both SQL parsing and review rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree, and stays inactive (with a `REVIEW002` warning) when they disagree. |
 | `--rules <RULE>` | Repeatable; run only these rules (accepts `risk/<id>` or bare `<id>`) |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set |
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (supports `*` glob) |

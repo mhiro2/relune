@@ -52,6 +52,8 @@ struct WasmReviewResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
     applied_rule_details: Vec<relune_core::ReviewRuleMetadata>,
+    requested_dialect: relune_core::SqlDialect,
+    effective_dialect: relune_core::SqlDialect,
 }
 
 /// Set the panic hook for better error messages in the browser.
@@ -303,14 +305,24 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 ///   evaluation (`[{ rule_id, severity }]`)
 /// - `dialect`: Optional dialect hint that drives both the SQL parser and
 ///   the review-evaluation dialect ("auto" | "postgres" | "mysql" |
-///   "sqlite", default "auto"). Lock-risk rules require `postgres` or
-///   `mysql`; under `auto` / `sqlite` they emit no findings.
+///   "sqlite", default "auto"). Lock-risk rules activate on `postgres`
+///   or `mysql`; `sqlite` keeps them inactive. `auto` is promoted to the
+///   parser-resolved dialect when both SQL inputs agree (so SQL-only
+///   inputs that resolve to postgres/mysql run lock-risk automatically),
+///   stays `auto` (with a `REVIEW002` warning) when both sides resolve
+///   to different concrete dialects, and stays `auto` silently when one
+///   or both sides carry no parser-side dialect signal (e.g. schema-JSON
+///   inputs).
 ///
 /// Returns a JSON result object with:
 /// - `review`: Structured review payload (`findings`, `suppressed`,
 ///   `summary`, `applied_rules`)
 /// - `diagnostics`: Array of parser / schema diagnostics
 /// - `denied`: Whether the configured `deny` threshold was exceeded
+/// - `requested_dialect`: The dialect supplied in the request (or
+///   `"auto"` if unset)
+/// - `effective_dialect`: The dialect actually used for review
+///   evaluation, after auto-promotion
 /// - `content`: CLI-equivalent rendering for the requested `format`
 ///   (the `format = "json"` payload matches `relune review --format json`)
 /// - `applied_rule_details`: Metadata snapshots for each applied rule,
@@ -339,6 +351,8 @@ pub fn review_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
         denied: result.denied,
         content,
         applied_rule_details,
+        requested_dialect: result.requested_dialect,
+        effective_dialect: result.effective_dialect,
     };
 
     Ok(serde_wasm_bindgen::to_value(&response).map_err(WasmError::from)?)
@@ -546,6 +560,40 @@ mod wasm_bindgen_tests {
                 .unwrap_or_default()
                 .contains("## Schema Diff")
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_from_sql_surfaces_resolved_dialect() {
+        // SERIAL on both sides triggers the parser's postgres detection;
+        // under `auto`, the review pipeline should promote to postgres
+        // and surface that resolution to the caller so the playground
+        // can render the correct lock-risk-active note.
+        let before = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let after = "
+            CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+            CREATE INDEX users_email_idx ON users(email);
+        ";
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: Some(before.to_string()),
+            before_schema_json: None,
+            after_sql: Some(after.to_string()),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: None,
+        })
+        .expect("serialize review request");
+
+        let result = review_from_sql(input).expect("review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        assert_eq!(value["requested_dialect"], "auto");
+        assert_eq!(value["effective_dialect"], "postgres");
     }
 
     #[wasm_bindgen_test]

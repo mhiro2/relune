@@ -63,7 +63,7 @@ instead.
 | `after` | **yes** | — | Path to the updated schema file (SQL DDL or schema JSON). |
 | `format` | no | `markdown` | Output format. Mode-specific accepted values: see below. |
 | `output-path` | no | auto | Path for the generated file. Defaults are derived from `mode` and `format` (see [Output paths](#output-paths)). |
-| `dialect` | no | `auto` | SQL dialect: `auto`, `postgres`, `mysql`, or `sqlite`. Applied to **both** `diff` and `review`. `auto` lets the CLI infer the dialect from the file contents. In `review` mode, an explicit `postgres` or `mysql` value also activates the lock-risk caution rules — see [Lock-risk findings](#lock-risk-findings). |
+| `dialect` | no | `auto` | SQL dialect: `auto`, `postgres`, `mysql`, or `sqlite`. Applied to **both** `diff` and `review`. `auto` lets the CLI infer the dialect from the file contents. In `review` mode, `auto` also promotes to a concrete dialect when both `before` and `after` parse to the same one (so SQL-only workflows usually pick up lock-risk caution rules without setting `dialect`); pin `dialect: postgres` or `dialect: mysql` to force it. See [Lock-risk findings](#lock-risk-findings). |
 | `binary-path` | no | `""` | Path to a pre-built `relune` binary. Skips the install step — useful for testing unreleased builds in CI. |
 
 `format` accepted values:
@@ -204,15 +204,22 @@ Why a separate summary file is still needed:
 
 ## Lock-risk findings
 
-`mode: review` with an explicit `dialect: postgres` or `dialect: mysql` activates the
-lock-risk caution rules. They surface state changes whose naive execution acquires a
-problematic lock — `CREATE INDEX` on an existing table, `ADD FOREIGN KEY` on an existing
-table, and `ALTER COLUMN TYPE` on a non-equivalent type for both dialects, plus PK
-rotation / column drops that require a table rewrite for `dialect: mysql`
-(`risk/rewrite-table` is MySQL-only because that engine forces a full table rebuild;
-PostgreSQL handles those edits without a rewrite). Each match becomes a `caution`
-finding in the PR comment. `dialect: auto` (the default) does not enable these rules;
-the SQL parser still runs in auto-detect mode but the rule set is unchanged.
+`mode: review` activates the lock-risk caution rules whenever the effective dialect
+resolves to `postgres` or `mysql`. They surface state changes whose naive execution
+acquires a problematic lock — `CREATE INDEX` on an existing table, `ADD FOREIGN KEY`
+on an existing table, and `ALTER COLUMN TYPE` on a non-equivalent type for both
+dialects, plus PK rotation / column drops that require a table rewrite for
+`dialect: mysql` (`risk/rewrite-table` is MySQL-only because that engine forces a
+full table rebuild; PostgreSQL handles those edits without a rewrite). Each match
+becomes a `caution` finding in the PR comment.
+
+With `dialect: auto` (the default), the CLI promotes `auto` to the parser-resolved
+dialect whenever both `before` and `after` parse to the same one — so SQL-only
+workflows pick up lock-risk caution rules without any extra configuration. Pin
+`dialect: postgres` or `dialect: mysql` to force the resolution (for example when
+inputs are schema-JSON, which carries no parser-side dialect signal). When the two
+sides resolve to different dialects, the run stays inactive and emits a `REVIEW002`
+warning so the skip is visible in the report.
 
 To gate the merge on lock-risk findings, pair the activation with `deny: caution`. The
 caution band is opinionated, so reach for `except-rules` (e.g. `risk/alter-column-type`)

@@ -4,28 +4,34 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use relune_core::{
-    EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId, ReviewRuleMetadata,
-    ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding, diff_schemas,
-    lock_risk_skip_diagnostic,
+    Diagnostic, EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId,
+    ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding,
+    SqlDialect, diagnostic::codes, diff_schemas, lock_risk_skip_diagnostic,
 };
 
 use crate::error::AppError;
 use crate::request::ReviewRequest;
 use crate::result::ReviewResult;
-use crate::schema_input::schema_from_input;
+use crate::schema_input::schema_from_input_with_dialect;
 
 /// Execute a review request.
 #[allow(clippy::needless_pass_by_value)]
 pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
-    let (before_schema, mut diagnostics) = schema_from_input(&request.before)?;
-    let (after_schema, after_diagnostics) = schema_from_input(&request.after)?;
+    let (before_schema, mut diagnostics, before_dialect) =
+        schema_from_input_with_dialect(&request.before)?;
+    let (after_schema, after_diagnostics, after_dialect) =
+        schema_from_input_with_dialect(&request.after)?;
     diagnostics.extend(after_diagnostics);
 
     let schema_diff = diff_schemas(&before_schema, &after_schema);
 
     let applied_rules = resolve_active_rules(&request.rules, &request.except_rules)?;
     let override_map = build_override_map(&request.severity_overrides)?;
-    let effective: EffectiveDialect = request.dialect.into();
+    let (effective, promotion_diagnostic) =
+        resolve_effective_dialect(request.dialect, before_dialect, after_dialect);
+    if let Some(diagnostic) = promotion_diagnostic {
+        diagnostics.push(diagnostic);
+    }
     let mut raw_findings = relune_core::run_rules(
         &schema_diff,
         &before_schema,
@@ -57,7 +63,49 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         review: core_result,
         diagnostics,
         denied,
+        requested_dialect: request.dialect,
+        effective_dialect: effective.into(),
     })
+}
+
+/// Resolve the effective review dialect from the requested dialect and
+/// the parser-detected dialects of the before/after inputs.
+///
+/// When the caller passed an explicit dialect (`Postgres` / `Mysql` /
+/// `Sqlite`), it is honored as-is. When the caller passed `Auto`, the
+/// effective dialect is promoted to the parser-detected concrete dialect
+/// when both sides agree; if the two sides resolved to different
+/// concrete dialects, a warning diagnostic is emitted and the effective
+/// dialect stays `Auto` (so lock-risk rules continue to skip rather than
+/// running against a guessed dialect). Schema-JSON inputs carry no
+/// parser dialect signal, so a missing side leaves the effective dialect
+/// as `Auto` silently.
+///
+/// Returns the resolved effective dialect plus an optional warning
+/// diagnostic surfaced to the caller.
+fn resolve_effective_dialect(
+    requested: SqlDialect,
+    before: Option<SqlDialect>,
+    after: Option<SqlDialect>,
+) -> (EffectiveDialect, Option<Diagnostic>) {
+    if requested != SqlDialect::Auto {
+        return (requested.into(), None);
+    }
+
+    match (before, after) {
+        (Some(b), Some(a)) if b == a => (b.into(), None),
+        (Some(b), Some(a)) => {
+            let diagnostic = Diagnostic::warning(
+                codes::review_dialect_mismatch(),
+                format!(
+                    "Auto dialect resolved to {b} for the before input but {a} for the after input; \
+                     lock-risk rules will not fire. Pass --dialect explicitly to pin the review dialect."
+                ),
+            );
+            (EffectiveDialect::Auto, Some(diagnostic))
+        }
+        _ => (EffectiveDialect::Auto, None),
+    }
 }
 
 fn build_override_map(
@@ -104,6 +152,9 @@ pub fn format_review_text_with(result: &ReviewResult, quiet: bool) -> String {
     output.push('\n');
 
     write_summary_line(&mut output, &result.review.summary);
+    if let Some(line) = effective_dialect_text(result) {
+        let _ = writeln!(output, "  {line}");
+    }
     output.push('\n');
 
     if quiet {
@@ -163,6 +214,9 @@ pub fn format_review_markdown_with(result: &ReviewResult, quiet: bool) -> String
         "{breaking} · {caution} · {warning} · {} info",
         s.info,
     );
+    if let Some(line) = effective_dialect_text(result) {
+        let _ = writeln!(output, "_{line}_");
+    }
     output.push('\n');
 
     if quiet {
@@ -217,6 +271,31 @@ pub fn applied_rule_metadata(result: &ReviewResult) -> Vec<ReviewRuleMetadata> {
         .iter()
         .map(ReviewRuleId::metadata)
         .collect()
+}
+
+/// Format a one-line note describing how the review pipeline resolved
+/// the dialect, suitable for the text and markdown formatters.
+///
+/// Returns `None` when the requested dialect was already concrete and
+/// matches the effective dialect (no UX value in restating it). Otherwise
+/// either announces the auto-promotion (`auto resolved to postgres`) or
+/// the fallback when promotion could not happen.
+fn effective_dialect_text(result: &ReviewResult) -> Option<String> {
+    use relune_core::SqlDialect;
+
+    let requested = result.requested_dialect;
+    let effective = result.effective_dialect;
+
+    match (requested, effective) {
+        (SqlDialect::Auto, SqlDialect::Auto) => Some(
+            "Effective dialect: auto (lock-risk rules inactive; pass --dialect to enable)"
+                .to_string(),
+        ),
+        (SqlDialect::Auto, concrete) => Some(format!(
+            "Effective dialect: {concrete} (resolved from auto)"
+        )),
+        _ => None,
+    }
 }
 
 fn write_summary_line(output: &mut String, summary: &ReviewSummary) {
@@ -562,11 +641,14 @@ mod tests {
             CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
         ";
 
-        // Without override the info-level finding does not trip --deny=warning.
-        let baseline = ReviewRequest::from_sql(before, after).with_deny(ReviewSeverity::Warning);
+        // Schema-JSON inputs prevent auto-promotion to a concrete
+        // dialect so this test isolates the severity-override logic
+        // from the lock-risk rules that would otherwise fire under
+        // promoted Postgres / MySQL.
+        let baseline = schema_json_request(before, after).with_deny(ReviewSeverity::Warning);
         assert!(!run(baseline).denied);
 
-        let request = ReviewRequest::from_sql(before, after)
+        let request = schema_json_request(before, after)
             .with_deny(ReviewSeverity::Warning)
             .with_severity_overrides(vec![ReviewSeverityOverride {
                 rule_id: ReviewRuleId::FkWithoutIndex,
@@ -619,9 +701,15 @@ mod tests {
 
     #[test]
     fn explicit_lock_risk_opt_in_under_auto_emits_skip_diagnostic() {
-        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
-        let request = ReviewRequest::from_sql(sql, sql)
-            .with_rules(vec!["risk/add-index-on-large-table".to_string()]);
+        // Schema-JSON inputs carry no parser-dialect signal, so the
+        // review pipeline cannot promote `Auto` to a concrete dialect.
+        // Lock-risk rules opted in via `--rules` must therefore emit the
+        // info-level skip diagnostic so callers know nothing fired.
+        let request = schema_json_request(
+            "CREATE TABLE users (id INT PRIMARY KEY);",
+            "CREATE TABLE users (id INT PRIMARY KEY);",
+        )
+        .with_rules(vec!["risk/add-index-on-large-table".to_string()]);
         let result = run(request);
         assert_eq!(result.diagnostics.len(), 1);
         let diag = &result.diagnostics[0];
@@ -632,6 +720,148 @@ mod tests {
             "unexpected message: {}",
             diag.message,
         );
+    }
+
+    #[test]
+    fn auto_promotes_to_postgres_when_both_sides_resolve_postgres() {
+        // Postgres-leaning syntax (SERIAL) makes the parser detect
+        // postgres on both sides; under `Auto` the review pipeline
+        // should promote to `Postgres` so lock-risk rules can fire.
+        let before = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let after = "
+            CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+            CREATE INDEX users_email_idx ON users(email);
+        ";
+        let result = run(ReviewRequest::from_sql(before, after));
+        assert_eq!(result.requested_dialect, relune_core::SqlDialect::Auto);
+        assert_eq!(result.effective_dialect, relune_core::SqlDialect::Postgres);
+        assert!(
+            result
+                .review
+                .findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::AddIndexOnLargeTable),
+            "expected risk/add-index-on-large-table to fire after promotion",
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "promotion should not emit diagnostics: {:?}",
+            result.diagnostics,
+        );
+    }
+
+    #[test]
+    fn auto_promotes_to_mysql_when_both_sides_resolve_mysql() {
+        let before = "CREATE TABLE `users` (id INT AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;";
+        let after = "CREATE TABLE `users` (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(255)) ENGINE=InnoDB;";
+        let result = run(ReviewRequest::from_sql(before, after));
+        assert_eq!(result.effective_dialect, relune_core::SqlDialect::Mysql);
+    }
+
+    #[test]
+    fn auto_emits_warning_on_dialect_mismatch_and_stays_auto() {
+        // Postgres-leaning before vs. MySQL-leaning after: the parser
+        // resolves to different concrete dialects, so the review
+        // pipeline must keep `Auto` (lock-risk rules stay inactive) and
+        // surface a warning so the operator can pin the dialect.
+        let before = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let after = "CREATE TABLE `users` (id INT AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;";
+        let result = run(ReviewRequest::from_sql(before, after));
+        assert_eq!(result.effective_dialect, relune_core::SqlDialect::Auto);
+        let warning = result
+            .diagnostics
+            .iter()
+            .find(|d| d.severity == relune_core::Severity::Warning)
+            .expect("mismatch should emit a warning diagnostic");
+        assert_eq!(
+            warning.code,
+            relune_core::diagnostic::codes::review_dialect_mismatch()
+        );
+        assert!(warning.message.contains("postgres"));
+        assert!(warning.message.contains("mysql"));
+    }
+
+    #[test]
+    fn auto_promotes_to_sqlite_when_both_sides_resolve_sqlite() {
+        // Sqlite-leaning syntax (AUTOINCREMENT) makes the parser detect
+        // sqlite on both sides; the review pipeline must promote to
+        // `Sqlite` (so the playground / CLI can show the resolved
+        // dialect), but lock-risk rules stay inactive on sqlite.
+        let sql = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT);";
+        let result = run(ReviewRequest::from_sql(sql, sql));
+        assert_eq!(result.effective_dialect, relune_core::SqlDialect::Sqlite);
+        assert!(
+            result.review.findings.is_empty(),
+            "sqlite should keep lock-risk inactive; got: {:?}",
+            result.review.findings,
+        );
+    }
+
+    #[test]
+    fn auto_stays_auto_when_only_one_side_carries_dialect_signal() {
+        // Mixing SQL (parser dialect available) with schema JSON (no
+        // parser-side dialect) should leave `Auto` intact and stay
+        // silent: the schema-JSON side gives no signal to compare
+        // against, so there is nothing to promote and nothing to warn
+        // about. Lock-risk callers can pin `--dialect` explicitly when
+        // they know the JSON came from a specific engine.
+        use crate::request::InputSource;
+        use relune_core::export::export_schema;
+        use relune_parser_sql::parse_sql_to_schema;
+
+        let before_sql = "CREATE TABLE users (id SERIAL PRIMARY KEY);";
+        let after_json = serde_json::to_string(&export_schema(
+            &parse_sql_to_schema("CREATE TABLE users (id SERIAL PRIMARY KEY);").expect("parse"),
+        ))
+        .expect("serialize");
+        let request = ReviewRequest {
+            before: InputSource::sql_text_with_dialect(before_sql, relune_core::SqlDialect::Auto),
+            after: InputSource::SchemaJson { json: after_json },
+            ..Default::default()
+        };
+        let result = run(request);
+        assert_eq!(result.effective_dialect, relune_core::SqlDialect::Auto);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| d.code != relune_core::diagnostic::codes::review_dialect_mismatch()),
+            "missing parser signal must not emit REVIEW002: {:?}",
+            result.diagnostics,
+        );
+    }
+
+    #[test]
+    fn explicit_dialect_overrides_parser_resolution() {
+        // Even when the parser would resolve to MySQL on both sides,
+        // the explicit `--dialect postgres` request must win so the
+        // operator stays in control of which lock-risk rules fire.
+        let sql = "CREATE TABLE `users` (id INT AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;";
+        let request =
+            ReviewRequest::from_sql(sql, sql).with_dialect(relune_core::SqlDialect::Postgres);
+        let result = run(request);
+        assert_eq!(result.effective_dialect, relune_core::SqlDialect::Postgres);
+    }
+
+    fn schema_json_request(before_sql: &str, after_sql: &str) -> ReviewRequest {
+        use crate::request::InputSource;
+        use relune_core::export::export_schema;
+        use relune_parser_sql::parse_sql_to_schema;
+
+        let before_json = serde_json::to_string(&export_schema(
+            &parse_sql_to_schema(before_sql).expect("parse before"),
+        ))
+        .expect("serialize before");
+        let after_json = serde_json::to_string(&export_schema(
+            &parse_sql_to_schema(after_sql).expect("parse after"),
+        ))
+        .expect("serialize after");
+
+        ReviewRequest {
+            before: InputSource::SchemaJson { json: before_json },
+            after: InputSource::SchemaJson { json: after_json },
+            ..Default::default()
+        }
     }
 
     #[test]

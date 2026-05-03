@@ -205,6 +205,8 @@ Migration risk review (`relune review`) reuses the same diagnostic stream and ad
 
 Lock-risk rules are dialect-scoped: `run_rules` reads `EffectiveDialect` and skips a rule whenever its `dialect_scope` does not include the resolved dialect. `risk/add-index-on-large-table`, `risk/add-fk-on-existing`, and `risk/alter-column-type` activate for `Postgres` or `Mysql`; `risk/rewrite-table` is MySQL-only because the rule encodes MySQL's full-table-rebuild semantics (PostgreSQL handles the same edits without a rewrite). The `default` profile stays silent in skip cases, but when a caller pins a lock-risk rule via `--rules` / `[review.rules]` and the dialect does not match (including `Auto`, `Sqlite`, or a `Postgres`-vs-`risk/rewrite-table` mismatch), the skip surfaces as a single info-level diagnostic (`REVIEW001`) so the response explains why no findings were produced.
 
+When the caller leaves `--dialect` at its default `auto`, the review use case promotes it to a concrete `EffectiveDialect` whenever the SQL parser resolved both the before and after inputs to the same dialect (e.g. both look like Postgres → `Postgres`). DB-URL inputs use the URL scheme as the parser-side signal; schema-JSON inputs carry no parser dialect and stay `Auto`. If the two sides resolve to different dialects, `EffectiveDialect` stays `Auto` and a single warning diagnostic (`REVIEW002`) is emitted so the user can tell that lock-risk evaluation was skipped because of the mismatch rather than silently. The originally requested dialect and the resolved effective dialect are surfaced in `relune-app::ReviewResult` (`requested_dialect` / `effective_dialect`), in the WASM response, and inline in the CLI text/markdown reports.
+
 ---
 
 ## 10. Layout
