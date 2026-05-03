@@ -2223,6 +2223,7 @@ version = "0.10.0"
 dependencies = [
  "insta",
  "petgraph",
+ "proptest",
  "relune-core",
  "serde",
  "serde_json",
