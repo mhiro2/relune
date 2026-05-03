@@ -208,4 +208,12 @@ pub mod codes {
     pub fn review_lock_risk_skipped() -> DiagnosticCode {
         DiagnosticCode::new("REVIEW", 1)
     }
+
+    /// Returns the code emitted when `--dialect auto` resolved to
+    /// different concrete dialects on the before and after sides, so
+    /// lock-risk evaluation cannot be promoted automatically.
+    #[must_use]
+    pub fn review_dialect_mismatch() -> DiagnosticCode {
+        DiagnosticCode::new("REVIEW", 2)
+    }
 }

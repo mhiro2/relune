@@ -512,10 +512,13 @@ pub struct WasmReviewRequest {
     #[serde(default)]
     pub severity_overrides: Vec<ReviewSeverityOverride>,
     /// Optional dialect hint that drives both the SQL parser and the
-    /// review-evaluation dialect. Lock-risk rules require `postgres`
-    /// or `mysql`; under `auto` / `sqlite` they emit no findings.
-    /// Ignored by the parser when schema JSON inputs are used, but the
-    /// review dialect is still honored.
+    /// review-evaluation dialect. Lock-risk rules activate on
+    /// `postgres` or `mysql`. Under `auto` (the default) the review
+    /// uses the parser-resolved dialect when both SQL inputs agree;
+    /// `sqlite` and the auto-mismatch case keep lock-risk inactive
+    /// (the latter surfaces a `REVIEW002` warning). Ignored by the
+    /// parser when schema JSON inputs are used, but the review dialect
+    /// is still honored.
     #[serde(default)]
     pub dialect: Option<SqlDialect>,
 }

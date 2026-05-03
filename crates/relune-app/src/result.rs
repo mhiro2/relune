@@ -2,7 +2,7 @@
 //!
 //! These types define the output of operations from relune-app.
 
-use relune_core::{Diagnostic, Schema, SchemaStats};
+use relune_core::{Diagnostic, Schema, SchemaStats, SqlDialect};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -415,6 +415,20 @@ pub struct ReviewResult {
     pub diagnostics: Vec<Diagnostic>,
     /// Whether the configured `--deny` threshold was exceeded.
     pub denied: bool,
+    /// Dialect that the request was submitted with (mirrors
+    /// `ReviewRequest.dialect`). When this is `Auto` and
+    /// `effective_dialect` resolves to a concrete value, the review
+    /// pipeline auto-promoted the dialect from parser detection so the
+    /// CLI / playground can show what was actually used and lock-risk
+    /// rules can fire when appropriate.
+    #[serde(default)]
+    pub requested_dialect: SqlDialect,
+    /// Dialect actually used for review evaluation. May differ from
+    /// `requested_dialect` when `Auto` was promoted from the parser-
+    /// resolved dialect (any of `Postgres`, `Mysql`, or `Sqlite`).
+    /// Lock-risk rules only fire when this is `Postgres` or `Mysql`.
+    #[serde(default)]
+    pub effective_dialect: SqlDialect,
 }
 
 impl ReviewResult {

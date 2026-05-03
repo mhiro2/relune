@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "column_name": "user_id",
+    "message": "New index orders_user_id_idx on existing table orders (user_id) (postgres). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
+    "mitigation": "Use CREATE INDEX CONCURRENTLY (and DROP INDEX CONCURRENTLY for rollback) in postgres.",
+    "rule_id": "risk/add-index-on-large-table",
+    "severity": "caution",
+    "table_id": "orders",
+    "table_name": "orders"
+  },
+  {
+    "column_name": "user_id",
+    "fk_name": "orders_user_id_fkey",
+    "message": "New FK orders_user_id_fkey on existing table orders (postgres). Adding a FK validates all existing rows under SHARE ROW EXCLUSIVE lock.",
+    "mitigation": "Use ADD CONSTRAINT ... NOT VALID, then VALIDATE CONSTRAINT in a separate transaction.",
+    "related_table_id": "users",
+    "rule_id": "risk/add-fk-on-existing",
+    "severity": "caution",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

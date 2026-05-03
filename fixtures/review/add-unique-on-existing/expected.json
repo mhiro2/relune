@@ -6,5 +6,14 @@
     "severity": "warning",
     "table_id": "users",
     "table_name": "users"
+  },
+  {
+    "column_name": "email",
+    "message": "New index users_email_key on existing table users (email) (postgres). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
+    "mitigation": "Use CREATE INDEX CONCURRENTLY (and DROP INDEX CONCURRENTLY for rollback) in postgres.",
+    "rule_id": "risk/add-index-on-large-table",
+    "severity": "caution",
+    "table_id": "users",
+    "table_name": "users"
   }
 ]

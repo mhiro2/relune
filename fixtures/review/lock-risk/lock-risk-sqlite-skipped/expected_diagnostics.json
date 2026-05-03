@@ -4,7 +4,7 @@
       "number": 1,
       "prefix": "REVIEW"
     },
-    "message": "Lock-risk review rules require an explicit --dialect (postgres or mysql); skipped 1 rule(s).",
+    "message": "Lock-risk review rules are not defined for sqlite; skipped 1 rule(s).",
     "severity": "info",
     "source": null,
     "span": null

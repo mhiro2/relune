@@ -7,5 +7,14 @@
     "severity": "breaking",
     "table_id": "users",
     "table_name": "users"
+  },
+  {
+    "column_name": "username",
+    "message": "Column users.username changed type from VARCHAR(100) to VARCHAR(50) (postgres). Many type changes rewrite the entire table under ACCESS EXCLUSIVE lock.",
+    "mitigation": "Add a new column, backfill, swap, drop the old column; or verify the USING clause is no-rewrite.",
+    "rule_id": "risk/alter-column-type",
+    "severity": "caution",
+    "table_id": "users",
+    "table_name": "users"
   }
 ]
