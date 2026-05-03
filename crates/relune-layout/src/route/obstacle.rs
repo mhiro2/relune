@@ -137,6 +137,29 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
     source_side: Option<AttachmentSide>,
     target_side: Option<AttachmentSide>,
 ) -> EdgeRoute {
+    detour_around_obstacles_with_endpoint_sizes(
+        route,
+        obstacles,
+        source_side,
+        target_side,
+        None,
+        None,
+    )
+}
+
+/// Variant of [`detour_around_obstacles_with_endpoints`] that lets callers
+/// supply the source/target node bounding boxes so the endpoint anchor
+/// distance can be clamped against half the node's size on the attachment
+/// axis instead of using the unconditional fallback.
+#[must_use]
+pub(crate) fn detour_around_obstacles_with_endpoint_sizes(
+    route: &EdgeRoute,
+    obstacles: &[Rect],
+    source_side: Option<AttachmentSide>,
+    target_side: Option<AttachmentSide>,
+    source_extent: Option<(f32, f32)>,
+    target_extent: Option<(f32, f32)>,
+) -> EdgeRoute {
     if obstacles.is_empty() {
         return route.clone();
     }
@@ -147,7 +170,13 @@ pub(crate) fn detour_around_obstacles_with_endpoints(
         return route.clone();
     }
 
-    let mut points = add_endpoint_anchors(&initial_points, source_side, target_side);
+    let mut points = add_endpoint_anchors(
+        &initial_points,
+        source_side,
+        target_side,
+        source_extent,
+        target_extent,
+    );
 
     // Iteratively detour until no segments intersect obstacles (max 4 passes).
     for _ in 0..4 {
@@ -249,6 +278,8 @@ fn add_endpoint_anchors(
     points: &[(f32, f32)],
     source_side: Option<AttachmentSide>,
     target_side: Option<AttachmentSide>,
+    source_extent: Option<(f32, f32)>,
+    target_extent: Option<(f32, f32)>,
 ) -> Vec<(f32, f32)> {
     let Some((&start, rest)) = points.split_first() else {
         return Vec::new();
@@ -261,17 +292,36 @@ fn add_endpoint_anchors(
     anchored.push(start);
 
     if let Some(side) = source_side {
-        anchored.push(step_from_attachment(start, side, ENDPOINT_ANCHOR_DISTANCE));
+        let distance = anchor_distance_for(side, source_extent);
+        anchored.push(step_from_attachment(start, side, distance));
     }
 
     anchored.extend_from_slice(middle);
 
     if let Some(side) = target_side {
-        anchored.push(step_from_attachment(end, side, ENDPOINT_ANCHOR_DISTANCE));
+        let distance = anchor_distance_for(side, target_extent);
+        anchored.push(step_from_attachment(end, side, distance));
     }
 
     anchored.push(end);
     anchored
+}
+
+/// Pick the anchor step length, clamped against half the node's extent along
+/// the attachment-side normal so a tight node can't be overshot. Falls back
+/// to the unscaled constant when the caller does not provide a size.
+fn anchor_distance_for(side: AttachmentSide, node_size: Option<(f32, f32)>) -> f32 {
+    let Some((width, height)) = node_size else {
+        return ENDPOINT_ANCHOR_DISTANCE;
+    };
+    let half_side = match side {
+        AttachmentSide::East | AttachmentSide::West => width * 0.5,
+        AttachmentSide::North | AttachmentSide::South => height * 0.5,
+    };
+    if half_side <= 0.0 {
+        return ENDPOINT_ANCHOR_DISTANCE;
+    }
+    ENDPOINT_ANCHOR_DISTANCE.min(half_side)
 }
 
 /// Check whether a line segment from `a` to `b` passes through the interior

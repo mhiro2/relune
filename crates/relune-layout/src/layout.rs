@@ -26,8 +26,8 @@ use crate::port::{EdgePortAssignment, RegularPortAssignment, assign_edge_ports};
 use crate::rank::{RankAssignmentStrategy, assign_ranks};
 use crate::route::{
     AttachmentSide, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
-    detour_around_obstacles, estimate_label_half_width, nudge_label, point_along_route,
-    rebuild_route_from_points, route_edge_with_assigned_ports, route_points,
+    detour_around_obstacles_with_endpoint_sizes, estimate_label_half_width, nudge_label,
+    point_along_route, rebuild_route_from_points, route_edge_with_assigned_ports, route_points,
     route_self_loop_with_offset, sample_route_obstacles, step_from_attachment,
 };
 use relune_core::layout::{Cardinality, EdgeRoute, RouteStyle};
@@ -290,8 +290,10 @@ impl LayoutConfig {
     #[allow(clippy::cast_precision_loss)]
     pub fn compute_compacted_config(&self, node_count: usize) -> CompactedConfig {
         if self.compaction.threshold > 0 && node_count > self.compaction.threshold {
-            // Calculate compaction factor based on how much we exceed the threshold
-            let excess_ratio = (node_count as f32 / self.compaction.threshold as f32).min(2.0);
+            // Calculate compaction factor based on how much we exceed the threshold.
+            // The min_* floors below already prevent runaway shrinkage, so the
+            // excess_ratio itself does not need to saturate.
+            let excess_ratio = node_count as f32 / self.compaction.threshold as f32;
             let compaction_factor = 1.0 / excess_ratio;
 
             // Apply compaction with minimum bounds to maintain readability
@@ -355,14 +357,12 @@ impl LayoutConfig {
         };
 
         // --- Density factor: denser graphs need more room for edges. ---
+        // The clamp keeps the curve continuous at density=2.0 (the lower
+        // bound of 1.0 holds until density>2.5, then climbs to a 1.2× cap).
         let density_factor = if density <= 1.0 {
-            // Sparse: tighten a bit.
             0.9
-        } else if density <= 2.0 {
-            1.0
         } else {
-            // Dense: widen to avoid congestion, cap at 1.2×.
-            (density * 0.4).min(1.2)
+            (density * 0.4).clamp(1.0, 1.2)
         };
 
         let combined = count_factor * density_factor;
@@ -845,6 +845,10 @@ fn assign_coordinates(
 const SPATIAL_GRID_THRESHOLD: usize = 64;
 
 /// Apply a single repulsion pair force between nodes `i` and `j`.
+///
+/// `node_radii` carries the precomputed `max(width, height) * 0.5` for every
+/// node so that the per-pair spacing reduces to a couple of additions instead
+/// of recomputing the radii on every iteration.
 #[allow(
     clippy::cast_precision_loss,
     clippy::too_many_arguments,
@@ -855,6 +859,7 @@ fn apply_repulsion_pair(
     j: usize,
     positions: &[(f32, f32)],
     node_sizes: &[NodeSize],
+    node_radii: &[f32],
     config: &LayoutConfig,
     repulsion_strength: f32,
     min_distance: f32,
@@ -886,7 +891,9 @@ fn apply_repulsion_pair(
     }
 
     // Standard distance-based repulsion (keeps non-overlapping nodes apart).
-    let min_gap = node_pair_spacing(node_sizes[i], node_sizes[j], config);
+    let min_gap = config
+        .node_padding
+        .mul_add(2.0, node_radii[i] + node_radii[j]);
     let dist_sq = dx * dx + dy * dy + min_distance + min_gap * min_gap * 0.25;
     let dist = dist_sq.sqrt();
 
@@ -911,6 +918,7 @@ fn apply_repulsion_pair(
 fn compute_repulsion_with_grid(
     positions: &[(f32, f32)],
     node_sizes: &[NodeSize],
+    node_radii: &[f32],
     config: &LayoutConfig,
     repulsion_strength: f32,
     min_distance: f32,
@@ -976,6 +984,7 @@ fn compute_repulsion_with_grid(
             j,
             positions,
             node_sizes,
+            node_radii,
             config,
             repulsion_strength,
             min_distance,
@@ -1020,6 +1029,14 @@ fn apply_force_layout(
     let primary_targets: Vec<f32> = seed_nodes.iter().map(|node| node.y).collect();
     let (center_x, center_y) = force_layout_seed_center(&positions, node_sizes);
 
+    // Precompute the per-node "radius" used by `node_pair_spacing`. These do
+    // not change during simulation, so caching them avoids `iterations × pairs`
+    // recomputations of the same `max(w, h) * 0.5` value.
+    let node_radii: Vec<f32> = node_sizes
+        .iter()
+        .map(|s| s.width.max(s.height) * 0.5)
+        .collect();
+
     // Initialize velocities
     let mut velocities: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
 
@@ -1052,6 +1069,7 @@ fn apply_force_layout(
             compute_repulsion_with_grid(
                 &positions,
                 node_sizes,
+                &node_radii,
                 config,
                 repulsion_strength,
                 min_distance,
@@ -1065,6 +1083,7 @@ fn apply_force_layout(
                         j,
                         &positions,
                         node_sizes,
+                        &node_radii,
                         config,
                         repulsion_strength,
                         min_distance,
@@ -1624,12 +1643,6 @@ fn expand_bounds_for_edges(width: f32, height: f32, edges: &[PositionedEdge]) ->
         }
     }
     (w, h)
-}
-
-fn node_pair_spacing(left: NodeSize, right: NodeSize, config: &LayoutConfig) -> f32 {
-    let left_radius = left.width.max(left.height) * 0.5;
-    let right_radius = right.width.max(right.height) * 0.5;
-    config.node_padding.mul_add(2.0, left_radius + right_radius)
 }
 
 /// Direction-aware target distance for edge attraction.
@@ -2480,7 +2493,18 @@ fn route_single_edge(
     let route = match edge.is_self_loop {
         true => {
             bundle_metadata = None;
-            detour_around_obstacles(&route, ctx.detour_obstacles)
+            let self_size = match (from_pos, to_pos) {
+                (Some(&(_, _, w, h)), _) | (_, Some(&(_, _, w, h))) => Some((w, h)),
+                _ => None,
+            };
+            detour_around_obstacles_with_endpoint_sizes(
+                &route,
+                ctx.detour_obstacles,
+                Some(AttachmentSide::East),
+                Some(AttachmentSide::East),
+                self_size,
+                self_size,
+            )
         }
         false if route_needs_detour(&route, ctx.detour_obstacles) => {
             bundle_metadata = None;

@@ -16,6 +16,7 @@ unicode-width.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+proptest = "1.6"
 
 [lints]
 workspace = true

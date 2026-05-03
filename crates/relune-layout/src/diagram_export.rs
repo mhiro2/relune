@@ -1,4 +1,11 @@
 //! Text diagram formats for review tooling (Mermaid ER, D2, Graphviz DOT).
+//!
+//! The Mermaid emitter quotes entity and column names with `"…"` and escapes
+//! `\\`, `"`, `\n`, `\r`, `[`, `]`, `{`, `}`, `(`, `)` inside the quoted text.
+//! Quoted entity/attribute names in the Mermaid ER diagram syntax are
+//! supported on Mermaid v10.0.0 and later — older releases reject them with a
+//! parse error, so consumers embedding the output should pin to a compatible
+//! Mermaid runtime.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};

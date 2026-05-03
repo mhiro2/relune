@@ -4,7 +4,7 @@
 //! like search, filtering, and highlighting.
 
 use relune_core::{EdgeKind, NodeKind};
-use relune_layout::{DiagramOverlay, LayoutGraph, overlay::edge_key};
+use relune_layout::{DiagramOverlay, LayoutGraph, overlay::EdgeKey};
 use serde::{Deserialize, Serialize};
 
 /// Metadata about the graph for client-side features.
@@ -174,7 +174,10 @@ pub fn build_metadata_with_overlay(
         .edges
         .iter()
         .map(|edge| {
-            let edge_overlay = overlay.and_then(|o| o.edges.get(&edge_key(&edge.from, &edge.to)));
+            let edge_overlay = overlay.and_then(|o| {
+                o.edges
+                    .get(&EdgeKey::new(edge.from.as_str(), edge.to.as_str()))
+            });
             let issues = edge_overlay
                 .map(|eo| annotations_to_issues(&eo.annotations))
                 .unwrap_or_default();

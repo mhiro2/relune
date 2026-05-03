@@ -100,6 +100,10 @@ pub struct WasmRenderRequest {
     /// Vertical spacing hint.
     #[serde(default)]
     pub vertical_spacing: Option<f32>,
+    /// Iteration count for the force-directed layout (defaults to the
+    /// canonical 150 if omitted).
+    #[serde(default)]
+    pub force_iterations: Option<u32>,
     /// Render theme.
     #[serde(default)]
     pub theme: Option<RenderTheme>,
@@ -137,6 +141,7 @@ impl WasmRenderRequest {
         let horizontal_spacing =
             validated_spacing(self.horizontal_spacing, 320.0, "horizontalSpacing")?;
         let vertical_spacing = validated_spacing(self.vertical_spacing, 80.0, "verticalSpacing")?;
+        let force_iterations = validated_force_iterations(self.force_iterations)?;
 
         let layout = LayoutSpec {
             algorithm: self.layout_algorithm.unwrap_or_default(),
@@ -144,7 +149,7 @@ impl WasmRenderRequest {
             edge_style: self.edge_style.unwrap_or_default(),
             horizontal_spacing,
             vertical_spacing,
-            force_iterations: 150,
+            force_iterations,
             compaction: LayoutCompactionSpec::default(),
             ..Default::default()
         };
@@ -379,6 +384,10 @@ pub struct WasmDiffRequest {
     /// Edge rendering style.
     #[serde(default)]
     pub edge_style: Option<RouteStyle>,
+    /// Iteration count for the force-directed layout (defaults to the
+    /// canonical 150 if omitted).
+    #[serde(default)]
+    pub force_iterations: Option<u32>,
     /// Render theme.
     #[serde(default)]
     pub theme: Option<RenderTheme>,
@@ -402,6 +411,8 @@ impl WasmDiffRequest {
         };
         let default_options = RenderOptions::default();
 
+        let force_iterations = validated_force_iterations(self.force_iterations)?;
+
         Ok(DiffRequest {
             before: wasm_input_source(
                 self.before_sql.as_deref(),
@@ -422,7 +433,7 @@ impl WasmDiffRequest {
                 algorithm: self.layout_algorithm.unwrap_or_default(),
                 direction: self.layout_direction.unwrap_or_default().into(),
                 edge_style: self.edge_style.unwrap_or_default(),
-                force_iterations: 150,
+                force_iterations,
                 compaction: LayoutCompactionSpec::default(),
                 ..Default::default()
             },
@@ -436,6 +447,29 @@ fn validated_spacing(value: Option<f32>, default: f32, field: &str) -> Result<f3
         Ok(spacing)
     } else {
         Err(format!("{field} must be a positive finite number"))
+    }
+}
+
+/// Default force-directed layout iteration count when the caller does not
+/// override `forceIterations`.
+const DEFAULT_FORCE_ITERATIONS: u32 = 150;
+/// Hard upper bound for `forceIterations`. Picked so that even the largest
+/// schemas finish in well under a second on commodity hardware while still
+/// giving callers room to crank up iteration count for stress experiments.
+/// Without this guard a JavaScript caller could pass `u32::MAX` and freeze
+/// the browser thread.
+const MAX_FORCE_ITERATIONS: u32 = 10_000;
+
+fn validated_force_iterations(value: Option<u32>) -> Result<usize, String> {
+    let iterations = value.unwrap_or(DEFAULT_FORCE_ITERATIONS);
+    if iterations == 0 {
+        Err("forceIterations must be greater than 0".to_string())
+    } else if iterations > MAX_FORCE_ITERATIONS {
+        Err(format!(
+            "forceIterations must be at most {MAX_FORCE_ITERATIONS}"
+        ))
+    } else {
+        Ok(iterations as usize)
     }
 }
 
@@ -535,6 +569,7 @@ mod tests {
             edge_style: None,
             horizontal_spacing: None,
             vertical_spacing: None,
+            force_iterations: None,
             theme: None,
             show_legend: None,
             show_stats: None,
@@ -560,6 +595,7 @@ mod tests {
             edge_style: Some(RouteStyle::Orthogonal),
             horizontal_spacing: None,
             vertical_spacing: None,
+            force_iterations: Some(75),
             theme: Some(RenderTheme::Light),
             show_legend: Some(false),
             show_stats: Some(false),
@@ -572,9 +608,55 @@ mod tests {
         assert_eq!(focus.depth, 2);
         assert_eq!(render_req.layout.algorithm, LayoutAlgorithm::ForceDirected);
         assert_eq!(render_req.layout.edge_style, RouteStyle::Orthogonal);
+        assert_eq!(render_req.layout.force_iterations, 75);
         assert_eq!(render_req.options.theme, RenderTheme::Light);
         assert!(!render_req.options.show_legend);
         assert!(!render_req.options.show_stats);
+    }
+
+    #[test]
+    fn test_wasm_render_request_force_iterations_default_and_zero() {
+        let mut req = WasmRenderRequest {
+            sql: Some("CREATE TABLE t (id INT);".to_string()),
+            schema_json: None,
+            format: None,
+            focus_table: None,
+            depth: None,
+            include_tables: vec![],
+            exclude_tables: vec![],
+            group_by: None,
+            layout_direction: None,
+            layout_algorithm: None,
+            edge_style: None,
+            horizontal_spacing: None,
+            vertical_spacing: None,
+            force_iterations: None,
+            theme: None,
+            show_legend: None,
+            show_stats: None,
+        };
+        assert_eq!(
+            req.to_render_request().unwrap().layout.force_iterations,
+            150
+        );
+
+        req.force_iterations = Some(0);
+        let err = req
+            .to_render_request()
+            .expect_err("zero forceIterations should be rejected");
+        assert!(err.contains("forceIterations"));
+
+        req.force_iterations = Some(MAX_FORCE_ITERATIONS + 1);
+        let err = req
+            .to_render_request()
+            .expect_err("forceIterations above the cap should be rejected");
+        assert!(err.contains("forceIterations"));
+
+        req.force_iterations = Some(MAX_FORCE_ITERATIONS);
+        assert_eq!(
+            req.to_render_request().unwrap().layout.force_iterations,
+            MAX_FORCE_ITERATIONS as usize
+        );
     }
 
     #[test]
@@ -593,6 +675,7 @@ mod tests {
             edge_style: None,
             horizontal_spacing: None,
             vertical_spacing: None,
+            force_iterations: None,
             theme: None,
             show_legend: None,
             show_stats: None,
@@ -617,6 +700,7 @@ mod tests {
             edge_style: None,
             horizontal_spacing: None,
             vertical_spacing: None,
+            force_iterations: None,
             theme: None,
             show_legend: None,
             show_stats: None,
@@ -698,6 +782,7 @@ mod tests {
             layout_direction: Some(WasmLayoutDirection::RightToLeft),
             layout_algorithm: Some(LayoutAlgorithm::ForceDirected),
             edge_style: Some(RouteStyle::Straight),
+            force_iterations: Some(50),
             theme: Some(RenderTheme::Light),
             show_legend: Some(false),
             show_stats: Some(false),
@@ -709,6 +794,7 @@ mod tests {
         assert_eq!(diff_req.layout.direction, LayoutDirection::RightToLeft);
         assert_eq!(diff_req.layout.algorithm, LayoutAlgorithm::ForceDirected);
         assert_eq!(diff_req.layout.edge_style, RouteStyle::Straight);
+        assert_eq!(diff_req.layout.force_iterations, 50);
         assert_eq!(diff_req.options.theme, RenderTheme::Light);
         assert!(!diff_req.options.show_legend);
         assert!(!diff_req.options.show_stats);
@@ -867,6 +953,7 @@ mod tests {
             edge_style: None,
             horizontal_spacing: Some(0.0),
             vertical_spacing: Some(80.0),
+            force_iterations: None,
             theme: None,
             show_legend: None,
             show_stats: None,

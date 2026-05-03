@@ -10,6 +10,7 @@ pub(crate) use geometry::{
     approximate_route_length, rebuild_route_from_points, route_points, sample_route_obstacles,
 };
 pub use geometry::{point_along_route, shortest_backbone_segment_length};
+pub(crate) use obstacle::detour_around_obstacles_with_endpoint_sizes;
 pub use obstacle::{detour_around_obstacles, nudge_label};
 
 use geometry::{polyline_midpoint, simplify_orthogonal_path};
@@ -822,6 +823,63 @@ mod tests {
     }
 
     #[test]
+    fn test_detour_endpoint_anchor_clamped_by_node_size() {
+        // Source node is only 10px wide on the West/East axis, so the 28px
+        // default anchor would overshoot. Passing the source size should
+        // clamp the anchor offset to half the node width (5px).
+        let route = EdgeRoute {
+            x1: 1080.4,
+            y1: 123.0,
+            x2: 373.0,
+            y2: 775.0,
+            control_points: Vec::new(),
+            style: RouteStyle::Straight,
+            label_position: (726.7, 449.0),
+        };
+        let obstacles = vec![Rect {
+            x: 630.2,
+            y: 382.0,
+            w: 315.0,
+            h: 156.0,
+        }];
+
+        let unclamped = obstacle::detour_around_obstacles_with_endpoints(
+            &route,
+            &obstacles,
+            Some(AttachmentSide::West),
+            Some(AttachmentSide::East),
+        );
+        let clamped = obstacle::detour_around_obstacles_with_endpoint_sizes(
+            &route,
+            &obstacles,
+            Some(AttachmentSide::West),
+            Some(AttachmentSide::East),
+            Some((10.0, 100.0)),
+            Some((10.0, 100.0)),
+        );
+
+        let unclamped_first = unclamped
+            .control_points
+            .first()
+            .expect("unclamped detour should add points");
+        let clamped_first = clamped
+            .control_points
+            .first()
+            .expect("clamped detour should add points");
+
+        let unclamped_offset = (route.x1 - unclamped_first.0).abs();
+        let clamped_offset = (route.x1 - clamped_first.0).abs();
+        assert!(
+            unclamped_offset > clamped_offset,
+            "expected clamped anchor ({clamped_offset}) to sit closer to start than unclamped ({unclamped_offset})"
+        );
+        assert!(
+            clamped_offset <= 5.0 + 0.001,
+            "anchor should be clamped to half_width=5.0, got {clamped_offset}"
+        );
+    }
+
+    #[test]
     fn test_detour_curved_route_with_obstacle_keeps_render_style() {
         let route = route_edge(
             0.0,
@@ -1178,5 +1236,66 @@ mod tests {
 
         assert_eq!(route.control_points, vec![(50.0, 130.0), (250.0, 130.0)]);
         assert_eq!(route.label_position, (150.0, 130.0));
+    }
+
+    mod proptest_routing {
+        use super::*;
+        use proptest::prelude::*;
+
+        const COORD_RANGE: f32 = 5_000.0;
+        const SIZE_MIN: f32 = 8.0;
+        const SIZE_MAX: f32 = 400.0;
+
+        fn finite_2d(point: (f32, f32)) -> bool {
+            point.0.is_finite() && point.1.is_finite() && point.0.abs() < 1e7 && point.1.abs() < 1e7
+        }
+
+        fn route_style() -> impl Strategy<Value = RouteStyle> {
+            prop_oneof![
+                Just(RouteStyle::Straight),
+                Just(RouteStyle::Orthogonal),
+                Just(RouteStyle::Curved),
+            ]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(96))]
+
+            /// For any pair of randomly placed, non-degenerate node rectangles,
+            /// the routed backbone polyline must contain at least the two
+            /// endpoints and consist entirely of finite coordinates.
+            #[test]
+            fn route_edge_is_finite_and_has_two_or_more_points(
+                x1 in -COORD_RANGE..COORD_RANGE,
+                y1 in -COORD_RANGE..COORD_RANGE,
+                w1 in SIZE_MIN..SIZE_MAX,
+                h1 in SIZE_MIN..SIZE_MAX,
+                x2 in -COORD_RANGE..COORD_RANGE,
+                y2 in -COORD_RANGE..COORD_RANGE,
+                w2 in SIZE_MIN..SIZE_MAX,
+                h2 in SIZE_MIN..SIZE_MAX,
+                style in route_style(),
+            ) {
+                let route = route_edge(x1, y1, w1, h1, x2, y2, w2, h2, style);
+                let points = route_points(&route);
+
+                prop_assert!(
+                    points.len() >= 2,
+                    "backbone polyline should contain at least the two endpoints, got {}",
+                    points.len()
+                );
+                for point in &points {
+                    prop_assert!(
+                        finite_2d(*point),
+                        "polyline contained non-finite or unreasonably large point: {point:?}"
+                    );
+                }
+                prop_assert!(
+                    finite_2d(route.label_position),
+                    "label position must be finite, got {:?}",
+                    route.label_position
+                );
+            }
+        }
     }
 }

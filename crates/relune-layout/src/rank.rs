@@ -3,7 +3,7 @@
 //! This module implements algorithms for assigning nodes to layers (ranks)
 //! in a hierarchical graph layout.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use crate::graph::LayoutGraph;
 use tracing::warn;
@@ -139,6 +139,7 @@ fn assign_ranks_via_components(graph: &LayoutGraph) -> RankAssignment {
     let component_count = scc.components.len();
     let mut adjacency = vec![Vec::new(); component_count];
     let mut in_degree = vec![0usize; component_count];
+    let mut seen_edges: HashSet<(usize, usize)> = HashSet::new();
 
     for edge in &graph.edges {
         if edge.is_self_loop {
@@ -150,8 +151,7 @@ fn assign_ranks_via_components(graph: &LayoutGraph) -> RankAssignment {
         ) {
             let from_component = scc.component_of[from_idx];
             let to_component = scc.component_of[to_idx];
-            if from_component != to_component && !adjacency[to_component].contains(&from_component)
-            {
+            if from_component != to_component && seen_edges.insert((to_component, from_component)) {
                 adjacency[to_component].push(from_component);
                 in_degree[from_component] += 1;
             }
@@ -260,7 +260,10 @@ fn strongly_connected_components(graph: &LayoutGraph) -> StronglyConnectedCompon
                     break;
                 }
                 if on_stack[neighbor] {
-                    lowlinks[node] = lowlinks[node].min(indices[neighbor].unwrap_or_default());
+                    lowlinks[node] = lowlinks[node].min(
+                        indices[neighbor]
+                            .expect("on_stack[neighbor] implies indices[neighbor] is Some"),
+                    );
                 }
                 *cursor += 1;
             }
@@ -270,7 +273,7 @@ fn strongly_connected_components(graph: &LayoutGraph) -> StronglyConnectedCompon
 
             // All neighbors processed — equivalent of the post-recursion
             // lowlink propagation and SCC extraction.
-            if lowlinks[node] == indices[node].unwrap_or_default() {
+            if lowlinks[node] == indices[node].expect("node was assigned an index on first visit") {
                 let comp_idx = components.len();
                 let mut component = Vec::new();
                 while let Some(top) = scc_stack.pop() {
