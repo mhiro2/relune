@@ -359,7 +359,7 @@ A composite action is available at `mhiro2/relune/action` (Linux and macOS runne
 
 ```yaml
 # diff mode (default) -- render a schema diff
-- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+- uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
   id: diff
   with:
     before: base-schema.sql
@@ -376,7 +376,7 @@ A composite action is available at `mhiro2/relune/action` (Linux and macOS runne
 
 ```yaml
 # review mode -- run the migration risk review
-- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+- uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
   id: review
   with:
     mode: review

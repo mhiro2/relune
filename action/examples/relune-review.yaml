@@ -62,7 +62,7 @@ jobs:
         # Pinned to a full commit SHA with a trailing version comment — the
         # same convention this repository's own workflows use. Bump both the
         # SHA and the trailing comment together when upgrading.
-        uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+        uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
         with:
           mode: review
           before: .relune/before.sql
