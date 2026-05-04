@@ -22,7 +22,7 @@ Render a Markdown diff for two schema files. `mode` defaults to `diff`, so passi
 optional but recommended for clarity.
 
 ```yaml
-- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+- uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
   id: diff
   with:
     mode: diff
@@ -35,7 +35,7 @@ optional but recommended for clarity.
 Run the migration risk review and gate on `breaking` findings.
 
 ```yaml
-- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+- uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
   id: review
   with:
     mode: review
@@ -58,7 +58,7 @@ instead.
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `mode` | no | `diff` | `diff` or `review`. Any other value fails the action with a usage error. |
-| `version` | no | `latest` | Relune version to install (for example `0.10.0`). Ignored when `binary-path` is set. |
+| `version` | no | `latest` | Relune version to install (for example `0.11.0`). Ignored when `binary-path` is set. |
 | `before` | **yes** | — | Path to the baseline schema file (SQL DDL or schema JSON). |
 | `after` | **yes** | — | Path to the updated schema file (SQL DDL or schema JSON). |
 | `format` | no | `markdown` | Output format. Mode-specific accepted values: see below. |
@@ -247,7 +247,7 @@ binary via `binary-path` to skip the install step:
 - name: Build relune
   run: cargo build -p relune-cli --release
 
-- uses: mhiro2/relune/action@241c85bcf2b8de4e8c3c19491cad67898671817c # v0.10.0
+- uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
   with:
     mode: review
     before: base.sql
@@ -267,7 +267,7 @@ explicit version to bypass the API call:
 
 ```yaml
 with:
-  version: "0.10.0"
+  version: "0.11.0"
 ```
 
 ### Install step fails with "Unsupported runner OS / architecture"

@@ -2,7 +2,7 @@
 # install.sh — Download and install the relune binary from GitHub Releases.
 #
 # Environment variables:
-#   VERSION   — Relune version to install ("latest" or a semver like "0.10.0").
+#   VERSION   — Relune version to install ("latest" or a semver like "0.11.0").
 #   GH_TOKEN  — GitHub token for API requests (optional, avoids rate limits).
 
 set -euo pipefail
