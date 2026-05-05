@@ -531,14 +531,10 @@ impl LayoutGraphBuilder {
 
             // Build edges for foreign keys
             for fk in &table.foreign_keys {
-                let is_self_loop = fk.to_table == table.stable_id || fk.to_table == table.name;
-                let target_id = if is_self_loop {
-                    Some(table.stable_id.clone())
-                } else {
-                    table_index
-                        .resolve(table, fk.to_schema.as_deref(), &fk.to_table)
-                        .map(|target| target.stable_id.clone())
-                };
+                let target_id = table_index
+                    .resolve(table, fk.to_schema.as_deref(), &fk.to_table)
+                    .map(|target| target.stable_id.clone());
+                let is_self_loop = target_id.as_deref() == Some(table.stable_id.as_str());
 
                 // Determine if FK is nullable by checking source columns
                 let fk_nullable = fk.from_columns.iter().all(|col_name| {
@@ -638,11 +634,12 @@ impl LayoutGraphBuilder {
                     }
                 };
                 let mut seen_targets = BTreeSet::new();
+                let referencing_schema = view.schema_name.as_deref();
 
                 for table in tables {
                     if relations
                         .iter()
-                        .any(|relation| relation.matches_table(table))
+                        .any(|relation| relation.matches_table(table, referencing_schema))
                     {
                         seen_targets.insert(table.stable_id.clone());
                     }
@@ -655,7 +652,7 @@ impl LayoutGraphBuilder {
 
                     if relations
                         .iter()
-                        .any(|relation| relation.matches_view(dependency_view))
+                        .any(|relation| relation.matches_view(dependency_view, referencing_schema))
                     {
                         seen_targets.insert(dependency_view.id.clone());
                     }
@@ -1440,6 +1437,50 @@ mod tests {
                 && edge.to == "recent_users"
                 && edge.kind == EdgeKind::ViewDependency
         }));
+    }
+
+    #[test]
+    fn test_view_dependency_uses_view_schema_for_unqualified_relation() {
+        let schema = Schema {
+            tables: vec![],
+            views: vec![
+                View {
+                    id: "public.recent_users".to_string(),
+                    schema_name: Some("public".to_string()),
+                    name: "recent_users".to_string(),
+                    columns: vec![],
+                    definition: Some("SELECT 1".to_string()),
+                },
+                View {
+                    id: "analytics.recent_users".to_string(),
+                    schema_name: Some("analytics".to_string()),
+                    name: "recent_users".to_string(),
+                    columns: vec![],
+                    definition: Some("SELECT 1".to_string()),
+                },
+                View {
+                    id: "public.active_users".to_string(),
+                    schema_name: Some("public".to_string()),
+                    name: "active_users".to_string(),
+                    columns: vec![],
+                    definition: Some("SELECT * FROM recent_users".to_string()),
+                },
+            ],
+            enums: vec![],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+
+        let view_dep_edges: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.kind == EdgeKind::ViewDependency && edge.from == "public.active_users"
+            })
+            .collect();
+
+        assert_eq!(view_dep_edges.len(), 1);
+        assert_eq!(view_dep_edges[0].to, "public.recent_users");
     }
 
     #[test]
