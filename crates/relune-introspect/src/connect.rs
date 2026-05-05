@@ -62,6 +62,12 @@ fn pool_max_override_from(value: Option<&str>) -> Option<u32> {
 }
 
 /// Builds hardened `PostgreSQL` connect options from a URL.
+///
+/// Remote connections that do not opt into a TLS mode via the URL default to
+/// `VerifyFull`, which validates both the certificate chain and the server
+/// hostname. Users who connect to clusters with self-signed certificates can
+/// still opt out by passing an explicit `sslmode=require` (encryption only)
+/// in the URL; that explicit choice is respected.
 pub(crate) fn postgres_connect_options(
     database_url: &str,
 ) -> Result<PgConnectOptions, IntrospectError> {
@@ -70,7 +76,7 @@ pub(crate) fn postgres_connect_options(
     let options = if postgres_uses_local_transport(&options) || postgres_tls_is_enforced(&options) {
         options
     } else {
-        options.ssl_mode(PgSslMode::Require)
+        options.ssl_mode(PgSslMode::VerifyFull)
     };
 
     Ok(options.options([(
@@ -80,6 +86,12 @@ pub(crate) fn postgres_connect_options(
 }
 
 /// Builds hardened MySQL/MariaDB connect options from a URL.
+///
+/// Remote connections that do not opt into a TLS mode via the URL default to
+/// `VerifyIdentity`, which validates both the certificate chain and the
+/// server hostname. Users who need to relax verification (for self-signed
+/// certificates) can still opt out by passing an explicit `ssl-mode=required`
+/// in the URL; that explicit choice is respected.
 pub(crate) fn mysql_connect_options(
     database_url: &str,
 ) -> Result<MySqlConnectOptions, IntrospectError> {
@@ -89,7 +101,7 @@ pub(crate) fn mysql_connect_options(
     if mysql_uses_local_transport(&options) || mysql_tls_is_enforced(&options) {
         Ok(options)
     } else {
-        Ok(options.ssl_mode(MySqlSslMode::Required))
+        Ok(options.ssl_mode(MySqlSslMode::VerifyIdentity))
     }
 }
 
@@ -188,12 +200,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn postgres_remote_connections_require_tls() {
+    fn postgres_remote_connections_default_to_verify_full() {
         let options = postgres_connect_options("postgres://user:pass@example.com/app")
             .expect("postgres URL should parse");
 
-        assert!(matches!(options.get_ssl_mode(), PgSslMode::Require));
+        assert!(matches!(options.get_ssl_mode(), PgSslMode::VerifyFull));
         assert_eq!(options.get_options(), Some("-c statement_timeout=30000ms"));
+    }
+
+    #[test]
+    fn postgres_explicit_require_is_respected_for_self_signed_clusters() {
+        let options =
+            postgres_connect_options("postgres://user:pass@example.com/app?sslmode=require")
+                .expect("postgres URL should parse");
+
+        assert!(matches!(options.get_ssl_mode(), PgSslMode::Require));
     }
 
     #[test]
@@ -206,8 +227,19 @@ mod tests {
     }
 
     #[test]
-    fn mysql_remote_connections_require_tls() {
+    fn mysql_remote_connections_default_to_verify_identity() {
         let options = mysql_connect_options("mysql://user:pass@example.com/app")
+            .expect("mysql URL should parse");
+
+        assert!(matches!(
+            options.get_ssl_mode(),
+            MySqlSslMode::VerifyIdentity
+        ));
+    }
+
+    #[test]
+    fn mysql_explicit_required_is_respected_for_self_signed_clusters() {
+        let options = mysql_connect_options("mysql://user:pass@example.com/app?ssl-mode=required")
             .expect("mysql URL should parse");
 
         assert!(matches!(options.get_ssl_mode(), MySqlSslMode::Required));
