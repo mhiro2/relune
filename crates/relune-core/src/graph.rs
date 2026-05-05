@@ -114,37 +114,69 @@ pub struct SqlRelation {
 impl SqlRelation {
     /// Returns `true` if this SQL relation reference resolves to `table`.
     ///
-    /// Schema-qualified references require the schema to match; bare
-    /// references match either the table name or its stable id.
+    /// Schema-qualified references require the schema to match. Bare
+    /// references match by name (or stable id) and are filtered by
+    /// `referencing_schema`: if provided, only tables in the same schema or
+    /// tables with no schema qualifier are considered, which avoids over-
+    /// linking when the same name exists in multiple schemas.
     #[must_use]
-    pub fn matches_table(&self, table: &Table) -> bool {
+    pub fn matches_table(&self, table: &Table, referencing_schema: Option<&str>) -> bool {
         let table_name = table.name.to_lowercase();
         let stable_id = table.stable_id.to_lowercase();
 
-        match self.schema_name.as_deref() {
-            Some(reference_schema) => table.schema_name.as_deref().is_some_and(|table_schema| {
+        if let Some(reference_schema) = self.schema_name.as_deref() {
+            table.schema_name.as_deref().is_some_and(|table_schema| {
                 table_schema.to_lowercase() == reference_schema && table_name == self.name
-            }),
-            None => self.name == table_name || self.name == stable_id,
+            })
+        } else {
+            let name_matches = self.name == table_name || self.name == stable_id;
+            if !name_matches {
+                return false;
+            }
+            schema_visible_from(table.schema_name.as_deref(), referencing_schema)
         }
     }
 
     /// Returns `true` if this SQL relation reference resolves to `view`.
     ///
-    /// Schema-qualified references require the schema to match; bare
-    /// references match the view name, id, or qualified name.
+    /// Schema-qualified references require the schema to match. Bare
+    /// references match by name, id, or qualified name and are filtered by
+    /// `referencing_schema` so a view does not depend on a same-named view
+    /// in an unrelated schema.
     #[must_use]
-    pub fn matches_view(&self, view: &View) -> bool {
+    pub fn matches_view(&self, view: &View, referencing_schema: Option<&str>) -> bool {
         let view_name = view.name.to_lowercase();
         let view_id = view.id.to_lowercase();
         let view_label = view.qualified_name().to_lowercase();
 
-        match self.schema_name.as_deref() {
-            Some(reference_schema) => view.schema_name.as_deref().is_some_and(|view_schema| {
+        if let Some(reference_schema) = self.schema_name.as_deref() {
+            view.schema_name.as_deref().is_some_and(|view_schema| {
                 view_schema.to_lowercase() == reference_schema && view_name == self.name
-            }),
-            None => self.name == view_name || self.name == view_id || self.name == view_label,
+            })
+        } else {
+            let name_matches =
+                self.name == view_name || self.name == view_id || self.name == view_label;
+            if !name_matches {
+                return false;
+            }
+            schema_visible_from(view.schema_name.as_deref(), referencing_schema)
         }
+    }
+}
+
+/// Decides whether a relation in `target_schema` is visible to a bare
+/// reference written from a relation in `referencing_schema`.
+///
+/// A target with no schema qualifier is treated as visible from anywhere;
+/// a qualified target is only visible when the schemas match. When the
+/// caller has no schema context, all targets are considered visible.
+const fn schema_visible_from(
+    target_schema: Option<&str>,
+    referencing_schema: Option<&str>,
+) -> bool {
+    match (target_schema, referencing_schema) {
+        (None, _) | (_, None) => true,
+        (Some(target), Some(reference)) => target.eq_ignore_ascii_case(reference),
     }
 }
 
@@ -397,7 +429,7 @@ impl SchemaGraph {
                 to,
                 GraphEdge {
                     from: table.stable_id.clone(),
-                    to: fk.to_table.clone(),
+                    to: target_table.stable_id.clone(),
                     label: fk.name.clone().unwrap_or_else(|| {
                         if fk.from_columns.is_empty() {
                             "fk".to_string()
@@ -423,12 +455,13 @@ impl SchemaGraph {
     ) -> Result<(), GraphBuildError> {
         for column in &table.columns {
             if let Some(enum_idx) = enum_index.resolve(table, &column.data_type)? {
+                let enum_id = graph[enum_idx].id.clone();
                 graph.add_edge(
                     from,
                     enum_idx,
                     GraphEdge {
                         from: table.stable_id.clone(),
-                        to: column.data_type.clone(),
+                        to: enum_id,
                         label: format!("{} ({})", column.name, column.data_type),
                         nullable: column.nullable,
                         from_columns: vec![column.name.clone()],
@@ -475,11 +508,12 @@ impl SchemaGraph {
                 // tools can distinguish unparsable views from orphan views.
                 match collect_sql_relations(definition) {
                     Ok(references) => {
+                        let referencing_schema = view.schema_name.as_deref();
                         for table in &schema.tables {
                             if table_names.contains(&table.name.to_lowercase())
-                                && references
-                                    .iter()
-                                    .any(|reference| reference.matches_table(table))
+                                && references.iter().any(|reference| {
+                                    reference.matches_table(table, referencing_schema)
+                                })
                                 && let Some(&table_idx) = ids.get(&table.id)
                             {
                                 graph.add_edge(
@@ -1085,6 +1119,134 @@ mod tests {
             .graph
             .node_indices()
             .find(|&idx| graph.graph[idx].label == "active_users")
+            .expect("view node");
+
+        let deps: Vec<_> = graph
+            .graph
+            .edge_references()
+            .filter(|edge| edge.target() == view && edge.weight().kind == EdgeKind::ViewDependency)
+            .map(|edge| edge.source())
+            .collect();
+
+        assert_eq!(deps, vec![public_users]);
+        assert!(!deps.contains(&analytics_users));
+    }
+
+    #[test]
+    fn fk_edge_to_uses_resolved_target_stable_id() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "users",
+                    Some("public"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "users",
+                    Some("audit"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    3,
+                    "sessions",
+                    Some("audit"),
+                    vec![
+                        make_column("id", "integer", false, true),
+                        make_column("user_id", "integer", false, false),
+                    ],
+                    vec![make_foreign_key("users", &["user_id"], &["id"])],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let edge = graph
+            .graph
+            .edge_references()
+            .find(|edge| edge.weight().kind == EdgeKind::ForeignKey)
+            .expect("foreign key edge");
+
+        assert_eq!(edge.weight().from, "audit.sessions");
+        assert_eq!(edge.weight().to, "audit.users");
+        assert_eq!(edge.weight().to, graph.graph[edge.target()].id);
+    }
+
+    #[test]
+    fn enum_edge_to_uses_resolved_enum_node_id() {
+        let schema = Schema {
+            tables: vec![make_table(
+                1,
+                "accounts",
+                Some("public"),
+                vec![
+                    make_column("id", "integer", false, true),
+                    make_column("status", "status", false, false),
+                ],
+                vec![],
+            )],
+            views: vec![],
+            enums: vec![make_enum("status", Some("public"), &["active", "inactive"])],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let edge = graph
+            .graph
+            .edge_references()
+            .find(|edge| edge.weight().kind == EdgeKind::EnumReference)
+            .expect("enum reference edge");
+
+        assert_eq!(edge.weight().to, "public.status");
+        assert_eq!(edge.weight().to, graph.graph[edge.target()].id);
+    }
+
+    #[test]
+    fn view_dependency_uses_view_schema_context_for_unqualified_relation() {
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "users",
+                    Some("public"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+                make_table(
+                    2,
+                    "users",
+                    Some("analytics"),
+                    vec![make_column("id", "integer", false, true)],
+                    vec![],
+                ),
+            ],
+            views: vec![make_view(
+                "active_users",
+                Some("public"),
+                "select * from users",
+            )],
+            enums: vec![],
+        };
+
+        let graph = SchemaGraph::from_schema(&schema).expect("schema graph should build");
+        let public_users = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "public.users")
+            .expect("public.users node");
+        let analytics_users = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "analytics.users")
+            .expect("analytics.users node");
+        let view = graph
+            .graph
+            .node_indices()
+            .find(|&idx| graph.graph[idx].label == "public.active_users")
             .expect("view node");
 
         let deps: Vec<_> = graph
