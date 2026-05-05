@@ -10,6 +10,10 @@ use sqlparser::ast::ObjectName;
 use std::collections::HashMap;
 
 /// Parse a COMMENT ON statement and apply it to the appropriate table or column.
+///
+/// `None` for `comment` represents `COMMENT ... IS NULL`, which deletes any
+/// existing comment per SQL semantics — earlier versions silently skipped this
+/// case and left a stale comment behind.
 #[allow(clippy::ref_option)]
 #[allow(clippy::trivially_copy_pass_by_ref, clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
@@ -23,10 +27,7 @@ pub(crate) fn parse_comment(
     tables: &mut [Table],
     table_map: &HashMap<String, usize>,
 ) {
-    let comment_text = match comment {
-        Some(c) => c.clone(),
-        None => return, // NULL comment means remove comment, we just skip
-    };
+    let new_comment = comment.cloned();
 
     match object_type {
         sqlparser::ast::CommentObject::Table => {
@@ -39,7 +40,7 @@ pub(crate) fn parse_comment(
             );
 
             if let Some(&table_idx) = table_map.get(&stable_id) {
-                tables[table_idx].comment = Some(comment_text);
+                tables[table_idx].comment = new_comment;
             } else {
                 ctx.diagnostics.push(
                     Diagnostic::warning(
@@ -105,7 +106,7 @@ pub(crate) fn parse_comment(
                     .iter_mut()
                     .find(|c| c.name == column_name)
                 {
-                    column.comment = Some(comment_text);
+                    column.comment = new_comment;
                 } else {
                     ctx.diagnostics.push(Diagnostic::warning(
                         codes::schema_unknown_column(),

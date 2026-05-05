@@ -193,6 +193,7 @@ pub(crate) fn extract_column_name(index_col: &sqlparser::ast::IndexColumn) -> St
 pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedColumn {
     let mut nullable = true;
     let mut is_primary_key = false;
+    let mut comment: Option<String> = None;
 
     for option in &column.options {
         match &option.option {
@@ -202,6 +203,9 @@ pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) 
                 is_primary_key = true;
                 nullable = false;
             }
+            ColumnOption::Comment(text) => {
+                comment = Some(text.clone());
+            }
             ColumnOption::Unique(_)
             | ColumnOption::Default(_)
             | ColumnOption::Check(_)
@@ -210,7 +214,6 @@ pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) 
             | ColumnOption::Collation(_)
             | ColumnOption::OnUpdate(_)
             | ColumnOption::Generated { .. }
-            | ColumnOption::Comment(_)
             | ColumnOption::ForeignKey(_)
             | ColumnOption::Materialized(_)
             | ColumnOption::Ephemeral(_)
@@ -236,5 +239,6 @@ pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) 
         data_type,
         nullable,
         is_primary_key,
+        comment,
     }
 }
