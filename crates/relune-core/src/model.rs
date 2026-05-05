@@ -114,6 +114,7 @@ impl Schema {
     /// - FK `to_columns` referencing nonexistent columns in the target table
     /// - FK `from_columns` / `to_columns` count mismatch
     /// - FK `to_table` referencing a nonexistent table
+    /// - Index `columns` referencing nonexistent columns or being empty
     #[must_use]
     pub fn validate(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
@@ -254,6 +255,49 @@ impl Schema {
 
         for fk in &table.foreign_keys {
             Self::validate_fk(table, fk, schema, &col_names, errors);
+        }
+
+        for index in &table.indexes {
+            Self::validate_index(table, index, &col_names, errors);
+        }
+    }
+
+    fn validate_index(
+        table: &Table,
+        index: &Index,
+        col_names: &HashSet<String>,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        if index.columns.is_empty() {
+            errors.push(ValidationError {
+                table: Some(table.name.clone()),
+                message: match index.name.as_deref() {
+                    Some(name) => format!("index '{name}' has no columns"),
+                    None => "index has no columns".to_string(),
+                },
+            });
+            return;
+        }
+
+        for col in &index.columns {
+            // Expression indexes (e.g. `LOWER(email)`) are stringified by the
+            // parser into the same `Index.columns` slot as bare column refs,
+            // so skip entries that are not plain identifiers to avoid false
+            // positives until the model carries an explicit expression form.
+            if !is_simple_column_reference(col) {
+                continue;
+            }
+            if !col_names.contains(&col.to_lowercase()) {
+                errors.push(ValidationError {
+                    table: Some(table.name.clone()),
+                    message: match index.name.as_deref() {
+                        Some(name) => {
+                            format!("index '{name}' references unknown column '{col}'")
+                        }
+                        None => format!("index references unknown column '{col}'"),
+                    },
+                });
+            }
         }
     }
 
@@ -396,6 +440,17 @@ pub(crate) enum ForeignKeyTargetResolution<'a> {
     Found(&'a Table),
     Missing,
     Ambiguous,
+}
+
+/// Returns `true` when `s` looks like a bare column identifier rather than
+/// an expression. The SQL parser flattens expression indexes such as
+/// `LOWER(email)` into the same `Index.columns` slot as plain column
+/// references, so validation needs a way to tell them apart.
+fn is_simple_column_reference(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    !s.chars().any(|c| matches!(c, '(' | ')' | ',' | ' ' | '\t'))
 }
 
 pub(crate) fn resolve_table_reference<'a>(
@@ -1064,6 +1119,110 @@ mod tests {
             errs.iter()
                 .any(|e| e.message.contains("FK from_columns contains duplicate"))
         );
+    }
+
+    // --- Index validation ---
+
+    fn make_table_with_indexes(name: &str, cols: &[&str], indexes: Vec<Index>) -> Table {
+        Table {
+            indexes,
+            ..make_table(name, None, cols, vec![])
+        }
+    }
+
+    #[test]
+    fn validate_index_referencing_unknown_column() {
+        let schema = Schema {
+            tables: vec![make_table_with_indexes(
+                "users",
+                &["id", "name"],
+                vec![Index {
+                    name: Some("idx_users_email".to_string()),
+                    columns: vec!["email".to_string()],
+                    is_unique: false,
+                }],
+            )],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("idx_users_email"));
+        assert!(errs[0].message.contains("email"));
+    }
+
+    #[test]
+    fn validate_index_referencing_existing_column_is_ok() {
+        let schema = Schema {
+            tables: vec![make_table_with_indexes(
+                "users",
+                &["id", "email"],
+                vec![Index {
+                    name: Some("idx_users_email".to_string()),
+                    columns: vec!["email".to_string()],
+                    is_unique: false,
+                }],
+            )],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_index_column_match_is_case_insensitive() {
+        let schema = Schema {
+            tables: vec![make_table_with_indexes(
+                "users",
+                &["id", "Email"],
+                vec![Index {
+                    name: None,
+                    columns: vec!["email".to_string()],
+                    is_unique: true,
+                }],
+            )],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_index_skips_expression_columns() {
+        let schema = Schema {
+            tables: vec![make_table_with_indexes(
+                "users",
+                &["id", "email"],
+                vec![Index {
+                    name: Some("idx_users_lower_email".to_string()),
+                    columns: vec!["lower(email)".to_string()],
+                    is_unique: false,
+                }],
+            )],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_index_with_empty_columns_is_detected() {
+        let schema = Schema {
+            tables: vec![make_table_with_indexes(
+                "users",
+                &["id"],
+                vec![Index {
+                    name: Some("idx_empty".to_string()),
+                    columns: vec![],
+                    is_unique: false,
+                }],
+            )],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("no columns"));
     }
 
     // --- View validation ---
