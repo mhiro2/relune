@@ -221,7 +221,7 @@ fn returns_diagnostics_for_unsupported_constructs() {
     let sql = r"
     CREATE TABLE users (id BIGINT PRIMARY KEY);
     CREATE VIEW user_view AS SELECT * FROM users;
-    DROP TABLE users;
+    CREATE FUNCTION noop() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     ";
 
     let output = parse_sql_to_schema_with_diagnostics(sql);
@@ -1848,4 +1848,288 @@ fn alter_table_drop_unknown_index_warns() {
             .iter()
             .any(|d| d.message.contains("ghost"))
     );
+}
+
+#[test]
+fn drop_table_removes_table_from_schema() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    CREATE TABLE orders (id BIGINT PRIMARY KEY);
+    DROP TABLE users;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    assert_eq!(schema.tables.len(), 1);
+    assert_eq!(schema.tables[0].name, "orders");
+}
+
+#[test]
+fn drop_table_recreate_works_after_drop() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    DROP TABLE users;
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    assert_eq!(schema.tables.len(), 1);
+    assert!(
+        schema.tables[0].columns.iter().any(|c| c.name == "email"),
+        "second definition should be the active one"
+    );
+}
+
+#[test]
+fn drop_table_unknown_warns_without_if_exists() {
+    let sql = "DROP TABLE missing;";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("DROP TABLE references unknown table"))
+    );
+}
+
+#[test]
+fn drop_table_if_exists_is_silent() {
+    let sql = "DROP TABLE IF EXISTS missing;";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("DROP TABLE references unknown table"))
+    );
+}
+
+#[test]
+fn drop_view_removes_view_from_schema() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    CREATE VIEW user_view AS SELECT id FROM users;
+    DROP VIEW user_view;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    assert!(schema.views.is_empty(), "view should be dropped");
+    assert_eq!(schema.tables.len(), 1);
+}
+
+#[test]
+fn drop_type_removes_enum_from_schema() {
+    let sql = r"
+    CREATE TYPE status AS ENUM ('active', 'inactive');
+    DROP TYPE status;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    assert!(schema.enums.is_empty(), "enum type should be dropped");
+}
+
+#[test]
+fn drop_index_removes_named_index_from_table() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);
+    CREATE INDEX users_email_idx ON users (email);
+    DROP INDEX users_email_idx;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    assert!(
+        schema.tables[0].indexes.is_empty(),
+        "named index should be removed"
+    );
+}
+
+#[test]
+fn drop_index_mysql_with_table_qualifier_removes_index() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email VARCHAR(255));
+    CREATE INDEX users_email_idx ON users (email);
+    DROP INDEX users_email_idx ON users;
+    ";
+
+    let output =
+        parse_sql_to_schema_with_diagnostics_and_dialect(sql, relune_core::SqlDialect::Mysql);
+    let schema = output.schema.expect("schema parse");
+    assert!(
+        schema.tables[0].indexes.is_empty(),
+        "MySQL DROP INDEX ... ON table should remove the index"
+    );
+}
+
+#[test]
+fn drop_index_schema_qualifier_only_drops_matching_schema() {
+    let sql = r"
+    CREATE TABLE public.users (id BIGINT PRIMARY KEY, email TEXT);
+    CREATE TABLE analytics.users (id BIGINT PRIMARY KEY, email TEXT);
+    CREATE INDEX users_email_idx ON public.users (email);
+    CREATE INDEX users_email_idx ON analytics.users (email);
+    DROP INDEX public.users_email_idx;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    let public_users = schema
+        .tables
+        .iter()
+        .find(|t| t.schema_name.as_deref() == Some("public"))
+        .expect("public.users present");
+    let analytics_users = schema
+        .tables
+        .iter()
+        .find(|t| t.schema_name.as_deref() == Some("analytics"))
+        .expect("analytics.users present");
+    assert!(
+        public_users.indexes.is_empty(),
+        "public.users index should be dropped"
+    );
+    assert_eq!(
+        analytics_users.indexes.len(),
+        1,
+        "analytics.users index should be untouched"
+    );
+}
+
+#[test]
+fn drop_table_removes_inbound_foreign_keys() {
+    let sql = r"
+    CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+    CREATE TABLE users (
+        id BIGINT PRIMARY KEY,
+        org_id BIGINT REFERENCES orgs (id)
+    );
+    DROP TABLE orgs;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    let users = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "users")
+        .expect("users present");
+    assert!(
+        users.foreign_keys.is_empty(),
+        "FK pointing at the dropped table should be removed; got {:?}",
+        users.foreign_keys
+    );
+    let validation_errors = schema.validate();
+    assert!(
+        validation_errors.is_empty(),
+        "schema should remain valid: {validation_errors:?}"
+    );
+}
+
+#[test]
+fn drop_schema_qualified_table_removes_qualified_inbound_fks() {
+    let sql = r"
+    CREATE TABLE auth.orgs (id BIGINT PRIMARY KEY);
+    CREATE TABLE public.orgs (id BIGINT PRIMARY KEY);
+    CREATE TABLE app.users (
+        id BIGINT PRIMARY KEY,
+        org_id BIGINT REFERENCES auth.orgs (id)
+    );
+    CREATE TABLE app.members (
+        id BIGINT PRIMARY KEY,
+        org_id BIGINT REFERENCES public.orgs (id)
+    );
+    DROP TABLE auth.orgs;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    let users = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "users")
+        .expect("users present");
+    let members = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "members")
+        .expect("members present");
+    assert!(
+        users.foreign_keys.is_empty(),
+        "FK to auth.orgs should be removed"
+    );
+    assert_eq!(
+        members.foreign_keys.len(),
+        1,
+        "FK to public.orgs should remain"
+    );
+}
+
+#[test]
+fn drop_unqualified_table_keeps_explicitly_qualified_inbound_fks() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    CREATE TABLE public.users (id BIGINT PRIMARY KEY);
+    CREATE TABLE public.orders (
+        id BIGINT PRIMARY KEY,
+        user_id BIGINT REFERENCES public.users (id)
+    );
+    DROP TABLE users;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    let orders = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "orders")
+        .expect("orders present");
+    assert_eq!(
+        orders.foreign_keys.len(),
+        1,
+        "FK explicitly targeting public.users must survive a DROP of bare users"
+    );
+}
+
+#[test]
+fn comment_on_table_with_null_clears_existing_comment() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    COMMENT ON TABLE users IS 'old';
+    COMMENT ON TABLE users IS NULL;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    assert_eq!(schema.tables[0].comment, None);
+}
+
+#[test]
+fn comment_on_column_with_null_clears_existing_comment() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);
+    COMMENT ON COLUMN users.email IS 'old';
+    COMMENT ON COLUMN users.email IS NULL;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("schema parse");
+    let email = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "email")
+        .expect("email column");
+    assert_eq!(email.comment, None);
+}
+
+#[test]
+fn mysql_inline_column_comment_is_captured() {
+    let sql = r"
+    CREATE TABLE users (
+        id BIGINT PRIMARY KEY,
+        email VARCHAR(255) COMMENT 'login email'
+    );
+    ";
+
+    let output =
+        parse_sql_to_schema_with_diagnostics_and_dialect(sql, relune_core::SqlDialect::Mysql);
+    let schema = output.schema.expect("schema parse");
+    let email = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "email")
+        .expect("email column");
+    assert_eq!(email.comment.as_deref(), Some("login email"));
 }

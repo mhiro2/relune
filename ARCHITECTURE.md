@@ -172,7 +172,7 @@ Supported paths into a `Schema`:
 | Normalized schema JSON | Deserialized directly into `relune-core` types |
 | Live database | `relune-introspect` (PostgreSQL, MySQL/MariaDB, SQLite) |
 
-`relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries. PostgreSQL/MySQL/MariaDB introspection applies a default 30 second statement deadline, and remote TCP connections require TLS by default. Native file-backed SQL and schema JSON inputs are size-limited before reading.
+`relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries. PostgreSQL/MySQL/MariaDB introspection applies a default 30 second statement deadline, and remote TCP connections default to verifying TLS (PostgreSQL `verify-full`, MySQL/MariaDB `verify-identity`) — set `sslmode=require` / `ssl-mode=required` in the URL to keep encryption while accepting self-signed clusters. Native file-backed SQL and schema JSON inputs are size-limited before reading.
 
 ---
 

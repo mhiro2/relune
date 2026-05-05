@@ -17,6 +17,7 @@ mod create_index;
 mod create_table;
 mod diagnostics;
 mod dialect;
+mod drop;
 mod enum_type;
 mod mysql_enum;
 mod names;
@@ -40,6 +41,7 @@ use create_index::parse_create_index;
 use create_table::parse_create_table;
 use diagnostics::{error_summary, truncate_unsupported_debug};
 use dialect::{dialect_impl, resolve_dialect};
+use drop::apply_drop_statement;
 use enum_type::parse_create_type_enum;
 use mysql_enum::populate_mysql_enum_columns;
 use recovery::parse_statements_with_recovery;
@@ -236,6 +238,33 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                     &alter_table.operations,
                 );
             }
+            Statement::Drop {
+                object_type,
+                if_exists,
+                names,
+                table,
+                ..
+            } => {
+                let handled = apply_drop_statement(
+                    &mut ctx,
+                    input,
+                    &offsets,
+                    *object_type,
+                    *if_exists,
+                    names,
+                    table.as_ref(),
+                    &mut tables,
+                    &mut views,
+                    &mut enums,
+                    &mut table_map,
+                );
+                if !handled {
+                    ctx.warn_unsupported(
+                        &format!("DROP {object_type}"),
+                        source_span_from_sql_span(input, &offsets, statement.span()),
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -248,8 +277,9 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             | Statement::Comment { .. }
             | Statement::CreateView(_)
             | Statement::CreateType { .. }
-            | Statement::AlterTable(_) => {
-                // Handled in the ordered schema pass (ALTER warns per-operation there).
+            | Statement::AlterTable(_)
+            | Statement::Drop { .. } => {
+                // Handled in the ordered schema pass (ALTER/DROP report per-statement diagnostics there).
             }
             Statement::Insert { .. } => {
                 ctx.info_skipped("INSERT");
@@ -278,12 +308,6 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             Statement::CreateExtension { .. } => {
                 ctx.warn_unsupported(
                     "CREATE EXTENSION",
-                    source_span_from_sql_span(input, &offsets, statement.span()),
-                );
-            }
-            Statement::Drop { .. } => {
-                ctx.warn_unsupported(
-                    "DROP",
                     source_span_from_sql_span(input, &offsets, statement.span()),
                 );
             }

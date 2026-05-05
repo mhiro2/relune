@@ -16,7 +16,7 @@ Every command requires **at least one input**. Typical inputs:
 | SQL file | `--sql <FILE>` | DDL |
 | SQL string | `--sql-text '<DDL>'` | Not available on `lint` |
 | Normalized schema JSON | `--schema-json <FILE>` | From a previous export |
-| Live DB | `--db-url <URL>` | Read-only introspection; PostgreSQL/MySQL/MariaDB use a 30s statement deadline, and remote TCP connections require TLS by default |
+| Live DB | `--db-url <URL>` | Read-only introspection; PostgreSQL/MySQL/MariaDB use a 30s statement deadline, and remote TCP connections default to verifying TLS (PostgreSQL `verify-full`, MySQL/MariaDB `verify-identity`) — set `sslmode=require` / `ssl-mode=required` in the URL to keep encryption without certificate verification |
 | SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | Drives both SQL parsing and `relune review` rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree (so SQL inputs that both look like Postgres run lock-risk under `Postgres`); when the two sides disagree, `auto` stays inactive and a `REVIEW002` warning is emitted. |
 
 Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly.

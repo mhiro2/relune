@@ -133,6 +133,7 @@ pub(crate) struct ParsedColumn {
     pub(crate) data_type: String,
     pub(crate) nullable: bool,
     pub(crate) is_primary_key: bool,
+    pub(crate) comment: Option<String>,
 }
 
 impl ParsedColumn {
@@ -143,7 +144,7 @@ impl ParsedColumn {
             data_type: self.data_type,
             nullable: self.nullable,
             is_primary_key: self.is_primary_key,
-            comment: None,
+            comment: self.comment,
             enum_values: None,
         }
     }
