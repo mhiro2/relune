@@ -4,9 +4,9 @@
   "description": "TypeScript sources for embedded HTML viewer scripts (build outputs to src/js/)",
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "fmt": "oxfmt ts",
-    "fmt:check": "oxfmt --check ts",
-    "lint": "oxlint ts",
+    "fmt": "oxfmt -c ../../.oxfmtrc.json",
+    "fmt:check": "oxfmt -c ../../.oxfmtrc.json --check",
+    "lint": "oxlint -c ../../.oxlintrc.json ts esbuild.config.mjs",
     "typecheck": "tsgo --noEmit -p tsconfig.json",
     "check": "pnpm fmt:check && pnpm lint && pnpm typecheck"
   },
@@ -15,6 +15,7 @@
     "@typescript/native-preview": "catalog:",
     "esbuild": "catalog:",
     "oxfmt": "catalog:",
-    "oxlint": "catalog:"
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
   }
 }

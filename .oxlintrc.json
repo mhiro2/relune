@@ -1,0 +1,44 @@
+{
+  "plugins": ["eslint", "typescript", "oxc", "unicorn", "import", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "options": {
+    "reportUnusedDisableDirectives": "warn",
+    "typeAware": true,
+    "denyWarnings": true
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "playground/dist/**",
+    "crates/relune-render-html/src/js/**"
+  ],
+  "rules": {
+    "no-console": "warn",
+    "eqeqeq": ["error", "smart"],
+    "no-underscore-dangle": "off",
+    "import/no-cycle": "warn",
+    "typescript/consistent-type-imports": "warn",
+    "typescript/no-unsafe-type-assertion": "off",
+    "unicorn/consistent-function-scoping": "off"
+  },
+  "overrides": [
+    {
+      "files": ["**/esbuild.config.mjs"],
+      "env": {
+        "node": true,
+        "browser": false
+      },
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}

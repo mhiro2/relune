@@ -4,9 +4,9 @@
   "description": "Public WASM playground for relune",
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "fmt": "oxfmt src",
-    "fmt:check": "oxfmt --check src",
-    "lint": "oxlint src",
+    "fmt": "oxfmt -c ../.oxfmtrc.json",
+    "fmt:check": "oxfmt -c ../.oxfmtrc.json --check",
+    "lint": "oxlint -c ../.oxlintrc.json src esbuild.config.mjs",
     "typecheck": "tsgo --noEmit -p tsconfig.json",
     "check": "pnpm fmt:check && pnpm lint && pnpm typecheck"
   },
@@ -24,6 +24,7 @@
     "@typescript/native-preview": "catalog:",
     "esbuild": "catalog:",
     "oxfmt": "catalog:",
-    "oxlint": "catalog:"
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
   }
 }
