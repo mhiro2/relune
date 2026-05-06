@@ -141,8 +141,8 @@ function flushViewerWaiters(): void {
   viewerWindow[VIEWER_WAITERS_KEY] = remaining;
 }
 
-export function emitViewerEvent<T>(name: string, detail: T): void {
-  document.dispatchEvent(new CustomEvent<T>(name, { detail }));
+export function emitViewerEvent(name: string, detail: unknown): void {
+  document.dispatchEvent(new CustomEvent(name, { detail }));
 }
 
 function noticeStack(): HTMLElement {
@@ -184,6 +184,7 @@ export function reportSessionStorageError(action: string, error: unknown): void 
     );
     return;
   }
+  // eslint-disable-next-line no-console
   console.warn(`Session storage error while ${action}`, error);
 }
 

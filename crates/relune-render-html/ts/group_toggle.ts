@@ -1,3 +1,9 @@
+import {
+  buildGroupListDOM,
+  applyGroupVisibility,
+  updateEdgeVisibility,
+  syncGroupItemClass,
+} from './group_toggle_dom';
 import { parseReluneMetadata, type GroupMetadata } from './metadata';
 import {
   emitViewerEvent,
@@ -6,12 +12,6 @@ import {
   markViewerModuleReady,
   reportSessionStorageError,
 } from './viewer_api';
-import {
-  buildGroupListDOM,
-  applyGroupVisibility,
-  updateEdgeVisibility,
-  syncGroupItemClass,
-} from './group_toggle_dom';
 
 {
   const metadata = parseReluneMetadata();

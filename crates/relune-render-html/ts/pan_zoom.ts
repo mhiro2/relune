@@ -1,4 +1,4 @@
-import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
+import { getAvailableViewport, applyTransform } from './pan_zoom_dom';
 import {
   clamp,
   parseViewBox,
@@ -7,7 +7,7 @@ import {
   computeZoomAt,
   buildViewportState,
 } from './pan_zoom_state';
-import { getAvailableViewport, applyTransform } from './pan_zoom_dom';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
 {
   const viewportEl = document.getElementById('viewport');

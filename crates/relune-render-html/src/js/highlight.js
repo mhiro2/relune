@@ -1,89 +1,5 @@
 "use strict";
 (() => {
-  // ts/metadata.ts
-  var METADATA_ELEMENT_ID = "relune-metadata";
-  function parseReluneMetadata() {
-    const el = document.getElementById(METADATA_ELEMENT_ID);
-    const raw = el?.textContent;
-    if (raw == null || raw === "") {
-      return null;
-    }
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  function tableDisplayName(table) {
-    return table.label || table.table_name || table.id;
-  }
-
-  // ts/viewer_api.ts
-  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
-  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
-  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
-  function getViewerRuntime() {
-    const viewerWindow = window;
-    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
-      viewerWindow[VIEWER_RUNTIME_KEY] = {};
-    }
-    return viewerWindow[VIEWER_RUNTIME_KEY];
-  }
-  function readyModules() {
-    const viewerWindow = window;
-    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
-      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
-    }
-    return viewerWindow[VIEWER_READY_MODULES_KEY];
-  }
-  function runtimeWaiters() {
-    const viewerWindow = window;
-    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
-      viewerWindow[VIEWER_WAITERS_KEY] = [];
-    }
-    return viewerWindow[VIEWER_WAITERS_KEY];
-  }
-  function markViewerModuleReady(module) {
-    readyModules().add(module);
-    flushViewerWaiters();
-  }
-  function flushViewerWaiters() {
-    const ready = readyModules();
-    const remaining = [];
-    for (const waiter of runtimeWaiters()) {
-      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
-        waiter.callback();
-      } else {
-        remaining.push(waiter);
-      }
-    }
-    const viewerWindow = window;
-    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
-  }
-  function emitViewerEvent(name, detail) {
-    document.dispatchEvent(new CustomEvent(name, { detail }));
-  }
-
-  // ts/highlight_state.ts
-  function createHighlightState(tables, edges) {
-    const tableById = new Map(tables.map((table) => [table.id, table]));
-    const inboundMap = {};
-    const outboundMap = {};
-    for (const edge of edges) {
-      (outboundMap[edge.from] ??= []).push({ node: edge.to, edge });
-      (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
-    }
-    return {
-      hoveredNode: null,
-      selectedNode: null,
-      traversalDepth: 1,
-      tableById,
-      inboundMap,
-      outboundMap,
-      edges
-    };
-  }
-
   // ts/highlight_actions.ts
   function collectNeighborhood(nodeId, state, depth = 1) {
     const neighborIds = /* @__PURE__ */ new Set();
@@ -141,6 +57,24 @@
     return table.id.toLowerCase().includes(needle) || table.label.toLowerCase().includes(needle) || table.table_name.toLowerCase().includes(needle) || table.columns.some(
       (column) => column.name.toLowerCase().includes(needle) || column.data_type.toLowerCase().includes(needle)
     );
+  }
+
+  // ts/metadata.ts
+  var METADATA_ELEMENT_ID = "relune-metadata";
+  function parseReluneMetadata() {
+    const el = document.getElementById(METADATA_ELEMENT_ID);
+    const raw = el?.textContent;
+    if (raw == null || raw === "") {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  function tableDisplayName(table) {
+    return table.label || table.table_name || table.id;
   }
 
   // ts/highlight_dom.ts
@@ -517,6 +451,72 @@
       onSelect(item.table.id);
     });
     return button;
+  }
+
+  // ts/highlight_state.ts
+  function createHighlightState(tables, edges) {
+    const tableById = new Map(tables.map((table) => [table.id, table]));
+    const inboundMap = {};
+    const outboundMap = {};
+    for (const edge of edges) {
+      (outboundMap[edge.from] ??= []).push({ node: edge.to, edge });
+      (inboundMap[edge.to] ??= []).push({ node: edge.from, edge });
+    }
+    return {
+      hoveredNode: null,
+      selectedNode: null,
+      traversalDepth: 1,
+      tableById,
+      inboundMap,
+      outboundMap,
+      edges
+    };
+  }
+
+  // ts/viewer_api.ts
+  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
+  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
+  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
+  function getViewerRuntime() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
+      viewerWindow[VIEWER_RUNTIME_KEY] = {};
+    }
+    return viewerWindow[VIEWER_RUNTIME_KEY];
+  }
+  function readyModules() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
+      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
+    }
+    return viewerWindow[VIEWER_READY_MODULES_KEY];
+  }
+  function runtimeWaiters() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
+      viewerWindow[VIEWER_WAITERS_KEY] = [];
+    }
+    return viewerWindow[VIEWER_WAITERS_KEY];
+  }
+  function markViewerModuleReady(module) {
+    readyModules().add(module);
+    flushViewerWaiters();
+  }
+  function flushViewerWaiters() {
+    const ready = readyModules();
+    const remaining = [];
+    for (const waiter of runtimeWaiters()) {
+      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
+        waiter.callback();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    const viewerWindow = window;
+    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
+  }
+  function emitViewerEvent(name, detail) {
+    document.dispatchEvent(new CustomEvent(name, { detail }));
   }
 
   // ts/highlight.ts

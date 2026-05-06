@@ -1,14 +1,4 @@
 import { syncEdgeDimming } from './edge_filters';
-import { parseReluneMetadata, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
-import {
-  createFilterEngineState,
-  tableMatchesAllFacets,
-  hasActiveFilters,
-  activeFilterSummary,
-  type FacetId,
-  type FilterMode,
-} from './filter_engine_state';
 import {
   buildFilterModeSwitcher,
   syncModeSwitcher,
@@ -19,6 +9,16 @@ import {
   renderActiveFilterSummary,
   syncFilterResetBar,
 } from './filter_engine_dom';
+import {
+  createFilterEngineState,
+  tableMatchesAllFacets,
+  hasActiveFilters,
+  activeFilterSummary,
+  type FacetId,
+  type FilterMode,
+} from './filter_engine_state';
+import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
 {
   const sectionEl = document.getElementById('filter-section');
@@ -271,7 +271,7 @@ import {
       },
       getFacetSelection(facetId: FacetId): string[] {
         const facet = state.facets.get(facetId);
-        return facet ? [...facet.selectedValues].sort() : [];
+        return facet ? [...facet.selectedValues].toSorted() : [];
       },
       setFacetSelection(facetId: FacetId, values: string[]): void {
         const facet = state.facets.get(facetId);

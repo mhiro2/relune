@@ -1,6 +1,3 @@
-import { parseReluneMetadata, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
-import { createHighlightState } from './highlight_state';
 import {
   computeHoverPreview,
   computeNeighborHighlights,
@@ -19,6 +16,9 @@ import {
   type HoverPopoverElements,
   type PopoverPosition,
 } from './highlight_dom';
+import { createHighlightState } from './highlight_state';
+import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
 {
   const metadata = parseReluneMetadata();

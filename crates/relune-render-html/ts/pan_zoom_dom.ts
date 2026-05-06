@@ -52,6 +52,8 @@ function overlayInset(
       return Math.max(0, rect.bottom - viewportRect.top + 16);
     case 'bottom':
       return Math.max(0, viewportRect.bottom - rect.top + 16);
+    default:
+      return 0;
   }
 }
 

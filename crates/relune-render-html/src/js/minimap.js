@@ -112,8 +112,8 @@
         updateFrame(initialState);
       }
       hostSvg.addEventListener("click", (event) => {
-        const bounds2 = runtime.viewport?.getDiagramBounds();
-        if (bounds2 === null || bounds2 === void 0) {
+        const clickBounds = runtime.viewport?.getDiagramBounds();
+        if (clickBounds === null || clickBounds === void 0) {
           return;
         }
         const rect = hostSvg.getBoundingClientRect();
@@ -123,8 +123,8 @@
         const percentX = (event.clientX - rect.left) / rect.width;
         const percentY = (event.clientY - rect.top) / rect.height;
         runtime.viewport?.center(
-          bounds2.x + bounds2.width * percentX,
-          bounds2.y + bounds2.height * percentY
+          clickBounds.x + clickBounds.width * percentX,
+          clickBounds.y + clickBounds.height * percentY
         );
       });
     }

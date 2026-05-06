@@ -1,7 +1,7 @@
 import { syncEdgeDimming } from './edge_filters';
 import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 import { computeSearchMatches } from './search_actions';
+import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
 {
   const searchInput = document.getElementById('table-search');
