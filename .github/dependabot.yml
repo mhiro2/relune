@@ -27,6 +27,12 @@ updates:
         patterns:
           - "resvg"
           - "fontdb"
+      cargo-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: npm
     directory: /
@@ -42,4 +48,11 @@ updates:
       oxc:
         patterns:
           - "oxlint"
+          - "oxlint-tsgolint"
           - "oxfmt"
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

@@ -42,6 +42,27 @@
     return table.label || table.table_name || table.id;
   }
 
+  // ts/search_actions.ts
+  function computeSearchMatches(nodes, tableNames, query) {
+    const q = query.toLowerCase().trim();
+    const results = [];
+    let matchCount = 0;
+    nodes.forEach((node) => {
+      if (q === "") {
+        results.push({ node, matches: true });
+        matchCount += 1;
+        return;
+      }
+      const tableId = node.getAttribute("data-id") ?? node.getAttribute("data-table-id") ?? "";
+      const tableName = tableNames[tableId] ?? tableId;
+      const nodeText = node.textContent?.toLowerCase() ?? "";
+      const matches = tableName.toLowerCase().includes(q) || tableId.toLowerCase().includes(q) || nodeText.includes(q);
+      results.push({ node, matches });
+      if (matches) matchCount += 1;
+    });
+    return { results, matchCount, total: nodes.length };
+  }
+
   // ts/viewer_api.ts
   var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
   var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
@@ -86,27 +107,6 @@
   }
   function emitViewerEvent(name, detail) {
     document.dispatchEvent(new CustomEvent(name, { detail }));
-  }
-
-  // ts/search_actions.ts
-  function computeSearchMatches(nodes, tableNames, query) {
-    const q = query.toLowerCase().trim();
-    const results = [];
-    let matchCount = 0;
-    nodes.forEach((node) => {
-      if (q === "") {
-        results.push({ node, matches: true });
-        matchCount += 1;
-        return;
-      }
-      const tableId = node.getAttribute("data-id") ?? node.getAttribute("data-table-id") ?? "";
-      const tableName = tableNames[tableId] ?? tableId;
-      const nodeText = node.textContent?.toLowerCase() ?? "";
-      const matches = tableName.toLowerCase().includes(q) || tableId.toLowerCase().includes(q) || nodeText.includes(q);
-      results.push({ node, matches });
-      if (matches) matchCount += 1;
-    });
-    return { results, matchCount, total: nodes.length };
   }
 
   // ts/search.ts

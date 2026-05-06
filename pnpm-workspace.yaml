@@ -6,6 +6,7 @@ catalog:
   esbuild: 0.28.0
   oxfmt: 0.47.0
   oxlint: 1.62.0
+  oxlint-tsgolint: 0.22.1
   "@typescript/native-preview": 7.0.0-dev.20260428.1
 
 blockExoticSubdeps: true

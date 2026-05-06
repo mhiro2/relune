@@ -24,67 +24,6 @@
     });
   }
 
-  // ts/metadata.ts
-  var METADATA_ELEMENT_ID = "relune-metadata";
-  function parseReluneMetadata() {
-    const el = document.getElementById(METADATA_ELEMENT_ID);
-    const raw = el?.textContent;
-    if (raw == null || raw === "") {
-      return null;
-    }
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  // ts/viewer_api.ts
-  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
-  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
-  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
-  function getViewerRuntime() {
-    const viewerWindow = window;
-    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
-      viewerWindow[VIEWER_RUNTIME_KEY] = {};
-    }
-    return viewerWindow[VIEWER_RUNTIME_KEY];
-  }
-  function readyModules() {
-    const viewerWindow = window;
-    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
-      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
-    }
-    return viewerWindow[VIEWER_READY_MODULES_KEY];
-  }
-  function runtimeWaiters() {
-    const viewerWindow = window;
-    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
-      viewerWindow[VIEWER_WAITERS_KEY] = [];
-    }
-    return viewerWindow[VIEWER_WAITERS_KEY];
-  }
-  function markViewerModuleReady(module) {
-    readyModules().add(module);
-    flushViewerWaiters();
-  }
-  function flushViewerWaiters() {
-    const ready = readyModules();
-    const remaining = [];
-    for (const waiter of runtimeWaiters()) {
-      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
-        waiter.callback();
-      } else {
-        remaining.push(waiter);
-      }
-    }
-    const viewerWindow = window;
-    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
-  }
-  function emitViewerEvent(name, detail) {
-    document.dispatchEvent(new CustomEvent(name, { detail }));
-  }
-
   // ts/filter_engine_state.ts
   var DEFAULT_SCHEMA = "(default)";
   function extractSchemaValues(table) {
@@ -125,7 +64,7 @@
         counts.set(v, (counts.get(v) ?? 0) + 1);
       }
     }
-    const allValues = [...valueSet].sort(
+    const allValues = [...valueSet].toSorted(
       (a, b) => a.localeCompare(b, void 0, { sensitivity: "base" })
     );
     return {
@@ -206,7 +145,7 @@
           facetId: facet.id,
           label: facet.label,
           count: facet.selectedValues.size,
-          values: [...facet.selectedValues].sort()
+          values: [...facet.selectedValues].toSorted()
         });
       }
     }
@@ -389,6 +328,67 @@
   function rebuildColumnTypeFacet(details, facet, query, onChange) {
     const visible = visibleTypesForQuery(facet.allValues, query);
     rebuildFacetCheckboxes(details, visible, facet.selectedValues, facet.counts, onChange);
+  }
+
+  // ts/metadata.ts
+  var METADATA_ELEMENT_ID = "relune-metadata";
+  function parseReluneMetadata() {
+    const el = document.getElementById(METADATA_ELEMENT_ID);
+    const raw = el?.textContent;
+    if (raw == null || raw === "") {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  // ts/viewer_api.ts
+  var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
+  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
+  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
+  function getViewerRuntime() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
+      viewerWindow[VIEWER_RUNTIME_KEY] = {};
+    }
+    return viewerWindow[VIEWER_RUNTIME_KEY];
+  }
+  function readyModules() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
+      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
+    }
+    return viewerWindow[VIEWER_READY_MODULES_KEY];
+  }
+  function runtimeWaiters() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
+      viewerWindow[VIEWER_WAITERS_KEY] = [];
+    }
+    return viewerWindow[VIEWER_WAITERS_KEY];
+  }
+  function markViewerModuleReady(module) {
+    readyModules().add(module);
+    flushViewerWaiters();
+  }
+  function flushViewerWaiters() {
+    const ready = readyModules();
+    const remaining = [];
+    for (const waiter of runtimeWaiters()) {
+      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
+        waiter.callback();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    const viewerWindow = window;
+    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
+  }
+  function emitViewerEvent(name, detail) {
+    document.dispatchEvent(new CustomEvent(name, { detail }));
   }
 
   // ts/filter_engine.ts
@@ -579,7 +579,7 @@
         },
         getFacetSelection(facetId) {
           const facet = state.facets.get(facetId);
-          return facet ? [...facet.selectedValues].sort() : [];
+          return facet ? [...facet.selectedValues].toSorted() : [];
         },
         setFacetSelection(facetId, values) {
           const facet = state.facets.get(facetId);

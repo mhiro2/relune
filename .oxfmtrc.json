@@ -1,0 +1,13 @@
+{
+  "singleQuote": true,
+  "sortImports": true,
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/target/**",
+    "**/pkg/**",
+    "**/src/js/**",
+    "**/*.min.js",
+    "**/pnpm-lock.yaml"
+  ]
+}

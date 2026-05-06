@@ -48,9 +48,9 @@
   --iframe-bg: #fffdf8;
 
   /* Typography */
-  --font-display: "DM Sans", system-ui, sans-serif;
-  --font-body: "DM Sans", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Consolas", monospace;
+  --font-display: 'DM Sans', system-ui, sans-serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
 
   /* Geometry */
   --radius-sm: 6px;
@@ -60,7 +60,7 @@
   --topbar-h: 72px;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   color-scheme: dark;
 
   --bg: #0f0c0a;
@@ -355,7 +355,7 @@ a {
 
 /* Wider invisible hit area */
 .sidebar-handle::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 -6px;
 }
@@ -478,7 +478,7 @@ a {
 }
 
 .ctrl-section__title::before {
-  content: "›";
+  content: '›';
   display: inline-block;
   margin-right: 6px;
   font-size: 14px;
@@ -929,7 +929,7 @@ details[open] > .ctrl-section__title::before {
 
 /* Chevron indicator */
 .diagnostics__label::before {
-  content: "›";
+  content: '›';
   display: inline-block;
   margin-right: 4px;
   font-size: 18px;
@@ -1068,7 +1068,7 @@ details[open] > .ctrl-section__title::before {
 }
 
 .viewport::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0;
   border-radius: var(--radius-md);
@@ -1274,7 +1274,7 @@ details[open] > .ctrl-section__title::before {
 }
 
 .compare-summary__label::before {
-  content: "›";
+  content: '›';
   display: inline-block;
   margin-right: 4px;
   font-size: 18px;

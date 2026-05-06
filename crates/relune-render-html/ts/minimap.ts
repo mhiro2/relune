@@ -129,8 +129,8 @@ interface MinimapNode {
     }
 
     hostSvg.addEventListener('click', (event: MouseEvent) => {
-      const bounds = runtime.viewport?.getDiagramBounds();
-      if (bounds === null || bounds === undefined) {
+      const clickBounds = runtime.viewport?.getDiagramBounds();
+      if (clickBounds === null || clickBounds === undefined) {
         return;
       }
 
@@ -142,8 +142,8 @@ interface MinimapNode {
       const percentX = (event.clientX - rect.left) / rect.width;
       const percentY = (event.clientY - rect.top) / rect.height;
       runtime.viewport?.center(
-        bounds.x + bounds.width * percentX,
-        bounds.y + bounds.height * percentY,
+        clickBounds.x + clickBounds.width * percentX,
+        clickBounds.y + clickBounds.height * percentY,
       );
     });
   }

@@ -1,11 +1,11 @@
+import type { HoverPreview, NeighborHighlight } from './highlight_actions';
+import type { HighlightState } from './highlight_state';
 import {
   tableDisplayName,
   type EdgeMetadata,
   type IssueMetadata,
   type TableMetadata,
 } from './metadata';
-import type { HighlightState } from './highlight_state';
-import type { HoverPreview, NeighborHighlight } from './highlight_actions';
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 

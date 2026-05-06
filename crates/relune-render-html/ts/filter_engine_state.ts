@@ -71,7 +71,7 @@ function buildFacet(
     }
   }
 
-  const allValues = [...valueSet].sort((a, b) =>
+  const allValues = [...valueSet].toSorted((a, b) =>
     a.localeCompare(b, undefined, { sensitivity: 'base' }),
   );
 
@@ -189,7 +189,7 @@ export function activeFilterSummary(state: FilterEngineState): FacetSummaryItem[
         facetId: facet.id,
         label: facet.label,
         count: facet.selectedValues.size,
-        values: [...facet.selectedValues].sort(),
+        values: [...facet.selectedValues].toSorted(),
       });
     }
   }

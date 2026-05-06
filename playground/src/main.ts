@@ -7,21 +7,21 @@ import initWasm, {
   review_from_sql,
   set_panic_hook,
   version,
-} from "../pkg/relune_wasm.js";
-import { createSqlEditor } from "./editor.js";
+} from '../pkg/relune_wasm.js';
+import { createSqlEditor } from './editor.js';
 
-type ExampleId = "simple-blog" | "ecommerce" | "multi-schema" | "custom";
-type Theme = "light" | "dark";
-type LayoutAlgorithm = "hierarchical" | "force-directed";
-type LayoutDirection = "top-to-bottom" | "left-to-right" | "right-to-left" | "bottom-to-top";
-type EdgeStyle = "curved" | "orthogonal" | "straight";
-type GroupBy = "none" | "schema" | "prefix";
-type WorkbenchMode = "render" | "inspect" | "export" | "lint" | "compare";
-type ExportFormat = "schema-json" | "graph-json" | "layout-json" | "mermaid" | "d2" | "dot";
-type CompareView = "visual" | "text" | "markdown" | "json" | "review";
-type ReviewDialect = "auto" | "postgres" | "mysql" | "sqlite";
+type ExampleId = 'simple-blog' | 'ecommerce' | 'multi-schema' | 'custom';
+type Theme = 'light' | 'dark';
+type LayoutAlgorithm = 'hierarchical' | 'force-directed';
+type LayoutDirection = 'top-to-bottom' | 'left-to-right' | 'right-to-left' | 'bottom-to-top';
+type EdgeStyle = 'curved' | 'orthogonal' | 'straight';
+type GroupBy = 'none' | 'schema' | 'prefix';
+type WorkbenchMode = 'render' | 'inspect' | 'export' | 'lint' | 'compare';
+type ExportFormat = 'schema-json' | 'graph-json' | 'layout-json' | 'mermaid' | 'd2' | 'dot';
+type CompareView = 'visual' | 'text' | 'markdown' | 'json' | 'review';
+type ReviewDialect = 'auto' | 'postgres' | 'mysql' | 'sqlite';
 type ViewpointId = string;
-type WasmSeverity = "error" | "warning" | "info" | "hint";
+type WasmSeverity = 'error' | 'warning' | 'info' | 'hint';
 
 type WasmDiagnosticCode = {
   prefix: string;
@@ -208,7 +208,7 @@ type WasmDiffResult = {
   content?: string | null;
 };
 
-type ReviewSeverity = "breaking" | "caution" | "warning" | "info";
+type ReviewSeverity = 'breaking' | 'caution' | 'warning' | 'info';
 
 type ReviewFinding = {
   rule_id: string;
@@ -279,7 +279,7 @@ type PersistedState = {
 };
 
 type ExampleDefinition = {
-  id: Exclude<ExampleId, "custom">;
+  id: Exclude<ExampleId, 'custom'>;
   label: string;
   path: string;
 };
@@ -308,103 +308,103 @@ type ButtonAction = {
   run: () => void | Promise<void>;
 };
 
-const STORAGE_KEY = "relune-schema-workbench:v1";
-const CUSTOM_EXAMPLE_ID = "custom";
-const DEFAULT_EXAMPLE_ID: Exclude<ExampleId, "custom"> = "simple-blog";
-const MANUAL_VIEWPOINT_ID = "";
-const MANUAL_VIEWPOINT_LABEL = "Manual controls";
+const STORAGE_KEY = 'relune-schema-workbench:v1';
+const CUSTOM_EXAMPLE_ID = 'custom';
+const DEFAULT_EXAMPLE_ID: Exclude<ExampleId, 'custom'> = 'simple-blog';
+const MANUAL_VIEWPOINT_ID = '';
+const MANUAL_VIEWPOINT_LABEL = 'Manual controls';
 const SIDEBAR_DEFAULT = 380;
 
 const DEFAULT_MANUAL_VIEW_STATE: Readonly<ManualViewState> = {
-  groupBy: "none",
-  focusTable: "",
-  depth: "1",
-  includeTables: "",
-  excludeTables: "",
+  groupBy: 'none',
+  focusTable: '',
+  depth: '1',
+  includeTables: '',
+  excludeTables: '',
 };
 
 const EXAMPLES: readonly ExampleDefinition[] = [
   {
-    id: "simple-blog",
-    label: "Simple Blog",
-    path: "./examples/simple_blog.sql",
+    id: 'simple-blog',
+    label: 'Simple Blog',
+    path: './examples/simple_blog.sql',
   },
   {
-    id: "ecommerce",
-    label: "Ecommerce",
-    path: "./examples/ecommerce.sql",
+    id: 'ecommerce',
+    label: 'Ecommerce',
+    path: './examples/ecommerce.sql',
   },
   {
-    id: "multi-schema",
-    label: "Multi Schema",
-    path: "./examples/multi_schema.sql",
+    id: 'multi-schema',
+    label: 'Multi Schema',
+    path: './examples/multi_schema.sql',
   },
 ] as const;
 
-const VIEWPOINTS: Record<Exclude<ExampleId, "custom">, readonly ViewpointDefinition[]> = {
-  "simple-blog": [
+const VIEWPOINTS: Record<Exclude<ExampleId, 'custom'>, readonly ViewpointDefinition[]> = {
+  'simple-blog': [
     {
-      id: "authoring",
-      label: "Authoring",
-      description: "Posts with their authors and comments.",
-      groupBy: "none",
-      focusTable: "posts",
+      id: 'authoring',
+      label: 'Authoring',
+      description: 'Posts with their authors and comments.',
+      groupBy: 'none',
+      focusTable: 'posts',
       depth: 1,
-      includeTables: ["users", "posts", "comments"],
+      includeTables: ['users', 'posts', 'comments'],
       excludeTables: [],
     },
     {
-      id: "community",
-      label: "Community",
-      description: "Comment moderation around users and posts.",
-      groupBy: "none",
-      focusTable: "comments",
+      id: 'community',
+      label: 'Community',
+      description: 'Comment moderation around users and posts.',
+      groupBy: 'none',
+      focusTable: 'comments',
       depth: 1,
-      includeTables: ["comments", "posts", "users"],
+      includeTables: ['comments', 'posts', 'users'],
       excludeTables: [],
     },
   ],
   ecommerce: [
     {
-      id: "billing",
-      label: "Billing",
-      description: "Orders, payments, and purchased products.",
-      groupBy: "none",
-      focusTable: "orders",
+      id: 'billing',
+      label: 'Billing',
+      description: 'Orders, payments, and purchased products.',
+      groupBy: 'none',
+      focusTable: 'orders',
       depth: 1,
-      includeTables: ["orders", "order_items", "payments", "products", "users"],
+      includeTables: ['orders', 'order_items', 'payments', 'products', 'users'],
       excludeTables: [],
     },
     {
-      id: "catalog",
-      label: "Catalog",
-      description: "Products and categories around order lines.",
-      groupBy: "none",
-      focusTable: "products",
+      id: 'catalog',
+      label: 'Catalog',
+      description: 'Products and categories around order lines.',
+      groupBy: 'none',
+      focusTable: 'products',
       depth: 1,
-      includeTables: ["products", "categories", "order_items"],
-      excludeTables: ["payments"],
+      includeTables: ['products', 'categories', 'order_items'],
+      excludeTables: ['payments'],
     },
   ],
-  "multi-schema": [
+  'multi-schema': [
     {
-      id: "sales",
-      label: "Sales",
-      description: "Schema-scoped sales flow with grouped tables.",
-      groupBy: "schema",
-      focusTable: "sales.orders",
+      id: 'sales',
+      label: 'Sales',
+      description: 'Schema-scoped sales flow with grouped tables.',
+      groupBy: 'schema',
+      focusTable: 'sales.orders',
       depth: 1,
-      includeTables: ["sales.*"],
+      includeTables: ['sales.*'],
       excludeTables: [],
     },
     {
-      id: "inventory",
-      label: "Inventory",
-      description: "Products and stock relationships inside the inventory schema.",
-      groupBy: "schema",
-      focusTable: "inventory.products",
+      id: 'inventory',
+      label: 'Inventory',
+      description: 'Products and stock relationships inside the inventory schema.',
+      groupBy: 'schema',
+      focusTable: 'inventory.products',
       depth: 1,
-      includeTables: ["inventory.*"],
+      includeTables: ['inventory.*'],
       excludeTables: [],
     },
   ],
@@ -420,148 +420,148 @@ const MODE_META: Record<
   }
 > = {
   render: {
-    label: "Render",
-    title: "Schema Preview",
-    description: "Render deterministic viewer HTML and SVG with the same WASM engine as the CLI.",
-    actionLabel: "Render",
+    label: 'Render',
+    title: 'Schema Preview',
+    description: 'Render deterministic viewer HTML and SVG with the same WASM engine as the CLI.',
+    actionLabel: 'Render',
   },
   inspect: {
-    label: "Inspect",
-    title: "Schema Inventory",
-    description: "Explore schema counts, table inventory, and table details from one SQL input.",
-    actionLabel: "Inspect",
+    label: 'Inspect',
+    title: 'Schema Inventory',
+    description: 'Explore schema counts, table inventory, and table details from one SQL input.',
+    actionLabel: 'Inspect',
   },
   export: {
-    label: "Export",
-    title: "Portable Schema Outputs",
-    description: "Export normalized schema data, graph data, and documentation-friendly sources.",
-    actionLabel: "Export",
+    label: 'Export',
+    title: 'Portable Schema Outputs',
+    description: 'Export normalized schema data, graph data, and documentation-friendly sources.',
+    actionLabel: 'Export',
   },
   lint: {
-    label: "Lint",
-    title: "Schema Review",
+    label: 'Lint',
+    title: 'Schema Review',
     description:
-      "Review lint issues and parser diagnostics as a schema workbench, not just a demo viewer.",
-    actionLabel: "Lint",
+      'Review lint issues and parser diagnostics as a schema workbench, not just a demo viewer.',
+    actionLabel: 'Lint',
   },
   compare: {
-    label: "Compare",
-    title: "Before / After Diff",
+    label: 'Compare',
+    title: 'Before / After Diff',
     description:
-      "Keep before and after separate, then inspect visual or structured changes without crowding the viewer mode.",
-    actionLabel: "Compare",
+      'Keep before and after separate, then inspect visual or structured changes without crowding the viewer mode.',
+    actionLabel: 'Compare',
   },
 };
 
 const DEFAULT_STATE: PersistedState = {
   example: DEFAULT_EXAMPLE_ID,
-  mode: "render",
-  theme: "light",
-  layout: "hierarchical",
-  direction: "top-to-bottom",
-  edgeStyle: "curved",
+  mode: 'render',
+  theme: 'light',
+  layout: 'hierarchical',
+  direction: 'top-to-bottom',
+  edgeStyle: 'curved',
   viewpoint: MANUAL_VIEWPOINT_ID,
-  groupBy: "none",
-  focusTable: "",
-  depth: "1",
-  includeTables: "",
-  excludeTables: "",
-  exportFormat: "schema-json",
-  inspectTable: "",
-  lintRules: "",
-  compareView: "visual",
-  compareReviewDialect: "auto",
-  sql: "",
-  compareBeforeSql: "",
-  compareAfterSql: "",
+  groupBy: 'none',
+  focusTable: '',
+  depth: '1',
+  includeTables: '',
+  excludeTables: '',
+  exportFormat: 'schema-json',
+  inspectTable: '',
+  lintRules: '',
+  compareView: 'visual',
+  compareReviewDialect: 'auto',
+  sql: '',
+  compareBeforeSql: '',
+  compareAfterSql: '',
 };
 
-const exampleSelect = getElement<HTMLSelectElement>("example-select");
-const themeSelect = getElement<HTMLSelectElement>("theme-select");
-const layoutSelect = getElement<HTMLSelectElement>("layout-select");
-const directionSelect = getElement<HTMLSelectElement>("direction-select");
-const edgeStyleSelect = getElement<HTMLSelectElement>("edge-style-select");
-const groupBySelect = getElement<HTMLSelectElement>("group-by-select");
-const viewpointSelect = getElement<HTMLSelectElement>("viewpoint-select");
-const viewpointHint = getElement<HTMLElement>("viewpoint-hint");
-const focusTableInput = getElement<HTMLInputElement>("focus-table-input");
-const depthInput = getElement<HTMLInputElement>("depth-input");
-const includeTablesInput = getElement<HTMLInputElement>("include-tables-input");
-const excludeTablesInput = getElement<HTMLInputElement>("exclude-tables-input");
-const inspectTableSelect = getElement<HTMLSelectElement>("inspect-table-select");
-const exportFormatSelect = getElement<HTMLSelectElement>("export-format-select");
-const lintRulesInput = getElement<HTMLInputElement>("lint-rules-input");
-const compareFormatSelect = getElement<HTMLSelectElement>("compare-format-select");
-const compareReviewDialectSelect = getElement<HTMLSelectElement>("compare-review-dialect-select");
-const compareReviewDialectRow = getElement<HTMLElement>("compare-review-dialect-row");
+const exampleSelect = getElement<HTMLSelectElement>('example-select');
+const themeSelect = getElement<HTMLSelectElement>('theme-select');
+const layoutSelect = getElement<HTMLSelectElement>('layout-select');
+const directionSelect = getElement<HTMLSelectElement>('direction-select');
+const edgeStyleSelect = getElement<HTMLSelectElement>('edge-style-select');
+const groupBySelect = getElement<HTMLSelectElement>('group-by-select');
+const viewpointSelect = getElement<HTMLSelectElement>('viewpoint-select');
+const viewpointHint = getElement<HTMLElement>('viewpoint-hint');
+const focusTableInput = getElement<HTMLInputElement>('focus-table-input');
+const depthInput = getElement<HTMLInputElement>('depth-input');
+const includeTablesInput = getElement<HTMLInputElement>('include-tables-input');
+const excludeTablesInput = getElement<HTMLInputElement>('exclude-tables-input');
+const inspectTableSelect = getElement<HTMLSelectElement>('inspect-table-select');
+const exportFormatSelect = getElement<HTMLSelectElement>('export-format-select');
+const lintRulesInput = getElement<HTMLInputElement>('lint-rules-input');
+const compareFormatSelect = getElement<HTMLSelectElement>('compare-format-select');
+const compareReviewDialectSelect = getElement<HTMLSelectElement>('compare-review-dialect-select');
+const compareReviewDialectRow = getElement<HTMLElement>('compare-review-dialect-row');
 
-const appearanceSection = getElement<HTMLElement>("appearance-section");
-const layoutSection = getElement<HTMLElement>("layout-section");
-const scopeSection = getElement<HTMLElement>("scope-section");
-const inspectSection = getElement<HTMLElement>("inspect-section");
-const exportSection = getElement<HTMLElement>("export-section");
-const lintSection = getElement<HTMLElement>("lint-section");
-const compareSection = getElement<HTMLElement>("compare-section");
-const viewpointRow = getElement<HTMLElement>("viewpoint-row");
-const focusRow = getElement<HTMLElement>("focus-row");
+const appearanceSection = getElement<HTMLElement>('appearance-section');
+const layoutSection = getElement<HTMLElement>('layout-section');
+const scopeSection = getElement<HTMLElement>('scope-section');
+const inspectSection = getElement<HTMLElement>('inspect-section');
+const exportSection = getElement<HTMLElement>('export-section');
+const lintSection = getElement<HTMLElement>('lint-section');
+const compareSection = getElement<HTMLElement>('compare-section');
+const viewpointRow = getElement<HTMLElement>('viewpoint-row');
+const focusRow = getElement<HTMLElement>('focus-row');
 
-const sqlEditorMount = getElement<HTMLDivElement>("sql-input");
-const compareBeforeMount = getElement<HTMLDivElement>("compare-before-input");
-const compareAfterMount = getElement<HTMLDivElement>("compare-after-input");
+const sqlEditorMount = getElement<HTMLDivElement>('sql-input');
+const compareBeforeMount = getElement<HTMLDivElement>('compare-before-input');
+const compareAfterMount = getElement<HTMLDivElement>('compare-after-input');
 const sqlEditor = createSqlEditor(sqlEditorMount);
 const compareBeforeEditor = createSqlEditor(compareBeforeMount);
 const compareAfterEditor = createSqlEditor(compareAfterMount);
 
-const singleEditorSection = getElement<HTMLElement>("single-editor-section");
-const compareEditorsSection = getElement<HTMLElement>("compare-editors-section");
-const modeHint = getElement<HTMLElement>("mode-hint");
-const modeTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".mode-tab"));
+const singleEditorSection = getElement<HTMLElement>('single-editor-section');
+const compareEditorsSection = getElement<HTMLElement>('compare-editors-section');
+const modeHint = getElement<HTMLElement>('mode-hint');
+const modeTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.mode-tab'));
 
-const resetExampleButton = getElement<HTMLButtonElement>("reset-example");
-const renderNowButton = getElement<HTMLButtonElement>("render-now");
-const copyOutputButton = getElement<HTMLButtonElement>("copy-output");
-const downloadPrimaryButton = getElement<HTMLButtonElement>("download-html");
-const downloadSecondaryButton = getElement<HTMLButtonElement>("download-svg");
-const renderStatus = getElement<HTMLElement>("render-status");
-const versionPill = getElement<HTMLElement>("version-pill");
-const errorBox = getElement<HTMLElement>("error-box");
-const statsGrid = getElement<HTMLElement>("stats-grid");
-const diagnosticCount = getElement<HTMLElement>("diagnostic-count");
-const diagnosticList = getElement<HTMLUListElement>("diagnostic-list");
-const previewPanel = getElement<HTMLElement>("preview-panel");
-const previewFrame = getElement<HTMLIFrameElement>("preview-frame");
+const resetExampleButton = getElement<HTMLButtonElement>('reset-example');
+const renderNowButton = getElement<HTMLButtonElement>('render-now');
+const copyOutputButton = getElement<HTMLButtonElement>('copy-output');
+const downloadPrimaryButton = getElement<HTMLButtonElement>('download-html');
+const downloadSecondaryButton = getElement<HTMLButtonElement>('download-svg');
+const renderStatus = getElement<HTMLElement>('render-status');
+const versionPill = getElement<HTMLElement>('version-pill');
+const errorBox = getElement<HTMLElement>('error-box');
+const statsGrid = getElement<HTMLElement>('stats-grid');
+const diagnosticCount = getElement<HTMLElement>('diagnostic-count');
+const diagnosticList = getElement<HTMLUListElement>('diagnostic-list');
+const previewPanel = getElement<HTMLElement>('preview-panel');
+const previewFrame = getElement<HTMLIFrameElement>('preview-frame');
 
-const surfaceEyebrow = getElement<HTMLElement>("surface-eyebrow");
-const surfaceTitle = getElement<HTMLElement>("surface-title");
-const surfaceDescription = getElement<HTMLElement>("surface-description");
-const inspectPanel = getElement<HTMLElement>("inspect-panel");
-const inspectTableList = getElement<HTMLUListElement>("inspect-table-list");
-const inspectDetail = getElement<HTMLElement>("inspect-detail");
-const lintPanel = getElement<HTMLElement>("lint-panel");
-const lintIssueList = getElement<HTMLUListElement>("lint-issue-list");
-const compareSummaryPanel = getElement<HTMLElement>("compare-summary-panel");
-const compareSummary = getElement<HTMLElement>("compare-summary");
-const compareSummaryCount = getElement<HTMLElement>("compare-summary-count");
-const compareObjectList = getElement<HTMLUListElement>("compare-object-list");
-const reviewPanel = getElement<HTMLElement>("review-panel");
-const reviewSummaryBadges = getElement<HTMLElement>("review-summary-badges");
-const reviewDialectNote = getElement<HTMLElement>("review-dialect-note");
-const reviewFindingList = getElement<HTMLUListElement>("review-finding-list");
-const reviewSuppressedPanel = getElement<HTMLDetailsElement>("review-suppressed-panel");
-const reviewSuppressedList = getElement<HTMLUListElement>("review-suppressed-list");
-const textOutputPanel = getElement<HTMLElement>("text-output-panel");
-const textOutputLabel = getElement<HTMLElement>("text-output-label");
-const textOutputMeta = getElement<HTMLElement>("text-output-meta");
-const textOutput = getElement<HTMLElement>("text-output");
+const surfaceEyebrow = getElement<HTMLElement>('surface-eyebrow');
+const surfaceTitle = getElement<HTMLElement>('surface-title');
+const surfaceDescription = getElement<HTMLElement>('surface-description');
+const inspectPanel = getElement<HTMLElement>('inspect-panel');
+const inspectTableList = getElement<HTMLUListElement>('inspect-table-list');
+const inspectDetail = getElement<HTMLElement>('inspect-detail');
+const lintPanel = getElement<HTMLElement>('lint-panel');
+const lintIssueList = getElement<HTMLUListElement>('lint-issue-list');
+const compareSummaryPanel = getElement<HTMLElement>('compare-summary-panel');
+const compareSummary = getElement<HTMLElement>('compare-summary');
+const compareSummaryCount = getElement<HTMLElement>('compare-summary-count');
+const compareObjectList = getElement<HTMLUListElement>('compare-object-list');
+const reviewPanel = getElement<HTMLElement>('review-panel');
+const reviewSummaryBadges = getElement<HTMLElement>('review-summary-badges');
+const reviewDialectNote = getElement<HTMLElement>('review-dialect-note');
+const reviewFindingList = getElement<HTMLUListElement>('review-finding-list');
+const reviewSuppressedPanel = getElement<HTMLDetailsElement>('review-suppressed-panel');
+const reviewSuppressedList = getElement<HTMLUListElement>('review-suppressed-list');
+const textOutputPanel = getElement<HTMLElement>('text-output-panel');
+const textOutputLabel = getElement<HTMLElement>('text-output-label');
+const textOutputMeta = getElement<HTMLElement>('text-output-meta');
+const textOutput = getElement<HTMLElement>('text-output');
 
-const sidebar = getElement<HTMLElement>("sidebar");
-const sidebarHandle = getElement<HTMLElement>("sidebar-handle");
-const sidebarCollapseButton = getElement<HTMLButtonElement>("sidebar-collapse");
-const sidebarExpandButton = getElement<HTMLButtonElement>("sidebar-expand");
-const editorExpandButton = getElement<HTMLButtonElement>("editor-expand");
-const sidebarScroll = document.querySelector<HTMLElement>(".sidebar__scroll")!;
+const sidebar = getElement<HTMLElement>('sidebar');
+const sidebarHandle = getElement<HTMLElement>('sidebar-handle');
+const sidebarCollapseButton = getElement<HTMLButtonElement>('sidebar-collapse');
+const sidebarExpandButton = getElement<HTMLButtonElement>('sidebar-expand');
+const editorExpandButton = getElement<HTMLButtonElement>('editor-expand');
+const sidebarScroll = document.querySelector<HTMLElement>('.sidebar__scroll')!;
 
-const exampleSql = new Map<Exclude<ExampleId, "custom">, string>();
+const exampleSql = new Map<Exclude<ExampleId, 'custom'>, string>();
 const manualViewStateByExample = new Map<ExampleId, ManualViewState>();
 
 let currentMode: WorkbenchMode = DEFAULT_STATE.mode;
@@ -579,7 +579,7 @@ void bootstrap();
 
 async function bootstrap(): Promise<void> {
   try {
-    setStatus("Loading WASM runtime…");
+    setStatus('Loading WASM runtime…');
     setActionButtonsDisabled(true);
     await loadExamples();
     restoreInitialState();
@@ -590,7 +590,7 @@ async function bootstrap(): Promise<void> {
     scheduleWorkbench(0);
   } catch (error) {
     showError(normalizeError(error));
-    setStatus("Runtime failed");
+    setStatus('Runtime failed');
   }
 }
 
@@ -599,7 +599,7 @@ function populateExampleOptions(): void {
     (example) => `<option value="${example.id}">${escapeHtml(example.label)}</option>`,
   );
   options.push(`<option value="${CUSTOM_EXAMPLE_ID}">Custom</option>`);
-  exampleSelect.innerHTML = options.join("");
+  exampleSelect.innerHTML = options.join('');
 }
 
 function getViewpoints(example: ExampleId): readonly ViewpointDefinition[] {
@@ -626,7 +626,7 @@ function populateViewpointOptions(example: ExampleId, preferredViewpoint: Viewpo
     ),
   ];
 
-  viewpointSelect.innerHTML = options.join("");
+  viewpointSelect.innerHTML = options.join('');
   viewpointSelect.disabled = viewpoints.length === 0;
   viewpointSelect.value = findViewpoint(example, preferredViewpoint)?.id ?? MANUAL_VIEWPOINT_ID;
   updateViewpointHint();
@@ -643,8 +643,8 @@ function updateViewpointHint(): void {
 
   viewpointHint.textContent =
     viewpoints.length === 0
-      ? "Manual controls edit focus, filters, and grouping directly for custom SQL."
-      : "Built-in presets are scoped to the selected example. Switch to Manual controls to edit focus, filters, and grouping yourself.";
+      ? 'Manual controls edit focus, filters, and grouping directly for custom SQL.'
+      : 'Built-in presets are scoped to the selected example. Switch to Manual controls to edit focus, filters, and grouping yourself.';
 }
 
 function getSelectedViewpoint(): ViewpointDefinition | undefined {
@@ -652,7 +652,7 @@ function getSelectedViewpoint(): ViewpointDefinition | undefined {
 }
 
 function serializePatterns(patterns: readonly string[]): string {
-  return patterns.join(", ");
+  return patterns.join(', ');
 }
 
 function cloneManualViewState(state: Readonly<ManualViewState>): ManualViewState {
@@ -758,7 +758,7 @@ function restoreInitialState(): void {
   };
 
   if (initialState.example !== CUSTOM_EXAMPLE_ID) {
-    initialState.sql = exampleSql.get(toBuiltinExampleId(initialState.example)) ?? "";
+    initialState.sql = exampleSql.get(toBuiltinExampleId(initialState.example)) ?? '';
     if (!initialState.compareBeforeSql) {
       initialState.compareBeforeSql = initialState.sql;
     }
@@ -768,7 +768,7 @@ function restoreInitialState(): void {
   }
 
   if (!initialState.sql) {
-    initialState.sql = exampleSql.get(DEFAULT_EXAMPLE_ID) ?? "";
+    initialState.sql = exampleSql.get(DEFAULT_EXAMPLE_ID) ?? '';
   }
   if (!initialState.compareBeforeSql) {
     initialState.compareBeforeSql = initialState.sql;
@@ -783,19 +783,19 @@ function restoreInitialState(): void {
 }
 
 function attachEventListeners(): void {
-  exampleSelect.addEventListener("change", handleExampleChange);
-  viewpointSelect.addEventListener("change", handleViewpointChange);
-  renderNowButton.addEventListener("click", () => {
+  exampleSelect.addEventListener('change', handleExampleChange);
+  viewpointSelect.addEventListener('change', handleViewpointChange);
+  renderNowButton.addEventListener('click', () => {
     void runWorkbench();
   });
-  resetExampleButton.addEventListener("click", resetExample);
-  copyOutputButton.addEventListener("click", () => {
+  resetExampleButton.addEventListener('click', resetExample);
+  copyOutputButton.addEventListener('click', () => {
     void copyAction?.run();
   });
-  downloadPrimaryButton.addEventListener("click", () => {
+  downloadPrimaryButton.addEventListener('click', () => {
     void primaryAction?.run();
   });
-  downloadSecondaryButton.addEventListener("click", () => {
+  downloadSecondaryButton.addEventListener('click', () => {
     void secondaryAction?.run();
   });
 
@@ -817,12 +817,12 @@ function attachEventListeners(): void {
   ];
 
   for (const control of controls) {
-    control.addEventListener("change", handleControlChange);
-    control.addEventListener("input", handleControlChange);
+    control.addEventListener('change', handleControlChange);
+    control.addEventListener('input', handleControlChange);
   }
 
   for (const tab of modeTabs) {
-    tab.addEventListener("click", () => {
+    tab.addEventListener('click', () => {
       const nextMode = tab.dataset.mode;
       if (isWorkbenchMode(nextMode)) {
         handleModeChange(nextMode);
@@ -843,9 +843,9 @@ function attachEventListeners(): void {
     handleEditorChange();
   });
 
-  sidebarCollapseButton.addEventListener("click", collapseSidebar);
-  sidebarExpandButton.addEventListener("click", expandSidebar);
-  editorExpandButton.addEventListener("click", toggleEditorExpand);
+  sidebarCollapseButton.addEventListener('click', collapseSidebar);
+  sidebarExpandButton.addEventListener('click', expandSidebar);
+  editorExpandButton.addEventListener('click', toggleEditorExpand);
   initSidebarResize();
 }
 
@@ -855,11 +855,11 @@ function handleModeChange(mode: WorkbenchMode): void {
   }
 
   if (
-    mode === "compare" &&
+    mode === 'compare' &&
     !compareBeforeEditor.getValue().trim() &&
     !compareAfterEditor.getValue().trim()
   ) {
-    const seedSql = sqlEditor.getValue().trim() || exampleSql.get(DEFAULT_EXAMPLE_ID) || "";
+    const seedSql = sqlEditor.getValue().trim() || exampleSql.get(DEFAULT_EXAMPLE_ID) || '';
     compareBeforeEditor.setValue(seedSql);
     compareAfterEditor.setValue(seedSql);
   }
@@ -871,7 +871,7 @@ function handleModeChange(mode: WorkbenchMode): void {
 }
 
 function handleEditorChange(): void {
-  if (currentMode !== "compare") {
+  if (currentMode !== 'compare') {
     syncViewpointSelectionWithControls();
     if (viewpointSelect.value === MANUAL_VIEWPOINT_ID) {
       storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
@@ -884,7 +884,7 @@ function handleEditorChange(): void {
 }
 
 function handleControlChange(): void {
-  if (currentMode !== "compare") {
+  if (currentMode !== 'compare') {
     syncViewpointSelectionWithControls();
     if (viewpointSelect.value === MANUAL_VIEWPOINT_ID) {
       storeManualViewState(exampleSelect.value as ExampleId, readManualViewStateFromControls());
@@ -909,7 +909,7 @@ function handleExampleChange(): void {
   }
 
   if (exampleSelect.value !== CUSTOM_EXAMPLE_ID) {
-    const sql = exampleSql.get(exampleSelect.value as Exclude<ExampleId, "custom">);
+    const sql = exampleSql.get(exampleSelect.value as Exclude<ExampleId, 'custom'>);
     if (sql) {
       syncEditorsWithExampleSql(sql);
     }
@@ -949,7 +949,7 @@ function resetExample(): void {
     restoreManualViewState(effectiveExample);
   }
 
-  const sql = exampleSql.get(effectiveExample) ?? "";
+  const sql = exampleSql.get(effectiveExample) ?? '';
   syncEditorsWithExampleSql(sql);
 
   previousViewpointId = viewpointSelect.value;
@@ -958,18 +958,18 @@ function resetExample(): void {
 }
 
 function collapseSidebar(): void {
-  sidebar.classList.add("is-collapsed");
+  sidebar.classList.add('is-collapsed');
 }
 
 function expandSidebar(): void {
-  sidebar.classList.remove("is-collapsed");
+  sidebar.classList.remove('is-collapsed');
   sidebar.style.width = `${SIDEBAR_DEFAULT}px`;
 }
 
 function toggleEditorExpand(): void {
-  const expanded = sidebarScroll.classList.toggle("is-editor-expanded");
-  editorExpandButton.setAttribute("aria-label", expanded ? "Collapse editor" : "Expand editor");
-  editorExpandButton.setAttribute("title", expanded ? "Collapse editor" : "Expand editor");
+  const expanded = sidebarScroll.classList.toggle('is-editor-expanded');
+  editorExpandButton.setAttribute('aria-label', expanded ? 'Collapse editor' : 'Expand editor');
+  editorExpandButton.setAttribute('title', expanded ? 'Collapse editor' : 'Expand editor');
 }
 
 function initSidebarResize(): void {
@@ -978,8 +978,8 @@ function initSidebarResize(): void {
   let startWidth = 0;
 
   function onPointerDown(event: PointerEvent): void {
-    if (sidebar.classList.contains("is-collapsed")) {
-      sidebar.classList.remove("is-collapsed");
+    if (sidebar.classList.contains('is-collapsed')) {
+      sidebar.classList.remove('is-collapsed');
       sidebar.style.width = `${SIDEBAR_DEFAULT}px`;
       return;
     }
@@ -988,10 +988,10 @@ function initSidebarResize(): void {
     startX = event.clientX;
     startWidth = sidebar.getBoundingClientRect().width;
 
-    sidebar.style.transition = "none";
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    previewFrame.style.pointerEvents = "none";
+    sidebar.style.transition = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    previewFrame.style.pointerEvents = 'none';
 
     sidebarHandle.setPointerCapture(event.pointerId);
   }
@@ -1012,22 +1012,22 @@ function initSidebarResize(): void {
     }
 
     dragging = false;
-    sidebar.style.transition = "";
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    previewFrame.style.pointerEvents = "";
+    sidebar.style.transition = '';
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    previewFrame.style.pointerEvents = '';
   }
 
   function onDoubleClick(): void {
-    sidebar.classList.remove("is-collapsed");
+    sidebar.classList.remove('is-collapsed');
     sidebar.style.width = `${SIDEBAR_DEFAULT}px`;
   }
 
-  sidebarHandle.addEventListener("pointerdown", onPointerDown);
-  sidebarHandle.addEventListener("pointermove", onPointerMove);
-  sidebarHandle.addEventListener("pointerup", onPointerUp);
-  sidebarHandle.addEventListener("pointercancel", onPointerUp);
-  sidebarHandle.addEventListener("dblclick", onDoubleClick);
+  sidebarHandle.addEventListener('pointerdown', onPointerDown);
+  sidebarHandle.addEventListener('pointermove', onPointerMove);
+  sidebarHandle.addEventListener('pointerup', onPointerUp);
+  sidebarHandle.addEventListener('pointercancel', onPointerUp);
+  sidebarHandle.addEventListener('dblclick', onDoubleClick);
 }
 
 function syncExampleSelectionWithActiveEditors(): void {
@@ -1042,7 +1042,7 @@ function syncExampleSelectionWithActiveEditors(): void {
 
   const builtinSql = selectedSql.trim();
   const matchesExample =
-    currentMode === "compare"
+    currentMode === 'compare'
       ? compareBeforeEditor.getValue().trim() === builtinSql &&
         compareAfterEditor.getValue().trim() === builtinSql
       : sqlEditor.getValue().trim() === builtinSql;
@@ -1099,37 +1099,37 @@ function applyModeVisibility(): void {
   renderNowButton.textContent = modeMeta.actionLabel;
 
   for (const tab of modeTabs) {
-    tab.classList.toggle("is-active", tab.dataset.mode === currentMode);
-    tab.setAttribute("aria-selected", `${tab.dataset.mode === currentMode}`);
+    tab.classList.toggle('is-active', tab.dataset.mode === currentMode);
+    tab.setAttribute('aria-selected', `${tab.dataset.mode === currentMode}`);
   }
 
   const usesVisualControls =
-    currentMode === "render" || currentMode === "export" || currentMode === "compare";
+    currentMode === 'render' || currentMode === 'export' || currentMode === 'compare';
   const usesScopeControls =
-    currentMode === "render" || currentMode === "export" || currentMode === "compare";
+    currentMode === 'render' || currentMode === 'export' || currentMode === 'compare';
 
   appearanceSection.hidden = !usesVisualControls;
   layoutSection.hidden = !usesVisualControls;
   scopeSection.hidden = !usesScopeControls;
-  inspectSection.hidden = currentMode !== "inspect";
-  exportSection.hidden = currentMode !== "export";
-  lintSection.hidden = currentMode !== "lint";
-  compareSection.hidden = currentMode !== "compare";
+  inspectSection.hidden = currentMode !== 'inspect';
+  exportSection.hidden = currentMode !== 'export';
+  lintSection.hidden = currentMode !== 'lint';
+  compareSection.hidden = currentMode !== 'compare';
   compareReviewDialectRow.hidden = !(
-    currentMode === "compare" && compareFormatSelect.value === "review"
+    currentMode === 'compare' && compareFormatSelect.value === 'review'
   );
-  viewpointRow.hidden = !(currentMode === "render" || currentMode === "export");
-  focusRow.hidden = currentMode === "compare";
+  viewpointRow.hidden = !(currentMode === 'render' || currentMode === 'export');
+  focusRow.hidden = currentMode === 'compare';
 
-  singleEditorSection.hidden = currentMode === "compare";
-  compareEditorsSection.hidden = currentMode !== "compare";
+  singleEditorSection.hidden = currentMode === 'compare';
+  compareEditorsSection.hidden = currentMode !== 'compare';
 
-  if (currentMode === "compare") {
-    previewFrame.title = "Relune diff preview";
-  } else if (currentMode === "render") {
-    previewFrame.title = "Relune HTML preview";
+  if (currentMode === 'compare') {
+    previewFrame.title = 'Relune diff preview';
+  } else if (currentMode === 'render') {
+    previewFrame.title = 'Relune HTML preview';
   } else {
-    previewFrame.title = "Relune workbench output";
+    previewFrame.title = 'Relune workbench output';
   }
 }
 
@@ -1147,19 +1147,19 @@ async function runWorkbench(): Promise<void> {
 
   try {
     switch (currentMode) {
-      case "render":
+      case 'render':
         await runRenderMode(currentSerial);
         break;
-      case "inspect":
+      case 'inspect':
         await runInspectMode(currentSerial);
         break;
-      case "export":
+      case 'export':
         await runExportMode(currentSerial);
         break;
-      case "lint":
+      case 'lint':
         await runLintMode(currentSerial);
         break;
-      case "compare":
+      case 'compare':
         await runCompareMode(currentSerial);
         break;
     }
@@ -1179,13 +1179,13 @@ async function runWorkbench(): Promise<void> {
 async function runRenderMode(currentSerial: number): Promise<void> {
   const sql = sqlEditor.getValue().trim();
   if (!sql) {
-    showError({ message: "SQL input is empty." });
-    setStatus("Waiting for SQL");
+    showError({ message: 'SQL input is empty.' });
+    setStatus('Waiting for SQL');
     return;
   }
 
-  setStatus("Rendering…");
-  const result = render_from_sql(buildRenderRequest("html")) as WasmRenderResult;
+  setStatus('Rendering…');
+  const result = render_from_sql(buildRenderRequest('html')) as WasmRenderResult;
   if (currentSerial !== renderSerial) {
     return;
   }
@@ -1194,30 +1194,30 @@ async function runRenderMode(currentSerial: number): Promise<void> {
   void previewPanel.offsetHeight;
   previewFrame.srcdoc = result.content;
   renderMetricCards([
-    ["Tables", `${result.stats.table_count}`],
-    ["Columns", `${result.stats.column_count}`],
-    ["Edges", `${result.stats.edge_count}`],
-    ["Views", `${result.stats.view_count}`],
-    ["Parse", formatDuration(result.stats.parse_time)],
-    ["Graph", formatDuration(result.stats.graph_time)],
-    ["Layout", formatDuration(result.stats.layout_time)],
-    ["Render", formatDuration(result.stats.render_time)],
+    ['Tables', `${result.stats.table_count}`],
+    ['Columns', `${result.stats.column_count}`],
+    ['Edges', `${result.stats.edge_count}`],
+    ['Views', `${result.stats.view_count}`],
+    ['Parse', formatDuration(result.stats.parse_time)],
+    ['Graph', formatDuration(result.stats.graph_time)],
+    ['Layout', formatDuration(result.stats.layout_time)],
+    ['Render', formatDuration(result.stats.render_time)],
   ]);
   renderDiagnostics(result.diagnostics);
   configureActions({
     copy: {
-      label: "Copy HTML",
-      run: () => copyText(result.content, "Copied HTML"),
+      label: 'Copy HTML',
+      run: () => copyText(result.content, 'Copied HTML'),
     },
     primary: {
-      label: "HTML",
-      run: () => downloadText("relune-workbench.html", result.content, "text/html;charset=utf-8"),
+      label: 'HTML',
+      run: () => downloadText('relune-workbench.html', result.content, 'text/html;charset=utf-8'),
     },
     secondary: {
-      label: "SVG",
+      label: 'SVG',
       run: () => {
-        const svgResult = render_from_sql(buildRenderRequest("svg")) as { content: string };
-        downloadText("relune-workbench.svg", svgResult.content, "image/svg+xml;charset=utf-8");
+        const svgResult = render_from_sql(buildRenderRequest('svg')) as { content: string };
+        downloadText('relune-workbench.svg', svgResult.content, 'image/svg+xml;charset=utf-8');
       },
     },
   });
@@ -1227,15 +1227,15 @@ async function runRenderMode(currentSerial: number): Promise<void> {
 async function runInspectMode(currentSerial: number): Promise<void> {
   const sql = sqlEditor.getValue().trim();
   if (!sql) {
-    showError({ message: "SQL input is empty." });
-    setStatus("Waiting for SQL");
+    showError({ message: 'SQL input is empty.' });
+    setStatus('Waiting for SQL');
     return;
   }
 
-  setStatus("Inspecting…");
+  setStatus('Inspecting…');
   const summaryResult = inspect_from_sql({
     sql: sqlEditor.getValue(),
-    format: "json",
+    format: 'json',
   }) as WasmInspectResult;
   if (currentSerial !== renderSerial) {
     return;
@@ -1244,7 +1244,7 @@ async function runInspectMode(currentSerial: number): Promise<void> {
   const tableNames = summaryResult.summary.tables.map((table) => table.name);
   const selectedTable = tableNames.includes(inspectTableSelect.value)
     ? inspectTableSelect.value
-    : "";
+    : '';
   populateInspectTableOptions(tableNames, selectedTable);
 
   const detailResult =
@@ -1252,7 +1252,7 @@ async function runInspectMode(currentSerial: number): Promise<void> {
       ? (inspect_from_sql({
           sql: sqlEditor.getValue(),
           table: selectedTable,
-          format: "json",
+          format: 'json',
         }) as WasmInspectResult)
       : summaryResult;
   if (currentSerial !== renderSerial) {
@@ -1261,60 +1261,60 @@ async function runInspectMode(currentSerial: number): Promise<void> {
 
   inspectPanel.hidden = false;
   renderMetricCards([
-    ["Tables", `${summaryResult.summary.table_count}`],
-    ["Columns", `${summaryResult.summary.column_count}`],
-    ["FKs", `${summaryResult.summary.foreign_key_count}`],
-    ["Indexes", `${summaryResult.summary.index_count}`],
-    ["Views", `${summaryResult.summary.view_count}`],
-    ["Enums", `${summaryResult.summary.enum_count}`],
-    ["No PK", `${summaryResult.summary.tables_without_pk}`],
-    ["Isolated", `${summaryResult.summary.orphan_table_count}`],
+    ['Tables', `${summaryResult.summary.table_count}`],
+    ['Columns', `${summaryResult.summary.column_count}`],
+    ['FKs', `${summaryResult.summary.foreign_key_count}`],
+    ['Indexes', `${summaryResult.summary.index_count}`],
+    ['Views', `${summaryResult.summary.view_count}`],
+    ['Enums', `${summaryResult.summary.enum_count}`],
+    ['No PK', `${summaryResult.summary.tables_without_pk}`],
+    ['Isolated', `${summaryResult.summary.orphan_table_count}`],
   ]);
   renderDiagnostics(detailResult.diagnostics);
   renderInspectPanel(summaryResult.summary, detailResult.table ?? null, selectedTable);
   const inspectJson = JSON.stringify(detailResult, null, 2);
   configureActions({
     copy: {
-      label: "Copy JSON",
-      run: () => copyText(inspectJson, "Copied inspect JSON"),
+      label: 'Copy JSON',
+      run: () => copyText(inspectJson, 'Copied inspect JSON'),
     },
     primary: {
-      label: "JSON",
-      run: () => downloadText("relune-inspect.json", inspectJson, "application/json;charset=utf-8"),
+      label: 'JSON',
+      run: () => downloadText('relune-inspect.json', inspectJson, 'application/json;charset=utf-8'),
     },
   });
-  setStatus(selectedTable ? `Inspected ${selectedTable}` : "Inspected schema");
+  setStatus(selectedTable ? `Inspected ${selectedTable}` : 'Inspected schema');
 }
 
 async function runExportMode(currentSerial: number): Promise<void> {
   const sql = sqlEditor.getValue().trim();
   if (!sql) {
-    showError({ message: "SQL input is empty." });
-    setStatus("Waiting for SQL");
+    showError({ message: 'SQL input is empty.' });
+    setStatus('Waiting for SQL');
     return;
   }
 
-  setStatus("Exporting…");
+  setStatus('Exporting…');
   const result = export_from_sql(buildExportRequest()) as WasmExportResult;
   if (currentSerial !== renderSerial) {
     return;
   }
 
   renderMetricCards([
-    ["Tables", `${result.stats.table_count}`],
-    ["Columns", `${result.stats.column_count}`],
-    ["FKs", `${result.stats.foreign_key_count}`],
-    ["Views", `${result.stats.view_count}`],
+    ['Tables', `${result.stats.table_count}`],
+    ['Columns', `${result.stats.column_count}`],
+    ['FKs', `${result.stats.foreign_key_count}`],
+    ['Views', `${result.stats.view_count}`],
   ]);
   renderDiagnostics(result.diagnostics);
   showTextOutput(exportFormatLabel(), result.content);
   configureActions({
     copy: {
-      label: "Copy output",
-      run: () => copyText(result.content, "Copied export output"),
+      label: 'Copy output',
+      run: () => copyText(result.content, 'Copied export output'),
     },
     primary: {
-      label: "Download",
+      label: 'Download',
       run: () => downloadText(exportFilename(), result.content, exportMimeType()),
     },
   });
@@ -1324,15 +1324,15 @@ async function runExportMode(currentSerial: number): Promise<void> {
 async function runLintMode(currentSerial: number): Promise<void> {
   const sql = sqlEditor.getValue().trim();
   if (!sql) {
-    showError({ message: "SQL input is empty." });
-    setStatus("Waiting for SQL");
+    showError({ message: 'SQL input is empty.' });
+    setStatus('Waiting for SQL');
     return;
   }
 
-  setStatus("Linting…");
+  setStatus('Linting…');
   const result = lint_from_sql({
     sql: sqlEditor.getValue(),
-    format: "json",
+    format: 'json',
     rules: splitPatterns(lintRulesInput.value),
   }) as WasmLintResult;
   if (currentSerial !== renderSerial) {
@@ -1341,127 +1341,127 @@ async function runLintMode(currentSerial: number): Promise<void> {
 
   lintPanel.hidden = false;
   renderMetricCards([
-    ["Total", `${result.stats.total}`],
-    ["Errors", `${result.stats.errors}`],
-    ["Warnings", `${result.stats.warnings}`],
-    ["Info", `${result.stats.infos}`],
-    ["Hints", `${result.stats.hints}`],
+    ['Total', `${result.stats.total}`],
+    ['Errors', `${result.stats.errors}`],
+    ['Warnings', `${result.stats.warnings}`],
+    ['Info', `${result.stats.infos}`],
+    ['Hints', `${result.stats.hints}`],
   ]);
   renderDiagnostics(result.diagnostics);
   renderLintPanel(result.issues);
   const lintJson = JSON.stringify(result, null, 2);
   configureActions({
     copy: {
-      label: "Copy JSON",
-      run: () => copyText(lintJson, "Copied lint JSON"),
+      label: 'Copy JSON',
+      run: () => copyText(lintJson, 'Copied lint JSON'),
     },
     primary: {
-      label: "JSON",
-      run: () => downloadText("relune-lint.json", lintJson, "application/json;charset=utf-8"),
+      label: 'JSON',
+      run: () => downloadText('relune-lint.json', lintJson, 'application/json;charset=utf-8'),
     },
   });
-  setStatus(result.stats.total === 0 ? "No lint issues" : `${result.stats.total} issues found`);
+  setStatus(result.stats.total === 0 ? 'No lint issues' : `${result.stats.total} issues found`);
 }
 
 async function runCompareMode(currentSerial: number): Promise<void> {
   const beforeSql = compareBeforeEditor.getValue().trim();
   const afterSql = compareAfterEditor.getValue().trim();
   if (!beforeSql || !afterSql) {
-    showError({ message: "Both before and after SQL inputs are required." });
-    setStatus("Waiting for before / after SQL");
+    showError({ message: 'Both before and after SQL inputs are required.' });
+    setStatus('Waiting for before / after SQL');
     return;
   }
 
   const compareView = compareFormatSelect.value as CompareView;
 
-  if (compareView === "review") {
+  if (compareView === 'review') {
     await runReviewView(currentSerial);
     return;
   }
 
-  setStatus("Comparing…");
+  setStatus('Comparing…');
   const result = diff_from_sql(buildDiffRequest(compareView)) as WasmDiffResult;
   if (currentSerial !== renderSerial) {
     return;
   }
 
   renderMetricCards([
-    ["Tables +", `${result.diff.summary.tables_added}`],
-    ["Tables -", `${result.diff.summary.tables_removed}`],
-    ["Tables ~", `${result.diff.summary.tables_modified}`],
-    ["Columns", `${result.diff.summary.columns_changed}`],
-    ["FKs", `${result.diff.summary.foreign_keys_changed}`],
-    ["Indexes", `${result.diff.summary.indexes_changed}`],
+    ['Tables +', `${result.diff.summary.tables_added}`],
+    ['Tables -', `${result.diff.summary.tables_removed}`],
+    ['Tables ~', `${result.diff.summary.tables_modified}`],
+    ['Columns', `${result.diff.summary.columns_changed}`],
+    ['FKs', `${result.diff.summary.foreign_keys_changed}`],
+    ['Indexes', `${result.diff.summary.indexes_changed}`],
     [
-      "Views",
+      'Views',
       `${result.diff.summary.views_added + result.diff.summary.views_removed + result.diff.summary.views_modified}`,
     ],
     [
-      "Enums",
+      'Enums',
       `${result.diff.summary.enums_added + result.diff.summary.enums_removed + result.diff.summary.enums_modified}`,
     ],
   ]);
   renderDiagnostics(result.diagnostics);
   renderCompareSummary(result.diff);
 
-  if (compareView === "visual") {
+  if (compareView === 'visual') {
     previewPanel.hidden = false;
     void previewPanel.offsetHeight;
-    previewFrame.srcdoc = result.rendered ?? "";
+    previewFrame.srcdoc = result.rendered ?? '';
     configureActions({
       copy: {
-        label: "Copy HTML",
-        run: () => copyText(result.rendered ?? "", "Copied diff HTML"),
+        label: 'Copy HTML',
+        run: () => copyText(result.rendered ?? '', 'Copied diff HTML'),
       },
       primary: {
-        label: "HTML",
+        label: 'HTML',
         run: () =>
-          downloadText("relune-diff.html", result.rendered ?? "", "text/html;charset=utf-8"),
+          downloadText('relune-diff.html', result.rendered ?? '', 'text/html;charset=utf-8'),
       },
     });
-  } else if (compareView === "json") {
+  } else if (compareView === 'json') {
     const diffJson = result.content ?? JSON.stringify(result, null, 2);
-    showTextOutput("Structured diff JSON", diffJson);
+    showTextOutput('Structured diff JSON', diffJson);
     configureActions({
       copy: {
-        label: "Copy JSON",
-        run: () => copyText(diffJson, "Copied diff JSON"),
+        label: 'Copy JSON',
+        run: () => copyText(diffJson, 'Copied diff JSON'),
       },
       primary: {
-        label: "JSON",
-        run: () => downloadText("relune-diff.json", diffJson, "application/json;charset=utf-8"),
+        label: 'JSON',
+        run: () => downloadText('relune-diff.json', diffJson, 'application/json;charset=utf-8'),
       },
     });
   } else {
-    const diffText = result.content ?? "";
-    showTextOutput(compareView === "markdown" ? "Diff markdown" : "Diff text", diffText);
+    const diffText = result.content ?? '';
+    showTextOutput(compareView === 'markdown' ? 'Diff markdown' : 'Diff text', diffText);
     configureActions({
       copy: {
-        label: compareView === "markdown" ? "Copy markdown" : "Copy text",
+        label: compareView === 'markdown' ? 'Copy markdown' : 'Copy text',
         run: () =>
           copyText(
             diffText,
-            compareView === "markdown" ? "Copied diff markdown" : "Copied diff text",
+            compareView === 'markdown' ? 'Copied diff markdown' : 'Copied diff text',
           ),
       },
       primary: {
-        label: compareView === "markdown" ? "MD" : "TXT",
+        label: compareView === 'markdown' ? 'MD' : 'TXT',
         run: () =>
           downloadText(
-            compareView === "markdown" ? "relune-diff.md" : "relune-diff.txt",
+            compareView === 'markdown' ? 'relune-diff.md' : 'relune-diff.txt',
             diffText,
-            "text/plain;charset=utf-8",
+            'text/plain;charset=utf-8',
           ),
       },
     });
   }
 
   const totalChanges = totalDiffChanges(result.diff.summary);
-  setStatus(totalChanges === 0 ? "No changes detected" : `${totalChanges} changes detected`);
+  setStatus(totalChanges === 0 ? 'No changes detected' : `${totalChanges} changes detected`);
 }
 
 async function runReviewView(currentSerial: number): Promise<void> {
-  setStatus("Reviewing…");
+  setStatus('Reviewing…');
   const result = review_from_sql(buildReviewRequest()) as WasmReviewResult;
   if (currentSerial !== renderSerial) {
     return;
@@ -1469,14 +1469,14 @@ async function runReviewView(currentSerial: number): Promise<void> {
 
   const summary = result.review.summary;
   renderMetricCards([
-    ["Findings", `${summary.breaking + summary.caution + summary.warning + summary.info}`],
-    ["Breaking", `${summary.breaking}`],
-    ["Caution", `${summary.caution}`],
-    ["Warning", `${summary.warning}`],
-    ["Info", `${summary.info}`],
-    ["Suppressed", `${result.review.suppressed.length}`],
-    ["Rules", `${result.review.applied_rules.length}`],
-    ["Denied", result.denied ? "yes" : "no"],
+    ['Findings', `${summary.breaking + summary.caution + summary.warning + summary.info}`],
+    ['Breaking', `${summary.breaking}`],
+    ['Caution', `${summary.caution}`],
+    ['Warning', `${summary.warning}`],
+    ['Info', `${summary.info}`],
+    ['Suppressed', `${result.review.suppressed.length}`],
+    ['Rules', `${result.review.applied_rules.length}`],
+    ['Denied', result.denied ? 'yes' : 'no'],
   ]);
   renderDiagnostics(result.diagnostics);
   renderReviewPanel(result);
@@ -1484,18 +1484,18 @@ async function runReviewView(currentSerial: number): Promise<void> {
   const reviewJson = result.content ?? JSON.stringify(result, null, 2);
   configureActions({
     copy: {
-      label: "Copy JSON",
-      run: () => copyText(reviewJson, "Copied review JSON"),
+      label: 'Copy JSON',
+      run: () => copyText(reviewJson, 'Copied review JSON'),
     },
     primary: {
-      label: "JSON",
-      run: () => downloadText("relune-review.json", reviewJson, "application/json;charset=utf-8"),
+      label: 'JSON',
+      run: () => downloadText('relune-review.json', reviewJson, 'application/json;charset=utf-8'),
     },
   });
 
   const total = summary.breaking + summary.caution + summary.warning + summary.info;
   if (total === 0) {
-    setStatus("No risk findings");
+    setStatus('No risk findings');
   } else {
     setStatus(`${total} risk findings`);
   }
@@ -1506,12 +1506,12 @@ function buildReviewRequest(): Record<string, unknown> {
   const request: Record<string, unknown> = {
     beforeSql: compareBeforeEditor.getValue(),
     afterSql: compareAfterEditor.getValue(),
-    format: "json",
+    format: 'json',
     rules: [],
     exceptRules: [],
     exceptTables: [],
   };
-  if (dialect !== "auto") {
+  if (dialect !== 'auto') {
     request.dialect = dialect;
   }
   return request;
@@ -1522,74 +1522,78 @@ function renderReviewPanel(result: WasmReviewResult): void {
 
   const summary = result.review.summary;
   reviewSummaryBadges.innerHTML = [
-    buildSeverityBadge("breaking", summary.breaking),
-    buildSeverityBadge("caution", summary.caution),
-    buildSeverityBadge("warning", summary.warning),
-    buildSeverityBadge("info", summary.info),
-  ].join("");
+    buildSeverityBadge('breaking', summary.breaking),
+    buildSeverityBadge('caution', summary.caution),
+    buildSeverityBadge('warning', summary.warning),
+    buildSeverityBadge('info', summary.info),
+  ].join('');
 
   const noteText = effectiveDialectNote(result.requested_dialect, result.effective_dialect);
   if (noteText) {
     reviewDialectNote.textContent = noteText;
     reviewDialectNote.hidden = false;
   } else {
-    reviewDialectNote.textContent = "";
+    reviewDialectNote.textContent = '';
     reviewDialectNote.hidden = true;
   }
 
-  const sortedFindings = [...result.review.findings].sort(
+  const sortedFindings = result.review.findings.toSorted(
     (left, right) => severityRank(left.severity) - severityRank(right.severity),
   );
   reviewFindingList.innerHTML =
     sortedFindings.length === 0
       ? '<li class="finding-card finding-card--empty"><p class="empty-state">No risk findings.</p></li>'
-      : sortedFindings.map(buildFindingCard).join("");
+      : sortedFindings.map(buildFindingCard).join('');
 
   if (result.review.suppressed.length === 0) {
     reviewSuppressedPanel.hidden = true;
-    reviewSuppressedList.innerHTML = "";
+    reviewSuppressedList.innerHTML = '';
   } else {
     reviewSuppressedPanel.hidden = false;
-    reviewSuppressedList.innerHTML = result.review.suppressed.map(buildFindingCard).join("");
+    reviewSuppressedList.innerHTML = result.review.suppressed.map(buildFindingCard).join('');
   }
 }
 
 function effectiveDialectNote(requested: ReviewDialect, effective: ReviewDialect): string | null {
-  if (requested !== "auto") {
+  if (requested !== 'auto') {
     return null;
   }
-  if (effective === "postgres" || effective === "mysql") {
+  if (effective === 'postgres' || effective === 'mysql') {
     return `auto resolved to ${effective}; lock-risk review active.`;
   }
-  if (effective === "sqlite") {
-    return "auto resolved to sqlite; lock-risk rules are inactive on this dialect.";
+  if (effective === 'sqlite') {
+    return 'auto resolved to sqlite; lock-risk rules are inactive on this dialect.';
   }
-  return "Auto could not infer a single dialect; lock-risk rules are inactive.";
+  return 'Auto could not infer a single dialect; lock-risk rules are inactive.';
 }
 
 function severityRank(severity: ReviewSeverity): number {
   switch (severity) {
-    case "breaking":
+    case 'breaking':
       return 0;
-    case "caution":
+    case 'caution':
       return 1;
-    case "warning":
+    case 'warning':
       return 2;
-    case "info":
+    case 'info':
       return 3;
+    default:
+      return Number.MAX_SAFE_INTEGER;
   }
 }
 
 function severityEmoji(severity: ReviewSeverity): string {
   switch (severity) {
-    case "breaking":
-      return "🔴";
-    case "caution":
-      return "🟡";
-    case "warning":
-      return "🟠";
-    case "info":
-      return "⚪";
+    case 'breaking':
+      return '🔴';
+    case 'caution':
+      return '🟡';
+    case 'warning':
+      return '🟠';
+    case 'info':
+      return '⚪';
+    default:
+      return '';
   }
 }
 
@@ -1608,7 +1612,7 @@ function buildFindingCard(finding: ReviewFinding): string {
   const target = formatFindingTarget(finding);
   const mitigationMarkup = finding.mitigation
     ? `<div class="finding-card__mitigation">💡 ${escapeHtml(finding.mitigation)}</div>`
-    : "";
+    : '';
   return `
     <li class="finding-card finding-card--${finding.severity}">
       <div class="finding-card__meta">
@@ -1627,9 +1631,9 @@ function buildFindingCard(finding: ReviewFinding): string {
 }
 
 function formatFindingTarget(finding: ReviewFinding): string {
-  const table = finding.table_name ?? "";
-  const column = finding.column_name ?? "";
-  const fk = finding.fk_name ?? "";
+  const table = finding.table_name ?? '';
+  const column = finding.column_name ?? '';
+  const fk = finding.fk_name ?? '';
   if (table && column) {
     return `${table}.${column}`;
   }
@@ -1642,10 +1646,10 @@ function formatFindingTarget(finding: ReviewFinding): string {
   if (fk) {
     return fk;
   }
-  return "(schema)";
+  return '(schema)';
 }
 
-function buildRenderRequest(format: "html" | "svg"): Record<string, unknown> {
+function buildRenderRequest(format: 'html' | 'svg'): Record<string, unknown> {
   const focusTable = focusTableInput.value.trim();
   const depth = parsePositiveInteger(depthInput.value);
 
@@ -1686,13 +1690,13 @@ function buildExportRequest(): Record<string, unknown> {
 
 function buildDiffRequest(compareView: CompareView): Record<string, unknown> {
   const format =
-    compareView === "visual"
-      ? "html"
-      : compareView === "markdown"
-        ? "markdown"
-        : compareView === "text"
-          ? "text"
-          : "json";
+    compareView === 'visual'
+      ? 'html'
+      : compareView === 'markdown'
+        ? 'markdown'
+        : compareView === 'text'
+          ? 'text'
+          : 'json';
 
   return {
     beforeSql: compareBeforeEditor.getValue(),
@@ -1729,30 +1733,30 @@ function renderInspectPanel(
             (item) => `
               <li>
                 <button
-                  class="inspect-table-button${item.name === selectedTable ? " is-active" : ""}"
+                  class="inspect-table-button${item.name === selectedTable ? ' is-active' : ''}"
                   type="button"
                   data-table-name="${escapeHtml(item.name)}"
                 >
                   <span class="inspect-table-name">${escapeHtml(item.name)}</span>
                   <span class="inspect-table-meta">
-                    ${item.column_count} cols · ${item.foreign_key_count} out · ${item.incoming_fk_count} in · ${item.index_count} idx${item.has_primary_key ? " · PK" : ""}
+                    ${item.column_count} cols · ${item.foreign_key_count} out · ${item.incoming_fk_count} in · ${item.index_count} idx${item.has_primary_key ? ' · PK' : ''}
                   </span>
                 </button>
               </li>
             `,
           )
-          .join("");
+          .join('');
 
-  for (const button of inspectTableList.querySelectorAll<HTMLButtonElement>("[data-table-name]")) {
-    button.addEventListener("click", () => {
-      inspectTableSelect.value = button.dataset.tableName ?? "";
+  for (const button of inspectTableList.querySelectorAll<HTMLButtonElement>('[data-table-name]')) {
+    button.addEventListener('click', () => {
+      inspectTableSelect.value = button.dataset.tableName ?? '';
       handleControlChange();
     });
   }
 
   if (!table) {
-    const hubTables = [...summary.tables]
-      .sort(
+    const hubTables = summary.tables
+      .toSorted(
         (left, right) =>
           right.foreign_key_count +
           right.incoming_fk_count -
@@ -1789,7 +1793,7 @@ function renderInspectPanel(
                 </div>
               `,
             )
-            .join("")}
+            .join('')}
         </div>
       </article>
     `;
@@ -1799,7 +1803,7 @@ function renderInspectPanel(
   inspectDetail.innerHTML = `
     <article class="detail-card">
       <h2>${escapeHtml(table.name)}</h2>
-      <p>${table.comment ? escapeHtml(table.comment) : "No table comment."}</p>
+      <p>${table.comment ? escapeHtml(table.comment) : 'No table comment.'}</p>
     </article>
     <article class="detail-card">
       <h3>Columns</h3>
@@ -1813,14 +1817,14 @@ function renderInspectPanel(
                     <div class="detail-item">
                       <div class="detail-item__title">
                         ${escapeHtml(column.name)}
-                        ${column.is_primary_key ? '<span class="pill pill--warning">PK</span>' : ""}
+                        ${column.is_primary_key ? '<span class="pill pill--warning">PK</span>' : ''}
                         ${column.nullable ? '<span class="pill pill--hint">NULL</span>' : '<span class="pill pill--info">NOT NULL</span>'}
                       </div>
                       <div class="detail-item__meta">${escapeHtml(column.data_type)}</div>
                     </div>
                   `,
                 )
-                .join("")
+                .join('')
         }
       </div>
     </article>
@@ -1835,15 +1839,15 @@ function renderInspectPanel(
                   (foreignKey) => `
                     <div class="detail-item">
                       <div class="detail-item__title">${escapeHtml(
-                        foreignKey.name || foreignKey.from_columns.join(", "),
+                        foreignKey.name || foreignKey.from_columns.join(', '),
                       )}</div>
                       <div class="detail-item__meta">
-                        ${escapeHtml(foreignKey.from_columns.join(", "))} → ${escapeHtml(foreignKey.to_table)}(${escapeHtml(foreignKey.to_columns.join(", "))})
+                        ${escapeHtml(foreignKey.from_columns.join(', '))} → ${escapeHtml(foreignKey.to_table)}(${escapeHtml(foreignKey.to_columns.join(', '))})
                       </div>
                     </div>
                   `,
                 )
-                .join("")
+                .join('')
         }
       </div>
     </article>
@@ -1858,14 +1862,14 @@ function renderInspectPanel(
                   (index) => `
                     <div class="detail-item">
                       <div class="detail-item__title">
-                        ${escapeHtml(index.name || index.columns.join(", "))}
-                        ${index.is_unique ? '<span class="pill pill--warning">UNIQUE</span>' : ""}
+                        ${escapeHtml(index.name || index.columns.join(', '))}
+                        ${index.is_unique ? '<span class="pill pill--warning">UNIQUE</span>' : ''}
                       </div>
-                      <div class="detail-item__meta">${escapeHtml(index.columns.join(", "))}</div>
+                      <div class="detail-item__meta">${escapeHtml(index.columns.join(', '))}</div>
                     </div>
                   `,
                 )
-                .join("")
+                .join('')
         }
       </div>
     </article>
@@ -1887,15 +1891,15 @@ function renderLintPanel(issues: readonly LintIssue[]): void {
             <span class="pill pill--${issue.severity}">${issue.severity}</span>
             <span class="pill pill--info">${escapeHtml(issue.category)}</span>
             <span class="issue-card__title">${escapeHtml(issue.rule_id)}</span>
-            ${issue.table_name ? `<code>${escapeHtml(issue.table_name)}</code>` : ""}
-            ${issue.column_name ? `<code>${escapeHtml(issue.column_name)}</code>` : ""}
+            ${issue.table_name ? `<code>${escapeHtml(issue.table_name)}</code>` : ''}
+            ${issue.column_name ? `<code>${escapeHtml(issue.column_name)}</code>` : ''}
           </div>
           <div class="issue-card__body">${escapeHtml(issue.message)}</div>
-          ${issue.hint ? `<div class="issue-card__hint">${escapeHtml(issue.hint)}</div>` : ""}
+          ${issue.hint ? `<div class="issue-card__hint">${escapeHtml(issue.hint)}</div>` : ''}
         </li>
       `,
     )
-    .join("");
+    .join('');
 }
 
 function renderCompareSummary(diff: SchemaDiff): void {
@@ -1912,14 +1916,14 @@ function renderCompareSummary(diff: SchemaDiff): void {
     diff.modified_enums.length;
   compareSummaryCount.textContent = `${totalObjects}`;
   compareSummary.innerHTML = [
-    ["Added tables", `${diff.added_tables.length}`],
-    ["Removed tables", `${diff.removed_tables.length}`],
-    ["Modified tables", `${diff.modified_tables.length}`],
-    ["Added views", `${diff.added_views.length}`],
-    ["Removed views", `${diff.removed_views.length}`],
-    ["Modified views", `${diff.modified_views.length}`],
-    ["Added enums", `${diff.added_enums.length}`],
-    ["Removed enums", `${diff.removed_enums.length}`],
+    ['Added tables', `${diff.added_tables.length}`],
+    ['Removed tables', `${diff.removed_tables.length}`],
+    ['Modified tables', `${diff.modified_tables.length}`],
+    ['Added views', `${diff.added_views.length}`],
+    ['Removed views', `${diff.removed_views.length}`],
+    ['Modified views', `${diff.modified_views.length}`],
+    ['Added enums', `${diff.added_enums.length}`],
+    ['Removed enums', `${diff.removed_enums.length}`],
   ]
     .map(
       ([label, value]) => `
@@ -1929,49 +1933,49 @@ function renderCompareSummary(diff: SchemaDiff): void {
         </article>
       `,
     )
-    .join("");
+    .join('');
 
   const changeCards: string[] = [];
   for (const tableName of diff.added_tables) {
-    changeCards.push(buildChangeCard("Added table", tableName, "Table exists only in after."));
+    changeCards.push(buildChangeCard('Added table', tableName, 'Table exists only in after.'));
   }
   for (const tableName of diff.removed_tables) {
-    changeCards.push(buildChangeCard("Removed table", tableName, "Table exists only in before."));
+    changeCards.push(buildChangeCard('Removed table', tableName, 'Table exists only in before.'));
   }
   for (const table of diff.modified_tables) {
     changeCards.push(
       buildChangeCard(
-        "Modified table",
+        'Modified table',
         table.table_name,
         `${table.column_diffs.length} column changes · ${table.fk_diffs.length} foreign key changes · ${table.index_diffs.length} index changes`,
       ),
     );
   }
   for (const viewName of diff.added_views) {
-    changeCards.push(buildChangeCard("Added view", viewName, "View exists only in after."));
+    changeCards.push(buildChangeCard('Added view', viewName, 'View exists only in after.'));
   }
   for (const viewName of diff.removed_views) {
-    changeCards.push(buildChangeCard("Removed view", viewName, "View exists only in before."));
+    changeCards.push(buildChangeCard('Removed view', viewName, 'View exists only in before.'));
   }
   for (const view of diff.modified_views) {
     changeCards.push(
       buildChangeCard(
-        "Modified view",
+        'Modified view',
         view.view_name,
         `${view.column_diffs.length} column changes`,
       ),
     );
   }
   for (const enumName of diff.added_enums) {
-    changeCards.push(buildChangeCard("Added enum", enumName, "Enum exists only in after."));
+    changeCards.push(buildChangeCard('Added enum', enumName, 'Enum exists only in after.'));
   }
   for (const enumName of diff.removed_enums) {
-    changeCards.push(buildChangeCard("Removed enum", enumName, "Enum exists only in before."));
+    changeCards.push(buildChangeCard('Removed enum', enumName, 'Enum exists only in before.'));
   }
   for (const schemaEnum of diff.modified_enums) {
     changeCards.push(
       buildChangeCard(
-        "Modified enum",
+        'Modified enum',
         schemaEnum.enum_name,
         `${schemaEnum.value_diffs.length} enum value changes`,
       ),
@@ -1981,7 +1985,7 @@ function renderCompareSummary(diff: SchemaDiff): void {
   compareObjectList.innerHTML =
     changeCards.length === 0
       ? '<li class="change-card"><p class="empty-state">No schema changes detected.</p></li>'
-      : changeCards.join("");
+      : changeCards.join('');
 }
 
 function buildChangeCard(kind: string, name: string, body: string): string {
@@ -2013,7 +2017,7 @@ function renderMetricCards(entries: readonly [string, string][]): void {
         </article>
       `,
     )
-    .join("");
+    .join('');
 }
 
 function renderDiagnostics(diagnostics: readonly WasmDiagnostic[]): void {
@@ -2037,7 +2041,7 @@ function renderDiagnostics(diagnostics: readonly WasmDiagnostic[]): void {
         </li>
       `;
     })
-    .join("");
+    .join('');
 }
 
 function configureActions(actions: {
@@ -2049,9 +2053,9 @@ function configureActions(actions: {
   primaryAction = actions.primary ?? null;
   secondaryAction = actions.secondary ?? null;
 
-  copyOutputButton.textContent = copyAction?.label ?? "Copy";
-  downloadPrimaryButton.textContent = primaryAction?.label ?? "Download";
-  downloadSecondaryButton.textContent = secondaryAction?.label ?? "More";
+  copyOutputButton.textContent = copyAction?.label ?? 'Copy';
+  downloadPrimaryButton.textContent = primaryAction?.label ?? 'Download';
+  downloadSecondaryButton.textContent = secondaryAction?.label ?? 'More';
 
   copyOutputButton.hidden = copyAction === null;
   downloadPrimaryButton.hidden = primaryAction === null;
@@ -2070,18 +2074,18 @@ function resetOutputPanels(): void {
   textOutputPanel.hidden = true;
   reviewPanel.hidden = true;
   reviewSuppressedPanel.hidden = true;
-  inspectTableList.innerHTML = "";
-  inspectDetail.innerHTML = "";
-  lintIssueList.innerHTML = "";
-  compareSummary.innerHTML = "";
-  compareObjectList.innerHTML = "";
-  textOutput.textContent = "";
-  textOutputMeta.textContent = "";
-  reviewSummaryBadges.textContent = "";
+  inspectTableList.innerHTML = '';
+  inspectDetail.innerHTML = '';
+  lintIssueList.innerHTML = '';
+  compareSummary.innerHTML = '';
+  compareObjectList.innerHTML = '';
+  textOutput.textContent = '';
+  textOutputMeta.textContent = '';
+  reviewSummaryBadges.textContent = '';
   reviewDialectNote.hidden = true;
-  reviewDialectNote.textContent = "";
-  reviewFindingList.innerHTML = "";
-  reviewSuppressedList.innerHTML = "";
+  reviewDialectNote.textContent = '';
+  reviewFindingList.innerHTML = '';
+  reviewSuppressedList.innerHTML = '';
   resetActions();
 }
 
@@ -2091,13 +2095,13 @@ function populateInspectTableOptions(tableNames: readonly string[], selectedTabl
     ...tableNames.map(
       (tableName) => `<option value="${escapeHtml(tableName)}">${escapeHtml(tableName)}</option>`,
     ),
-  ].join("");
+  ].join('');
   inspectTableSelect.value = selectedTable;
 }
 
 function splitPatterns(rawValue: string): string[] {
   return rawValue
-    .split(",")
+    .split(',')
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
 }
@@ -2122,7 +2126,7 @@ function formatDuration(duration: WasmDuration): string {
 }
 
 function formatDiagnosticCode(diagnostic: WasmDiagnostic): string {
-  return `${diagnostic.code.prefix}${diagnostic.code.number.toString().padStart(3, "0")}`;
+  return `${diagnostic.code.prefix}${diagnostic.code.number.toString().padStart(3, '0')}`;
 }
 
 function totalDiffChanges(summary: DiffSummary): number {
@@ -2147,46 +2151,50 @@ function totalDiffChanges(summary: DiffSummary): number {
 
 function exportFormatLabel(): string {
   switch (exportFormatSelect.value as ExportFormat) {
-    case "schema-json":
-      return "Schema JSON";
-    case "graph-json":
-      return "Graph JSON";
-    case "layout-json":
-      return "Layout JSON";
-    case "mermaid":
-      return "Mermaid";
-    case "d2":
-      return "D2";
-    case "dot":
-      return "DOT";
+    case 'schema-json':
+      return 'Schema JSON';
+    case 'graph-json':
+      return 'Graph JSON';
+    case 'layout-json':
+      return 'Layout JSON';
+    case 'mermaid':
+      return 'Mermaid';
+    case 'd2':
+      return 'D2';
+    case 'dot':
+      return 'DOT';
+    default:
+      return '';
   }
 }
 
 function exportFilename(): string {
   switch (exportFormatSelect.value as ExportFormat) {
-    case "schema-json":
-      return "relune-schema.json";
-    case "graph-json":
-      return "relune-graph.json";
-    case "layout-json":
-      return "relune-layout.json";
-    case "mermaid":
-      return "relune-diagram.mmd";
-    case "d2":
-      return "relune-diagram.d2";
-    case "dot":
-      return "relune-diagram.dot";
+    case 'schema-json':
+      return 'relune-schema.json';
+    case 'graph-json':
+      return 'relune-graph.json';
+    case 'layout-json':
+      return 'relune-layout.json';
+    case 'mermaid':
+      return 'relune-diagram.mmd';
+    case 'd2':
+      return 'relune-diagram.d2';
+    case 'dot':
+      return 'relune-diagram.dot';
+    default:
+      return 'relune-export';
   }
 }
 
 function exportMimeType(): string {
   switch (exportFormatSelect.value as ExportFormat) {
-    case "schema-json":
-    case "graph-json":
-    case "layout-json":
-      return "application/json;charset=utf-8";
+    case 'schema-json':
+    case 'graph-json':
+    case 'layout-json':
+      return 'application/json;charset=utf-8';
     default:
-      return "text/plain;charset=utf-8";
+      return 'text/plain;charset=utf-8';
   }
 }
 
@@ -2197,14 +2205,14 @@ function setStatus(text: string): void {
 function showError(error: WasmErrorShape): void {
   errorBox.hidden = false;
   errorBox.innerHTML = `
-    <strong>${escapeHtml(error.code ?? "WORKBENCH_ERROR")}</strong>
+    <strong>${escapeHtml(error.code ?? 'WORKBENCH_ERROR')}</strong>
     <p>${escapeHtml(error.message)}</p>
   `;
 }
 
 function clearError(): void {
   errorBox.hidden = true;
-  errorBox.innerHTML = "";
+  errorBox.innerHTML = '';
 }
 
 function normalizeError(error: unknown): WasmErrorShape {
@@ -2213,27 +2221,27 @@ function normalizeError(error: unknown): WasmErrorShape {
   }
   if (
     error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof error.message === "string"
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
   ) {
     return { message: error.message };
   }
-  return { message: "Unknown playground error." };
+  return { message: 'Unknown playground error.' };
 }
 
 function isWasmErrorShape(value: unknown): value is WasmErrorShape {
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== 'object') {
     return false;
   }
 
-  return "message" in value && typeof value.message === "string";
+  return 'message' in value && typeof value.message === 'string';
 }
 
 function downloadText(filename: string, content: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });
   const blobUrl = URL.createObjectURL(blob);
-  const link = document.createElement("a");
+  const link = document.createElement('a');
   link.href = blobUrl;
   link.download = filename;
   link.click();
@@ -2265,23 +2273,23 @@ function readStoredState(): Partial<PersistedState> {
 function readQueryState(): Partial<PersistedState> {
   const params = new URLSearchParams(window.location.search);
   return sanitizeState({
-    example: (params.get("example") as ExampleId | null) ?? undefined,
-    mode: (params.get("mode") as WorkbenchMode | null) ?? undefined,
-    theme: (params.get("theme") as Theme | null) ?? undefined,
-    layout: (params.get("layout") as LayoutAlgorithm | null) ?? undefined,
-    direction: (params.get("direction") as LayoutDirection | null) ?? undefined,
-    edgeStyle: (params.get("edges") as EdgeStyle | null) ?? undefined,
-    viewpoint: params.get("viewpoint") ?? undefined,
-    groupBy: (params.get("group") as GroupBy | null) ?? undefined,
-    focusTable: params.get("focus") ?? undefined,
-    depth: params.get("depth") ?? undefined,
-    includeTables: params.get("include") ?? undefined,
-    excludeTables: params.get("exclude") ?? undefined,
-    exportFormat: (params.get("export") as ExportFormat | null) ?? undefined,
-    inspectTable: params.get("table") ?? undefined,
-    lintRules: params.get("rules") ?? undefined,
-    compareView: (params.get("compare") as CompareView | null) ?? undefined,
-    compareReviewDialect: (params.get("reviewDialect") as ReviewDialect | null) ?? undefined,
+    example: (params.get('example') as ExampleId | null) ?? undefined,
+    mode: (params.get('mode') as WorkbenchMode | null) ?? undefined,
+    theme: (params.get('theme') as Theme | null) ?? undefined,
+    layout: (params.get('layout') as LayoutAlgorithm | null) ?? undefined,
+    direction: (params.get('direction') as LayoutDirection | null) ?? undefined,
+    edgeStyle: (params.get('edges') as EdgeStyle | null) ?? undefined,
+    viewpoint: params.get('viewpoint') ?? undefined,
+    groupBy: (params.get('group') as GroupBy | null) ?? undefined,
+    focusTable: params.get('focus') ?? undefined,
+    depth: params.get('depth') ?? undefined,
+    includeTables: params.get('include') ?? undefined,
+    excludeTables: params.get('exclude') ?? undefined,
+    exportFormat: (params.get('export') as ExportFormat | null) ?? undefined,
+    inspectTable: params.get('table') ?? undefined,
+    lintRules: params.get('rules') ?? undefined,
+    compareView: (params.get('compare') as CompareView | null) ?? undefined,
+    compareReviewDialect: (params.get('reviewDialect') as ReviewDialect | null) ?? undefined,
   });
 }
 
@@ -2306,31 +2314,31 @@ function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> 
   if (isEdgeStyle(state.edgeStyle)) {
     sanitized.edgeStyle = state.edgeStyle;
   }
-  if (typeof state.viewpoint === "string") {
+  if (typeof state.viewpoint === 'string') {
     sanitized.viewpoint = state.viewpoint.trim();
   }
   if (isGroupBy(state.groupBy)) {
     sanitized.groupBy = state.groupBy;
   }
-  if (typeof state.focusTable === "string") {
+  if (typeof state.focusTable === 'string') {
     sanitized.focusTable = state.focusTable;
   }
-  if (typeof state.depth === "string") {
+  if (typeof state.depth === 'string') {
     sanitized.depth = state.depth;
   }
-  if (typeof state.includeTables === "string") {
+  if (typeof state.includeTables === 'string') {
     sanitized.includeTables = state.includeTables;
   }
-  if (typeof state.excludeTables === "string") {
+  if (typeof state.excludeTables === 'string') {
     sanitized.excludeTables = state.excludeTables;
   }
   if (isExportFormat(state.exportFormat)) {
     sanitized.exportFormat = state.exportFormat;
   }
-  if (typeof state.inspectTable === "string") {
+  if (typeof state.inspectTable === 'string') {
     sanitized.inspectTable = state.inspectTable;
   }
-  if (typeof state.lintRules === "string") {
+  if (typeof state.lintRules === 'string') {
     sanitized.lintRules = state.lintRules;
   }
   if (isCompareView(state.compareView)) {
@@ -2339,13 +2347,13 @@ function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> 
   if (isReviewDialect(state.compareReviewDialect)) {
     sanitized.compareReviewDialect = state.compareReviewDialect;
   }
-  if (typeof state.sql === "string") {
+  if (typeof state.sql === 'string') {
     sanitized.sql = state.sql;
   }
-  if (typeof state.compareBeforeSql === "string") {
+  if (typeof state.compareBeforeSql === 'string') {
     sanitized.compareBeforeSql = state.compareBeforeSql;
   }
-  if (typeof state.compareAfterSql === "string") {
+  if (typeof state.compareAfterSql === 'string') {
     sanitized.compareAfterSql = state.compareAfterSql;
   }
 
@@ -2385,51 +2393,51 @@ function collectState(): PersistedState {
 
 function syncQueryString(state: PersistedState): void {
   const params = new URLSearchParams();
-  params.set("example", state.example);
-  params.set("mode", state.mode);
-  params.set("theme", state.theme);
-  params.set("layout", state.layout);
-  params.set("direction", state.direction);
-  params.set("edges", state.edgeStyle);
-  params.set("group", state.groupBy);
+  params.set('example', state.example);
+  params.set('mode', state.mode);
+  params.set('theme', state.theme);
+  params.set('layout', state.layout);
+  params.set('direction', state.direction);
+  params.set('edges', state.edgeStyle);
+  params.set('group', state.groupBy);
 
   if (state.viewpoint) {
-    params.set("viewpoint", state.viewpoint);
+    params.set('viewpoint', state.viewpoint);
   }
   if (state.focusTable) {
-    params.set("focus", state.focusTable);
+    params.set('focus', state.focusTable);
   }
   if (state.depth && state.depth !== DEFAULT_STATE.depth) {
-    params.set("depth", state.depth);
+    params.set('depth', state.depth);
   }
   if (state.includeTables) {
-    params.set("include", state.includeTables);
+    params.set('include', state.includeTables);
   }
   if (state.excludeTables) {
-    params.set("exclude", state.excludeTables);
+    params.set('exclude', state.excludeTables);
   }
-  if (state.mode === "export") {
-    params.set("export", state.exportFormat);
+  if (state.mode === 'export') {
+    params.set('export', state.exportFormat);
   }
-  if (state.mode === "inspect" && state.inspectTable) {
-    params.set("table", state.inspectTable);
+  if (state.mode === 'inspect' && state.inspectTable) {
+    params.set('table', state.inspectTable);
   }
-  if (state.mode === "lint" && state.lintRules) {
-    params.set("rules", state.lintRules);
+  if (state.mode === 'lint' && state.lintRules) {
+    params.set('rules', state.lintRules);
   }
-  if (state.mode === "compare") {
-    params.set("compare", state.compareView);
+  if (state.mode === 'compare') {
+    params.set('compare', state.compareView);
     if (
-      state.compareView === "review" &&
+      state.compareView === 'review' &&
       state.compareReviewDialect !== DEFAULT_STATE.compareReviewDialect
     ) {
-      params.set("reviewDialect", state.compareReviewDialect);
+      params.set('reviewDialect', state.compareReviewDialect);
     }
   }
 
   const nextQuery = params.toString();
   const nextUrl = nextQuery ? `?${nextQuery}` : window.location.pathname;
-  window.history.replaceState(null, "", nextUrl);
+  window.history.replaceState(null, '', nextUrl);
 }
 
 function setActionButtonsDisabled(disabled: boolean): void {
@@ -2441,74 +2449,74 @@ function setActionButtonsDisabled(disabled: boolean): void {
 
 function isExampleId(value: unknown): value is ExampleId {
   return (
-    value === "simple-blog" ||
-    value === "ecommerce" ||
-    value === "multi-schema" ||
+    value === 'simple-blog' ||
+    value === 'ecommerce' ||
+    value === 'multi-schema' ||
     value === CUSTOM_EXAMPLE_ID
   );
 }
 
 function isWorkbenchMode(value: unknown): value is WorkbenchMode {
   return (
-    value === "render" ||
-    value === "inspect" ||
-    value === "export" ||
-    value === "lint" ||
-    value === "compare"
+    value === 'render' ||
+    value === 'inspect' ||
+    value === 'export' ||
+    value === 'lint' ||
+    value === 'compare'
   );
 }
 
 function isTheme(value: unknown): value is Theme {
-  return value === "light" || value === "dark";
+  return value === 'light' || value === 'dark';
 }
 
 function isLayoutAlgorithm(value: unknown): value is LayoutAlgorithm {
-  return value === "hierarchical" || value === "force-directed";
+  return value === 'hierarchical' || value === 'force-directed';
 }
 
 function isLayoutDirection(value: unknown): value is LayoutDirection {
   return (
-    value === "top-to-bottom" ||
-    value === "left-to-right" ||
-    value === "right-to-left" ||
-    value === "bottom-to-top"
+    value === 'top-to-bottom' ||
+    value === 'left-to-right' ||
+    value === 'right-to-left' ||
+    value === 'bottom-to-top'
   );
 }
 
 function isEdgeStyle(value: unknown): value is EdgeStyle {
-  return value === "curved" || value === "orthogonal" || value === "straight";
+  return value === 'curved' || value === 'orthogonal' || value === 'straight';
 }
 
 function isGroupBy(value: unknown): value is GroupBy {
-  return value === "none" || value === "schema" || value === "prefix";
+  return value === 'none' || value === 'schema' || value === 'prefix';
 }
 
 function isExportFormat(value: unknown): value is ExportFormat {
   return (
-    value === "schema-json" ||
-    value === "graph-json" ||
-    value === "layout-json" ||
-    value === "mermaid" ||
-    value === "d2" ||
-    value === "dot"
+    value === 'schema-json' ||
+    value === 'graph-json' ||
+    value === 'layout-json' ||
+    value === 'mermaid' ||
+    value === 'd2' ||
+    value === 'dot'
   );
 }
 
 function isCompareView(value: unknown): value is CompareView {
   return (
-    value === "visual" ||
-    value === "text" ||
-    value === "markdown" ||
-    value === "json" ||
-    value === "review"
+    value === 'visual' ||
+    value === 'text' ||
+    value === 'markdown' ||
+    value === 'json' ||
+    value === 'review'
   );
 }
 
 function isReviewDialect(value: unknown): value is ReviewDialect {
-  return value === "auto" || value === "postgres" || value === "mysql" || value === "sqlite";
+  return value === 'auto' || value === 'postgres' || value === 'mysql' || value === 'sqlite';
 }
 
-function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, "custom"> {
+function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, 'custom'> {
   return value === CUSTOM_EXAMPLE_ID ? DEFAULT_EXAMPLE_ID : value;
 }
 
@@ -2516,6 +2524,7 @@ function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
 }
 
+// eslint-disable-next-line typescript/no-unnecessary-type-parameters
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
   if (!element) {
@@ -2526,9 +2535,9 @@ function getElement<T extends HTMLElement>(id: string): T {
 
 function escapeHtml(value: string): string {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }

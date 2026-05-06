@@ -1,5 +1,5 @@
-import type { TableMetadata } from './metadata';
 import type { HighlightState } from './highlight_state';
+import type { TableMetadata } from './metadata';
 
 interface HighlightNeighborhood {
   neighborIds: Set<string>;
