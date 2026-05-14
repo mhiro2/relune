@@ -43,13 +43,16 @@ pub fn escape_json_for_script(json: &str) -> String {
             i += "</script".len();
             copy_from = i;
         } else if b == b'<' && bytes.get(i + 1..i + 4) == Some(b"!--") {
+            // Emit a JSON `\uXXXX` escape for `<` so the HTML parser never sees
+            // `<!--`, while `JSON.parse` still recovers the original character.
             out.push_str(&json[copy_from..i]);
-            out.push_str("<\\!--");
+            out.push_str("\\u003C!--");
             i += "<!--".len();
             copy_from = i;
         } else if b == b'-' && bytes.get(i + 1..i + 3) == Some(b"->") {
+            // Same approach for `-->`: escape `>` so the runtime string is unchanged.
             out.push_str(&json[copy_from..i]);
-            out.push_str("-\\->");
+            out.push_str("--\\u003E");
             i += "-->".len();
             copy_from = i;
         } else {
@@ -270,7 +273,13 @@ mod tests {
     fn test_escape_json_neutralizes_html_comments() {
         let input = r#"{"a": "<!--", "b": "-->"}"#;
         let escaped = escape_json_for_script(input);
-        assert_eq!(escaped, r#"{"a": "<\!--", "b": "-\->"}"#);
+        // The `<` / `>` forms are valid JSON escapes that hide the raw
+        // `<` / `>` from the HTML parser; `JSON.parse` decodes them back losslessly.
+        assert_eq!(escaped, r#"{"a": "\u003C!--", "b": "--\u003E"}"#);
+        // Output must still be parseable by JSON consumers (e.g. the embedded viewer).
+        let parsed: serde_json::Value = serde_json::from_str(&escaped).expect("valid JSON");
+        assert_eq!(parsed["a"], "<!--");
+        assert_eq!(parsed["b"], "-->");
     }
 
     #[test]
