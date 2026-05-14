@@ -21,13 +21,53 @@ static FAVICON_DATA_URI: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// Escape JSON content for safe embedding in a script tag.
+///
+/// The HTML parser treats script end tags case-insensitively, so any
+/// `</script` sequence must be neutralized regardless of casing (e.g.
+/// `</SCRIPT>`, `</Script foo>`) to prevent premature script termination
+/// and XSS via metadata. `<!--` and `-->` are also neutralized to avoid
+/// HTML comment issues in legacy parsers.
 pub fn escape_json_for_script(json: &str) -> String {
-    // For JSON inside a script tag, we need to escape </script> to prevent
-    // premature script termination. We also escape <!-- and --> to prevent
-    // HTML comment issues in older browsers.
-    json.replace("</script>", "<\\/script>")
-        .replace("<!--", "<\\!--")
-        .replace("-->", "-\\->")
+    let bytes = json.as_bytes();
+    let mut out = String::with_capacity(json.len());
+    let mut copy_from = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'<' && matches_ascii_ci(bytes, i + 1, b"/script") {
+            // Preserve the original casing of the matched substring and only
+            // insert the inert backslash before the slash.
+            out.push_str(&json[copy_from..i]);
+            out.push_str("<\\");
+            out.push_str(&json[i + 1..i + "</script".len()]);
+            i += "</script".len();
+            copy_from = i;
+        } else if b == b'<' && bytes.get(i + 1..i + 4) == Some(b"!--") {
+            // Emit a JSON `\uXXXX` escape for `<` so the HTML parser never sees
+            // `<!--`, while `JSON.parse` still recovers the original character.
+            out.push_str(&json[copy_from..i]);
+            out.push_str("\\u003C!--");
+            i += "<!--".len();
+            copy_from = i;
+        } else if b == b'-' && bytes.get(i + 1..i + 3) == Some(b"->") {
+            // Same approach for `-->`: escape `>` so the runtime string is unchanged.
+            out.push_str(&json[copy_from..i]);
+            out.push_str("--\\u003E");
+            i += "-->".len();
+            copy_from = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&json[copy_from..]);
+    out
+}
+
+/// Returns true when `bytes[start..]` starts with `needle` ignoring ASCII case.
+fn matches_ascii_ci(bytes: &[u8], start: usize, needle: &[u8]) -> bool {
+    bytes
+        .get(start..start + needle.len())
+        .is_some_and(|slice| slice.eq_ignore_ascii_case(needle))
 }
 
 /// Build the complete HTML document.
@@ -190,10 +230,56 @@ mod tests {
     }
 
     #[test]
+    fn test_escape_json_for_script_neutralizes_uppercase_end_tag() {
+        // HTML parsers treat </SCRIPT> identically to </script>; the escape
+        // must catch it to prevent XSS via metadata that contains uppercase
+        // or mixed-case script end tags.
+        let input = r#"{"name": "</SCRIPT>"}"#;
+        let escaped = escape_json_for_script(input);
+        assert_eq!(escaped, r#"{"name": "<\/SCRIPT>"}"#);
+        assert!(!escaped.to_ascii_lowercase().contains("</script>"));
+    }
+
+    #[test]
+    fn test_escape_json_for_script_neutralizes_mixed_case_end_tag() {
+        let input = r#"{"name": "</Script>"}"#;
+        let escaped = escape_json_for_script(input);
+        assert_eq!(escaped, r#"{"name": "<\/Script>"}"#);
+    }
+
+    #[test]
+    fn test_escape_json_for_script_neutralizes_end_tag_with_attribute() {
+        // Browsers still terminate the script when </script foo> appears.
+        let input = r#"{"name": "</script foo>"}"#;
+        let escaped = escape_json_for_script(input);
+        assert_eq!(escaped, r#"{"name": "<\/script foo>"}"#);
+    }
+
+    #[test]
     fn test_escape_json_preserves_content() {
         let input = r#"{"key": "value", "number": 42}"#;
         let escaped = escape_json_for_script(input);
         assert_eq!(escaped, input);
+    }
+
+    #[test]
+    fn test_escape_json_preserves_unicode_content() {
+        let input = r#"{"name": "テスト", "emoji": "🚀"}"#;
+        let escaped = escape_json_for_script(input);
+        assert_eq!(escaped, input);
+    }
+
+    #[test]
+    fn test_escape_json_neutralizes_html_comments() {
+        let input = r#"{"a": "<!--", "b": "-->"}"#;
+        let escaped = escape_json_for_script(input);
+        // The `<` / `>` forms are valid JSON escapes that hide the raw
+        // `<` / `>` from the HTML parser; `JSON.parse` decodes them back losslessly.
+        assert_eq!(escaped, r#"{"a": "\u003C!--", "b": "--\u003E"}"#);
+        // Output must still be parseable by JSON consumers (e.g. the embedded viewer).
+        let parsed: serde_json::Value = serde_json::from_str(&escaped).expect("valid JSON");
+        assert_eq!(parsed["a"], "<!--");
+        assert_eq!(parsed["b"], "-->");
     }
 
     #[test]

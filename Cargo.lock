@@ -2253,6 +2253,7 @@ dependencies = [
  "insta",
  "relune-core",
  "relune-layout",
+ "relune-render-svg",
  "relune-render-theme",
  "serde",
  "serde_json",

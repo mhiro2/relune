@@ -118,7 +118,7 @@ fn render_with_schema(
     let svg = render_svg_with_overlay(&positioned, svg_options, request.overlay.as_ref())?;
 
     match request.output_format {
-        OutputFormat::Svg => Ok(svg),
+        OutputFormat::Svg => Ok(svg.into_string()),
         OutputFormat::Html => {
             let html_theme = match request.options.theme {
                 RenderTheme::Light => HtmlTheme::Light,
