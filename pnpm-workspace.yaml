@@ -7,7 +7,7 @@ catalog:
   oxfmt: 0.47.0
   oxlint: 1.62.0
   oxlint-tsgolint: 0.22.1
-  "@typescript/native-preview": 7.0.0-dev.20260429.1
+  "@typescript/native-preview": 7.0.0-dev.20260506.1
 
 blockExoticSubdeps: true
 minimumReleaseAge: 10080
