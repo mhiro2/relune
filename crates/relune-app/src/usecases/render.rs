@@ -198,7 +198,7 @@ fn render_svg_output(
         compact: false,
         show_tooltips: true,
     };
-    Ok(render_svg_with_overlay(positioned, options, overlay)?)
+    Ok(render_svg_with_overlay(positioned, options, overlay)?.into_string())
 }
 
 /// Render to HTML format.

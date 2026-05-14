@@ -9,6 +9,7 @@ rust-version.workspace = true
 base64.workspace = true
 relune-core = { path = "../relune-core" }
 relune-layout = { path = "../relune-layout" }
+relune-render-svg = { path = "../relune-render-svg" }
 relune-render-theme = { path = "../relune-render-theme" }
 serde.workspace = true
 serde_json.workspace = true

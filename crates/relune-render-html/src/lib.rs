@@ -12,6 +12,7 @@ mod options;
 
 pub use error::HtmlRenderError;
 pub use options::{HtmlRenderOptions, Theme};
+pub use relune_render_svg::SvgArtifact;
 
 use relune_layout::LayoutGraph;
 
@@ -20,7 +21,7 @@ use relune_layout::LayoutGraph;
 /// # Arguments
 ///
 /// * `graph` - The layout graph containing node/edge/group information
-/// * `svg` - Pre-rendered SVG content to embed
+/// * `svg` - Pre-rendered SVG produced by [`relune_render_svg`]
 /// * `options` - HTML rendering options
 ///
 /// # Returns
@@ -28,7 +29,7 @@ use relune_layout::LayoutGraph;
 /// A complete, self-contained HTML document string.
 pub fn render_html(
     graph: &LayoutGraph,
-    svg: &str,
+    svg: &SvgArtifact,
     options: &HtmlRenderOptions,
 ) -> Result<String, HtmlRenderError> {
     render_html_with_overlay(graph, svg, options, None)
@@ -40,7 +41,7 @@ pub fn render_html(
 /// so that client-side scripts can display lint warnings, diff status, etc.
 pub fn render_html_with_overlay(
     graph: &LayoutGraph,
-    svg: &str,
+    svg: &SvgArtifact,
     options: &HtmlRenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<String, HtmlRenderError> {
@@ -48,7 +49,7 @@ pub fn render_html_with_overlay(
     let metadata_json = serde_json::to_string(&metadata)?;
     let escaped_metadata = html::escape_json_for_script(&metadata_json);
 
-    let html_document = html::build_html_document(svg, &escaped_metadata, options);
+    let html_document = html::build_html_document(svg.as_str(), &escaped_metadata, options);
 
     Ok(html_document)
 }
@@ -151,12 +152,15 @@ mod tests {
         }
     }
 
-    fn create_test_svg() -> &'static str {
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 400">
+    fn create_test_svg() -> SvgArtifact {
+        SvgArtifact::from_trusted(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 400">
   <g class="node" data-id="users"><rect x="56" y="56" width="260" height="94"/></g>
   <g class="node" data-id="posts"><rect x="56" y="230" width="260" height="112"/></g>
   <g class="edge"><line x1="316" y1="286" x2="56" y2="103"/></g>
 </svg>"#
+                .to_string(),
+        )
     }
 
     #[test]
@@ -165,7 +169,7 @@ mod tests {
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains("<!DOCTYPE html>"));
         assert!(result.contains("<html"));
@@ -180,7 +184,7 @@ mod tests {
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains(r#"<svg xmlns="http://www.w3.org/2000/svg""#));
         assert!(result.contains(r#"data-id="users""#));
@@ -193,7 +197,7 @@ mod tests {
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains(r#"id="relune-metadata""#));
         assert!(result.contains(r#""tables""#));
@@ -211,7 +215,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains("<title>My Schema ERD</title>"));
         assert!(result.contains("<h1>My Schema ERD</h1>"));
@@ -226,7 +230,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains("--bg-color: #0c0f1a"));
         assert!(result.contains("--text-color: #e2e8f0"));
@@ -241,7 +245,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains("--bg-color: #f7f8fc"));
         assert!(result.contains("--text-color: #1e293b"));
@@ -253,7 +257,7 @@ mod tests {
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         assert!(result.contains("updateTransform"));
         assert!(result.contains("addEventListener"));
@@ -265,7 +269,7 @@ mod tests {
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         // Should not reference external HTTP resources
         assert!(result.contains("<link"));
@@ -279,7 +283,7 @@ mod tests {
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
-        let result = render_html(&graph, svg, &options).unwrap();
+        let result = render_html(&graph, &svg, &options).unwrap();
 
         // Check metadata contains expected structure
         assert!(result.contains(r#""id":"users""#));
@@ -350,12 +354,15 @@ mod tests {
             node_index: std::collections::BTreeMap::new(),
             reverse_index: std::collections::BTreeMap::new(),
         };
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 400">
+        let svg = SvgArtifact::from_trusted(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 400">
   <g class="table-node node node-kind-view" data-table-id="active_users" data-id="active_users" data-node-kind="view"></g>
   <g class="table-node node node-kind-enum" data-table-id="status" data-id="status" data-node-kind="enum"></g>
-</svg>"#;
+</svg>"#
+                .to_string(),
+        );
 
-        let result = render_html(&graph, svg, &HtmlRenderOptions::default()).unwrap();
+        let result = render_html(&graph, &svg, &HtmlRenderOptions::default()).unwrap();
 
         assert!(result.contains(r#""kind":"view""#));
         assert!(result.contains(r#""kind":"enum""#));

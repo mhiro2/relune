@@ -26,11 +26,56 @@ pub use legend::render_legend;
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
 
+/// SVG produced by this crate's rendering pipeline.
+///
+/// This is the typed boundary between SVG production and downstream consumers
+/// (notably HTML embedding). All values written through this crate's renderers
+/// are escaped via [`relune_render_theme::escape_xml_text`], so a `SvgArtifact`
+/// is safe to embed in HTML without further sanitization. Callers that need to
+/// wrap an externally produced SVG must use [`SvgArtifact::from_trusted`] and
+/// uphold the same guarantee themselves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SvgArtifact {
+    svg: String,
+}
+
+impl SvgArtifact {
+    /// Wrap a string that the caller asserts is safe SVG.
+    ///
+    /// The caller is responsible for ensuring the string contains no
+    /// unescaped script content, event handlers, or external references.
+    /// Prefer obtaining a `SvgArtifact` from [`render_svg`] or
+    /// [`render_svg_with_overlay`], which apply the required escaping
+    /// internally.
+    #[must_use]
+    pub const fn from_trusted(svg: String) -> Self {
+        Self { svg }
+    }
+
+    /// Borrow the SVG content as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.svg
+    }
+
+    /// Consume the artifact and return the underlying SVG string.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.svg
+    }
+}
+
+impl AsRef<str> for SvgArtifact {
+    fn as_ref(&self) -> &str {
+        &self.svg
+    }
+}
+
 /// When any backbone segment is shorter than this, Crow's Foot `<marker>` geometry
 /// (refX up to ~26px) intrudes past orthogonal elbows; draw inline symbols instead.
 const MIN_SVG_MARKER_BACKBONE_SEGMENT: f32 = 32.0;
 
-/// Renders a positioned graph to an SVG string with the given options.
+/// Renders a positioned graph to an [`SvgArtifact`] with the given options.
 ///
 /// Supports group rendering for visually grouping related tables.
 /// When an overlay is provided, annotations (lint warnings, diff status, etc.)
@@ -38,19 +83,19 @@ const MIN_SVG_MARKER_BACKBONE_SEGMENT: f32 = 32.0;
 pub fn render_svg(
     graph: &relune_layout::PositionedGraph,
     options: SvgRenderOptions,
-) -> Result<String, SvgRenderError> {
+) -> Result<SvgArtifact, SvgRenderError> {
     render_svg_with_overlay(graph, options, None)
 }
 
-/// Renders a positioned graph to an SVG string with an optional overlay.
+/// Renders a positioned graph to an [`SvgArtifact`] with an optional overlay.
 ///
-/// This is the full-featured entry point. `render_svg` delegates here with
-/// `overlay = None` for backwards compatibility.
+/// This is the full-featured entry point. [`render_svg`] delegates here with
+/// `overlay = None`.
 pub fn render_svg_with_overlay(
     graph: &relune_layout::PositionedGraph,
     options: SvgRenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
-) -> Result<String, SvgRenderError> {
+) -> Result<SvgArtifact, SvgRenderError> {
     let colors = get_colors(options.theme);
     let mut out = String::with_capacity(estimate_svg_capacity(graph, options, overlay));
 
@@ -108,7 +153,7 @@ pub fn render_svg_with_overlay(
     }
 
     out.push_str("</svg>");
-    Ok(out)
+    Ok(SvgArtifact::from_trusted(out))
 }
 
 fn estimate_svg_capacity(
@@ -577,7 +622,9 @@ mod tests {
     };
 
     fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOptions) -> String {
-        super::render_svg(graph, options).expect("svg rendering should succeed in tests")
+        super::render_svg(graph, options)
+            .expect("svg rendering should succeed in tests")
+            .into_string()
     }
 
     fn render_svg_with_overlay(
@@ -587,6 +634,7 @@ mod tests {
     ) -> String {
         super::render_svg_with_overlay(graph, options, overlay)
             .expect("svg overlay rendering should succeed in tests")
+            .into_string()
     }
 
     fn relation_flags(
@@ -1844,7 +1892,8 @@ mod snapshot_tests {
             .and_then(|schema| build_layout(schema).ok())
             .and_then(|positioned_graph| {
                 render_svg(&positioned_graph, SvgRenderOptions::default()).ok()
-            });
+            })
+            .map(SvgArtifact::into_string);
         (parse_output, svg)
     }
 
