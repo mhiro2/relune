@@ -46,6 +46,17 @@
           event.preventDefault();
           document.getElementById("group-panel-collapse")?.dispatchEvent(new MouseEvent("click"));
           break;
+        case "m":
+        case "M":
+          if (event.ctrlKey || event.metaKey || event.altKey) {
+            break;
+          }
+          event.preventDefault();
+          if (runtime.minimap !== void 0) {
+            runtime.minimap.setHidden(!runtime.minimap.isHidden());
+            runtime.viewport?.fit();
+          }
+          break;
         case "+":
         case "=":
           event.preventDefault();

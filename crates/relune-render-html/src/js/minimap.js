@@ -2,6 +2,8 @@
 (() => {
   // ts/viewer_api.ts
   var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
+  var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
+  var VIEWER_WAITERS_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.waiters");
   function getViewerRuntime() {
     const viewerWindow = window;
     if (viewerWindow[VIEWER_RUNTIME_KEY] === void 0) {
@@ -9,9 +11,71 @@
     }
     return viewerWindow[VIEWER_RUNTIME_KEY];
   }
+  function readyModules() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_READY_MODULES_KEY] === void 0) {
+      viewerWindow[VIEWER_READY_MODULES_KEY] = /* @__PURE__ */ new Set();
+    }
+    return viewerWindow[VIEWER_READY_MODULES_KEY];
+  }
+  function runtimeWaiters() {
+    const viewerWindow = window;
+    if (viewerWindow[VIEWER_WAITERS_KEY] === void 0) {
+      viewerWindow[VIEWER_WAITERS_KEY] = [];
+    }
+    return viewerWindow[VIEWER_WAITERS_KEY];
+  }
+  function markViewerModuleReady(module) {
+    readyModules().add(module);
+    flushViewerWaiters();
+  }
+  function flushViewerWaiters() {
+    const ready = readyModules();
+    const remaining = [];
+    for (const waiter of runtimeWaiters()) {
+      if (Array.from(waiter.modules).every((module) => ready.has(module))) {
+        waiter.callback();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    const viewerWindow = window;
+    viewerWindow[VIEWER_WAITERS_KEY] = remaining;
+  }
+  function emitViewerEvent(name, detail) {
+    document.dispatchEvent(new CustomEvent(name, { detail }));
+  }
 
   // ts/minimap.ts
   {
+    const runtime = getViewerRuntime();
+    const minimapShell = document.getElementById("minimap-shell");
+    const minimapToggleBtn = document.getElementById("minimap-toggle");
+    if (minimapShell instanceof HTMLElement) {
+      const isHidden = () => minimapShell.hasAttribute("hidden");
+      const setHidden = (hidden) => {
+        const changed = isHidden() !== hidden;
+        if (hidden) {
+          minimapShell.setAttribute("hidden", "");
+        } else {
+          minimapShell.removeAttribute("hidden");
+        }
+        if (minimapToggleBtn instanceof HTMLButtonElement) {
+          minimapToggleBtn.setAttribute("aria-pressed", String(!hidden));
+        }
+        if (changed) {
+          emitViewerEvent("relune:minimap-toggled", { hidden });
+        }
+      };
+      runtime.minimap = { isHidden, setHidden };
+      markViewerModuleReady("minimap");
+      if (minimapToggleBtn instanceof HTMLButtonElement) {
+        minimapToggleBtn.addEventListener("click", () => {
+          setHidden(!isHidden());
+          runtime.viewport?.fit();
+        });
+      }
+    }
     const host = document.getElementById("minimap");
     const svgRoot = document.querySelector(".canvas svg");
     if (!(host instanceof SVGSVGElement) || svgRoot === null) {
@@ -37,7 +101,6 @@
         runtime.viewport?.center(contentX, contentY);
       };
       updateFrame2 = updateFrame, focusPoint2 = focusPoint;
-      const runtime = getViewerRuntime();
       const hostSvg = host;
       hostSvg.innerHTML = "";
       const frame = document.createElementNS("http://www.w3.org/2000/svg", "rect");

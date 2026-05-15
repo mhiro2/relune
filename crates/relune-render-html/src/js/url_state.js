@@ -124,6 +124,9 @@
       if (collapsed.length > 0) {
         params.set(PARAM_COLLAPSED, collapsed.join(","));
       }
+      if (runtime.minimap?.isHidden() === true) {
+        params.set(PARAM_MINIMAP_HIDDEN, "1");
+      }
       return params;
     }, writeHash = function() {
       const str = buildHashParams().toString();
@@ -142,6 +145,7 @@
       pendingPush = false;
     }, restoreFromHash = function() {
       const params = readHash();
+      runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_HIDDEN) === "1");
       if (params.toString() === "") {
         return;
       }
@@ -211,6 +215,9 @@
       if (document.getElementById("canvas")?.querySelector("svg") !== null) {
         modules.push("collapse");
       }
+      if (document.getElementById("minimap-shell") !== null) {
+        modules.push("minimap");
+      }
       return modules;
     };
     readHash2 = readHash, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, scheduleDiscreteWrite2 = scheduleDiscreteWrite, buildHashParams2 = buildHashParams, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
@@ -231,6 +238,7 @@
     const PARAM_FILTER_MODE = "fm";
     const PARAM_HIDDEN_GROUPS = "hg";
     const PARAM_COLLAPSED = "c";
+    const PARAM_MINIMAP_HIDDEN = "mh";
     const FACET_PARAMS = [
       { param: PARAM_FILTER_SCHEMA, facetId: "schema" },
       { param: PARAM_FILTER_KIND, facetId: "kind" },
@@ -251,6 +259,7 @@
     document.addEventListener("relune:filters-changed", scheduleDiscreteWrite);
     document.addEventListener("relune:groups-changed", scheduleDiscreteWrite);
     document.addEventListener("relune:collapse-changed", scheduleDiscreteWrite);
+    document.addEventListener("relune:minimap-toggled", scheduleDiscreteWrite);
     window.addEventListener("popstate", () => {
       restoringFromPopstate = true;
       restoreFromHash();

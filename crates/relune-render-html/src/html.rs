@@ -585,6 +585,10 @@ mod tests {
         assert!(html.contains(r#"id="zoom-out""#));
         assert!(html.contains(r#"id="zoom-level""#));
         assert!(html.contains(r#"id="zoom-fit""#));
+        assert!(html.contains(r#"id="minimap-toggle""#));
+        assert!(html.contains(r#"aria-pressed="true""#));
+        assert!(html.contains(r#"aria-label="Toggle minimap""#));
+        assert!(html.contains(r#"aria-controls="minimap-shell""#));
         assert!(html.contains(r#"id="minimap""#));
         // Verify SVG icons replaced text labels
         assert!(html.contains("<svg"));

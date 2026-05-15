@@ -31,6 +31,19 @@ import { getViewerRuntime, isEditableTarget } from './viewer_api';
         event.preventDefault();
         document.getElementById('group-panel-collapse')?.dispatchEvent(new MouseEvent('click'));
         break;
+      case 'm':
+      case 'M':
+        // Skip when a modifier is held (Cmd+M, Ctrl+M, Alt+M) so we don't
+        // shadow OS- or browser-owned shortcuts.
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+          break;
+        }
+        event.preventDefault();
+        if (runtime.minimap !== undefined) {
+          runtime.minimap.setHidden(!runtime.minimap.isHidden());
+          runtime.viewport?.fit();
+        }
+        break;
       case '+':
       case '=':
         event.preventDefault();
