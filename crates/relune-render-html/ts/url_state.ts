@@ -20,7 +20,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   const PARAM_FILTER_MODE = 'fm';
   const PARAM_HIDDEN_GROUPS = 'hg';
   const PARAM_COLLAPSED = 'c';
-  const PARAM_MINIMAP_HIDDEN = 'mh';
+  const PARAM_MINIMAP_VISIBLE = 'mv';
 
   type FacetUrlParam = { param: string; facetId: string };
   const FACET_PARAMS: FacetUrlParam[] = [
@@ -148,8 +148,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       params.set(PARAM_COLLAPSED, collapsed.join(','));
     }
 
-    if (runtime.minimap?.isHidden() === true) {
-      params.set(PARAM_MINIMAP_HIDDEN, '1');
+    if (runtime.minimap?.isHidden() === false) {
+      params.set(PARAM_MINIMAP_VISIBLE, '1');
     }
 
     return params;
@@ -180,8 +180,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   function restoreFromHash(): void {
     const params = readHash();
     // Sync minimap visibility unconditionally so popstate back to a clean hash
-    // restores the visible default instead of leaving it stuck hidden.
-    runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_HIDDEN) === '1');
+    // restores the hidden default instead of leaving it stuck visible.
+    runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1');
     if (params.toString() === '') {
       return;
     }

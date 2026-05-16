@@ -124,8 +124,8 @@
       if (collapsed.length > 0) {
         params.set(PARAM_COLLAPSED, collapsed.join(","));
       }
-      if (runtime.minimap?.isHidden() === true) {
-        params.set(PARAM_MINIMAP_HIDDEN, "1");
+      if (runtime.minimap?.isHidden() === false) {
+        params.set(PARAM_MINIMAP_VISIBLE, "1");
       }
       return params;
     }, writeHash = function() {
@@ -145,7 +145,7 @@
       pendingPush = false;
     }, restoreFromHash = function() {
       const params = readHash();
-      runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_HIDDEN) === "1");
+      runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== "1");
       if (params.toString() === "") {
         return;
       }
@@ -238,7 +238,7 @@
     const PARAM_FILTER_MODE = "fm";
     const PARAM_HIDDEN_GROUPS = "hg";
     const PARAM_COLLAPSED = "c";
-    const PARAM_MINIMAP_HIDDEN = "mh";
+    const PARAM_MINIMAP_VISIBLE = "mv";
     const FACET_PARAMS = [
       { param: PARAM_FILTER_SCHEMA, facetId: "schema" },
       { param: PARAM_FILTER_KIND, facetId: "kind" },

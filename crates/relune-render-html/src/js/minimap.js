@@ -62,6 +62,9 @@
         }
         if (minimapToggleBtn instanceof HTMLButtonElement) {
           minimapToggleBtn.setAttribute("aria-pressed", String(!hidden));
+          const label = hidden ? "Show minimap" : "Hide minimap";
+          minimapToggleBtn.setAttribute("aria-label", label);
+          minimapToggleBtn.setAttribute("title", `${label} (M)`);
         }
         if (changed) {
           emitViewerEvent("relune:minimap-toggled", { hidden });
