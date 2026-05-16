@@ -180,8 +180,11 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   function restoreFromHash(): void {
     const params = readHash();
     // Sync minimap visibility unconditionally so popstate back to a clean hash
-    // restores the hidden default instead of leaving it stuck visible.
-    runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1');
+    // restores the hidden default instead of leaving it stuck visible. Use the
+    // silent option to avoid emitting `relune:minimap-toggled` — that event
+    // would queue a debounced hash write after restoringFromPopstate has
+    // already flipped back to false, causing a spurious pushState.
+    runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1', { silent: true });
     if (params.toString() === '') {
       return;
     }

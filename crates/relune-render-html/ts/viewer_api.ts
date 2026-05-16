@@ -65,7 +65,7 @@ export interface ViewerCollapseApi {
 
 export interface ViewerMinimapApi {
   isHidden(): boolean;
-  setHidden(hidden: boolean): void;
+  setHidden(hidden: boolean, options?: { silent?: boolean }): void;
 }
 
 export interface ViewerRuntime {

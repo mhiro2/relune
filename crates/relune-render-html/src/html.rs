@@ -587,8 +587,9 @@ mod tests {
         assert!(html.contains(r#"id="zoom-fit""#));
         assert!(html.contains(r#"id="minimap-toggle""#));
         assert!(html.contains(r#"aria-pressed="false""#));
-        assert!(html.contains(r#"aria-label="Show minimap""#));
+        assert!(html.contains(r#"aria-label="Minimap""#));
         assert!(html.contains(r#"aria-controls="minimap-shell""#));
+        assert!(html.contains(r#"aria-keyshortcuts="M""#));
         assert!(html.contains(r#"title="Show minimap (M)""#));
         assert!(html.contains(r#"id="minimap-shell""#));
         assert!(html.contains(r#"id="minimap-shell" aria-label="Diagram minimap" hidden"#));

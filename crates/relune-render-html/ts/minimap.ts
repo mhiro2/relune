@@ -21,7 +21,7 @@ interface MinimapNode {
 
   if (minimapShell instanceof HTMLElement) {
     const isHidden = (): boolean => minimapShell.hasAttribute('hidden');
-    const setHidden = (hidden: boolean): void => {
+    const setHidden = (hidden: boolean, options?: { silent?: boolean }): void => {
       const changed = isHidden() !== hidden;
       if (hidden) {
         minimapShell.setAttribute('hidden', '');
@@ -30,11 +30,10 @@ interface MinimapNode {
       }
       if (minimapToggleBtn instanceof HTMLButtonElement) {
         minimapToggleBtn.setAttribute('aria-pressed', String(!hidden));
-        const label = hidden ? 'Show minimap' : 'Hide minimap';
-        minimapToggleBtn.setAttribute('aria-label', label);
-        minimapToggleBtn.setAttribute('title', `${label} (M)`);
+        const action = hidden ? 'Show minimap' : 'Hide minimap';
+        minimapToggleBtn.setAttribute('title', `${action} (M)`);
       }
-      if (changed) {
+      if (changed && options?.silent !== true) {
         emitViewerEvent('relune:minimap-toggled', { hidden });
       }
     };

@@ -87,7 +87,7 @@ pub(crate) fn build_viewer_controls_html() -> String {
     <button type="button" class="viewer-control-button" id="zoom-out" title="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
     <span class="viewer-control-status" id="zoom-level">100%</span>
     <button type="button" class="viewer-control-button viewer-control-fit" id="zoom-fit" title="Fit to screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
-    <button type="button" class="viewer-control-button viewer-control-minimap" id="minimap-toggle" aria-pressed="false" aria-label="Show minimap" aria-controls="minimap-shell" title="Show minimap (M)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v16M15 6v16"/></svg></button>
+    <button type="button" class="viewer-control-button viewer-control-minimap" id="minimap-toggle" aria-pressed="false" aria-label="Minimap" aria-controls="minimap-shell" aria-keyshortcuts="M" title="Show minimap (M)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v16M15 6v16"/></svg></button>
   </div>
   <div class="minimap-shell" id="minimap-shell" aria-label="Diagram minimap" hidden>
     <div class="minimap-header">

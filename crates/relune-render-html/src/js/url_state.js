@@ -145,7 +145,7 @@
       pendingPush = false;
     }, restoreFromHash = function() {
       const params = readHash();
-      runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== "1");
+      runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== "1", { silent: true });
       if (params.toString() === "") {
         return;
       }
