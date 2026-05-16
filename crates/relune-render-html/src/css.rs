@@ -982,6 +982,14 @@ pub(crate) fn build_css(
       background: color-mix(in srgb, var(--panel-bg) 82%, var(--accent-soft));
     }
 
+    .viewer-control-button[aria-pressed=false] {
+      opacity: 0.55;
+    }
+
+    .viewer-control-button[aria-pressed=false]:hover {
+      opacity: 1;
+    }
+
     .minimap-shell {
       position: fixed;
       right: 12px;

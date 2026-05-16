@@ -63,6 +63,11 @@ export interface ViewerCollapseApi {
   setCollapsed(tableIds: string[]): void;
 }
 
+export interface ViewerMinimapApi {
+  isHidden(): boolean;
+  setHidden(hidden: boolean, options?: { silent?: boolean }): void;
+}
+
 export interface ViewerRuntime {
   viewport?: ViewerViewportApi;
   filters?: ViewerFiltersApi;
@@ -70,9 +75,17 @@ export interface ViewerRuntime {
   selection?: ViewerSelectionApi;
   groups?: ViewerGroupsApi;
   collapse?: ViewerCollapseApi;
+  minimap?: ViewerMinimapApi;
 }
 
-export type ViewerModule = 'viewport' | 'filters' | 'search' | 'selection' | 'groups' | 'collapse';
+export type ViewerModule =
+  | 'viewport'
+  | 'filters'
+  | 'search'
+  | 'selection'
+  | 'groups'
+  | 'collapse'
+  | 'minimap';
 
 type RuntimeWaiter = {
   modules: Set<ViewerModule>;

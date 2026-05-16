@@ -1,4 +1,10 @@
-import { getViewerRuntime, type DiagramBounds, type ViewportState } from './viewer_api';
+import {
+  emitViewerEvent,
+  getViewerRuntime,
+  markViewerModuleReady,
+  type DiagramBounds,
+  type ViewportState,
+} from './viewer_api';
 
 interface MinimapNode {
   id: string;
@@ -9,12 +15,44 @@ interface MinimapNode {
 }
 
 {
+  const runtime = getViewerRuntime();
+  const minimapShell = document.getElementById('minimap-shell');
+  const minimapToggleBtn = document.getElementById('minimap-toggle');
+
+  if (minimapShell instanceof HTMLElement) {
+    const isHidden = (): boolean => minimapShell.hasAttribute('hidden');
+    const setHidden = (hidden: boolean, options?: { silent?: boolean }): void => {
+      const changed = isHidden() !== hidden;
+      if (hidden) {
+        minimapShell.setAttribute('hidden', '');
+      } else {
+        minimapShell.removeAttribute('hidden');
+      }
+      if (minimapToggleBtn instanceof HTMLButtonElement) {
+        minimapToggleBtn.setAttribute('aria-pressed', String(!hidden));
+        const action = hidden ? 'Show minimap' : 'Hide minimap';
+        minimapToggleBtn.setAttribute('title', `${action} (M)`);
+      }
+      if (changed && options?.silent !== true) {
+        emitViewerEvent('relune:minimap-toggled', { hidden });
+      }
+    };
+    runtime.minimap = { isHidden, setHidden };
+    markViewerModuleReady('minimap');
+
+    if (minimapToggleBtn instanceof HTMLButtonElement) {
+      minimapToggleBtn.addEventListener('click', () => {
+        setHidden(!isHidden());
+        runtime.viewport?.fit();
+      });
+    }
+  }
+
   const host = document.getElementById('minimap');
   const svgRoot = document.querySelector('.canvas svg');
   if (!(host instanceof SVGSVGElement) || svgRoot === null) {
     // Minimap host or source SVG not available.
   } else {
-    const runtime = getViewerRuntime();
     const hostSvg = host;
     hostSvg.innerHTML = '';
 

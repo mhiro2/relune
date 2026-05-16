@@ -69,7 +69,7 @@ export function computeFit(
     return null;
   }
 
-  const padding = 40;
+  const padding = 20;
   const scale = clamp(
     Math.min(
       (available.width - padding * 2) / diagram.width,

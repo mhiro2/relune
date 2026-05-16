@@ -20,6 +20,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   const PARAM_FILTER_MODE = 'fm';
   const PARAM_HIDDEN_GROUPS = 'hg';
   const PARAM_COLLAPSED = 'c';
+  const PARAM_MINIMAP_VISIBLE = 'mv';
 
   type FacetUrlParam = { param: string; facetId: string };
   const FACET_PARAMS: FacetUrlParam[] = [
@@ -147,6 +148,10 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       params.set(PARAM_COLLAPSED, collapsed.join(','));
     }
 
+    if (runtime.minimap?.isHidden() === false) {
+      params.set(PARAM_MINIMAP_VISIBLE, '1');
+    }
+
     return params;
   }
 
@@ -174,6 +179,12 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
 
   function restoreFromHash(): void {
     const params = readHash();
+    // Sync minimap visibility unconditionally so popstate back to a clean hash
+    // restores the hidden default instead of leaving it stuck visible. Use the
+    // silent option to avoid emitting `relune:minimap-toggled` — that event
+    // would queue a debounced hash write after restoringFromPopstate has
+    // already flipped back to false, causing a spurious pushState.
+    runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1', { silent: true });
     if (params.toString() === '') {
       return;
     }
@@ -259,6 +270,9 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     if (document.getElementById('canvas')?.querySelector('svg') !== null) {
       modules.push('collapse');
     }
+    if (document.getElementById('minimap-shell') !== null) {
+      modules.push('minimap');
+    }
     return modules;
   }
 
@@ -273,6 +287,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   document.addEventListener('relune:filters-changed', scheduleDiscreteWrite);
   document.addEventListener('relune:groups-changed', scheduleDiscreteWrite);
   document.addEventListener('relune:collapse-changed', scheduleDiscreteWrite);
+  document.addEventListener('relune:minimap-toggled', scheduleDiscreteWrite);
 
   // ---------------------------------------------------------------------------
   // popstate: re-apply state when the user navigates back/forward or edits hash

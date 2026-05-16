@@ -93,7 +93,7 @@
     if (diagram.width <= 0 || diagram.height <= 0 || available.width <= 0 || available.height <= 0) {
       return null;
     }
-    const padding = 40;
+    const padding = 20;
     const scale = clamp(
       Math.min(
         (available.width - padding * 2) / diagram.width,
