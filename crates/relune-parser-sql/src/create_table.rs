@@ -118,6 +118,12 @@ pub(crate) fn parse_create_table(
                     span_from_spanned(input, offsets, constraint),
                 );
             }
+            TableConstraint::PrimaryKeyUsingIndex(_) | TableConstraint::UniqueUsingIndex(_) => {
+                ctx.warn_unsupported(
+                    "PRIMARY KEY/UNIQUE USING INDEX constraint",
+                    span_from_spanned(input, offsets, constraint),
+                );
+            }
         }
     }
 

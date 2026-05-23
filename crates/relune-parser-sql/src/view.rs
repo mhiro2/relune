@@ -79,15 +79,19 @@ fn extract_view_columns_from_query(query: &sqlparser::ast::Query) -> Vec<Column>
     };
 
     let mut columns = Vec::new();
-    for (i, item) in select.projection.iter().enumerate() {
-        let col_name = match item {
-            SelectItem::UnnamedExpr(expr) => extract_expr_column_name(expr),
-            SelectItem::ExprWithAlias { alias, .. } => Some(normalize_identifier(&alias.value)),
-            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => None,
+    for item in &select.projection {
+        let names: Vec<String> = match item {
+            SelectItem::UnnamedExpr(expr) => extract_expr_column_name(expr).into_iter().collect(),
+            SelectItem::ExprWithAlias { alias, .. } => vec![normalize_identifier(&alias.value)],
+            SelectItem::ExprWithAliases { aliases, .. } => aliases
+                .iter()
+                .map(|alias| normalize_identifier(&alias.value))
+                .collect(),
+            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => Vec::new(),
         };
-        if let Some(name) = col_name {
+        for name in names {
             columns.push(Column {
-                id: ColumnId((i as u64) + 1),
+                id: ColumnId((columns.len() as u64) + 1),
                 name,
                 data_type: "unknown".to_string(),
                 nullable: true,

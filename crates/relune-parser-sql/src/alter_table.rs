@@ -521,5 +521,11 @@ fn apply_add_table_constraint(
                 span_from_spanned(input, offsets, constraint),
             );
         }
+        TableConstraint::PrimaryKeyUsingIndex(_) | TableConstraint::UniqueUsingIndex(_) => {
+            ctx.warn_unsupported(
+                "PRIMARY KEY/UNIQUE USING INDEX constraint",
+                span_from_spanned(input, offsets, constraint),
+            );
+        }
     }
 }
