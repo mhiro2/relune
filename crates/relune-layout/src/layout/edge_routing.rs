@@ -158,7 +158,15 @@ fn route_single_edge(
                 detail: "source node position missing for self-loop",
             });
         };
-        route_self_loop_with_offset(x, y, w, h, ctx.config.edge_style, assignment.radius_offset)
+        route_self_loop_with_offset(
+            x,
+            y,
+            w,
+            h,
+            ctx.config.edge_style,
+            ctx.config.direction,
+            assignment.radius_offset,
+        )
     } else if let (
         EdgePortAssignment::Regular(assignment),
         Some(&(x1, y1, w1, h1)),

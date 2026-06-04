@@ -1,5 +1,6 @@
 ---
 source: crates/relune-app/tests/layout_json_regression_matrix.rs
+assertion_line: 163
 expression: snapshot
 ---
 {
@@ -52,16 +53,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1511.4000244140625,
+              1148.4000244140625,
               349.0
             ],
             [
-              1511.4000244140625,
+              1148.4000244140625,
               427.0
             ]
           ],
           "end": [
-            1475.4000244140625,
+            1184.4000244140625,
             427.0
           ],
           "from": "categories",
@@ -70,21 +71,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1523.4000244140625,
+          "label_x": 1136.4000244140625,
           "label_y": 388.0,
           "nullable": true,
           "route_label_position": [
-            1511.4000244140625,
+            1148.4000244140625,
             388.0
           ],
-          "source_side": "east",
+          "source_side": "west",
           "start": [
-            1475.4000244140625,
+            1184.4000244140625,
             349.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "categories",
           "to_columns": [
             "id"
@@ -234,7 +235,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 1124.532958984375,
+          "label_x": 1095.5999755859375,
           "label_y": 359.0,
           "nullable": false,
           "route_label_position": [
@@ -379,7 +380,7 @@ expression: snapshot
         "edge_count": 7,
         "height": 902.0,
         "node_count": 7,
-        "width": 1535.4000244140625
+        "width": 1531.4000244140625
       }
     },
     "orthogonal": {
@@ -428,16 +429,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1511.4000244140625,
+              1148.4000244140625,
               349.0
             ],
             [
-              1511.4000244140625,
+              1148.4000244140625,
               427.0
             ]
           ],
           "end": [
-            1475.4000244140625,
+            1184.4000244140625,
             427.0
           ],
           "from": "categories",
@@ -446,21 +447,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1523.4000244140625,
+          "label_x": 1136.4000244140625,
           "label_y": 388.0,
           "nullable": true,
           "route_label_position": [
-            1511.4000244140625,
+            1148.4000244140625,
             388.0
           ],
-          "source_side": "east",
+          "source_side": "west",
           "start": [
-            1475.4000244140625,
+            1184.4000244140625,
             349.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "categories",
           "to_columns": [
             "id"
@@ -610,7 +611,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 1124.532958984375,
+          "label_x": 1095.5999755859375,
           "label_y": 359.0,
           "nullable": false,
           "route_label_position": [
@@ -755,7 +756,7 @@ expression: snapshot
         "edge_count": 7,
         "height": 902.0,
         "node_count": 7,
-        "width": 1535.4000244140625
+        "width": 1531.4000244140625
       }
     },
     "straight": {
@@ -795,16 +796,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1511.4000244140625,
+              1148.4000244140625,
               349.0
             ],
             [
-              1511.4000244140625,
+              1148.4000244140625,
               427.0
             ]
           ],
           "end": [
-            1475.4000244140625,
+            1184.4000244140625,
             427.0
           ],
           "from": "categories",
@@ -813,21 +814,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1523.4000244140625,
-          "label_y": 388.0,
+          "label_x": 1148.4000244140625,
+          "label_y": 400.5,
           "nullable": true,
           "route_label_position": [
-            1511.4000244140625,
+            1148.4000244140625,
             388.0
           ],
-          "source_side": "east",
+          "source_side": "west",
           "start": [
-            1475.4000244140625,
+            1184.4000244140625,
             349.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "categories",
           "to_columns": [
             "id"
@@ -941,8 +942,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "category_id",
-          "label_x": 1122.6700439453125,
-          "label_y": 393.28900146484375,
+          "label_x": 982.010009765625,
+          "label_y": 405.72900390625,
           "nullable": false,
           "route_label_position": [
             1054.800048828125,
@@ -1077,7 +1078,7 @@ expression: snapshot
         "edge_count": 7,
         "height": 902.0,
         "node_count": 7,
-        "width": 1535.4000244140625
+        "width": 1531.4000244140625
       }
     }
   }

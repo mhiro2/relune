@@ -1,5 +1,6 @@
 ---
 source: crates/relune-app/tests/layout_json_regression_matrix.rs
+assertion_line: 163
 expression: snapshot
 ---
 {
@@ -53,16 +54,16 @@ expression: snapshot
           "control_points": [
             [
               933.2000122070313,
-              765.0
+              843.0
             ],
             [
               933.2000122070313,
-              843.0
+              765.0
             ]
           ],
           "end": [
             897.2000122070313,
-            843.0
+            765.0
           ],
           "from": "categories",
           "from_columns": [
@@ -80,7 +81,7 @@ expression: snapshot
           "source_side": "east",
           "start": [
             897.2000122070313,
-            765.0
+            843.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -429,16 +430,16 @@ expression: snapshot
           "control_points": [
             [
               933.2000122070313,
-              765.0
+              843.0
             ],
             [
               933.2000122070313,
-              843.0
+              765.0
             ]
           ],
           "end": [
             897.2000122070313,
-            843.0
+            765.0
           ],
           "from": "categories",
           "from_columns": [
@@ -456,7 +457,7 @@ expression: snapshot
           "source_side": "east",
           "start": [
             897.2000122070313,
-            765.0
+            843.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -796,16 +797,16 @@ expression: snapshot
           "control_points": [
             [
               933.2000122070313,
-              765.0
+              843.0
             ],
             [
               933.2000122070313,
-              843.0
+              765.0
             ]
           ],
           "end": [
             897.2000122070313,
-            843.0
+            765.0
           ],
           "from": "categories",
           "from_columns": [
@@ -823,7 +824,7 @@ expression: snapshot
           "source_side": "east",
           "start": [
             897.2000122070313,
-            765.0
+            843.0
           ],
           "style": "Straight",
           "target_cardinality": "One",

@@ -1,5 +1,6 @@
 ---
 source: crates/relune-app/tests/layout_json_regression_matrix.rs
+assertion_line: 163
 expression: snapshot
 ---
 {
@@ -176,16 +177,16 @@ expression: snapshot
           "control_points": [
             [
               2539.0,
-              706.5
+              811.5
             ],
             [
               2539.0,
-              811.5
+              706.5
             ]
           ],
           "end": [
             2503.0,
-            811.5
+            706.5
           ],
           "from": "comments",
           "from_columns": [
@@ -203,7 +204,7 @@ expression: snapshot
           "source_side": "east",
           "start": [
             2503.0,
-            706.5
+            811.5
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -2145,16 +2146,16 @@ expression: snapshot
           "control_points": [
             [
               2539.0,
-              706.5
+              811.5
             ],
             [
               2539.0,
-              811.5
+              706.5
             ]
           ],
           "end": [
             2503.0,
-            811.5
+            706.5
           ],
           "from": "comments",
           "from_columns": [
@@ -2172,7 +2173,7 @@ expression: snapshot
           "source_side": "east",
           "start": [
             2503.0,
-            706.5
+            811.5
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -4078,16 +4079,16 @@ expression: snapshot
           "control_points": [
             [
               2539.0,
-              706.5
+              811.5
             ],
             [
               2539.0,
-              811.5
+              706.5
             ]
           ],
           "end": [
             2503.0,
-            811.5
+            706.5
           ],
           "from": "comments",
           "from_columns": [
@@ -4105,7 +4106,7 @@ expression: snapshot
           "source_side": "east",
           "start": [
             2503.0,
-            706.5
+            811.5
           ],
           "style": "Straight",
           "target_cardinality": "One",
