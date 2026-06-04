@@ -1851,6 +1851,327 @@ fn alter_table_drop_unknown_index_warns() {
 }
 
 #[test]
+fn alter_table_alter_column_set_data_type() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, bio TEXT);
+    ALTER TABLE users ALTER COLUMN bio TYPE VARCHAR(10);
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+    let bio = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "bio")
+        .unwrap();
+    assert_eq!(
+        bio.data_type, "VARCHAR(10)",
+        "ALTER COLUMN TYPE should update the column's data type"
+    );
+}
+
+#[test]
+fn alter_table_alter_column_set_and_drop_not_null() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);
+    ALTER TABLE users ALTER COLUMN email SET NOT NULL;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+    let email = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "email")
+        .unwrap();
+    assert!(
+        !email.nullable,
+        "SET NOT NULL should make the column NOT NULL"
+    );
+
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
+    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+    let email = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "email")
+        .unwrap();
+    assert!(
+        email.nullable,
+        "DROP NOT NULL should make the column nullable"
+    );
+}
+
+#[test]
+fn alter_table_alter_column_drop_not_null_keeps_primary_key_not_null() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    ALTER TABLE users ALTER COLUMN id DROP NOT NULL;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+    let id = &schema.tables[0].columns[0];
+    assert!(
+        !id.nullable,
+        "primary-key columns stay NOT NULL even after DROP NOT NULL"
+    );
+}
+
+#[test]
+fn alter_table_alter_column_unknown_warns() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    ALTER TABLE users ALTER COLUMN ghost SET NOT NULL;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(output.schema.is_some());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.code == codes::schema_unknown_column() && d.message.contains("ghost"))
+    );
+}
+
+#[test]
+fn alter_table_modify_column_changes_type_and_nullability() {
+    let sql = r"
+    CREATE TABLE t (a INT);
+    ALTER TABLE t MODIFY COLUMN a BIGINT NOT NULL;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let a = &schema.tables[0].columns[0];
+    assert_eq!(a.data_type, "BIGINT", "MODIFY should update the data type");
+    assert!(
+        !a.nullable,
+        "MODIFY ... NOT NULL should make the column NOT NULL"
+    );
+}
+
+#[test]
+fn alter_table_modify_column_without_not_null_is_nullable() {
+    let sql = r"
+    CREATE TABLE t (a INT NOT NULL);
+    ALTER TABLE t MODIFY COLUMN a INT;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let a = &schema.tables[0].columns[0];
+    assert!(
+        a.nullable,
+        "MySQL MODIFY redefines the column, so an omitted NOT NULL makes it nullable"
+    );
+}
+
+#[test]
+fn alter_table_modify_column_preserves_primary_key() {
+    let sql = r"
+    CREATE TABLE t (id INT PRIMARY KEY);
+    ALTER TABLE t MODIFY COLUMN id BIGINT;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let id = &schema.tables[0].columns[0];
+    assert_eq!(id.data_type, "BIGINT");
+    assert!(
+        id.is_primary_key,
+        "MODIFY must not drop table-level primary-key membership"
+    );
+    assert!(!id.nullable, "primary-key columns remain NOT NULL");
+}
+
+#[test]
+fn alter_table_modify_column_to_enum_populates_values() {
+    let sql = r"
+    CREATE TABLE t (status VARCHAR(10));
+    ALTER TABLE t MODIFY COLUMN status ENUM('open', 'closed') NOT NULL;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let status = &schema.tables[0].columns[0];
+    assert_eq!(
+        status.enum_values.as_deref(),
+        Some(["open".to_string(), "closed".to_string()].as_slice()),
+        "MODIFY to ENUM should populate inline enum values"
+    );
+}
+
+#[test]
+fn alter_table_modify_unknown_column_warns() {
+    let sql = r"
+    CREATE TABLE t (a INT);
+    ALTER TABLE t MODIFY COLUMN ghost BIGINT;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Mysql);
+    assert!(output.schema.is_some());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.code == codes::schema_unknown_column() && d.message.contains("ghost"))
+    );
+}
+
+#[test]
+fn alter_table_change_column_renames_and_retypes() {
+    let sql = r"
+    CREATE TABLE t (a INT);
+    ALTER TABLE t CHANGE COLUMN a b BIGINT NOT NULL;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let table = &schema.tables[0];
+    assert!(!table.columns.iter().any(|c| c.name == "a"));
+    let b = table.columns.iter().find(|c| c.name == "b").unwrap();
+    assert_eq!(b.data_type, "BIGINT");
+    assert!(!b.nullable);
+}
+
+#[test]
+fn alter_table_change_column_updates_fk_and_index() {
+    let sql = r"
+    CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+    CREATE TABLE users (
+      id BIGINT PRIMARY KEY,
+      org_id BIGINT,
+      CONSTRAINT fk_org FOREIGN KEY (org_id) REFERENCES orgs(id)
+    );
+    CREATE INDEX idx_org ON users (org_id);
+    ALTER TABLE users CHANGE COLUMN org_id organization_id BIGINT;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+    assert!(users.columns.iter().any(|c| c.name == "organization_id"));
+    assert!(
+        users.foreign_keys[0]
+            .from_columns
+            .contains(&"organization_id".to_string()),
+        "CHANGE COLUMN should update the local FK's from_columns"
+    );
+    assert!(
+        users.indexes[0]
+            .columns
+            .contains(&"organization_id".to_string()),
+        "CHANGE COLUMN should update index columns"
+    );
+}
+
+#[test]
+fn alter_table_modify_column_with_unique_adds_index() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email VARCHAR(100));
+    ALTER TABLE users MODIFY COLUMN email VARCHAR(255) UNIQUE;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let users = &schema.tables[0];
+    let email = users.columns.iter().find(|c| c.name == "email").unwrap();
+    assert_eq!(email.data_type, "VARCHAR(255)");
+    assert!(
+        users
+            .indexes
+            .iter()
+            .any(|ix| ix.is_unique && ix.columns == vec!["email".to_string()]),
+        "MODIFY ... UNIQUE should add a unique index on the column"
+    );
+}
+
+#[test]
+fn alter_table_change_column_with_inline_foreign_key_adds_fk() {
+    let sql = r"
+    CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+    CREATE TABLE users (id BIGINT PRIMARY KEY, org BIGINT);
+    ALTER TABLE users CHANGE COLUMN org org_id BIGINT REFERENCES orgs(id);
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+    assert!(users.columns.iter().any(|c| c.name == "org_id"));
+    assert!(
+        users
+            .foreign_keys
+            .iter()
+            .any(|fk| fk.from_columns == vec!["org_id".to_string()] && fk.to_table == "orgs"),
+        "CHANGE ... REFERENCES should record the foreign key on the renamed column"
+    );
+}
+
+#[test]
+fn alter_table_change_unknown_column_warns() {
+    let sql = r"
+    CREATE TABLE t (a INT);
+    ALTER TABLE t CHANGE COLUMN ghost phantom BIGINT;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Mysql);
+    assert!(output.schema.is_some());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.code == codes::schema_unknown_column() && d.message.contains("ghost"))
+    );
+}
+
+#[test]
+fn alter_table_rename_constraint_renames_foreign_key() {
+    let sql = r"
+    CREATE TABLE orgs (id BIGINT PRIMARY KEY);
+    CREATE TABLE users (
+      id BIGINT PRIMARY KEY,
+      org_id BIGINT,
+      CONSTRAINT fk_org FOREIGN KEY (org_id) REFERENCES orgs(id)
+    );
+    ALTER TABLE users RENAME CONSTRAINT fk_org TO fk_organization;
+    ";
+
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+    let users = schema.tables.iter().find(|t| t.name == "users").unwrap();
+    assert_eq!(
+        users.foreign_keys[0].name.as_deref(),
+        Some("fk_organization"),
+        "RENAME CONSTRAINT should rename the foreign key"
+    );
+}
+
+#[test]
+fn alter_table_rename_unknown_constraint_warns() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    ALTER TABLE users RENAME CONSTRAINT ghost TO phantom;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(output.schema.is_some());
+    assert!(output.has_warnings());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("ghost"))
+    );
+}
+
+#[test]
 fn drop_table_removes_table_from_schema() {
     let sql = r"
     CREATE TABLE users (id BIGINT PRIMARY KEY);
