@@ -41,7 +41,9 @@ async fn setup_postgres_with_sql(
         .await?;
 
     // Execute the SQL against the database
-    sqlx::raw_sql(sql).execute(&pool).await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await?;
 
     // Close the pool
     pool.close().await;
@@ -286,7 +288,10 @@ async fn test_introspect_database_dispatches_postgres_url() {
         .connect(&database_url)
         .await
         .expect("pool");
-    sqlx::raw_sql(sql).execute(&pool).await.expect("ddl");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await
+        .expect("ddl");
     pool.close().await;
 
     let schema = introspect_database(&database_url)
@@ -324,7 +329,9 @@ async fn setup_mysql_with_sql(
         .connect(&database_url)
         .await?;
 
-    sqlx::raw_sql(sql).execute(&pool).await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await?;
     pool.close().await;
 
     Ok((database_url, container))
