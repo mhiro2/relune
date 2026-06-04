@@ -536,12 +536,14 @@ impl LayoutGraphBuilder {
                     .map(|target| target.stable_id.clone());
                 let is_self_loop = target_id.as_deref() == Some(table.stable_id.as_str());
 
-                // Determine if FK is nullable by checking source columns
+                // Determine if FK is nullable by checking source columns.
+                // Match column names case-insensitively, consistent with schema
+                // validation and FK target resolution.
                 let fk_nullable = fk.from_columns.iter().all(|col_name| {
                     table
                         .columns
                         .iter()
-                        .find(|c| &c.name == col_name)
+                        .find(|c| c.name.eq_ignore_ascii_case(col_name))
                         .is_some_and(|c| c.nullable)
                 });
 
