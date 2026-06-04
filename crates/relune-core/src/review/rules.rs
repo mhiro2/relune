@@ -821,16 +821,26 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
         return None;
     }
 
-    // VARCHAR / CHARACTER VARYING / CHAR with width.
-    if let (Some((old_kind, old_n)), Some((new_kind, new_n))) =
-        (parse_char_type(&old_norm), parse_char_type(&new_norm))
-        && old_kind == new_kind
-        && new_n < old_n
+    // Character/string types. Adding a fixed upper bound where there was
+    // none (TEXT/CLOB or unbounded VARCHAR -> VARCHAR(n)) or shrinking an
+    // existing bound can both reject or truncate existing data. The bound is
+    // compared dialect-independently so that the lengths are what matter, not
+    // the CHAR/VARCHAR spelling.
+    if let (Some((old_kind, old_bound)), Some((new_kind, new_bound))) =
+        (parse_string_type(&old_norm), parse_string_type(&new_norm))
     {
-        return Some((
-            format!("{old_kind}({old_n})"),
-            format!("{new_kind}({new_n})"),
-        ));
+        match (old_bound, new_bound) {
+            (None, Some(new_n)) => {
+                return Some((old_norm.clone(), format!("{new_kind}({new_n})")));
+            }
+            (Some(old_n), Some(new_n)) if new_n < old_n => {
+                return Some((
+                    format!("{old_kind}({old_n})"),
+                    format!("{new_kind}({new_n})"),
+                ));
+            }
+            _ => {}
+        }
     }
 
     // NUMERIC(P, S).
@@ -854,22 +864,43 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
     None
 }
 
-fn parse_char_type(value: &str) -> Option<(&'static str, u32)> {
+/// Classify a character/string type, returning its canonical kind label and
+/// declared length bound. A `None` bound means the type carries no fixed
+/// upper bound we can compare against — a TEXT/CLOB type or a bare VARCHAR.
+/// `value` must already be trimmed and upper-cased.
+///
+/// The sized `MySQL` text variants (`TINYTEXT`/`MEDIUMTEXT`/`LONGTEXT`) are
+/// intentionally not recognised: comparing them correctly needs per-type max
+/// lengths, and folding them into "unbounded" would mis-flag a widening such
+/// as `TINYTEXT -> VARCHAR(1000)` as a narrowing.
+fn parse_string_type(value: &str) -> Option<(&'static str, Option<u32>)> {
+    // Unbounded text types: no length we can compare against.
+    if matches!(value, "TEXT" | "CLOB") {
+        return Some(("TEXT", None));
+    }
+    // CHARACTER must be matched before CHAR, and CHARACTER VARYING before
+    // both, so the longer keyword wins.
     let (kind, rest) = if let Some(rest) = value.strip_prefix("CHARACTER VARYING") {
         ("VARCHAR", rest)
     } else if let Some(rest) = value.strip_prefix("VARCHAR") {
         ("VARCHAR", rest)
+    } else if let Some(rest) = value.strip_prefix("CHARACTER") {
+        ("CHAR", rest)
     } else if let Some(rest) = value.strip_prefix("CHAR") {
         ("CHAR", rest)
     } else {
         return None;
     };
     let trimmed = rest.trim();
-    if !trimmed.starts_with('(') {
-        return None;
+    if trimmed.is_empty() {
+        // Bare VARCHAR / CHARACTER VARYING is unbounded, but bare CHAR /
+        // CHARACTER is CHAR(1) in standard SQL.
+        let bound = if kind == "CHAR" { Some(1) } else { None };
+        return Some((kind, bound));
     }
     let inner = trimmed.strip_prefix('(')?.strip_suffix(')')?;
-    inner.trim().parse::<u32>().ok().map(|n| (kind, n))
+    let n = inner.trim().parse::<u32>().ok()?;
+    Some((kind, Some(n)))
 }
 
 fn parse_numeric(value: &str) -> Option<(u32, u32)> {
@@ -887,12 +918,17 @@ fn parse_numeric(value: &str) -> Option<(u32, u32)> {
     Some((p, s))
 }
 
-const fn int_rank(value: &str) -> Option<u32> {
-    match value.as_bytes() {
-        b"BIGINT" | b"INT8" => Some(64),
-        b"INT" | b"INTEGER" | b"INT4" => Some(32),
-        b"SMALLINT" | b"INT2" => Some(16),
-        b"TINYINT" => Some(8),
+fn int_rank(value: &str) -> Option<u32> {
+    // Drop the MySQL display width and any signedness/zerofill modifiers so
+    // that e.g. `BIGINT(20) UNSIGNED` ranks the same as `BIGINT`. `value` is
+    // already upper-cased.
+    let base = value.split_whitespace().next()?.split('(').next()?;
+    match base {
+        "BIGINT" | "INT8" => Some(64),
+        "INT" | "INTEGER" | "INT4" => Some(32),
+        "MEDIUMINT" => Some(24),
+        "SMALLINT" | "INT2" => Some(16),
+        "TINYINT" => Some(8),
         _ => None,
     }
 }
@@ -943,7 +979,7 @@ fn check_drop_pk_or_unique_column(
     if same_column_set(&after_pk_cols, &before_pk_cols) {
         return;
     }
-    if covered_by_unique_index(after_table, &before_pk_cols) {
+    if already_unique_in(after_table, &before_pk_cols) {
         return;
     }
 
@@ -1005,7 +1041,7 @@ fn check_drop_pk_or_unique_index(
         return;
     };
     let lower_cols: Vec<String> = old.columns.iter().map(|c| c.to_ascii_lowercase()).collect();
-    if covered_by_unique_index(after_table, &lower_cols) {
+    if already_unique_in(after_table, &lower_cols) {
         return;
     }
 
@@ -1087,7 +1123,7 @@ fn check_drop_pk_or_unique_widened(
     if !covers(&after_pk_cols, &before_pk_cols) {
         return;
     }
-    if covered_by_unique_index(after_table, &before_pk_cols) {
+    if already_unique_in(after_table, &before_pk_cols) {
         return;
     }
 
@@ -1724,25 +1760,6 @@ fn covers(set: &[String], expected: &[String]) -> bool {
 
 fn same_column_set(a: &[String], b: &[String]) -> bool {
     a.len() == b.len() && covers(a, b)
-}
-
-fn covered_by_unique_index(table: &Table, expected: &[String]) -> bool {
-    if expected.is_empty() {
-        return false;
-    }
-    let mut sorted_expected: Vec<String> =
-        expected.iter().map(|c| c.to_ascii_lowercase()).collect();
-    sorted_expected.sort();
-    table.indexes.iter().any(|idx| {
-        if !idx.is_unique {
-            return false;
-        }
-        let mut sorted_cols: Vec<String> =
-            idx.columns.iter().map(|c| c.to_ascii_lowercase()).collect();
-        sorted_cols.sort();
-        sorted_cols.iter().all(|c| sorted_expected.contains(c))
-            && sorted_cols.len() >= sorted_expected.len()
-    })
 }
 
 fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
@@ -2406,6 +2423,79 @@ mod tests {
     }
 
     #[test]
+    fn type_narrow_breaking_for_text_to_varchar() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("bio", "TEXT", true, false)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("bio", "VARCHAR(255)", true, false)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::TypeNarrow)
+            .expect("expected TypeNarrow finding for TEXT -> VARCHAR(n)");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
+    }
+
+    #[test]
+    fn detect_type_narrowing_flags_unbounded_to_bounded() {
+        assert!(detect_type_narrowing("TEXT", "VARCHAR(255)").is_some());
+        assert!(detect_type_narrowing("clob", "char(10)").is_some());
+        // Postgres VARCHAR without a length is unbounded; adding one narrows.
+        assert!(detect_type_narrowing("VARCHAR", "VARCHAR(50)").is_some());
+    }
+
+    #[test]
+    fn detect_type_narrowing_ignores_bounded_to_unbounded() {
+        assert!(detect_type_narrowing("VARCHAR(50)", "TEXT").is_none());
+        assert!(detect_type_narrowing("VARCHAR(50)", "VARCHAR").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_handles_character_full_spelling() {
+        assert!(detect_type_narrowing("CHARACTER(10)", "CHARACTER(5)").is_some());
+        assert!(detect_type_narrowing("CHARACTER VARYING(10)", "CHARACTER VARYING(5)").is_some());
+        assert!(detect_type_narrowing("CHARACTER(5)", "CHARACTER(10)").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_treats_bare_char_as_length_one() {
+        // Bare CHAR / CHARACTER is CHAR(1): widening to CHAR(2) must not fire,
+        // shrinking from CHAR(2) must fire.
+        assert!(detect_type_narrowing("CHAR", "CHAR(2)").is_none());
+        assert!(detect_type_narrowing("CHARACTER", "CHAR(2)").is_none());
+        assert!(detect_type_narrowing("CHAR(2)", "CHAR").is_some());
+        // Bare VARCHAR / CHARACTER VARYING stays unbounded.
+        assert!(detect_type_narrowing("VARCHAR", "VARCHAR(50)").is_some());
+        assert!(detect_type_narrowing("VARCHAR(50)", "VARCHAR").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_ranks_mediumint_and_ignores_modifiers() {
+        // MEDIUMINT sits between SMALLINT and INT.
+        assert!(detect_type_narrowing("INT", "MEDIUMINT").is_some());
+        assert!(detect_type_narrowing("MEDIUMINT", "SMALLINT").is_some());
+        assert!(detect_type_narrowing("MEDIUMINT", "INT").is_none());
+        // Display width / UNSIGNED / ZEROFILL must not defeat the rank match.
+        assert!(detect_type_narrowing("BIGINT(20) UNSIGNED", "INT UNSIGNED").is_some());
+        assert!(detect_type_narrowing("BIGINT UNSIGNED ZEROFILL", "SMALLINT").is_some());
+        assert!(detect_type_narrowing("INT", "BIGINT UNSIGNED").is_none());
+    }
+
+    #[test]
     fn drop_pk_breaking_with_referencing_fk() {
         let users_before = table(
             "users",
@@ -2593,6 +2683,123 @@ mod tests {
                 .iter()
                 .any(|f| f.rule_id == ReviewRuleId::DropPkOrUnique),
             "PK widening should be suppressed when a UNIQUE index covers the original PK columns, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_composite_pk_suppressed_when_unique_subset_remains() {
+        // Dropping PRIMARY KEY(id, tenant_id) while a UNIQUE(id) index
+        // remains is not a uniqueness loss: uniqueness on (id) implies
+        // uniqueness on the wider (id, tenant_id) set. Set-equality coverage
+        // missed this subset case and produced a false positive.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropPkOrUnique),
+            "dropping a composite PK must not warn when a UNIQUE subset index remains; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_composite_pk_to_subset_suppressed() {
+        // PRIMARY KEY(id, tenant_id) narrowed to PRIMARY KEY(id). id alone is
+        // now unique, so the original (id, tenant_id) set stays unique. This
+        // requires folding the after PK columns into the coverage check; the
+        // old index-only check reported a false positive.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropPkOrUnique),
+            "narrowing a composite PK to a unique subset must not warn; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_unique_index_suppressed_when_replaced_by_pk() {
+        // Dropping UNIQUE(email) while email becomes the PRIMARY KEY keeps the
+        // uniqueness guarantee. The parser records PKs via is_primary_key (no
+        // synthetic unique index), so the coverage check must consider PK
+        // columns, not just table.indexes.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true)],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("email", "TEXT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropPkOrUnique),
+            "dropping a UNIQUE index replaced by a PRIMARY KEY on the same column must not warn; got {findings:?}"
         );
     }
 
