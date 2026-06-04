@@ -43,7 +43,10 @@ async fn pg_container(sql: &str) -> (String, testcontainers::ContainerAsync<Post
         .connect(&url)
         .await
         .expect("connect postgres");
-    sqlx::raw_sql(sql).execute(&pool).await.expect("seed pg");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await
+        .expect("seed pg");
     pool.close().await;
 
     (url, container)
@@ -73,7 +76,10 @@ async fn mysql_container(sql: &str) -> (String, testcontainers::ContainerAsync<M
         .connect(&url)
         .await
         .expect("connect mysql");
-    sqlx::raw_sql(sql).execute(&pool).await.expect("seed mysql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await
+        .expect("seed mysql");
     pool.close().await;
 
     (url, container)
@@ -91,7 +97,7 @@ async fn sqlite_db(sql: &str) -> (String, tempfile::TempDir) {
     )
     .await
     .expect("connect sqlite");
-    sqlx::raw_sql(sql)
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
         .execute(&pool)
         .await
         .expect("seed sqlite");

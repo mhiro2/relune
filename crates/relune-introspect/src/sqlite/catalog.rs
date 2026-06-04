@@ -162,7 +162,7 @@ async fn pragma_table_info(
 ) -> Result<Vec<SqliteTableInfoRow>, IntrospectError> {
     let sql = format!("PRAGMA table_info({quoted_table})");
     with_query_timeout("PRAGMA table_info", async {
-        sqlx::query_as::<_, SqliteTableInfoRow>(&sql)
+        sqlx::query_as::<_, SqliteTableInfoRow>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
             .map_err(|e| IntrospectError::query_with_source("PRAGMA table_info failed", e))
@@ -176,7 +176,7 @@ async fn pragma_foreign_key_list(
 ) -> Result<Vec<SqliteFkRow>, IntrospectError> {
     let sql = format!("PRAGMA foreign_key_list({quoted_table})");
     with_query_timeout("PRAGMA foreign_key_list", async {
-        sqlx::query_as::<_, SqliteFkRow>(&sql)
+        sqlx::query_as::<_, SqliteFkRow>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
             .map_err(|e| IntrospectError::query_with_source("PRAGMA foreign_key_list failed", e))
@@ -190,7 +190,7 @@ async fn pragma_index_list(
 ) -> Result<Vec<SqliteIndexListRow>, IntrospectError> {
     let sql = format!("PRAGMA index_list({quoted_table})");
     with_query_timeout("PRAGMA index_list", async {
-        sqlx::query_as::<_, SqliteIndexListRow>(&sql)
+        sqlx::query_as::<_, SqliteIndexListRow>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
             .map_err(|e| IntrospectError::query_with_source("PRAGMA index_list failed", e))
@@ -204,7 +204,7 @@ async fn pragma_index_info(
 ) -> Result<Vec<SqliteIndexInfoRow>, IntrospectError> {
     let sql = format!("PRAGMA index_info({quoted_index})");
     with_query_timeout("PRAGMA index_info", async {
-        sqlx::query_as::<_, SqliteIndexInfoRow>(&sql)
+        sqlx::query_as::<_, SqliteIndexInfoRow>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
             .map_err(|e| IntrospectError::query_with_source("PRAGMA index_info failed", e))

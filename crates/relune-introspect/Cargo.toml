@@ -8,7 +8,7 @@ rust-version.workspace = true
 [dependencies]
 relune-core = { path = "../relune-core" }
 serde.workspace = true
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite"] }
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "macros"] }
 tracing.workspace = true
