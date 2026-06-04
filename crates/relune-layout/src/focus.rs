@@ -64,7 +64,7 @@ impl FocusExtractor {
             })?;
 
         // Find all nodes within the specified depth using BFS
-        let included_indices = self.find_nodes_within_depth(graph, target_idx, focus.depth)?;
+        let included_indices = self.find_nodes_within_depth(graph, target_idx, focus.depth())?;
 
         // Build the filtered graph
         self.build_focused_graph(graph, &included_indices)
@@ -314,10 +314,7 @@ mod tests {
         let graph = LayoutGraphBuilder::new().build(&schema);
         let extractor = FocusExtractor;
 
-        let focus = FocusSpec {
-            table: "posts".to_string(),
-            depth: 0,
-        };
+        let focus = FocusSpec::new("posts", 0);
 
         let focused = extractor.extract(&graph, &focus).unwrap();
         assert_eq!(focused.nodes.len(), 1);
@@ -330,10 +327,7 @@ mod tests {
         let graph = LayoutGraphBuilder::new().build(&schema);
         let extractor = FocusExtractor;
 
-        let focus = FocusSpec {
-            table: "posts".to_string(),
-            depth: 1,
-        };
+        let focus = FocusSpec::new("posts", 1);
 
         let focused = extractor.extract(&graph, &focus).unwrap();
         // depth 1 from posts includes: posts, users (outgoing FK), comments (incoming FK)
@@ -351,10 +345,7 @@ mod tests {
         let graph = LayoutGraphBuilder::new().build(&schema);
         let extractor = FocusExtractor;
 
-        let focus = FocusSpec {
-            table: "nonexistent".to_string(),
-            depth: 1,
-        };
+        let focus = FocusSpec::new("nonexistent", 1);
 
         let result = extractor.extract(&graph, &focus);
         assert!(result.is_err());

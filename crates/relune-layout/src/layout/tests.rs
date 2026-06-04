@@ -2982,10 +2982,7 @@ fn focus_extraction_does_not_leave_isolated_edges() {
     let schema = make_fully_connected_cycle_schema();
     for depth in 0..=2 {
         let request = LayoutRequest {
-            focus: Some(FocusSpec {
-                table: "accounts".to_string(),
-                depth,
-            }),
+            focus: Some(FocusSpec::new("accounts", depth)),
             ..LayoutRequest::default()
         };
         let result = build_layout_with_config(&schema, &request, &LayoutConfig::default()).unwrap();

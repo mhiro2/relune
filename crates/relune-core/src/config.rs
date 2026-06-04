@@ -20,8 +20,11 @@ pub struct FocusSpec {
     /// The table to focus on (qualified name or ID).
     pub table: String,
     /// Number of levels of related tables to include (clamped to [`MAX_FOCUS_DEPTH`]).
+    ///
+    /// Kept private so the clamp invariant cannot be bypassed by direct struct
+    /// construction; use [`FocusSpec::new`] and read it via [`FocusSpec::depth`].
     #[serde(default = "default_focus_depth", deserialize_with = "clamp_depth")]
-    pub depth: u32,
+    depth: u32,
 }
 
 const fn default_focus_depth() -> u32 {
@@ -58,6 +61,12 @@ impl FocusSpec {
             table: table.into(),
             depth: depth.min(MAX_FOCUS_DEPTH),
         }
+    }
+
+    /// Returns the focus depth, guaranteed to be `<= MAX_FOCUS_DEPTH`.
+    #[must_use]
+    pub const fn depth(&self) -> u32 {
+        self.depth
     }
 }
 
@@ -228,5 +237,32 @@ impl Default for LayoutSpec {
             compaction: LayoutCompactionSpec::default(),
             auto_tune_spacing: default_auto_tune_spacing(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focus_spec_new_clamps_depth() {
+        let spec = FocusSpec::new("users", MAX_FOCUS_DEPTH + 5);
+        assert_eq!(spec.depth(), MAX_FOCUS_DEPTH);
+
+        let spec = FocusSpec::new("users", 3);
+        assert_eq!(spec.depth(), 3);
+    }
+
+    #[test]
+    fn focus_spec_deserialize_clamps_depth() {
+        let json = format!(r#"{{"table":"users","depth":{}}}"#, MAX_FOCUS_DEPTH + 7);
+        let spec: FocusSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(spec.depth(), MAX_FOCUS_DEPTH);
+    }
+
+    #[test]
+    fn focus_spec_default_depth_is_one() {
+        let spec = FocusSpec::default();
+        assert_eq!(spec.depth(), 1);
     }
 }

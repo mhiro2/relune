@@ -608,7 +608,7 @@ mod tests {
         assert!(render_req.focus.is_some());
         let focus = render_req.focus.unwrap();
         assert_eq!(focus.table, "users");
-        assert_eq!(focus.depth, 2);
+        assert_eq!(focus.depth(), 2);
         assert_eq!(render_req.layout.algorithm, LayoutAlgorithm::ForceDirected);
         assert_eq!(render_req.layout.edge_style, RouteStyle::Orthogonal);
         assert_eq!(render_req.layout.force_iterations, 75);
