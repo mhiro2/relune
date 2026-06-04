@@ -821,16 +821,26 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
         return None;
     }
 
-    // VARCHAR / CHARACTER VARYING / CHAR with width.
-    if let (Some((old_kind, old_n)), Some((new_kind, new_n))) =
-        (parse_char_type(&old_norm), parse_char_type(&new_norm))
-        && old_kind == new_kind
-        && new_n < old_n
+    // Character/string types. Adding a fixed upper bound where there was
+    // none (TEXT/CLOB or unbounded VARCHAR -> VARCHAR(n)) or shrinking an
+    // existing bound can both reject or truncate existing data. The bound is
+    // compared dialect-independently so that the lengths are what matter, not
+    // the CHAR/VARCHAR spelling.
+    if let (Some((old_kind, old_bound)), Some((new_kind, new_bound))) =
+        (parse_string_type(&old_norm), parse_string_type(&new_norm))
     {
-        return Some((
-            format!("{old_kind}({old_n})"),
-            format!("{new_kind}({new_n})"),
-        ));
+        match (old_bound, new_bound) {
+            (None, Some(new_n)) => {
+                return Some((old_norm.clone(), format!("{new_kind}({new_n})")));
+            }
+            (Some(old_n), Some(new_n)) if new_n < old_n => {
+                return Some((
+                    format!("{old_kind}({old_n})"),
+                    format!("{new_kind}({new_n})"),
+                ));
+            }
+            _ => {}
+        }
     }
 
     // NUMERIC(P, S).
@@ -854,22 +864,43 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
     None
 }
 
-fn parse_char_type(value: &str) -> Option<(&'static str, u32)> {
+/// Classify a character/string type, returning its canonical kind label and
+/// declared length bound. A `None` bound means the type carries no fixed
+/// upper bound we can compare against — a TEXT/CLOB type or a bare VARCHAR.
+/// `value` must already be trimmed and upper-cased.
+///
+/// The sized `MySQL` text variants (`TINYTEXT`/`MEDIUMTEXT`/`LONGTEXT`) are
+/// intentionally not recognised: comparing them correctly needs per-type max
+/// lengths, and folding them into "unbounded" would mis-flag a widening such
+/// as `TINYTEXT -> VARCHAR(1000)` as a narrowing.
+fn parse_string_type(value: &str) -> Option<(&'static str, Option<u32>)> {
+    // Unbounded text types: no length we can compare against.
+    if matches!(value, "TEXT" | "CLOB") {
+        return Some(("TEXT", None));
+    }
+    // CHARACTER must be matched before CHAR, and CHARACTER VARYING before
+    // both, so the longer keyword wins.
     let (kind, rest) = if let Some(rest) = value.strip_prefix("CHARACTER VARYING") {
         ("VARCHAR", rest)
     } else if let Some(rest) = value.strip_prefix("VARCHAR") {
         ("VARCHAR", rest)
+    } else if let Some(rest) = value.strip_prefix("CHARACTER") {
+        ("CHAR", rest)
     } else if let Some(rest) = value.strip_prefix("CHAR") {
         ("CHAR", rest)
     } else {
         return None;
     };
     let trimmed = rest.trim();
-    if !trimmed.starts_with('(') {
-        return None;
+    if trimmed.is_empty() {
+        // Bare VARCHAR / CHARACTER VARYING is unbounded, but bare CHAR /
+        // CHARACTER is CHAR(1) in standard SQL.
+        let bound = if kind == "CHAR" { Some(1) } else { None };
+        return Some((kind, bound));
     }
     let inner = trimmed.strip_prefix('(')?.strip_suffix(')')?;
-    inner.trim().parse::<u32>().ok().map(|n| (kind, n))
+    let n = inner.trim().parse::<u32>().ok()?;
+    Some((kind, Some(n)))
 }
 
 fn parse_numeric(value: &str) -> Option<(u32, u32)> {
@@ -887,12 +918,17 @@ fn parse_numeric(value: &str) -> Option<(u32, u32)> {
     Some((p, s))
 }
 
-const fn int_rank(value: &str) -> Option<u32> {
-    match value.as_bytes() {
-        b"BIGINT" | b"INT8" => Some(64),
-        b"INT" | b"INTEGER" | b"INT4" => Some(32),
-        b"SMALLINT" | b"INT2" => Some(16),
-        b"TINYINT" => Some(8),
+fn int_rank(value: &str) -> Option<u32> {
+    // Drop the MySQL display width and any signedness/zerofill modifiers so
+    // that e.g. `BIGINT(20) UNSIGNED` ranks the same as `BIGINT`. `value` is
+    // already upper-cased.
+    let base = value.split_whitespace().next()?.split('(').next()?;
+    match base {
+        "BIGINT" | "INT8" => Some(64),
+        "INT" | "INTEGER" | "INT4" => Some(32),
+        "MEDIUMINT" => Some(24),
+        "SMALLINT" | "INT2" => Some(16),
+        "TINYINT" => Some(8),
         _ => None,
     }
 }
@@ -2403,6 +2439,79 @@ mod tests {
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::TypeNarrow)
         );
+    }
+
+    #[test]
+    fn type_narrow_breaking_for_text_to_varchar() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("bio", "TEXT", true, false)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("bio", "VARCHAR(255)", true, false)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::TypeNarrow)
+            .expect("expected TypeNarrow finding for TEXT -> VARCHAR(n)");
+        assert_eq!(f.severity, ReviewSeverity::Breaking);
+    }
+
+    #[test]
+    fn detect_type_narrowing_flags_unbounded_to_bounded() {
+        assert!(detect_type_narrowing("TEXT", "VARCHAR(255)").is_some());
+        assert!(detect_type_narrowing("clob", "char(10)").is_some());
+        // Postgres VARCHAR without a length is unbounded; adding one narrows.
+        assert!(detect_type_narrowing("VARCHAR", "VARCHAR(50)").is_some());
+    }
+
+    #[test]
+    fn detect_type_narrowing_ignores_bounded_to_unbounded() {
+        assert!(detect_type_narrowing("VARCHAR(50)", "TEXT").is_none());
+        assert!(detect_type_narrowing("VARCHAR(50)", "VARCHAR").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_handles_character_full_spelling() {
+        assert!(detect_type_narrowing("CHARACTER(10)", "CHARACTER(5)").is_some());
+        assert!(detect_type_narrowing("CHARACTER VARYING(10)", "CHARACTER VARYING(5)").is_some());
+        assert!(detect_type_narrowing("CHARACTER(5)", "CHARACTER(10)").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_treats_bare_char_as_length_one() {
+        // Bare CHAR / CHARACTER is CHAR(1): widening to CHAR(2) must not fire,
+        // shrinking from CHAR(2) must fire.
+        assert!(detect_type_narrowing("CHAR", "CHAR(2)").is_none());
+        assert!(detect_type_narrowing("CHARACTER", "CHAR(2)").is_none());
+        assert!(detect_type_narrowing("CHAR(2)", "CHAR").is_some());
+        // Bare VARCHAR / CHARACTER VARYING stays unbounded.
+        assert!(detect_type_narrowing("VARCHAR", "VARCHAR(50)").is_some());
+        assert!(detect_type_narrowing("VARCHAR(50)", "VARCHAR").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_ranks_mediumint_and_ignores_modifiers() {
+        // MEDIUMINT sits between SMALLINT and INT.
+        assert!(detect_type_narrowing("INT", "MEDIUMINT").is_some());
+        assert!(detect_type_narrowing("MEDIUMINT", "SMALLINT").is_some());
+        assert!(detect_type_narrowing("MEDIUMINT", "INT").is_none());
+        // Display width / UNSIGNED / ZEROFILL must not defeat the rank match.
+        assert!(detect_type_narrowing("BIGINT(20) UNSIGNED", "INT UNSIGNED").is_some());
+        assert!(detect_type_narrowing("BIGINT UNSIGNED ZEROFILL", "SMALLINT").is_some());
+        assert!(detect_type_narrowing("INT", "BIGINT UNSIGNED").is_none());
     }
 
     #[test]
