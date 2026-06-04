@@ -4,7 +4,7 @@ use crate::context::{LineOffsets, ParseContext, ParsedColumn, span_from_spanned}
 use crate::mysql_enum::canonicalize_mysql_enum_like_type;
 use crate::names::{build_foreign_key, normalized_stable_id, split_object_name_with_diagnostics};
 use relune_core::{ColumnId, Index, Table, normalize_identifier};
-use sqlparser::ast::{ColumnOption, TableConstraint};
+use sqlparser::ast::{ColumnOption, DataType, TableConstraint};
 
 /// Parse a CREATE TABLE statement into a Table.
 #[allow(clippy::too_many_lines)]
@@ -196,13 +196,25 @@ pub(crate) fn extract_column_name(index_col: &sqlparser::ast::IndexColumn) -> St
     }
 }
 
-pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedColumn {
+/// Column attributes derived from a list of column options (nullability,
+/// primary-key membership, comment). Shared by `CREATE TABLE` column parsing
+/// and `ALTER TABLE MODIFY/CHANGE COLUMN`, which redefine a column in full.
+pub(crate) struct ColumnAttributes {
+    pub(crate) nullable: bool,
+    pub(crate) is_primary_key: bool,
+    pub(crate) comment: Option<String>,
+}
+
+/// Interpret column options into the subset of attributes tracked by the model.
+pub(crate) fn column_attributes_from_options<'a>(
+    options: impl IntoIterator<Item = &'a ColumnOption>,
+) -> ColumnAttributes {
     let mut nullable = true;
     let mut is_primary_key = false;
     let mut comment: Option<String> = None;
 
-    for option in &column.options {
-        match &option.option {
+    for option in options {
+        match option {
             ColumnOption::NotNull => nullable = false,
             ColumnOption::Null => nullable = true,
             ColumnOption::PrimaryKey(_) => {
@@ -234,17 +246,30 @@ pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) 
         }
     }
 
-    let column_name = normalize_identifier(&column.name.value);
-    let raw_data_type = column.data_type.to_string();
-    let data_type = canonicalize_mysql_enum_like_type(&raw_data_type)
-        .ok()
-        .flatten()
-        .unwrap_or(raw_data_type);
-    ParsedColumn {
-        name: column_name,
-        data_type,
+    ColumnAttributes {
         nullable,
         is_primary_key,
         comment,
+    }
+}
+
+/// Render a `DataType` into the model's data-type string, canonicalizing
+/// `MySQL` inline `ENUM(...)`/`SET(...)` so enum values can be recovered later.
+pub(crate) fn canonicalize_data_type(data_type: &DataType) -> String {
+    let raw_data_type = data_type.to_string();
+    canonicalize_mysql_enum_like_type(&raw_data_type)
+        .ok()
+        .flatten()
+        .unwrap_or(raw_data_type)
+}
+
+pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedColumn {
+    let attrs = column_attributes_from_options(column.options.iter().map(|option| &option.option));
+    ParsedColumn {
+        name: normalize_identifier(&column.name.value),
+        data_type: canonicalize_data_type(&column.data_type),
+        nullable: attrs.nullable,
+        is_primary_key: attrs.is_primary_key,
+        comment: attrs.comment,
     }
 }

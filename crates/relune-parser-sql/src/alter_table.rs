@@ -1,15 +1,20 @@
 //! `ALTER TABLE` operation handling.
 
 use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_ident, span_from_spanned};
-use crate::create_table::{parsed_column_from_column_def, push_unique_index};
+use crate::create_table::{
+    canonicalize_data_type, column_attributes_from_options, parsed_column_from_column_def,
+    push_unique_index,
+};
 use crate::names::{
     build_foreign_key, normalized_stable_id, normalized_stable_id_for_object_name_with_diagnostics,
     split_object_name_with_diagnostics,
 };
 use relune_core::{
-    ColumnId, Diagnostic, ForeignKey, Table, diagnostic::codes, normalize_identifier,
+    Column, ColumnId, Diagnostic, ForeignKey, Table, diagnostic::codes, normalize_identifier,
 };
-use sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, TableConstraint};
+use sqlparser::ast::{
+    AlterColumnOperation, AlterTableOperation, ColumnOption, DataType, ObjectName, TableConstraint,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Build `stable_id` the same way as `parse_create_table` so `ALTER TABLE` resolves targets.
@@ -258,43 +263,8 @@ fn apply_single_alter_operation(
         } => {
             let old = normalize_identifier(&old_column_name.value);
             let new = normalize_identifier(&new_column_name.value);
-            let stable = tables[idx].stable_id.clone();
-            let found = tables[idx].columns.iter().any(|c| c.name == old);
-            if found {
-                let referencing_fks = foreign_keys_referencing_table(tables, idx);
-                // Update the column name, from_columns in local FKs, and index columns.
-                let table = &mut tables[idx];
-                if let Some(col) = table.columns.iter_mut().find(|c| c.name == old) {
-                    col.name.clone_from(&new);
-                }
-                for fk in &mut table.foreign_keys {
-                    for c in &mut fk.from_columns {
-                        if *c == old {
-                            c.clone_from(&new);
-                        }
-                    }
-                }
-                for ix in &mut table.indexes {
-                    for c in &mut ix.columns {
-                        if *c == old {
-                            c.clone_from(&new);
-                        }
-                    }
-                }
-
-                for (table_idx, fk_idx) in referencing_fks {
-                    if let Some(fk) = tables
-                        .get_mut(table_idx)
-                        .and_then(|table| table.foreign_keys.get_mut(fk_idx))
-                    {
-                        for c in &mut fk.to_columns {
-                            if *c == old {
-                                c.clone_from(&new);
-                            }
-                        }
-                    }
-                }
-            } else {
+            if !rename_column_in_tables(tables, idx, &old, &new) {
+                let stable = tables[idx].stable_id.clone();
                 ctx.diagnostics.push(
                     Diagnostic::warning(
                         codes::schema_unknown_column(),
@@ -307,6 +277,70 @@ fn apply_single_alter_operation(
                     )),
                 );
             }
+        }
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            apply_alter_column(ctx, input, offsets, &mut tables[idx], column_name, op);
+        }
+        AlterTableOperation::ModifyColumn {
+            col_name,
+            data_type,
+            options,
+            ..
+        } => {
+            let name = normalize_identifier(&col_name.value);
+            if tables[idx].columns.iter().any(|c| c.name == name) {
+                redefine_column_in_table(
+                    ctx,
+                    input,
+                    offsets,
+                    &mut tables[idx],
+                    &name,
+                    data_type,
+                    options,
+                );
+            } else {
+                let stable = tables[idx].stable_id.clone();
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::schema_unknown_column(),
+                        format!("ALTER TABLE MODIFY COLUMN: unknown column `{name}` on `{stable}`"),
+                    )
+                    .with_span_opt(span_from_ident(input, offsets, col_name)),
+                );
+            }
+        }
+        AlterTableOperation::ChangeColumn {
+            old_name,
+            new_name,
+            data_type,
+            options,
+            ..
+        } => {
+            let old = normalize_identifier(&old_name.value);
+            let new = normalize_identifier(&new_name.value);
+            if rename_column_in_tables(tables, idx, &old, &new) {
+                redefine_column_in_table(
+                    ctx,
+                    input,
+                    offsets,
+                    &mut tables[idx],
+                    &new,
+                    data_type,
+                    options,
+                );
+            } else {
+                let stable = tables[idx].stable_id.clone();
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::schema_unknown_column(),
+                        format!("ALTER TABLE CHANGE COLUMN: unknown column `{old}` on `{stable}`"),
+                    )
+                    .with_span_opt(span_from_ident(input, offsets, old_name)),
+                );
+            }
+        }
+        AlterTableOperation::RenameConstraint { old_name, new_name } => {
+            apply_rename_constraint(ctx, input, offsets, &mut tables[idx], old_name, new_name);
         }
         AlterTableOperation::RenameTable {
             table_name: new_table,
@@ -400,6 +434,196 @@ fn apply_single_alter_operation(
                 span_from_spanned(input, offsets, op),
             );
         }
+    }
+}
+
+/// Rename `old` to `new` on `tables[idx]`, propagating the change to the
+/// column's local FK `from_columns`, local index columns, and the `to_columns`
+/// of every FK that references this table. Returns `false` if no such column
+/// exists (the caller emits the unknown-column diagnostic).
+fn rename_column_in_tables(tables: &mut [Table], idx: usize, old: &str, new: &str) -> bool {
+    if !tables[idx].columns.iter().any(|c| c.name == old) {
+        return false;
+    }
+    let referencing_fks = foreign_keys_referencing_table(tables, idx);
+    let table = &mut tables[idx];
+    if let Some(col) = table.columns.iter_mut().find(|c| c.name == old) {
+        new.clone_into(&mut col.name);
+    }
+    for fk in &mut table.foreign_keys {
+        for c in &mut fk.from_columns {
+            if *c == old {
+                new.clone_into(c);
+            }
+        }
+    }
+    for ix in &mut table.indexes {
+        for c in &mut ix.columns {
+            if *c == old {
+                new.clone_into(c);
+            }
+        }
+    }
+    for (table_idx, fk_idx) in referencing_fks {
+        if let Some(fk) = tables
+            .get_mut(table_idx)
+            .and_then(|table| table.foreign_keys.get_mut(fk_idx))
+        {
+            for c in &mut fk.to_columns {
+                if *c == old {
+                    new.clone_into(c);
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Apply a `PostgreSQL` `ALTER COLUMN <col> <op>` to the matching column.
+fn apply_alter_column(
+    ctx: &mut ParseContext,
+    input: &str,
+    offsets: &LineOffsets,
+    table: &mut Table,
+    column_name: &sqlparser::ast::Ident,
+    op: &AlterColumnOperation,
+) {
+    let name = normalize_identifier(&column_name.value);
+    let stable = table.stable_id.clone();
+    let Some(column) = table.columns.iter_mut().find(|c| c.name == name) else {
+        ctx.diagnostics.push(
+            Diagnostic::warning(
+                codes::schema_unknown_column(),
+                format!("ALTER TABLE ALTER COLUMN: unknown column `{name}` on `{stable}`"),
+            )
+            .with_span_opt(span_from_ident(input, offsets, column_name)),
+        );
+        return;
+    };
+
+    match op {
+        AlterColumnOperation::SetNotNull => column.nullable = false,
+        AlterColumnOperation::DropNotNull => {
+            // Primary-key columns remain implicitly NOT NULL.
+            if !column.is_primary_key {
+                column.nullable = true;
+            }
+        }
+        AlterColumnOperation::SetDataType { data_type, .. } => {
+            set_column_data_type(column, data_type);
+        }
+        // The model tracks neither DEFAULT values nor identity/generated
+        // metadata, so these operations have no observable schema effect.
+        AlterColumnOperation::SetDefault { .. }
+        | AlterColumnOperation::DropDefault
+        | AlterColumnOperation::AddGenerated { .. } => {}
+    }
+}
+
+/// Fully redefine a column from a `MySQL` `MODIFY`/`CHANGE` clause: replace the
+/// data type, re-derive nullability from the options, and apply any inline
+/// schema-affecting options (`UNIQUE`, `FOREIGN KEY`) the same way `ADD COLUMN`
+/// does. `MySQL` treats these as complete column redefinitions, so an omitted
+/// `NOT NULL` makes the column nullable again. Primary-key membership is
+/// table-level, so it is only added (never cleared) here, and PK columns stay
+/// NOT NULL regardless.
+///
+/// The caller must have verified that `col_name` exists on `table`.
+fn redefine_column_in_table(
+    ctx: &mut ParseContext,
+    input: &str,
+    offsets: &LineOffsets,
+    table: &mut Table,
+    col_name: &str,
+    data_type: &DataType,
+    options: &[ColumnOption],
+) {
+    let attrs = column_attributes_from_options(options);
+    if let Some(column) = table.columns.iter_mut().find(|c| c.name == col_name) {
+        column.nullable = attrs.nullable;
+        if attrs.is_primary_key {
+            column.is_primary_key = true;
+        }
+        if column.is_primary_key {
+            column.nullable = false;
+        }
+        column.comment = attrs.comment;
+        set_column_data_type(column, data_type);
+    }
+
+    // Inline UNIQUE / FOREIGN KEY constraints carry no constraint name in this
+    // position, so they are recorded anonymously, mirroring `ADD COLUMN`.
+    for option in options {
+        match option {
+            ColumnOption::Unique(_) => {
+                push_unique_index(&mut table.indexes, None, vec![col_name.to_owned()]);
+            }
+            ColumnOption::ForeignKey(constraint) => {
+                table.foreign_keys.push(build_foreign_key(
+                    ctx,
+                    input,
+                    offsets,
+                    None,
+                    vec![col_name.to_owned()],
+                    &constraint.foreign_table,
+                    &constraint.referred_columns,
+                    constraint.on_delete,
+                    constraint.on_update,
+                    "ALTER TABLE MODIFY/CHANGE COLUMN inline FOREIGN KEY",
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Replace a column's data type, clearing any cached inline enum/set values so
+/// they are re-derived by the `MySQL` enum pass over the final type string.
+fn set_column_data_type(column: &mut Column, data_type: &DataType) {
+    column.data_type = canonicalize_data_type(data_type);
+    column.enum_values = None;
+}
+
+/// Apply `RENAME CONSTRAINT <old> TO <new>`, matching named primary keys,
+/// foreign keys, and indexes (constraint names are compared case-insensitively).
+fn apply_rename_constraint(
+    ctx: &mut ParseContext,
+    input: &str,
+    offsets: &LineOffsets,
+    table: &mut Table,
+    old_name: &sqlparser::ast::Ident,
+    new_name: &sqlparser::ast::Ident,
+) {
+    let old = normalize_identifier(&old_name.value);
+    let new = normalize_identifier(&new_name.value);
+    let stable = table.stable_id.clone();
+
+    let pk_renamed = table.primary_key_name.as_deref() == Some(old.as_str());
+    if pk_renamed {
+        table.primary_key_name = Some(new.clone());
+    }
+    let mut renamed = pk_renamed;
+    for fk in &mut table.foreign_keys {
+        if fk.name.as_deref().map(normalize_identifier).as_deref() == Some(old.as_str()) {
+            fk.name = Some(new.clone());
+            renamed = true;
+        }
+    }
+    for ix in &mut table.indexes {
+        if ix.name.as_deref().map(normalize_identifier).as_deref() == Some(old.as_str()) {
+            ix.name = Some(new.clone());
+            renamed = true;
+        }
+    }
+
+    if !renamed {
+        ctx.diagnostics.push(
+            Diagnostic::warning(
+                codes::parse_unsupported(),
+                format!("ALTER TABLE RENAME CONSTRAINT: no constraint named `{old}` on `{stable}`"),
+            )
+            .with_span_opt(span_from_ident(input, offsets, old_name)),
+        );
     }
 }
 
