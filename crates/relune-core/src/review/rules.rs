@@ -979,7 +979,7 @@ fn check_drop_pk_or_unique_column(
     if same_column_set(&after_pk_cols, &before_pk_cols) {
         return;
     }
-    if covered_by_unique_index(after_table, &before_pk_cols) {
+    if already_unique_in(after_table, &before_pk_cols) {
         return;
     }
 
@@ -1041,7 +1041,7 @@ fn check_drop_pk_or_unique_index(
         return;
     };
     let lower_cols: Vec<String> = old.columns.iter().map(|c| c.to_ascii_lowercase()).collect();
-    if covered_by_unique_index(after_table, &lower_cols) {
+    if already_unique_in(after_table, &lower_cols) {
         return;
     }
 
@@ -1123,7 +1123,7 @@ fn check_drop_pk_or_unique_widened(
     if !covers(&after_pk_cols, &before_pk_cols) {
         return;
     }
-    if covered_by_unique_index(after_table, &before_pk_cols) {
+    if already_unique_in(after_table, &before_pk_cols) {
         return;
     }
 
@@ -1760,25 +1760,6 @@ fn covers(set: &[String], expected: &[String]) -> bool {
 
 fn same_column_set(a: &[String], b: &[String]) -> bool {
     a.len() == b.len() && covers(a, b)
-}
-
-fn covered_by_unique_index(table: &Table, expected: &[String]) -> bool {
-    if expected.is_empty() {
-        return false;
-    }
-    let mut sorted_expected: Vec<String> =
-        expected.iter().map(|c| c.to_ascii_lowercase()).collect();
-    sorted_expected.sort();
-    table.indexes.iter().any(|idx| {
-        if !idx.is_unique {
-            return false;
-        }
-        let mut sorted_cols: Vec<String> =
-            idx.columns.iter().map(|c| c.to_ascii_lowercase()).collect();
-        sorted_cols.sort();
-        sorted_cols.iter().all(|c| sorted_expected.contains(c))
-            && sorted_cols.len() >= sorted_expected.len()
-    })
 }
 
 fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
@@ -2702,6 +2683,123 @@ mod tests {
                 .iter()
                 .any(|f| f.rule_id == ReviewRuleId::DropPkOrUnique),
             "PK widening should be suppressed when a UNIQUE index covers the original PK columns, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_composite_pk_suppressed_when_unique_subset_remains() {
+        // Dropping PRIMARY KEY(id, tenant_id) while a UNIQUE(id) index
+        // remains is not a uniqueness loss: uniqueness on (id) implies
+        // uniqueness on the wider (id, tenant_id) set. Set-equality coverage
+        // missed this subset case and produced a false positive.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropPkOrUnique),
+            "dropping a composite PK must not warn when a UNIQUE subset index remains; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_composite_pk_to_subset_suppressed() {
+        // PRIMARY KEY(id, tenant_id) narrowed to PRIMARY KEY(id). id alone is
+        // now unique, so the original (id, tenant_id) set stays unique. This
+        // requires folding the after PK columns into the coverage check; the
+        // old index-only check reported a false positive.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropPkOrUnique),
+            "narrowing a composite PK to a unique subset must not warn; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_unique_index_suppressed_when_replaced_by_pk() {
+        // Dropping UNIQUE(email) while email becomes the PRIMARY KEY keeps the
+        // uniqueness guarantee. The parser records PKs via is_primary_key (no
+        // synthetic unique index), so the coverage check must consider PK
+        // columns, not just table.indexes.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true)],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, false),
+                    col("email", "TEXT", false, true),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropPkOrUnique),
+            "dropping a UNIQUE index replaced by a PRIMARY KEY on the same column must not warn; got {findings:?}"
         );
     }
 
