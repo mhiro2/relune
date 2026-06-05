@@ -128,7 +128,9 @@ Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
 **`View`** — Parsed and introspected across all three dialects. Stored with the original SQL definition.
 
-**`Enum`** — PostgreSQL uses named enum types (`CREATE TYPE ... AS ENUM`). MySQL has no schema-level enum type; SQL parsing stores inline `ENUM(...)` / `SET(...)` definitions on `Column.enum_values` rather than synthesizing schema-level enum entries. Live MySQL introspection currently still lifts inline enum/set column types into `Schema.enums`. SQLite does not contribute enum metadata.
+**`Enum`** — PostgreSQL uses named enum types (`CREATE TYPE ... AS ENUM`). MySQL has no schema-level enum type; SQL parsing stores inline `ENUM(...)` / `SET(...)` definitions on `Column.enum_values` rather than synthesizing schema-level enum entries (recovered regardless of the resolved dialect, so a misclassified dump keeps its values). Live MySQL introspection currently still lifts inline enum/set column types into `Schema.enums`. SQLite does not contribute enum metadata.
+
+**Identifier normalization** — All schema, table, and column identifiers are normalized to lowercase on input (`normalize_identifier`), and downstream matching (diff, foreign-key resolution, graph construction) is case-insensitive throughout. This is a deliberate simplification, not full SQL quoting semantics: quoted identifiers do not retain their original case, so `"User"` and `"user"` collapse to the same name and only one survives. Treat identifier casing as non-significant when feeding schemas into Relune.
 
 **Derived artifacts** flow through the pipeline:
 
