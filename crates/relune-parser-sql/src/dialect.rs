@@ -39,6 +39,10 @@ fn detect_dialect_from_tokens(tokens: &[Token]) -> SqlDialect {
             contains_word_sequence(&significant_tokens, &["ON", "UPDATE", "CURRENT_TIMESTAMP"]),
             3,
         ),
+        // Weighted above SQLite's `INTEGER PRIMARY KEY` (3): an inline enum/set
+        // type is definitively MySQL, while `INTEGER PRIMARY KEY` is only a weak
+        // SQLite heuristic, so a table carrying both must resolve to MySQL.
+        (contains_inline_enum_or_set(&significant_tokens), 4),
     ]);
 
     let sqlite_score = score_dialect_signals(&[
@@ -113,6 +117,7 @@ fn detect_dialect_from_source(input: &str) -> SqlDialect {
         (upper.contains("FULLTEXT"), 2),
         (upper.contains("ON UPDATE CURRENT_TIMESTAMP"), 3),
         (input.contains('`'), 2),
+        (source_has_inline_enum_or_set(&upper), 4),
     ]);
 
     let sqlite_score = score_dialect_signals(&[
@@ -149,6 +154,16 @@ fn detect_dialect_from_source(input: &str) -> SqlDialect {
     }
 }
 
+/// Source-text fallback mirroring `contains_inline_enum_or_set` for inputs the
+/// tokenizer could not process: an `ENUM`/`SET` keyword whose value list opens
+/// with a single-quoted literal, excluding `AS ENUM`.
+fn source_has_inline_enum_or_set(upper: &str) -> bool {
+    let opens_quoted = |keyword: &str| {
+        upper.contains(&format!("{keyword}('")) || upper.contains(&format!("{keyword} ('"))
+    };
+    (opens_quoted("ENUM") || opens_quoted("SET")) && !upper.contains("AS ENUM")
+}
+
 fn significant_tokens(tokens: &[Token]) -> Vec<&Token> {
     tokens
         .iter()
@@ -175,6 +190,28 @@ fn contains_word_sequence(tokens: &[&Token], sequence: &[&str]) -> bool {
 
 fn is_word(token: &Token, expected: &str) -> bool {
     matches!(token, Token::Word(word) if word.value.eq_ignore_ascii_case(expected))
+}
+
+/// Detects a `MySQL` inline `ENUM('a',...)` / `SET('a',...)` column type.
+///
+/// The value list must open with a single-quoted string literal, which
+/// distinguishes a `MySQL` enum/set type from `PostgreSQL` constructs like `SET
+/// (fillfactor = 70)` storage parameters or `SET (a, b) = ...` tuple
+/// assignments, whose first inner token is an identifier. Only single quotes
+/// count: the detection tokenizer treats `"..."` as a delimited identifier, and
+/// accepting it would misread quoted `PostgreSQL` identifiers (e.g. `SET
+/// ("fillfactor" = 70)`) as `MySQL`. Double-quoted `MySQL` enum values are rare
+/// and still parse correctly because enum values are recovered regardless of
+/// the resolved dialect. `PostgreSQL`'s `CREATE TYPE ... AS ENUM (...)` is
+/// excluded because its `ENUM` is preceded by `AS`.
+fn contains_inline_enum_or_set(tokens: &[&Token]) -> bool {
+    tokens.windows(3).enumerate().any(|(i, window)| {
+        let is_enum_or_set = is_word(window[0], "ENUM") || is_word(window[0], "SET");
+        let opens_paren = matches!(window[1], Token::LParen);
+        let first_value_is_quoted = matches!(window[2], Token::SingleQuotedString(_));
+        let preceded_by_as = i > 0 && is_word(tokens[i - 1], "AS");
+        is_enum_or_set && opens_paren && first_value_is_quoted && !preceded_by_as
+    })
 }
 
 fn is_backtick_identifier(token: &Token) -> bool {

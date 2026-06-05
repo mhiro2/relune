@@ -2,7 +2,7 @@ use super::*;
 use crate::context::ParseContext;
 use crate::diagnostics::{MAX_UNSUPPORTED_DEBUG_LEN, truncate_unsupported_debug};
 use crate::mysql_enum::{
-    MySqlEnumLikeParseError, parse_mysql_enum_like_type, populate_mysql_enum_columns,
+    MySqlEnumLikeParseError, parse_mysql_enum_like_type, populate_inline_enum_columns,
 };
 use proptest::prelude::*;
 use relune_core::{Column, ColumnId, ReferentialAction, Table, TableId};
@@ -1131,6 +1131,36 @@ fn test_detect_dialect_ignores_comment_markers() {
     assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
 }
 
+#[test]
+fn test_detect_dialect_inline_enum_is_mysql() {
+    // Column-position inline ENUM(...) is MySQL-specific syntax.
+    let sql = "CREATE TABLE t (id INT PRIMARY KEY, status ENUM('a', 'b'));";
+    assert_eq!(detect_dialect(sql), SqlDialect::Mysql);
+}
+
+#[test]
+fn test_detect_dialect_inline_enum_outweighs_integer_primary_key() {
+    // An inline enum/set is definitively MySQL and must win over SQLite's weak
+    // `INTEGER PRIMARY KEY` heuristic when both appear.
+    let sql = "CREATE TABLE t (id INTEGER PRIMARY KEY, status ENUM('a', 'b'));";
+    assert_eq!(detect_dialect(sql), SqlDialect::Mysql);
+}
+
+#[test]
+fn test_detect_dialect_named_enum_type_is_not_mysql() {
+    // PostgreSQL's `CREATE TYPE ... AS ENUM` must not be read as a MySQL signal.
+    let sql = "CREATE TYPE mood AS ENUM ('happy', 'sad');";
+    assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
+}
+
+#[test]
+fn test_detect_dialect_set_storage_parameter_is_not_mysql() {
+    // PostgreSQL `SET (...)` storage parameters open with an identifier, not a
+    // quoted value, so they must not be mistaken for a MySQL `SET(...)` type.
+    let sql = "CREATE TABLE t (id INT PRIMARY KEY);\nALTER TABLE t SET (fillfactor = 70);";
+    assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
+}
+
 proptest! {
     #[test]
     fn prop_detect_dialect_mysql_from_backticks(table in "[a-z][a-z0-9_]{0,15}") {
@@ -1311,7 +1341,7 @@ fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
         comment: None,
     }];
 
-    populate_mysql_enum_columns(&mut ctx, &mut tables);
+    populate_inline_enum_columns(&mut ctx, &mut tables);
 
     assert!(
         tables[0].columns[0].enum_values.is_none(),
@@ -1325,7 +1355,7 @@ fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
     assert!(ctx.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("Malformed MySQL enum/set definition")
+            .contains("Malformed inline enum/set definition")
     }));
 }
 
@@ -1358,6 +1388,27 @@ fn test_parse_mysql_inline_enum_does_not_create_schema_enum_entries_across_table
             .expect("status column should exist");
         assert_eq!(column.enum_values, expected_values);
     }
+}
+
+#[test]
+fn inline_enum_values_recovered_under_non_mysql_dialect() {
+    // A MySQL dump misclassified as another dialect must still recover its
+    // inline enum values; the type string is canonicalized regardless of
+    // dialect, so the values must be too.
+    let sql = "CREATE TABLE t (id INT PRIMARY KEY, status ENUM('draft', 'published'));";
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+
+    let status = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "status")
+        .expect("status column should exist");
+    assert_eq!(
+        status.enum_values,
+        Some(vec!["draft".to_string(), "published".to_string()]),
+        "inline enum values must be recovered even when not parsed as MySQL"
+    );
 }
 
 #[test]
