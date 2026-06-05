@@ -42,15 +42,29 @@ impl<'a> InputSelection<'a> {
         dialect: SqlDialect,
         subject: &'static str,
     ) -> CliResult<InputSource> {
-        let selected = self.selected_count();
+        // Fall back to the DATABASE_URL environment variable only when no input
+        // flag was given. Passing the DSN via `--db-url` leaks it into argv
+        // (`ps`) and shell history, so the env var is the safer default for
+        // live-DB introspection.
+        let env_db_url = std::env::var("DATABASE_URL").ok();
+        let db_url = effective_db_url(
+            self.db_url,
+            self.has_explicit_input(),
+            env_db_url.as_deref(),
+        );
+
+        let selected = present(self.sql.is_some())
+            + present(self.sql_text.is_some())
+            + present(self.schema_json.is_some())
+            + present(db_url.is_some());
         if selected == 0 {
             return Err(CliError::usage(anyhow::anyhow!(
-                "No {subject} input option was selected"
+                "No input source was provided. Provide an input (e.g. --sql or --db-url) or set the DATABASE_URL environment variable."
             )));
         }
         if selected > 1 {
             return Err(CliError::usage(anyhow::anyhow!(
-                "Only one {subject} input option can be specified"
+                "Only one input source can be specified."
             )));
         }
 
@@ -63,18 +77,16 @@ impl<'a> InputSelection<'a> {
         if let Some(path) = self.schema_json {
             return read_schema_json_file(path, subject);
         }
-        if let Some(url) = self.db_url {
+        if let Some(url) = db_url {
             return Ok(InputSource::db_url(url.to_owned()));
         }
 
         unreachable!("validated input selection should always contain one item")
     }
 
-    const fn selected_count(&self) -> usize {
-        present(self.sql.is_some())
-            + present(self.sql_text.is_some())
-            + present(self.schema_json.is_some())
-            + present(self.db_url.is_some())
+    /// Whether any non-`db_url` input flag was provided.
+    const fn has_explicit_input(&self) -> bool {
+        self.sql.is_some() || self.sql_text.is_some() || self.schema_json.is_some()
     }
 
     /// Build a selection for `render`/`inspect`/`export`.
@@ -135,6 +147,25 @@ impl<'a> InputSelection<'a> {
 
 const fn present(value: bool) -> usize {
     if value { 1 } else { 0 }
+}
+
+/// Resolve the effective db-url.
+///
+/// The explicit `--db-url` flag always wins. Otherwise the `DATABASE_URL`
+/// environment value is used only when no other input flag was provided, so a
+/// stray `DATABASE_URL` never shadows an explicit `--sql`/`--schema-json`.
+fn effective_db_url<'a>(
+    flag: Option<&'a str>,
+    has_explicit_input: bool,
+    env_value: Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(url) = flag {
+        return Some(url);
+    }
+    if has_explicit_input {
+        return None;
+    }
+    env_value.filter(|value| !value.trim().is_empty())
 }
 
 fn read_sql_file(path: &Path, _subject: &str, dialect: SqlDialect) -> CliResult<InputSource> {
@@ -267,4 +298,38 @@ fn ensure_input_file_metadata(path: &Path, prefix: &str) -> CliResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_db_url;
+
+    #[test]
+    fn explicit_db_url_flag_wins_over_env() {
+        assert_eq!(
+            effective_db_url(Some("postgres://flag"), false, Some("postgres://env")),
+            Some("postgres://flag")
+        );
+    }
+
+    #[test]
+    fn env_is_used_when_no_input_flag_is_given() {
+        assert_eq!(
+            effective_db_url(None, false, Some("postgres://env")),
+            Some("postgres://env")
+        );
+    }
+
+    #[test]
+    fn explicit_non_db_input_suppresses_env_fallback() {
+        // A stray DATABASE_URL must not shadow `--sql`/`--schema-json`.
+        assert_eq!(effective_db_url(None, true, Some("postgres://env")), None);
+    }
+
+    #[test]
+    fn blank_env_value_is_ignored() {
+        assert_eq!(effective_db_url(None, false, Some("   ")), None);
+        assert_eq!(effective_db_url(None, false, Some("")), None);
+        assert_eq!(effective_db_url(None, false, None), None);
+    }
 }

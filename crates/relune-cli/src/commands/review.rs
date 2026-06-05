@@ -61,7 +61,7 @@ pub fn run_review(
     let result = review(request)
         .map_err(|error| CliError::general(anyhow::anyhow!("Failed to review schema: {error}")))?;
 
-    check_diagnostics(&result.diagnostics, color, false)?;
+    check_diagnostics(&result.diagnostics, color, false, quiet)?;
 
     // Emit the structured summary file before any deny short-circuit so CI
     // can rely on `--emit-summary` being written even when rc=10.
@@ -96,7 +96,7 @@ pub fn run_review(
     }
 
     if result.denied {
-        return Err(CliError::review_denied(anyhow::anyhow!(
+        return Err(CliError::deny_threshold_reached(anyhow::anyhow!(
             "Review findings reached the configured --deny threshold"
         )));
     }

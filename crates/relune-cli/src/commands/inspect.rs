@@ -44,7 +44,7 @@ pub fn run_inspect(
     };
     write_output(&output, args.out.as_deref(), color)?;
 
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning, quiet)?;
 
     if !quiet && let Some(ref out_path) = args.out {
         print_success(

@@ -7,7 +7,13 @@ Global options (before the subcommand):
 | `-c`, `--config <FILE>` | Optional TOML config; merges with flags (see [Configuration](configuration.md)) |
 | `--color auto\|always\|never` | Terminal styling |
 | `-v`, `--verbose` | More log output (repeatable: `-v` info, `-vv` debug, `-vvv` trace with span events) |
-| `-q`, `--quiet` | Less non-error output |
+| `-q`, `--quiet` | Suppresses non-error diagnostics (warning/info/hint) and success notices; errors are still reported |
+
+Logging is filtered through `RUST_LOG`. When `RUST_LOG` is set to a non-empty
+value it takes precedence and fully controls per-target filtering (standard
+[`tracing` `EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)
+syntax), so you can trace a single module, e.g. `RUST_LOG=relune_introspect=debug relune doc` (with `DATABASE_URL` set).
+When `RUST_LOG` is unset or empty, `-v`/`-q` select the level.
 
 Every command requires **at least one input**. Typical inputs:
 
@@ -19,11 +25,34 @@ Every command requires **at least one input**. Typical inputs:
 | Live DB | `--db-url <URL>` | Read-only introspection; PostgreSQL/MySQL/MariaDB use a 30s statement deadline, and remote TCP connections default to verifying TLS (PostgreSQL `verify-full`, MySQL/MariaDB `verify-identity`) — set `sslmode=require` / `ssl-mode=required` in the URL to keep encryption without certificate verification |
 | SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | Drives both SQL parsing and `relune review` rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree (so SQL inputs that both look like Postgres run lock-risk under `Postgres`); when the two sides disagree, `auto` stays inactive and a `REVIEW002` warning is emitted. |
 
-Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly.
+Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly. If the `--out` parent directory does not exist, Relune reports it as a usage error (exit `2`) and names the missing directory.
 
 For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**.
 
+> [!WARNING]
+> **Avoid passing a live-DB DSN on the command line.** A `--db-url` value is
+> visible to other users via `ps`/`/proc` and is recorded in shell history.
+> For `render`, `inspect`, `doc`, `export`, and `lint`, when **no** input flag
+> is given Relune falls back to the **`DATABASE_URL`** environment variable, so
+> prefer `export DATABASE_URL=...` (or a `.env` loaded by your shell) over
+> `--db-url`. An explicit `--sql`/`--schema-json`/`--db-url` flag always takes
+> precedence over `DATABASE_URL`.
+
 `--db-url` introspection runs catalog queries through a small connection pool. Set `RELUNE_DB_POOL_MAX_CONNECTIONS` to a positive integer to override the default cap (PostgreSQL/MySQL fan out to 6 connections, SQLite uses 1). Non-positive or non-numeric values are ignored and the default applies.
+
+---
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success. For `diff --exit-code` / `review --exit-code`, no changes/findings. |
+| `1` | General/internal failure (I/O, rasterization, unexpected errors). |
+| `2` | Usage error: bad flags, no input selected, unknown rule id, a missing `--out` directory, etc. |
+| `3` | A diagnostic reached the warning threshold under `--fail-on-warning` (or `--deny warning`/`--deny info` on a parser diagnostic). |
+| `10` | A configured threshold was reached: `diff --exit-code`/`review --exit-code` detected changes, `review --deny` / `lint --deny` found a finding/issue at or above the threshold. |
+
+`lint --deny`, `review --deny`, and `diff`/`review --exit-code` all use exit code `10` for "a threshold was reached", so CI can distinguish a policy gate from a general failure (`1`) or a usage mistake (`2`).
 
 ---
 

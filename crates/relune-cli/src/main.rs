@@ -88,19 +88,10 @@ fn run_command(cli: Cli) -> CliResult<()> {
 
 /// Setup logging based on verbosity and quiet flags.
 fn setup_logging(verbose: u8, quiet: bool) {
+    use tracing_subscriber::fmt;
     use tracing_subscriber::fmt::format::FmtSpan;
-    use tracing_subscriber::{EnvFilter, fmt};
 
-    let filter = if quiet {
-        EnvFilter::new("error")
-    } else {
-        match verbose {
-            0 => EnvFilter::new("warn"),
-            1 => EnvFilter::new("info"),
-            2 => EnvFilter::new("debug"),
-            _ => EnvFilter::new("trace"),
-        }
-    };
+    let filter = build_env_filter(verbose, quiet, std::env::var("RUST_LOG").ok().as_deref());
 
     let span_events = if verbose >= 3 {
         FmtSpan::NEW | FmtSpan::CLOSE
@@ -115,4 +106,96 @@ fn setup_logging(verbose: u8, quiet: bool) {
         .with_writer(std::io::stderr)
         .without_time()
         .try_init();
+}
+
+/// Build the log filter from the verbosity flags and `RUST_LOG`.
+///
+/// `RUST_LOG`, when set to a non-empty value, takes precedence and fully
+/// controls per-target filtering (standard `EnvFilter` semantics), so an
+/// operator can run e.g. `RUST_LOG=relune_introspect=debug` to trace a single
+/// module. When `RUST_LOG` is unset or empty, `-v`/`-q` select the level.
+fn build_env_filter(
+    verbose: u8,
+    quiet: bool,
+    rust_log: Option<&str>,
+) -> tracing_subscriber::EnvFilter {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::filter::LevelFilter;
+
+    let default_level = if quiet {
+        LevelFilter::ERROR
+    } else {
+        match verbose {
+            0 => LevelFilter::WARN,
+            1 => LevelFilter::INFO,
+            2 => LevelFilter::DEBUG,
+            _ => LevelFilter::TRACE,
+        }
+    };
+
+    let builder = EnvFilter::builder().with_default_directive(default_level.into());
+    match rust_log {
+        Some(value) if !value.trim().is_empty() => builder.parse_lossy(value),
+        _ => builder.parse_lossy(""),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_env_filter;
+    use tracing_subscriber::filter::LevelFilter;
+
+    #[test]
+    fn verbosity_sets_default_level_without_rust_log() {
+        assert_eq!(
+            build_env_filter(0, false, None).max_level_hint(),
+            Some(LevelFilter::WARN)
+        );
+        assert_eq!(
+            build_env_filter(1, false, None).max_level_hint(),
+            Some(LevelFilter::INFO)
+        );
+        assert_eq!(
+            build_env_filter(2, false, None).max_level_hint(),
+            Some(LevelFilter::DEBUG)
+        );
+        assert_eq!(
+            build_env_filter(9, false, None).max_level_hint(),
+            Some(LevelFilter::TRACE)
+        );
+    }
+
+    #[test]
+    fn quiet_lowers_default_level_to_error() {
+        assert_eq!(
+            build_env_filter(0, true, None).max_level_hint(),
+            Some(LevelFilter::ERROR)
+        );
+    }
+
+    #[test]
+    fn empty_rust_log_falls_back_to_verbosity() {
+        assert_eq!(
+            build_env_filter(1, false, Some("   ")).max_level_hint(),
+            Some(LevelFilter::INFO)
+        );
+    }
+
+    #[test]
+    fn rust_log_target_directive_takes_precedence() {
+        // A per-target directive enables that module even though the verbosity
+        // default would otherwise cap output at WARN.
+        assert_eq!(
+            build_env_filter(0, false, Some("relune_introspect=debug")).max_level_hint(),
+            Some(LevelFilter::DEBUG)
+        );
+    }
+
+    #[test]
+    fn rust_log_global_level_overrides_verbosity() {
+        assert_eq!(
+            build_env_filter(0, false, Some("trace")).max_level_hint(),
+            Some(LevelFilter::TRACE)
+        );
+    }
 }

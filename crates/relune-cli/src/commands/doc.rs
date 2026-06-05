@@ -32,7 +32,7 @@ pub fn run_doc(
     let result = doc(request).context("Failed to generate documentation")?;
 
     write_output(&result.content, args.out.as_deref(), color)?;
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning, quiet)?;
 
     // Print success message (unless quiet)
     if !quiet && let Some(ref out_path) = args.out {

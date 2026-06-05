@@ -1,13 +1,7 @@
 ---
 source: crates/relune-cli/tests/integration_tests.rs
-assertion_line: 45
 expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 2
 stderr:
-error: the following required arguments were not provided:
-  <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
-
-Usage: relune render <--sql <FILE>|--sql-text <TEXT>|--schema-json <FILE>|--db-url <URL>>
-
-For more information, try '--help'.
+Error: No input source was provided. Provide an input (e.g. --sql or --db-url) or set the DATABASE_URL environment variable.

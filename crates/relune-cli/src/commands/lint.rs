@@ -70,11 +70,13 @@ pub fn run_lint(
     };
     write_output(&output, args.out.as_deref(), color)?;
 
-    check_diagnostics_at_or_above(&result.diagnostics, color, diagnostic_threshold)?;
+    check_diagnostics_at_or_above(&result.diagnostics, color, diagnostic_threshold, quiet)?;
 
-    // Check if we should exit with non-zero code based on --deny
+    // Exit with the dedicated deny-threshold code (shared with the
+    // `--exit-code` and migration-risk deny gates) so CI can distinguish a
+    // policy gate from a general failure.
     if result.has_failures(fail_on) {
-        return Err(CliError::general(anyhow::anyhow!(
+        return Err(CliError::deny_threshold_reached(anyhow::anyhow!(
             "Lint issues found at or above the configured severity threshold"
         )));
     }

@@ -146,10 +146,17 @@ impl DiagnosticPrinter {
         eprintln!("{message}");
     }
 
-    /// Print multiple diagnostics to stderr.
-    pub fn print_all(&self, diagnostics: &[Diagnostic]) {
+    /// Print diagnostics to stderr.
+    ///
+    /// When `quiet` is set, only error-severity diagnostics are printed so that
+    /// `--quiet` lives up to its "less non-error output" promise. Suppression
+    /// is purely cosmetic: callers still compute exit codes from the full
+    /// diagnostic set.
+    pub fn print_all(&self, diagnostics: &[Diagnostic], quiet: bool) {
         for diagnostic in diagnostics {
-            self.print(diagnostic);
+            if !quiet || diagnostic.severity == Severity::Error {
+                self.print(diagnostic);
+            }
         }
     }
 
@@ -226,23 +233,28 @@ pub fn check_diagnostics(
     diagnostics: &[Diagnostic],
     color: ColorWhen,
     fail_on_warning: bool,
+    quiet: bool,
 ) -> crate::error::CliResult<()> {
     let threshold = if fail_on_warning {
         Severity::Warning
     } else {
         Severity::Error
     };
-    check_diagnostics_at_or_above(diagnostics, color, threshold)
+    check_diagnostics_at_or_above(diagnostics, color, threshold, quiet)
 }
 
 /// Print diagnostics, then fail when any diagnostic meets the threshold.
+///
+/// `quiet` suppresses printing of non-error diagnostics; the failure decision
+/// always considers the full diagnostic set.
 pub fn check_diagnostics_at_or_above(
     diagnostics: &[Diagnostic],
     color: ColorWhen,
     minimum_severity: Severity,
+    quiet: bool,
 ) -> crate::error::CliResult<()> {
     let printer = DiagnosticPrinter::new(color);
-    printer.print_all(diagnostics);
+    printer.print_all(diagnostics, quiet);
 
     let highest = diagnostics
         .iter()
@@ -261,6 +273,39 @@ pub fn check_diagnostics_at_or_above(
     }
 }
 
+/// Validate that the parent directory of an `--out` path exists before we try
+/// to create a temp file there.
+///
+/// A missing directory otherwise surfaces as an opaque general failure
+/// (exit 1) without naming the offending path. Reporting it as a usage error
+/// (exit 2) with the path matches how input-file problems are handled.
+pub fn validate_output_path(path: &Path) -> CliResult<()> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    match std::fs::metadata(parent) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(CliError::usage(anyhow::anyhow!(
+            "Output directory '{}' is not a directory (for --out '{}')",
+            parent.display(),
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(CliError::usage(anyhow::anyhow!(
+                "Output directory '{}' does not exist (for --out '{}')",
+                parent.display(),
+                path.display()
+            )))
+        }
+        // Other I/O errors (permission denied, symlink loops, ...) are not
+        // usage mistakes; let temp-file creation surface them as a general
+        // failure with the underlying error rather than mislabeling them here.
+        Err(_) => Ok(()),
+    }
+}
+
 /// Write string content to an output destination and finalise the writer.
 pub fn write_output(
     content: &str,
@@ -268,6 +313,10 @@ pub fn write_output(
     color: ColorWhen,
 ) -> crate::error::CliResult<()> {
     use anyhow::Context;
+
+    if let Some(path) = out_path {
+        validate_output_path(path)?;
+    }
 
     let mut writer =
         OutputWriter::new(out_path, color).context("Failed to create output writer")?;
@@ -412,10 +461,58 @@ mod tests {
     fn diagnostics_threshold_respects_info_level() {
         let diagnostics = vec![Diagnostic::info(codes::parse_skipped(), "ignored")];
 
-        let error = check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Info)
-            .expect_err("info diagnostics should trip the configured threshold");
+        let error =
+            check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Info, false)
+                .expect_err("info diagnostics should trip the configured threshold");
         assert_eq!(error.exit_code(), 3);
         assert!(error.to_string().contains("at or above info"));
+    }
+
+    #[test]
+    fn quiet_still_fails_on_threshold_even_when_diagnostics_are_hidden() {
+        // `--quiet` suppresses printing of non-error diagnostics, but the exit
+        // code must still reflect the full diagnostic set.
+        let diagnostics = vec![Diagnostic::info(codes::parse_skipped(), "ignored")];
+
+        let error =
+            check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Info, true)
+                .expect_err("threshold must still trip under --quiet");
+        assert_eq!(error.exit_code(), 3);
+    }
+
+    #[test]
+    fn validate_output_path_accepts_existing_directory() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let path = temp.path().join("out.svg");
+        validate_output_path(&path).expect("existing parent directory should be accepted");
+    }
+
+    #[test]
+    fn validate_output_path_rejects_missing_directory() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let path = temp.path().join("missing").join("out.svg");
+
+        let error = validate_output_path(&path)
+            .expect_err("missing parent directory should be a usage error");
+        assert_eq!(error.exit_code(), 2);
+        let message = error.to_string();
+        assert!(message.contains("does not exist"), "message: {message}");
+        assert!(message.contains("missing"), "message: {message}");
+    }
+
+    #[test]
+    fn validate_output_path_rejects_file_as_parent() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let file = temp.path().join("not-a-dir");
+        std::fs::write(&file, "x").expect("seed file");
+        let path = file.join("out.svg");
+
+        let error = validate_output_path(&path).expect_err("file parent should be a usage error");
+        assert_eq!(error.exit_code(), 2);
+        assert!(
+            error.to_string().contains("is not a directory"),
+            "message: {error}"
+        );
     }
 
     #[test]
@@ -423,7 +520,7 @@ mod tests {
         let diagnostics = vec![Diagnostic::error(codes::parse_error(), "syntax error")];
 
         let error =
-            check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Warning)
+            check_diagnostics_at_or_above(&diagnostics, ColorWhen::Never, Severity::Warning, false)
                 .expect_err("errors should remain fatal");
         assert_eq!(error.exit_code(), 1);
         assert!(error.to_string().contains("Errors were encountered"));

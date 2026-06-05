@@ -66,6 +66,8 @@ Every command requires at least one input. Combine with any subcommand.
 | Live database | `--db-url <URL>` | Read-only introspection (`postgres://`, `mysql://`, `mariadb://`, `sqlite:`) |
 | SQL dialect | `--dialect auto\|postgres\|mysql\|sqlite` | For SQL parsing (default: `auto`) |
 
+A `--db-url` value is visible in `ps`/`/proc` and shell history. For `render`, `inspect`, `doc`, `export`, and `lint`, when no input flag is given Relune falls back to the `DATABASE_URL` environment variable, so prefer `export DATABASE_URL=...` over `--db-url`. An explicit input flag always wins over `DATABASE_URL`.
+
 ## Global Options
 
 Place these before the subcommand.
@@ -75,7 +77,21 @@ Place these before the subcommand.
 | `-c`, `--config <FILE>` | TOML config file; merges with flags (flags win) |
 | `--color auto\|always\|never` | Terminal styling |
 | `-v`, `--verbose` | More log output (repeatable: `-v` info, `-vv` debug, `-vvv` trace) |
-| `-q`, `--quiet` | Less non-error output |
+| `-q`, `--quiet` | Suppresses non-error diagnostics (warning/info/hint) and success notices; errors still print |
+
+Logging honors `RUST_LOG`: when set to a non-empty value it takes precedence and fully controls per-target filtering (standard `tracing` `EnvFilter` syntax), e.g. `RUST_LOG=relune_introspect=debug relune doc` (with `DATABASE_URL` set). When unset, `-v`/`-q` choose the level.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (no changes/findings for `diff`/`review --exit-code`). |
+| `1` | General/internal failure. |
+| `2` | Usage error (bad flags, no input, unknown rule id, missing `--out` directory). |
+| `3` | Warning threshold reached under `--fail-on-warning`. |
+| `10` | A configured threshold was reached: `diff`/`review --exit-code` detected changes, or `lint --deny`/`review --deny` found an issue/finding at or above the threshold. |
+
+`lint --deny`, `review --deny`, and `diff`/`review --exit-code` share exit code `10` so CI can tell a policy gate apart from a general failure (`1`) or usage mistake (`2`).
 
 ## Commands
 
@@ -225,7 +241,7 @@ relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 | `--fail-on-warning` | Non-zero exit on warning diagnostics | -- |
 
 Rule categories cover structure, relationships, naming conventions, and documentation. `strict` adds column comment coverage on top of the default schema review profile.
-`--deny` applies to lint issues and parse diagnostics together, so warning-level parser diagnostics now fail the command when the configured threshold includes warnings.
+`--deny` applies to lint issues and parse diagnostics together. A lint issue at or above the threshold exits with code `10` (the shared policy-gate code, matching `review --deny`); a warning-level **parser** diagnostic exits with code `3` like `--fail-on-warning`.
 
 ### diff
 
