@@ -149,10 +149,7 @@ mod tests {
 
         let request = ExportRequest::from_sql(sql)
             .with_format(ExportFormat::GraphJson)
-            .with_focus(FocusSpec {
-                table: "posts".to_string(),
-                depth: 1,
-            });
+            .with_focus(FocusSpec::new("posts", 1));
 
         let result = export(request).unwrap();
         let graph: serde_json::Value = serde_json::from_str(&result.content).unwrap();

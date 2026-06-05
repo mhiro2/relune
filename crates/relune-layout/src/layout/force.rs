@@ -842,6 +842,11 @@ fn separate_force_groups(
         return;
     }
 
+    // Precompute node connectivity once. Previously each pack-gap check rescanned
+    // every edge (`force_nodes_are_connected`), making the group-vs-group case
+    // O(group² · E) per call and the whole pass quadratic in node count.
+    let connected = build_node_adjacency(graph);
+
     packed_items.sort_by(|(left_item, left_bounds), (right_item, right_bounds)| {
         let left_min = if pack_along_sim_y {
             left_bounds.min_y
@@ -871,7 +876,7 @@ fn separate_force_groups(
         } else {
             bounds.min_x
         };
-        let required_min = previous_end + force_pack_gap(graph, previous_item, item);
+        let required_min = previous_end + force_pack_gap(graph, &connected, previous_item, item);
         if current_min < required_min {
             let delta = required_min - current_min;
             shift_force_pack_item(graph, positions, item, delta, pack_along_sim_y);
@@ -891,8 +896,39 @@ fn separate_force_groups(
     }
 }
 
-fn force_pack_gap(graph: &LayoutGraph, left: ForcePackItem, right: ForcePackItem) -> f32 {
-    if force_pack_items_are_connected(graph, left, right) {
+/// Builds the set of connected node-index pairs (normalized as `(min, max)`)
+/// from the graph's edges, so connectivity checks during group packing are O(1)
+/// lookups instead of a full edge scan.
+fn build_node_adjacency(graph: &LayoutGraph) -> std::collections::HashSet<(usize, usize)> {
+    use std::collections::{HashMap, HashSet};
+
+    let index_by_id: HashMap<&str, usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(idx, node)| (node.id.as_str(), idx))
+        .collect();
+
+    let mut connected = HashSet::new();
+    for edge in &graph.edges {
+        if let (Some(&from), Some(&to)) = (
+            index_by_id.get(edge.from.as_str()),
+            index_by_id.get(edge.to.as_str()),
+        ) && from != to
+        {
+            connected.insert((from.min(to), from.max(to)));
+        }
+    }
+    connected
+}
+
+fn force_pack_gap(
+    graph: &LayoutGraph,
+    connected: &std::collections::HashSet<(usize, usize)>,
+    left: ForcePackItem,
+    right: ForcePackItem,
+) -> f32 {
+    if force_pack_items_are_connected(graph, connected, left, right) {
         FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP)
     } else {
         FORCE_GROUP_GAP
@@ -901,19 +937,20 @@ fn force_pack_gap(graph: &LayoutGraph, left: ForcePackItem, right: ForcePackItem
 
 fn force_pack_items_are_connected(
     graph: &LayoutGraph,
+    connected: &std::collections::HashSet<(usize, usize)>,
     left: ForcePackItem,
     right: ForcePackItem,
 ) -> bool {
     match (left, right) {
         (ForcePackItem::UngroupedNode(left_idx), ForcePackItem::UngroupedNode(right_idx)) => {
-            force_nodes_are_connected(graph, left_idx, right_idx)
+            force_nodes_are_connected(connected, left_idx, right_idx)
         }
         (ForcePackItem::Group(group_idx), ForcePackItem::UngroupedNode(node_idx))
         | (ForcePackItem::UngroupedNode(node_idx), ForcePackItem::Group(group_idx)) => graph.groups
             [group_idx]
             .node_indices
             .iter()
-            .any(|&group_node_idx| force_nodes_are_connected(graph, group_node_idx, node_idx)),
+            .any(|&group_node_idx| force_nodes_are_connected(connected, group_node_idx, node_idx)),
         (ForcePackItem::Group(left_group_idx), ForcePackItem::Group(right_group_idx)) => graph
             .groups[left_group_idx]
             .node_indices
@@ -923,20 +960,18 @@ fn force_pack_items_are_connected(
                     .node_indices
                     .iter()
                     .any(|&right_node_idx| {
-                        force_nodes_are_connected(graph, left_node_idx, right_node_idx)
+                        force_nodes_are_connected(connected, left_node_idx, right_node_idx)
                     })
             }),
     }
 }
 
-fn force_nodes_are_connected(graph: &LayoutGraph, left_idx: usize, right_idx: usize) -> bool {
-    let left_id = &graph.nodes[left_idx].id;
-    let right_id = &graph.nodes[right_idx].id;
-
-    graph.edges.iter().any(|edge| {
-        (edge.from == *left_id && edge.to == *right_id)
-            || (edge.from == *right_id && edge.to == *left_id)
-    })
+fn force_nodes_are_connected(
+    connected: &std::collections::HashSet<(usize, usize)>,
+    left_idx: usize,
+    right_idx: usize,
+) -> bool {
+    connected.contains(&(left_idx.min(right_idx), left_idx.max(right_idx)))
 }
 
 fn force_group_bounds(

@@ -159,7 +159,18 @@ fn mermaid_column_names(node: &crate::graph::LayoutNode) -> Vec<String> {
 }
 
 fn mermaid_escape_edge_label(label: &str) -> String {
-    mermaid_escape_text(label)
+    // Mermaid relationship labels are quoted strings that do NOT honor
+    // backslash escapes (unlike attribute comments), so a literal quote would
+    // close the string early and break the diagram. Replace quotes and control
+    // characters instead of escaping them.
+    label
+        .chars()
+        .map(|ch| match ch {
+            '"' => '\'',
+            ch if ch.is_control() => ' ',
+            ch => ch,
+        })
+        .collect()
 }
 
 fn format_edge_label(edge: &LayoutEdge) -> String {
@@ -457,7 +468,9 @@ mod tests {
         let mermaid = layout_graph_to_mermaid(&graph);
         assert!(mermaid.contains("\"users\\n\\[prod\\]\" {"));
         assert!(mermaid.contains("INT user_id PK"));
-        assert!(mermaid.contains(": \"fk\\[\\n\\] \\(user_id -> id\\)\""));
+        // Relationship labels are quoted strings without backslash escaping, so
+        // the control character is replaced with a space and brackets are kept.
+        assert!(mermaid.contains(": \"fk[ ] (user_id -> id)\""));
 
         let d2 = layout_graph_to_d2(&graph);
         assert!(d2.contains("\"users\\n[prod]\""));
@@ -466,6 +479,24 @@ mod tests {
         let dot = layout_graph_to_dot(&graph);
         assert!(dot.contains("[label=\"users\\n[prod]\"]"));
         assert!(dot.contains("[label=\"fk[\\n] (user_id -> id)\"]"));
+    }
+
+    #[test]
+    fn mermaid_relationship_label_strips_quotes() {
+        let mut graph = tiny_graph();
+        graph.edges[0].name = Some("fk\"x\"".into());
+
+        let mermaid = layout_graph_to_mermaid(&graph);
+        // A quote inside the relationship label must not appear verbatim (it
+        // would terminate the quoted string and break the diagram) and must not
+        // be backslash-escaped (Mermaid does not honor that here).
+        let label_line = mermaid
+            .lines()
+            .find(|line| line.contains("||--o{"))
+            .expect("relationship line present");
+        assert!(!label_line.contains("fk\""), "quote leaked: {label_line}");
+        assert!(!label_line.contains('\\'), "backslash leaked: {label_line}");
+        assert!(label_line.contains("fk'x'"));
     }
 
     #[test]

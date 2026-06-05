@@ -536,12 +536,14 @@ impl LayoutGraphBuilder {
                     .map(|target| target.stable_id.clone());
                 let is_self_loop = target_id.as_deref() == Some(table.stable_id.as_str());
 
-                // Determine if FK is nullable by checking source columns
+                // Determine if FK is nullable by checking source columns.
+                // Match column names case-insensitively, consistent with schema
+                // validation and FK target resolution.
                 let fk_nullable = fk.from_columns.iter().all(|col_name| {
                     table
                         .columns
                         .iter()
-                        .find(|c| &c.name == col_name)
+                        .find(|c| c.name.eq_ignore_ascii_case(col_name))
                         .is_some_and(|c| c.nullable)
                 });
 
@@ -1015,9 +1017,23 @@ fn build_prefix_groups(names: &[&str]) -> Vec<(String, Vec<usize>)> {
         return Vec::new();
     }
 
+    // Sort indices by name so names sharing a prefix are contiguous. A pair can
+    // only share a group prefix when their common prefix has at least two
+    // alphanumeric characters (`is_meaningful_group_prefix`), and for a fixed
+    // name the common prefix shrinks monotonically as we move away in sorted
+    // order. So each name only needs to be compared against the surrounding run
+    // that still meets that bound, rather than every other name. The resulting
+    // adjacency edge set is identical to the exhaustive all-pairs scan.
+    let mut order: Vec<usize> = (0..names.len()).collect();
+    order.sort_by(|&left, &right| names[left].cmp(names[right]));
+
     let mut adjacency = vec![Vec::new(); names.len()];
-    for left in 0..names.len() {
-        for right in (left + 1)..names.len() {
+    for pos in 0..order.len() {
+        let left = order[pos];
+        for &right in order.iter().skip(pos + 1) {
+            if !common_prefix_has_min_alnum(names[left], names[right]) {
+                break;
+            }
             if shared_group_prefix(names[left], names[right]).is_some() {
                 adjacency[left].push(right);
                 adjacency[right].push(left);
@@ -1123,6 +1139,26 @@ fn common_prefix<'a>(left: &'a str, right: &str) -> &'a str {
     &left[..end]
 }
 
+/// Returns `true` if the common character prefix of `left` and `right` contains
+/// at least two alphanumeric characters — the minimum for
+/// [`is_meaningful_group_prefix`], and therefore a necessary condition for
+/// [`shared_group_prefix`] to return `Some`.
+fn common_prefix_has_min_alnum(left: &str, right: &str) -> bool {
+    let mut alnum = 0usize;
+    for (lhs, rhs) in left.chars().zip(right.chars()) {
+        if lhs != rhs {
+            break;
+        }
+        if lhs.is_alphanumeric() {
+            alnum += 1;
+            if alnum >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn trim_prefix_to_boundary(prefix: &str) -> Option<String> {
     prefix
         .rfind('_')
@@ -1211,6 +1247,17 @@ mod tests {
         let groups = build_prefix_groups(&["users", "user_profile", "user_preferences"]);
 
         assert_eq!(groups, vec![("user".to_string(), vec![0, 1, 2])]);
+    }
+
+    #[test]
+    fn test_build_prefix_groups_handles_non_contiguous_components() {
+        // `user_x` and `users` share the terminal prefix "user", but the
+        // sort-adjacent `useraccount` (which falls between them lexically) does
+        // not share a group boundary with either. The component therefore skips
+        // the in-between name, which the spatial pruning must still reproduce.
+        let groups = build_prefix_groups(&["user_x", "useraccount", "users"]);
+
+        assert_eq!(groups, vec![("user".to_string(), vec![0, 2])]);
     }
 
     #[test]

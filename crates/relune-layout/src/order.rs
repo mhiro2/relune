@@ -195,20 +195,13 @@ fn count_crossings(
 ) -> usize {
     let mut crossings = 0;
 
-    // Build position map for all nodes
-    // Note: Bit-packing assumes max 65536 nodes per rank and 65536 ranks
-    let mut position: BTreeMap<usize, usize> = BTreeMap::new();
+    // Build position map for all nodes. Rank and position are packed into the
+    // high/low 32 bits of a u64 so the limit (~4 billion ranks/nodes per rank)
+    // is effectively unreachable for any real schema.
+    let mut position: BTreeMap<usize, u64> = BTreeMap::new();
     for (rank_idx, rank_nodes) in nodes_by_rank.iter().enumerate() {
-        assert!(
-            rank_idx < 65536,
-            "rank index exceeds 16-bit limit (max 65536 ranks)"
-        );
         for (pos, &node_idx) in rank_nodes.iter().enumerate() {
-            assert!(
-                pos < 65536,
-                "position within rank exceeds 16-bit limit (max 65536 nodes per rank)"
-            );
-            position.insert(node_idx, (rank_idx << 16) | pos);
+            position.insert(node_idx, ((rank_idx as u64) << 32) | pos as u64);
         }
     }
 
@@ -219,10 +212,10 @@ fn count_crossings(
             if let (Some(&from_pos), Some(&to_pos)) =
                 (position.get(&from_idx), position.get(&to_idx))
             {
-                let from_rank = from_pos >> 16;
-                let from_col = from_pos & 0xFFFF;
-                let to_rank = to_pos >> 16;
-                let to_col = to_pos & 0xFFFF;
+                let from_rank = (from_pos >> 32) as usize;
+                let from_col = (from_pos & 0xFFFF_FFFF) as usize;
+                let to_rank = (to_pos >> 32) as usize;
+                let to_col = (to_pos & 0xFFFF_FFFF) as usize;
                 // Only count each edge once (from lower rank to higher rank)
                 if from_rank < to_rank {
                     all_edges.push((from_rank, from_col, to_rank, to_col));

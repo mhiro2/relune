@@ -41,11 +41,11 @@ pub fn run_export(
         exclude: merged.exclude,
     };
 
-    // Build focus spec from merged config
-    let focus = merged.focus.as_ref().map(|table| FocusSpec {
-        table: table.clone(),
-        depth: merged.depth,
-    });
+    // Build focus spec from merged config (FocusSpec::new clamps depth).
+    let focus = merged
+        .focus
+        .as_ref()
+        .map(|table| FocusSpec::new(table.clone(), merged.depth));
 
     // Build grouping spec from merged config
     let grouping = GroupingSpec {

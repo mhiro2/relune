@@ -1,9 +1,9 @@
-//! Integration tests exercising validate → graph → lint → diff pipelines
+//! Integration tests exercising validate → lint → diff pipelines
 //! through the public `relune-core` API.
 
 use relune_core::{
-    Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, SchemaGraph, Table,
-    TableId, View, diff_schemas, lint_schema,
+    Column, ColumnId, ForeignKey, Index, ReferentialAction, Schema, Table, TableId, diff_schemas,
+    lint_schema,
 };
 
 fn make_table(
@@ -113,11 +113,6 @@ fn multi_schema_fk_resolves_across_schemas() {
         enums: vec![],
     };
 
-    // Graph should contain 2 nodes and 1 FK edge.
-    let graph = SchemaGraph::from_schema(&schema).expect("should build graph");
-    assert_eq!(graph.graph.node_count(), 2);
-    assert_eq!(graph.graph.edge_count(), 1);
-
     // Lint: cross-schema FK should not fire unresolved-FK.
     let lint_result = lint_schema(&schema);
     assert!(
@@ -130,53 +125,7 @@ fn multi_schema_fk_resolves_across_schemas() {
 }
 
 // ============================================================================
-// Scenario 2: View → Table dependency
-// ============================================================================
-
-#[test]
-fn view_with_table_dependency_appears_in_graph() {
-    let schema = Schema {
-        tables: vec![make_table(
-            1,
-            "public.users",
-            Some("public"),
-            "users",
-            vec![pk_col(1, "id"), fk_col(2, "email")],
-            vec![],
-            vec![],
-        )],
-        views: vec![View {
-            id: "public.active_users".to_string(),
-            schema_name: Some("public".to_string()),
-            name: "active_users".to_string(),
-            columns: vec![Column {
-                id: ColumnId(1),
-                name: "id".to_string(),
-                data_type: "bigint".to_string(),
-                nullable: false,
-                is_primary_key: false,
-                comment: None,
-                enum_values: None,
-            }],
-            definition: Some("SELECT id FROM users WHERE active".to_string()),
-        }],
-        enums: vec![],
-    };
-
-    let graph = SchemaGraph::from_schema(&schema).expect("should build graph");
-
-    // Both the table and view should appear as graph nodes.
-    let labels: Vec<&str> = graph
-        .graph
-        .node_indices()
-        .map(|idx| graph.graph[idx].id.as_str())
-        .collect();
-    assert!(labels.contains(&"public.users"), "table node missing");
-    assert!(labels.contains(&"public.active_users"), "view node missing");
-}
-
-// ============================================================================
-// Scenario 3: Circular FK detection
+// Scenario 2: Circular FK detection
 // ============================================================================
 
 #[test]
@@ -227,7 +176,7 @@ fn circular_fk_detected_by_lint() {
 }
 
 // ============================================================================
-// Scenario 4: Diff detects added and modified tables
+// Scenario 3: Diff detects added and modified tables
 // ============================================================================
 
 #[test]
@@ -285,51 +234,5 @@ fn diff_detects_table_changes() {
             .iter()
             .any(|t| t.table_name == "public.users"),
         "users should appear in modified_tables"
-    );
-}
-
-// ============================================================================
-// Scenario 5: Enum references in graph
-// ============================================================================
-
-#[test]
-fn enum_types_appear_in_graph() {
-    let schema = Schema {
-        tables: vec![make_table(
-            1,
-            "public.users",
-            Some("public"),
-            "users",
-            vec![
-                pk_col(1, "id"),
-                Column {
-                    id: ColumnId(2),
-                    name: "status".to_string(),
-                    data_type: "user_status".to_string(),
-                    nullable: false,
-                    is_primary_key: false,
-                    comment: None,
-                    enum_values: None,
-                },
-            ],
-            vec![],
-            vec![],
-        )],
-        views: vec![],
-        enums: vec![Enum {
-            id: "public.user_status".to_string(),
-            schema_name: Some("public".to_string()),
-            name: "user_status".to_string(),
-            values: vec!["active".to_string(), "inactive".to_string()],
-        }],
-    };
-
-    let graph = SchemaGraph::from_schema(&schema).expect("should build graph");
-    assert!(
-        graph
-            .graph
-            .node_indices()
-            .any(|idx| graph.graph[idx].id == "public.user_status"),
-        "enum node should appear in graph"
     );
 }

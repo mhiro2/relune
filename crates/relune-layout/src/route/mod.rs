@@ -14,6 +14,7 @@ pub(crate) use obstacle::detour_around_obstacles_with_endpoint_sizes;
 pub use obstacle::{detour_around_obstacles, nudge_label};
 
 use geometry::{polyline_midpoint, simplify_orthogonal_path};
+use relune_core::LayoutDirection;
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
 /// Outward offset (in pixels) applied to attachment points so that edge
@@ -386,10 +387,10 @@ fn attachment_point_for_side(x: f32, y: f32, w: f32, h: f32, side: AttachmentSid
     }
 }
 
-/// Route a self-loop edge.
+/// Route a self-loop edge (canonical top-to-bottom orientation).
 #[must_use]
 pub fn route_self_loop(x: f32, y: f32, w: f32, h: f32, style: RouteStyle) -> EdgeRoute {
-    route_self_loop_with_offset(x, y, w, h, style, 0.0)
+    route_self_loop_with_offset(x, y, w, h, style, LayoutDirection::TopToBottom, 0.0)
 }
 
 #[must_use]
@@ -399,6 +400,7 @@ pub(crate) fn route_self_loop_with_offset(
     w: f32,
     h: f32,
     style: RouteStyle,
+    direction: LayoutDirection,
     radius_offset: f32,
 ) -> EdgeRoute {
     // Self-loops go around the node.
@@ -411,21 +413,54 @@ pub(crate) fn route_self_loop_with_offset(
     let sy = h.mul_add(0.25, y);
     let tx = x + w;
     let ty = h.mul_add(0.75, y);
-    let points = [
+    let mut points = [
         (sx, sy),
         (sx + loop_radius, sy),
         (sx + loop_radius, ty),
         (tx, ty),
     ];
 
+    // Node coordinates are mirrored for RightToLeft / BottomToTop before edges
+    // are routed (see `mirror_positioned_nodes_for_direction`). The loop above
+    // is built in the canonical east-bulging orientation, so reflect it across
+    // the node's own center to follow the mirror instead of always bulging east.
+    mirror_self_loop_points(&mut points, x, y, w, h, direction);
+
     EdgeRoute {
-        x1: sx,
-        y1: sy,
-        x2: tx,
-        y2: ty,
+        x1: points[0].0,
+        y1: points[0].1,
+        x2: points[3].0,
+        y2: points[3].1,
         control_points: points[1..points.len() - 1].to_vec(),
         style,
         label_position: polyline_midpoint(&points),
+    }
+}
+
+/// Reflect a self-loop polyline across the node's own center so it bulges in the
+/// same direction the node was mirrored.
+fn mirror_self_loop_points(
+    points: &mut [(f32, f32)],
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    direction: LayoutDirection,
+) {
+    match direction {
+        LayoutDirection::RightToLeft => {
+            let center_x = w.mul_add(0.5, x);
+            for point in points.iter_mut() {
+                point.0 = 2.0f32.mul_add(center_x, -point.0);
+            }
+        }
+        LayoutDirection::BottomToTop => {
+            let center_y = h.mul_add(0.5, y);
+            for point in points.iter_mut() {
+                point.1 = 2.0f32.mul_add(center_y, -point.1);
+            }
+        }
+        LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => {}
     }
 }
 
@@ -724,12 +759,73 @@ mod tests {
 
     #[test]
     fn test_self_loop_offset_pushes_loop_farther_out() {
-        let base = route_self_loop_with_offset(0.0, 0.0, 100.0, 50.0, RouteStyle::Orthogonal, 0.0);
-        let offset =
-            route_self_loop_with_offset(0.0, 0.0, 100.0, 50.0, RouteStyle::Orthogonal, 18.0);
+        let base = route_self_loop_with_offset(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            RouteStyle::Orthogonal,
+            LayoutDirection::TopToBottom,
+            0.0,
+        );
+        let offset = route_self_loop_with_offset(
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            RouteStyle::Orthogonal,
+            LayoutDirection::TopToBottom,
+            18.0,
+        );
 
         assert!(offset.control_points[0].0 > base.control_points[0].0);
         assert!(offset.label_position.0 > base.label_position.0);
+    }
+
+    #[test]
+    fn test_self_loop_follows_layout_mirror() {
+        let (x, y, w, h) = (100.0, 100.0, 100.0, 50.0);
+        let east = route_self_loop_with_offset(
+            x,
+            y,
+            w,
+            h,
+            RouteStyle::Orthogonal,
+            LayoutDirection::TopToBottom,
+            0.0,
+        );
+        // TopToBottom / LeftToRight bulge east, past the node's right edge.
+        assert!(east.label_position.0 > x + w);
+
+        // RightToLeft reflects horizontally across the node center, so the loop
+        // bulges west (past the left edge) and stays symmetric about the center.
+        let west = route_self_loop_with_offset(
+            x,
+            y,
+            w,
+            h,
+            RouteStyle::Orthogonal,
+            LayoutDirection::RightToLeft,
+            0.0,
+        );
+        assert!(west.label_position.0 < x);
+        let center_x = x + w / 2.0;
+        assert!((east.label_position.0 - center_x) - (center_x - west.label_position.0) < 1e-3);
+
+        // BottomToTop reflects vertically: the bulge stays east but the endpoints
+        // swap top/bottom.
+        let flipped = route_self_loop_with_offset(
+            x,
+            y,
+            w,
+            h,
+            RouteStyle::Orthogonal,
+            LayoutDirection::BottomToTop,
+            0.0,
+        );
+        assert!(flipped.label_position.0 > x + w);
+        assert!((flipped.y1 - east.y2).abs() < 1e-3);
+        assert!((flipped.y2 - east.y1).abs() < 1e-3);
     }
 
     #[test]

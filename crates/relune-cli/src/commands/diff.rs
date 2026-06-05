@@ -41,10 +41,10 @@ pub fn run_diff(
         include: merged.include.clone(),
         exclude: merged.exclude.clone(),
     };
-    let focus = merged.focus.as_ref().map(|table| FocusSpec {
-        table: table.clone(),
-        depth: merged.depth,
-    });
+    let focus = merged
+        .focus
+        .as_ref()
+        .map(|table| FocusSpec::new(table.clone(), merged.depth));
     let grouping = GroupingSpec {
         strategy: match merged.group_by.unwrap_or(GroupByMode::None) {
             GroupByMode::None => GroupingStrategy::None,

@@ -1,5 +1,6 @@
 ---
 source: crates/relune-app/tests/layout_json_regression_matrix.rs
+assertion_line: 163
 expression: snapshot
 ---
 {
@@ -175,16 +176,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1561.0,
+              1198.0,
               980.5
             ],
             [
-              1561.0,
+              1198.0,
               1085.5
             ]
           ],
           "end": [
-            1525.0,
+            1234.0,
             1085.5
           ],
           "from": "comments",
@@ -193,21 +194,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1561.0,
-          "label_y": 1047.75,
+          "label_x": 1186.0,
+          "label_y": 1033.0,
           "nullable": true,
           "route_label_position": [
-            1561.0,
+            1198.0,
             1033.0
           ],
-          "source_side": "east",
+          "source_side": "west",
           "start": [
-            1525.0,
+            1234.0,
             980.5
           ],
           "style": "Curved",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "comments",
           "to_columns": [
             "id"
@@ -2112,16 +2113,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1561.0,
+              1198.0,
               980.5
             ],
             [
-              1561.0,
+              1198.0,
               1085.5
             ]
           ],
           "end": [
-            1525.0,
+            1234.0,
             1085.5
           ],
           "from": "comments",
@@ -2130,21 +2131,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1561.0,
-          "label_y": 1047.75,
+          "label_x": 1186.0,
+          "label_y": 1033.0,
           "nullable": true,
           "route_label_position": [
-            1561.0,
+            1198.0,
             1033.0
           ],
-          "source_side": "east",
+          "source_side": "west",
           "start": [
-            1525.0,
+            1234.0,
             980.5
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "comments",
           "to_columns": [
             "id"
@@ -3990,8 +3991,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "uploader_id",
-          "label_x": 1611.0,
-          "label_y": 1070.0,
+          "label_x": 1599.7110595703125,
+          "label_y": 1065.9300537109375,
           "nullable": false,
           "route_label_position": [
             1653.0,
@@ -4013,16 +4014,16 @@ expression: snapshot
         {
           "control_points": [
             [
-              1561.0,
+              1198.0,
               980.5
             ],
             [
-              1561.0,
+              1198.0,
               1085.5
             ]
           ],
           "end": [
-            1525.0,
+            1234.0,
             1085.5
           ],
           "from": "comments",
@@ -4031,21 +4032,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1561.0,
-          "label_y": 1047.75,
+          "label_x": 1186.0,
+          "label_y": 1033.0,
           "nullable": true,
           "route_label_position": [
-            1561.0,
+            1198.0,
             1033.0
           ],
-          "source_side": "east",
+          "source_side": "west",
           "start": [
-            1525.0,
+            1234.0,
             980.5
           ],
           "style": "Straight",
           "target_cardinality": "One",
-          "target_side": "east",
+          "target_side": "west",
           "to": "comments",
           "to_columns": [
             "id"

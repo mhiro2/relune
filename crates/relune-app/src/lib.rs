@@ -131,10 +131,7 @@ mod tests {
             );
         ";
 
-        let focus = FocusSpec {
-            table: "posts".to_string(),
-            depth: 1,
-        };
+        let focus = FocusSpec::new("posts", 1);
 
         let request = RenderRequest::from_sql(sql)
             .with_output_format(OutputFormat::GraphJson)

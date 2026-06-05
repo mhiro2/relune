@@ -476,9 +476,13 @@ impl TableDiff {
         if let Some(name) = &fk.name {
             name.clone()
         } else {
+            // Lowercase the target schema/table so case-only differences do not
+            // split one logical FK into spurious add/remove pairs (column names
+            // are already lowercased in `fk_column_pairs`).
+            let to_schema = fk.to_schema.as_ref().map(|s| s.to_lowercase());
             let mut key = String::new();
-            Self::push_key_option(&mut key, fk.to_schema.as_deref());
-            Self::push_key_part(&mut key, &fk.to_table);
+            Self::push_key_option(&mut key, to_schema.as_deref());
+            Self::push_key_part(&mut key, &fk.to_table.to_lowercase());
             Self::push_key_pairs(&mut key, &Self::fk_column_pairs(fk));
             key
         }
@@ -513,13 +517,20 @@ impl TableDiff {
     }
 
     fn fks_differ(a: &ForeignKey, b: &ForeignKey) -> bool {
+        // Compare the target schema/table case-insensitively, consistent with
+        // `fk_key`/`fk_column_pairs`, so a case-only rename is not reported as a
+        // modification.
         a.from_columns.len() != b.from_columns.len()
             || a.to_columns.len() != b.to_columns.len()
             || Self::fk_column_pairs(a) != Self::fk_column_pairs(b)
-            || a.to_schema != b.to_schema
-            || a.to_table != b.to_table
+            || Self::lower_opt(a.to_schema.as_deref()) != Self::lower_opt(b.to_schema.as_deref())
+            || a.to_table.to_lowercase() != b.to_table.to_lowercase()
             || a.on_delete != b.on_delete
             || a.on_update != b.on_update
+    }
+
+    fn lower_opt(value: Option<&str>) -> Option<String> {
+        value.map(str::to_lowercase)
     }
 
     fn fk_column_pairs(fk: &ForeignKey) -> Vec<(String, String)> {
@@ -1493,6 +1504,39 @@ mod tests {
             .as_ref()
             .expect("modified FK should carry new value");
         assert_eq!(new_value.on_delete.as_deref(), Some("CASCADE"));
+    }
+
+    #[test]
+    fn test_foreign_key_target_case_difference_is_not_a_change() {
+        // A case-only difference in the FK target table/schema must not surface
+        // as a modification (named FK) or as an add/remove pair (unnamed FK),
+        // matching the case-insensitive treatment of all other identifiers.
+        let make_schema = |to_table: &str| Schema {
+            tables: vec![
+                create_test_table("users", vec![("id", "bigint", false, true)], vec![]),
+                create_test_table(
+                    "posts",
+                    vec![
+                        ("id", "bigint", false, true),
+                        ("user_id", "bigint", false, false),
+                    ],
+                    vec![
+                        ("fk_posts_user", vec!["user_id"], to_table, vec!["id"]),
+                        ("", vec!["user_id"], to_table, vec!["id"]),
+                    ],
+                ),
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&make_schema("users"), &make_schema("Users"));
+
+        assert!(
+            diff.modified_tables.is_empty(),
+            "case-only FK target rename should not be reported as a change: {:?}",
+            diff.modified_tables
+        );
     }
 
     #[test]

@@ -3,6 +3,8 @@
 //! Types in this module are considered part of the public API contract
 //! and should maintain backwards compatibility.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Column, Enum, ForeignKey, Index, Schema, Table, View};
@@ -226,45 +228,37 @@ fn export_enum(enum_: &Enum) -> EnumExport {
 
 /// Import a Schema from the stable JSON format.
 ///
-/// Returns an error if any table, view, or enum has an empty stable identifier,
-/// which would corrupt downstream diff and overlay operations.
+/// Returns an error if any table, view, or enum has an empty or duplicate stable
+/// identifier. Duplicates would silently collapse entries in downstream diff and
+/// overlay operations, which key tables by `stable_id`.
 pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
+    let mut table_ids = HashSet::with_capacity(export.tables.len());
     let tables = export
         .tables
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            if t.id.is_empty() {
-                return Err(ImportError {
-                    message: format!("table at index {i} has an empty stable_id"),
-                });
-            }
+            check_stable_id(&mut table_ids, &t.id, "table", "stable_id", i)?;
             Ok(import_table(i, t))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let mut view_ids = HashSet::with_capacity(export.views.len());
     let views = export
         .views
         .iter()
         .enumerate()
         .map(|(i, v)| {
-            if v.id.is_empty() {
-                return Err(ImportError {
-                    message: format!("view at index {i} has an empty id"),
-                });
-            }
+            check_stable_id(&mut view_ids, &v.id, "view", "id", i)?;
             Ok(import_view(v))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let mut enum_ids = HashSet::with_capacity(export.enums.len());
     let enums = export
         .enums
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            if e.id.is_empty() {
-                return Err(ImportError {
-                    message: format!("enum at index {i} has an empty id"),
-                });
-            }
+            check_stable_id(&mut enum_ids, &e.id, "enum", "id", i)?;
             Ok(import_enum(e))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -273,6 +267,27 @@ pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
         views,
         enums,
     })
+}
+
+/// Validate that a stable identifier is non-empty and unique within its kind.
+fn check_stable_id<'a>(
+    seen: &mut HashSet<&'a str>,
+    id: &'a str,
+    kind: &str,
+    field: &str,
+    index: usize,
+) -> Result<(), ImportError> {
+    if id.is_empty() {
+        return Err(ImportError {
+            message: format!("{kind} at index {index} has an empty {field}"),
+        });
+    }
+    if !seen.insert(id) {
+        return Err(ImportError {
+            message: format!("{kind} at index {index} has a duplicate {field} '{id}'"),
+        });
+    }
+    Ok(())
 }
 
 /// Error returned when a schema import fails validation.
@@ -730,6 +745,67 @@ mod tests {
 
         let err = import_schema(&export).unwrap_err();
         assert!(err.message.contains("enum at index 0"));
+    }
+
+    #[test]
+    fn test_import_rejects_duplicate_table_stable_id() {
+        let table = |name: &str| TableExport {
+            id: "dup".to_string(),
+            schema: None,
+            name: name.to_string(),
+            columns: vec![],
+            foreign_keys: vec![],
+            indexes: vec![],
+        };
+        let export = SchemaExport::new(vec![table("a"), table("b")]);
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("table at index 1") && err.message.contains("duplicate"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_import_rejects_duplicate_view_id() {
+        let view = |name: &str| ViewExport {
+            id: "dup".to_string(),
+            schema: None,
+            name: name.to_string(),
+            columns: vec![],
+            definition: None,
+        };
+        let mut export = SchemaExport::new(vec![]);
+        export.views.push(view("a"));
+        export.views.push(view("b"));
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("view at index 1") && err.message.contains("duplicate"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_import_rejects_duplicate_enum_id() {
+        let enum_ = |name: &str| EnumExport {
+            id: "dup".to_string(),
+            schema: None,
+            name: name.to_string(),
+            values: vec!["v".to_string()],
+        };
+        let mut export = SchemaExport::new(vec![]);
+        export.enums.push(enum_("a"));
+        export.enums.push(enum_("b"));
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("enum at index 1") && err.message.contains("duplicate"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
