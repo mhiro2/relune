@@ -21,6 +21,7 @@ mod drop;
 mod enum_type;
 mod mysql_enum;
 mod names;
+mod query_columns;
 mod recovery;
 mod view;
 

@@ -1,9 +1,10 @@
 //! `CREATE TABLE` parsing and shared column helpers.
 
-use crate::context::{LineOffsets, ParseContext, ParsedColumn, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, ParsedColumn, WithSpanOpt, span_from_spanned};
 use crate::mysql_enum::canonicalize_mysql_enum_like_type;
 use crate::names::{build_foreign_key, normalized_stable_id, split_object_name_with_diagnostics};
-use relune_core::{ColumnId, Index, Table, normalize_identifier};
+use crate::query_columns::columns_from_query;
+use relune_core::{ColumnId, Diagnostic, Index, Table, diagnostic::codes, normalize_identifier};
 use sqlparser::ast::{ColumnOption, DataType, TableConstraint};
 
 /// Parse a CREATE TABLE statement into a Table.
@@ -21,12 +22,31 @@ pub(crate) fn parse_create_table(
 
     let table_id = ctx.next_table_id();
 
-    // Parse columns
+    // Parse columns. `CREATE TABLE ... AS SELECT` carries no explicit column
+    // definitions, so derive the projection columns from the query when one is
+    // present and warn if none can be recovered (e.g. `SELECT *`) instead of
+    // silently producing a column-less table.
     let mut columns = Vec::new();
-
-    for (next_column_id, column) in (1_u64..).zip(create.columns.iter()) {
-        let parsed_column = parsed_column_from_column_def(column);
-        columns.push(parsed_column.into_column(ColumnId(next_column_id)));
+    if create.columns.is_empty() {
+        if let Some(query) = create.query.as_deref() {
+            columns = columns_from_query(query);
+            if columns.is_empty() {
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        codes::parse_unsupported(),
+                        format!(
+                            "CREATE TABLE AS SELECT: could not derive columns for `{stable_id}` from the query projection (e.g. `SELECT *`); the table is recorded with no columns"
+                        ),
+                    )
+                    .with_span_opt(span_from_spanned(input, offsets, &create.name)),
+                );
+            }
+        }
+    } else {
+        for (next_column_id, column) in (1_u64..).zip(create.columns.iter()) {
+            let parsed_column = parsed_column_from_column_def(column);
+            columns.push(parsed_column.into_column(ColumnId(next_column_id)));
+        }
     }
 
     // Parse inline foreign key constraints from columns and capture any

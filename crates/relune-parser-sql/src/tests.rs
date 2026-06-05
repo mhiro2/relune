@@ -822,6 +822,166 @@ fn parses_create_view() {
     assert!(active_users.definition.is_some());
 }
 
+#[test]
+fn create_table_as_select_derives_columns_from_projection() {
+    let sql = "CREATE TABLE summary AS SELECT id, name AS label FROM users;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should produce a table");
+    assert_eq!(
+        summary
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "label"],
+        "columns should be derived from the SELECT projection"
+    );
+    assert!(
+        summary.columns.iter().all(|c| c.data_type == "unknown"),
+        "derived columns have no resolvable data type"
+    );
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning),
+        "deriving named projection columns should not warn"
+    );
+}
+
+#[test]
+fn create_table_as_select_wildcard_warns_without_columns() {
+    let sql = "CREATE TABLE summary AS SELECT * FROM users;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should still produce a table");
+    assert!(
+        summary.columns.is_empty(),
+        "wildcard projection cannot yield named columns"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("could not derive columns")),
+        "a column-less CREATE TABLE AS SELECT must be diagnosed, not silent"
+    );
+}
+
+#[test]
+fn create_table_as_select_derives_columns_through_set_operation() {
+    // UNION output column names come from the left-most SELECT.
+    let sql = "CREATE TABLE merged AS SELECT id, name FROM a UNION SELECT id, name FROM b;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let merged = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "merged")
+        .expect("CREATE TABLE AS SELECT should produce a table");
+    assert_eq!(
+        merged
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "name"],
+    );
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning),
+        "a set-operation projection with named columns should not warn"
+    );
+}
+
+#[test]
+fn create_table_as_select_derives_columns_through_parenthesized_query() {
+    let sql = "CREATE TABLE wrapped AS (SELECT id FROM src);";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let wrapped = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "wrapped")
+        .expect("CREATE TABLE AS SELECT should produce a table");
+    assert_eq!(
+        wrapped
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id"],
+    );
+}
+
+#[test]
+fn create_table_as_select_with_wildcard_and_named_item_warns() {
+    // `SELECT *, id` cannot be fully enumerated; recording only `id` would be a
+    // misleading partial schema, so it is treated as underivable and warned.
+    let sql = "CREATE TABLE summary AS SELECT *, id FROM users;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should still produce a table");
+    assert!(
+        summary.columns.is_empty(),
+        "a wildcard mixed with named items cannot be faithfully enumerated"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("could not derive columns")),
+    );
+}
+
+#[test]
+fn create_table_as_select_with_unnamed_expression_warns() {
+    // An unnamed non-column expression (`count(*)`) has no derivable name, so
+    // the projection fails closed rather than recording only `id`.
+    let sql = "CREATE TABLE summary AS SELECT id, count(*) FROM users GROUP BY id;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should still produce a table");
+    assert!(
+        summary.columns.is_empty(),
+        "an unnamed expression makes the column set incomplete"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("could not derive columns")),
+    );
+}
+
 // Snapshot tests for all fixtures
 mod snapshot_tests {
     use super::*;
