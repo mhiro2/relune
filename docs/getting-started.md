@@ -44,10 +44,14 @@ relune inspect --sql schema.sql
 
 ## Live database introspection
 
-Point at a database URL instead of a SQL file (supported where the `relune-introspect` adapter allows):
+Point at a database URL instead of a SQL file (supported where the `relune-introspect` adapter allows). Prefer the `DATABASE_URL` environment variable over `--db-url` so the DSN does not leak into argv (`ps`) or shell history — when no input flag is given, Relune reads `DATABASE_URL`:
 
 ```bash
-relune render --db-url 'postgres://user:pass@localhost:5432/dbname' -o erd.svg
+export DATABASE_URL='postgres://user:pass@localhost:5432/dbname'
+relune render -o erd.svg
+
+# Or pass it explicitly (visible to other users via `ps`):
+relune render --db-url "$DATABASE_URL" -o erd.svg
 ```
 
 Dialects and URL schemes follow CLI help (`relune render --help`).
