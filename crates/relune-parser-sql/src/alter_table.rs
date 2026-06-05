@@ -3,7 +3,7 @@
 use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_ident, span_from_spanned};
 use crate::create_table::{
     canonicalize_data_type, column_attributes_from_options, parsed_column_from_column_def,
-    push_unique_index,
+    plain_column_names, push_unique_index, warn_expression_key,
 };
 use crate::names::{
     build_foreign_key, normalized_stable_id, normalized_stable_id_for_object_name_with_diagnostics,
@@ -702,28 +702,40 @@ fn apply_add_table_constraint(
 ) {
     match constraint {
         TableConstraint::PrimaryKey(primary_key) => {
-            for pk_col in &primary_key.columns {
-                let col_name = crate::create_table::extract_column_name(pk_col);
-                if let Some(column) = table.columns.iter_mut().find(|c| c.name == col_name) {
-                    column.is_primary_key = true;
-                    column.nullable = false;
+            if let Some(pk_cols) = plain_column_names(&primary_key.columns) {
+                for col_name in &pk_cols {
+                    if let Some(column) = table.columns.iter_mut().find(|c| &c.name == col_name) {
+                        column.is_primary_key = true;
+                        column.nullable = false;
+                    }
                 }
-            }
-            if let Some(constraint_name) = &primary_key.name {
-                table.primary_key_name = Some(normalize_identifier(&constraint_name.value));
+                if let Some(constraint_name) = &primary_key.name {
+                    table.primary_key_name = Some(normalize_identifier(&constraint_name.value));
+                }
+            } else {
+                warn_expression_key(
+                    ctx,
+                    span_from_spanned(input, offsets, constraint),
+                    &table.stable_id,
+                    "PRIMARY KEY",
+                );
             }
         }
         TableConstraint::Unique(unique) => {
-            let col_names: Vec<String> = unique
-                .columns
-                .iter()
-                .map(crate::create_table::extract_column_name)
-                .collect();
-            let index_name = unique
-                .name
-                .as_ref()
-                .map(|ident| normalize_identifier(&ident.value));
-            push_unique_index(&mut table.indexes, index_name, col_names);
+            if let Some(col_names) = plain_column_names(&unique.columns) {
+                let index_name = unique
+                    .name
+                    .as_ref()
+                    .map(|ident| normalize_identifier(&ident.value));
+                push_unique_index(&mut table.indexes, index_name, col_names);
+            } else {
+                warn_expression_key(
+                    ctx,
+                    span_from_spanned(input, offsets, constraint),
+                    &table.stable_id,
+                    "UNIQUE constraint",
+                );
+            }
         }
         TableConstraint::ForeignKey(foreign_key) => {
             let from_cols: Vec<String> = foreign_key

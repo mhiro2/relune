@@ -116,6 +116,86 @@ fn parses_create_index() {
 }
 
 #[test]
+fn create_index_drops_expression_only_index_with_warning() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
+    CREATE INDEX idx_lower_email ON users (lower(email));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    assert!(
+        users.indexes.is_empty(),
+        "an index over only an expression references no modeled column"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("functional/expression")),
+        "dropping an expression index must be diagnosed"
+    );
+}
+
+#[test]
+fn create_index_drops_whole_mixed_expression_index() {
+    // A partial column list (keeping only `tenant_id`) would falsely claim the
+    // index leads with `tenant_id`, so the whole index is dropped.
+    let sql = r"
+    CREATE TABLE users (tenant_id BIGINT, email TEXT NOT NULL);
+    CREATE INDEX idx_mixed ON users (tenant_id, lower(email));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    assert!(
+        users.indexes.is_empty(),
+        "a mixed expression index cannot be represented as a plain prefix"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("functional/expression"))
+    );
+}
+
+#[test]
+fn unique_constraint_with_expression_is_dropped_not_narrowed() {
+    // `UNIQUE (tenant_id, lower(email))` must not collapse to `UNIQUE
+    // (tenant_id)`, which would assert uniqueness the DDL never declared.
+    let sql = r"
+    CREATE TABLE users (
+        tenant_id BIGINT,
+        email TEXT NOT NULL,
+        UNIQUE (tenant_id, lower(email))
+    );
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    assert!(
+        !users.indexes.iter().any(|ix| ix.is_unique),
+        "an expression unique constraint must not be recorded as a narrower unique index"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("functional/expression"))
+    );
+}
+
+#[test]
 fn handles_schema_qualified_names() {
     let sql = r"
     CREATE TABLE public.users (
