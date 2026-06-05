@@ -440,6 +440,47 @@ fn handles_invalid_sql() {
 }
 
 #[test]
+fn recovery_continues_after_semicolon_terminated_error() {
+    // A malformed statement that is semicolon-terminated lets the parser
+    // recover and still parse the surrounding valid statements.
+    let sql = r"
+    CREATE TABLE before (id BIGINT PRIMARY KEY);
+    THIS IS NOT VALID SQL;
+    CREATE TABLE after (id BIGINT PRIMARY KEY);
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    assert!(
+        output.has_errors(),
+        "the malformed statement should be reported"
+    );
+
+    let schema = output.schema.expect("valid statements should still parse");
+    let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"before"));
+    assert!(names.contains(&"after"));
+}
+
+#[test]
+fn recovery_is_semicolon_delimited_and_consumes_unterminated_errors() {
+    // Documents a known limitation: recovery skips to the next semicolon, so a
+    // malformed statement without its own terminating semicolon swallows the
+    // following statement up to the next one.
+    let sql = "THIS IS NOT VALID SQL\nCREATE TABLE swallowed (id BIGINT PRIMARY KEY);";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+
+    assert!(output.has_errors());
+    let parsed_swallowed = output
+        .schema
+        .is_some_and(|schema| schema.tables.iter().any(|t| t.name == "swallowed"));
+    assert!(
+        !parsed_swallowed,
+        "an unterminated malformed statement consumes the following statement"
+    );
+}
+
+#[test]
 fn strict_parse_rejects_error_diagnostics() {
     let sql = "THIS IS NOT VALID SQL";
 
