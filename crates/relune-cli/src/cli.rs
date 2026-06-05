@@ -8,6 +8,14 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use relune_core::{LayoutDirection, RouteStyle, SqlDialect};
 use serde::{Deserialize, Serialize};
 
+/// Help text shown after `--help` for commands that accept the shared input
+/// group. The usage line no longer marks an input as `required` (so the
+/// `DATABASE_URL` fallback can apply), so the input contract is spelled out
+/// here to keep it discoverable.
+const INPUT_SOURCE_HELP: &str = "An input is required: pass --sql, --schema-json, or --db-url \
+(--sql-text where supported), or set the DATABASE_URL environment variable (used only when no \
+input flag is given).";
+
 /// Render, inspect, export, lint, and diff database schemas
 #[derive(Debug, Parser)]
 #[command(name = "relune")]
@@ -79,9 +87,13 @@ pub enum Command {
     group(
         ArgGroup::new("input")
             .args(["sql", "sql_text", "schema_json", "db_url"])
-            .required(true)
+            // Not `required`: when no flag is given, input resolution falls
+            // back to the DATABASE_URL environment variable (and reports a
+            // usage error if that is also absent).
+            .required(false)
             .multiple(false)
-    )
+    ),
+    after_help = INPUT_SOURCE_HELP
 )]
 pub struct RenderArgs {
     // -------------------------------------------------------------------------
@@ -323,9 +335,13 @@ impl From<DirectionArg> for LayoutDirection {
     group(
         ArgGroup::new("input")
             .args(["sql", "sql_text", "schema_json", "db_url"])
-            .required(true)
+            // Not `required`: when no flag is given, input resolution falls
+            // back to the DATABASE_URL environment variable (and reports a
+            // usage error if that is also absent).
+            .required(false)
             .multiple(false)
-    )
+    ),
+    after_help = INPUT_SOURCE_HELP
 )]
 pub struct InspectArgs {
     // -------------------------------------------------------------------------
@@ -396,9 +412,13 @@ pub enum InspectFormat {
     group(
         ArgGroup::new("input")
             .args(["sql", "sql_text", "schema_json", "db_url"])
-            .required(true)
+            // Not `required`: when no flag is given, input resolution falls
+            // back to the DATABASE_URL environment variable (and reports a
+            // usage error if that is also absent).
+            .required(false)
             .multiple(false)
-    )
+    ),
+    after_help = INPUT_SOURCE_HELP
 )]
 pub struct ExportArgs {
     // -------------------------------------------------------------------------
@@ -505,9 +525,13 @@ pub enum ExportFormat {
     group(
         ArgGroup::new("input")
             .args(["sql", "sql_text", "schema_json", "db_url"])
-            .required(true)
+            // Not `required`: when no flag is given, input resolution falls
+            // back to the DATABASE_URL environment variable (and reports a
+            // usage error if that is also absent).
+            .required(false)
             .multiple(false)
-    )
+    ),
+    after_help = INPUT_SOURCE_HELP
 )]
 pub struct DocArgs {
     // -------------------------------------------------------------------------
@@ -555,9 +579,12 @@ pub struct DocArgs {
     group(
         ArgGroup::new("input")
             .args(["sql", "db_url", "schema_json"])
-            .required(true)
+            // Not `required`: input resolution falls back to DATABASE_URL when
+            // no flag is given (and reports a usage error if that is absent).
+            .required(false)
             .multiple(false)
-    )
+    ),
+    after_help = INPUT_SOURCE_HELP
 )]
 pub struct LintArgs {
     // -------------------------------------------------------------------------

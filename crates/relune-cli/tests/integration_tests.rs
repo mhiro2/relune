@@ -19,7 +19,12 @@ use relune_testkit::{
 };
 
 fn relune() -> Command {
-    Command::cargo_bin("relune").expect("Failed to find relune binary")
+    let mut cmd = Command::cargo_bin("relune").expect("Failed to find relune binary");
+    // The CLI falls back to DATABASE_URL for live-DB input when no input flag
+    // is given; clear it so tests are deterministic regardless of the
+    // developer's shell environment.
+    cmd.env_remove("DATABASE_URL");
+    cmd
 }
 
 fn fixtures_dir() -> PathBuf {
@@ -397,6 +402,37 @@ exclude = ["comments"]
             .assert()
             .failure()
             .code(2);
+    }
+
+    #[test]
+    fn database_url_env_is_used_as_db_input_fallback() {
+        // With no input flag, DATABASE_URL is consumed as live-DB input. An
+        // unsupported scheme fails fast (no connection), proving the env value
+        // reached introspection rather than tripping the "no input" usage error.
+        let output = relune()
+            .arg("inspect")
+            .env("DATABASE_URL", "unsupported://example/db")
+            .output()
+            .expect("command should run");
+
+        assert!(!output.status.success(), "unsupported scheme should fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Unsupported database URL"),
+            "DATABASE_URL should be treated as db input; stderr: {stderr}"
+        );
+    }
+
+    #[test]
+    fn explicit_input_flag_ignores_database_url_env() {
+        // An explicit --sql must win even when DATABASE_URL is set.
+        relune()
+            .arg("inspect")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .env("DATABASE_URL", "unsupported://example/db")
+            .assert()
+            .success();
     }
 
     #[test]
