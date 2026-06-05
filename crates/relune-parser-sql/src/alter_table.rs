@@ -202,6 +202,12 @@ fn apply_single_alter_operation(
                             !remove
                         });
                     }
+
+                    // A named primary key is meaningless once none of its
+                    // columns remain, so clear the dangling constraint name.
+                    if !tables[idx].columns.iter().any(|c| c.is_primary_key) {
+                        tables[idx].primary_key_name = None;
+                    }
                 } else if !if_exists {
                     ctx.diagnostics.push(
                         Diagnostic::warning(

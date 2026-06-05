@@ -1552,6 +1552,51 @@ fn alter_table_drop_column_cascades_to_fk_and_index() {
 }
 
 #[test]
+fn alter_table_drop_column_clears_dangling_primary_key_name() {
+    let sql = r"
+    CREATE TABLE t (
+      id BIGINT,
+      name TEXT,
+      CONSTRAINT pk_t PRIMARY KEY (id)
+    );
+    ALTER TABLE t DROP COLUMN id;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let table = &schema.tables[0];
+    assert!(!table.columns.iter().any(|c| c.name == "id"));
+    assert!(
+        !table.columns.iter().any(|c| c.is_primary_key),
+        "no primary-key columns should remain"
+    );
+    assert_eq!(
+        table.primary_key_name, None,
+        "primary key name must not dangle after its only column is dropped"
+    );
+}
+
+#[test]
+fn alter_table_drop_column_keeps_primary_key_name_for_remaining_columns() {
+    let sql = r"
+    CREATE TABLE t (
+      tenant_id BIGINT,
+      id BIGINT,
+      name TEXT,
+      CONSTRAINT pk_t PRIMARY KEY (tenant_id, id)
+    );
+    ALTER TABLE t DROP COLUMN name;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let table = &schema.tables[0];
+    assert_eq!(
+        table.primary_key_name,
+        Some("pk_t".to_string()),
+        "dropping a non-key column must not clear the primary key name"
+    );
+}
+
+#[test]
 fn alter_table_drop_column_removes_incoming_fk_to_column() {
     let sql = r"
     CREATE TABLE users (id BIGINT PRIMARY KEY);
