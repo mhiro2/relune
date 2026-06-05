@@ -19,8 +19,8 @@ pub(crate) enum CliError {
     General(anyhow::Error),
     /// Diff detected schema changes (used with `--exit-code`).
     DiffChangesDetected,
-    /// Review findings reached the configured `--deny` threshold.
-    ReviewDenied(anyhow::Error),
+    /// Findings or issues reached the configured `--deny` threshold.
+    DenyThresholdReached(anyhow::Error),
 }
 
 impl CliError {
@@ -42,10 +42,10 @@ impl CliError {
         Self::General(error.into())
     }
 
-    /// Create a review-denied failure (exit code `10`).
+    /// Create a deny-threshold failure (exit code `10`).
     #[must_use]
-    pub fn review_denied(error: impl Into<anyhow::Error>) -> Self {
-        Self::ReviewDenied(error.into())
+    pub fn deny_threshold_reached(error: impl Into<anyhow::Error>) -> Self {
+        Self::DenyThresholdReached(error.into())
     }
 
     /// Returns the process exit code for this error.
@@ -55,7 +55,7 @@ impl CliError {
             Self::Usage(_) => 2,
             Self::Warning(_) => 3,
             Self::General(_) => 1,
-            Self::DiffChangesDetected | Self::ReviewDenied(_) => 10,
+            Self::DiffChangesDetected | Self::DenyThresholdReached(_) => 10,
         }
     }
 }
@@ -66,7 +66,7 @@ impl Display for CliError {
             Self::Usage(error)
             | Self::Warning(error)
             | Self::General(error)
-            | Self::ReviewDenied(error) => Display::fmt(error, f),
+            | Self::DenyThresholdReached(error) => Display::fmt(error, f),
             Self::DiffChangesDetected => {
                 write!(f, "schema changes detected")
             }
@@ -111,8 +111,8 @@ mod tests {
     }
 
     #[test]
-    fn review_denied_uses_exit_code_10() {
-        let error = CliError::review_denied(anyhow::anyhow!("review denied"));
+    fn deny_threshold_reached_uses_exit_code_10() {
+        let error = CliError::deny_threshold_reached(anyhow::anyhow!("deny threshold reached"));
         assert_eq!(error.exit_code(), 10);
     }
 }

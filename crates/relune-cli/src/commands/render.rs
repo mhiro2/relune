@@ -100,6 +100,9 @@ pub fn run_render(
 
     // Write output (PNG needs byte-level writer for rasterized data)
     if is_png {
+        if let Some(path) = args.out.as_deref() {
+            crate::output::validate_output_path(path)?;
+        }
         let png_data =
             png::svg_to_png(&result.content).context("Failed to rasterize SVG to PNG")?;
         let mut writer = crate::output::OutputWriter::new(args.out.as_deref(), color)
@@ -112,7 +115,7 @@ pub fn run_render(
         write_output(&result.content, args.out.as_deref(), color)?;
     }
 
-    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning)?;
+    check_diagnostics(&result.diagnostics, color, merged.fail_on_warning, quiet)?;
 
     // Print stats if requested (from merged config)
     if merged.show_stats {

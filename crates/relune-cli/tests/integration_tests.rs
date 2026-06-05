@@ -451,6 +451,32 @@ exclude = ["comments"]
     }
 
     #[test]
+    fn render_missing_out_directory_is_usage_error() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let missing = temp.path().join("does-not-exist").join("erd.svg");
+
+        let output = relune()
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--out")
+            .arg(&missing)
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "missing --out directory should be a usage error"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("does not exist") && stderr.contains("does-not-exist"),
+            "stderr should name the missing directory: {stderr}"
+        );
+    }
+
+    #[test]
     fn render_uses_config_format_and_theme() {
         let mut cmd = relune();
         let output = cmd
@@ -1194,6 +1220,39 @@ mod lint_tests {
     }
 
     #[test]
+    fn quiet_suppresses_non_error_diagnostics() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = write_comment_only_sql(&temp);
+
+        // Without --quiet the parser warning is surfaced on stderr.
+        let loud = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .output()
+            .expect("command should run");
+        assert!(loud.status.success(), "lint should succeed on warnings");
+        assert!(
+            String::from_utf8_lossy(&loud.stderr).contains("PARSE004"),
+            "warning should be printed without --quiet"
+        );
+
+        // With --quiet the same warning is suppressed (exit code unchanged).
+        let quiet = relune()
+            .arg("--quiet")
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .output()
+            .expect("command should run");
+        assert!(quiet.status.success(), "lint should still succeed");
+        assert!(
+            !String::from_utf8_lossy(&quiet.stderr).contains("PARSE004"),
+            "warning should be suppressed under --quiet"
+        );
+    }
+
+    #[test]
     fn lint_uses_config_format() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");
         let config_path = temp.path().join("relune.toml");
@@ -1233,6 +1292,39 @@ mod lint_tests {
         assert_eq!(output.status.code(), Some(3));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("PARSE004"));
+    }
+
+    #[test]
+    fn lint_deny_exits_with_code_10_when_issue_reaches_threshold() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let sql_path = temp.path().join("schema.sql");
+        // `no-primary-key` is a warning-level issue (not a parser diagnostic),
+        // so this exercises the lint issue deny gate rather than the
+        // diagnostic threshold.
+        fs::write(&sql_path, "CREATE TABLE events (id INT, name TEXT);")
+            .expect("write SQL fixture");
+
+        let output = relune()
+            .arg("lint")
+            .arg("--sql")
+            .arg(&sql_path)
+            .arg("--rules")
+            .arg("no-primary-key")
+            .arg("--deny")
+            .arg("warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(
+            output.status.code(),
+            Some(10),
+            "lint --deny should exit 10 when an issue reaches the threshold"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("at or above the configured severity threshold"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
