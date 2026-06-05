@@ -2187,6 +2187,27 @@ fn alter_table_drop_unknown_index_warns() {
 }
 
 #[test]
+fn alter_table_unsupported_operation_truncates_debug_output() {
+    let sql = r"
+    CREATE TABLE t (id BIGINT PRIMARY KEY);
+    ALTER TABLE t OWNER TO some_role;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    let message = output
+        .diagnostics
+        .iter()
+        .find(|d| d.message.contains("ALTER TABLE operation (unsupported)"))
+        .map(|d| d.message.as_str())
+        .expect("an unsupported ALTER operation should be diagnosed");
+
+    assert!(
+        message.contains("..."),
+        "the operation's debug rendering should be truncated, got: {message}"
+    );
+}
+
+#[test]
 fn alter_table_alter_column_set_data_type() {
     let sql = r"
     CREATE TABLE users (id BIGINT PRIMARY KEY, bio TEXT);

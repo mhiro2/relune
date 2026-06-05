@@ -5,6 +5,7 @@ use crate::create_table::{
     canonicalize_data_type, column_attributes_from_options, parsed_column_from_column_def,
     plain_column_names, push_unique_index, warn_expression_key,
 };
+use crate::diagnostics::truncate_unsupported_debug;
 use crate::names::{
     build_foreign_key, normalized_stable_id, normalized_stable_id_for_object_name_with_diagnostics,
     split_object_name_with_diagnostics,
@@ -435,8 +436,11 @@ fn apply_single_alter_operation(
             }
         }
         other => {
+            // Truncate the debug rendering so an unsupported operation with a
+            // large AST does not emit an unbounded diagnostic message.
+            let truncated = truncate_unsupported_debug(&format!("{other:?}"));
             ctx.warn_unsupported(
-                &format!("ALTER TABLE operation (unsupported): {other:?}"),
+                &format!("ALTER TABLE operation (unsupported): {truncated}"),
                 span_from_spanned(input, offsets, op),
             );
         }
