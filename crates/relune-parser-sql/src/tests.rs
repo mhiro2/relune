@@ -2,7 +2,7 @@ use super::*;
 use crate::context::ParseContext;
 use crate::diagnostics::{MAX_UNSUPPORTED_DEBUG_LEN, truncate_unsupported_debug};
 use crate::mysql_enum::{
-    MySqlEnumLikeParseError, parse_mysql_enum_like_type, populate_mysql_enum_columns,
+    MySqlEnumLikeParseError, parse_mysql_enum_like_type, populate_inline_enum_columns,
 };
 use proptest::prelude::*;
 use relune_core::{Column, ColumnId, ReferentialAction, Table, TableId};
@@ -113,6 +113,86 @@ fn parses_create_index() {
     assert_eq!(id_idx.name, Some("idx_users_id".to_string()));
     assert_eq!(id_idx.columns, vec!["id"]);
     assert!(id_idx.is_unique);
+}
+
+#[test]
+fn create_index_drops_expression_only_index_with_warning() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
+    CREATE INDEX idx_lower_email ON users (lower(email));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    assert!(
+        users.indexes.is_empty(),
+        "an index over only an expression references no modeled column"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("functional/expression")),
+        "dropping an expression index must be diagnosed"
+    );
+}
+
+#[test]
+fn create_index_drops_whole_mixed_expression_index() {
+    // A partial column list (keeping only `tenant_id`) would falsely claim the
+    // index leads with `tenant_id`, so the whole index is dropped.
+    let sql = r"
+    CREATE TABLE users (tenant_id BIGINT, email TEXT NOT NULL);
+    CREATE INDEX idx_mixed ON users (tenant_id, lower(email));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    assert!(
+        users.indexes.is_empty(),
+        "a mixed expression index cannot be represented as a plain prefix"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("functional/expression"))
+    );
+}
+
+#[test]
+fn unique_constraint_with_expression_is_dropped_not_narrowed() {
+    // `UNIQUE (tenant_id, lower(email))` must not collapse to `UNIQUE
+    // (tenant_id)`, which would assert uniqueness the DDL never declared.
+    let sql = r"
+    CREATE TABLE users (
+        tenant_id BIGINT,
+        email TEXT NOT NULL,
+        UNIQUE (tenant_id, lower(email))
+    );
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    assert!(
+        !users.indexes.iter().any(|ix| ix.is_unique),
+        "an expression unique constraint must not be recorded as a narrower unique index"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("functional/expression"))
+    );
 }
 
 #[test]
@@ -357,6 +437,47 @@ fn handles_invalid_sql() {
 
     assert!(output.schema.is_none());
     assert!(output.has_errors());
+}
+
+#[test]
+fn recovery_continues_after_semicolon_terminated_error() {
+    // A malformed statement that is semicolon-terminated lets the parser
+    // recover and still parse the surrounding valid statements.
+    let sql = r"
+    CREATE TABLE before (id BIGINT PRIMARY KEY);
+    THIS IS NOT VALID SQL;
+    CREATE TABLE after (id BIGINT PRIMARY KEY);
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    assert!(
+        output.has_errors(),
+        "the malformed statement should be reported"
+    );
+
+    let schema = output.schema.expect("valid statements should still parse");
+    let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"before"));
+    assert!(names.contains(&"after"));
+}
+
+#[test]
+fn recovery_is_semicolon_delimited_and_consumes_unterminated_errors() {
+    // Documents a known limitation: recovery skips to the next semicolon, so a
+    // malformed statement without its own terminating semicolon swallows the
+    // following statement up to the next one.
+    let sql = "THIS IS NOT VALID SQL\nCREATE TABLE swallowed (id BIGINT PRIMARY KEY);";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+
+    assert!(output.has_errors());
+    let parsed_swallowed = output
+        .schema
+        .is_some_and(|schema| schema.tables.iter().any(|t| t.name == "swallowed"));
+    assert!(
+        !parsed_swallowed,
+        "an unterminated malformed statement consumes the following statement"
+    );
 }
 
 #[test]
@@ -822,6 +943,166 @@ fn parses_create_view() {
     assert!(active_users.definition.is_some());
 }
 
+#[test]
+fn create_table_as_select_derives_columns_from_projection() {
+    let sql = "CREATE TABLE summary AS SELECT id, name AS label FROM users;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should produce a table");
+    assert_eq!(
+        summary
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "label"],
+        "columns should be derived from the SELECT projection"
+    );
+    assert!(
+        summary.columns.iter().all(|c| c.data_type == "unknown"),
+        "derived columns have no resolvable data type"
+    );
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning),
+        "deriving named projection columns should not warn"
+    );
+}
+
+#[test]
+fn create_table_as_select_wildcard_warns_without_columns() {
+    let sql = "CREATE TABLE summary AS SELECT * FROM users;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should still produce a table");
+    assert!(
+        summary.columns.is_empty(),
+        "wildcard projection cannot yield named columns"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("could not derive columns")),
+        "a column-less CREATE TABLE AS SELECT must be diagnosed, not silent"
+    );
+}
+
+#[test]
+fn create_table_as_select_derives_columns_through_set_operation() {
+    // UNION output column names come from the left-most SELECT.
+    let sql = "CREATE TABLE merged AS SELECT id, name FROM a UNION SELECT id, name FROM b;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let merged = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "merged")
+        .expect("CREATE TABLE AS SELECT should produce a table");
+    assert_eq!(
+        merged
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "name"],
+    );
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning),
+        "a set-operation projection with named columns should not warn"
+    );
+}
+
+#[test]
+fn create_table_as_select_derives_columns_through_parenthesized_query() {
+    let sql = "CREATE TABLE wrapped AS (SELECT id FROM src);";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let wrapped = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "wrapped")
+        .expect("CREATE TABLE AS SELECT should produce a table");
+    assert_eq!(
+        wrapped
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id"],
+    );
+}
+
+#[test]
+fn create_table_as_select_with_wildcard_and_named_item_warns() {
+    // `SELECT *, id` cannot be fully enumerated; recording only `id` would be a
+    // misleading partial schema, so it is treated as underivable and warned.
+    let sql = "CREATE TABLE summary AS SELECT *, id FROM users;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should still produce a table");
+    assert!(
+        summary.columns.is_empty(),
+        "a wildcard mixed with named items cannot be faithfully enumerated"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("could not derive columns")),
+    );
+}
+
+#[test]
+fn create_table_as_select_with_unnamed_expression_warns() {
+    // An unnamed non-column expression (`count(*)`) has no derivable name, so
+    // the projection fails closed rather than recording only `id`.
+    let sql = "CREATE TABLE summary AS SELECT id, count(*) FROM users GROUP BY id;";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should be produced");
+
+    let summary = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "summary")
+        .expect("CREATE TABLE AS SELECT should still produce a table");
+    assert!(
+        summary.columns.is_empty(),
+        "an unnamed expression makes the column set incomplete"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning
+                && d.message.contains("could not derive columns")),
+    );
+}
+
 // Snapshot tests for all fixtures
 mod snapshot_tests {
     use super::*;
@@ -968,6 +1249,36 @@ fn test_detect_dialect_ignores_comment_markers() {
         );
     ";
 
+    assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
+}
+
+#[test]
+fn test_detect_dialect_inline_enum_is_mysql() {
+    // Column-position inline ENUM(...) is MySQL-specific syntax.
+    let sql = "CREATE TABLE t (id INT PRIMARY KEY, status ENUM('a', 'b'));";
+    assert_eq!(detect_dialect(sql), SqlDialect::Mysql);
+}
+
+#[test]
+fn test_detect_dialect_inline_enum_outweighs_integer_primary_key() {
+    // An inline enum/set is definitively MySQL and must win over SQLite's weak
+    // `INTEGER PRIMARY KEY` heuristic when both appear.
+    let sql = "CREATE TABLE t (id INTEGER PRIMARY KEY, status ENUM('a', 'b'));";
+    assert_eq!(detect_dialect(sql), SqlDialect::Mysql);
+}
+
+#[test]
+fn test_detect_dialect_named_enum_type_is_not_mysql() {
+    // PostgreSQL's `CREATE TYPE ... AS ENUM` must not be read as a MySQL signal.
+    let sql = "CREATE TYPE mood AS ENUM ('happy', 'sad');";
+    assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
+}
+
+#[test]
+fn test_detect_dialect_set_storage_parameter_is_not_mysql() {
+    // PostgreSQL `SET (...)` storage parameters open with an identifier, not a
+    // quoted value, so they must not be mistaken for a MySQL `SET(...)` type.
+    let sql = "CREATE TABLE t (id INT PRIMARY KEY);\nALTER TABLE t SET (fillfactor = 70);";
     assert_eq!(detect_dialect(sql), SqlDialect::Postgres);
 }
 
@@ -1151,7 +1462,7 @@ fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
         comment: None,
     }];
 
-    populate_mysql_enum_columns(&mut ctx, &mut tables);
+    populate_inline_enum_columns(&mut ctx, &mut tables);
 
     assert!(
         tables[0].columns[0].enum_values.is_none(),
@@ -1165,7 +1476,7 @@ fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
     assert!(ctx.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("Malformed MySQL enum/set definition")
+            .contains("Malformed inline enum/set definition")
     }));
 }
 
@@ -1198,6 +1509,27 @@ fn test_parse_mysql_inline_enum_does_not_create_schema_enum_entries_across_table
             .expect("status column should exist");
         assert_eq!(column.enum_values, expected_values);
     }
+}
+
+#[test]
+fn inline_enum_values_recovered_under_non_mysql_dialect() {
+    // A MySQL dump misclassified as another dialect must still recover its
+    // inline enum values; the type string is canonicalized regardless of
+    // dialect, so the values must be too.
+    let sql = "CREATE TABLE t (id INT PRIMARY KEY, status ENUM('draft', 'published'));";
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+
+    let status = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "status")
+        .expect("status column should exist");
+    assert_eq!(
+        status.enum_values,
+        Some(vec!["draft".to_string(), "published".to_string()]),
+        "inline enum values must be recovered even when not parsed as MySQL"
+    );
 }
 
 #[test]
@@ -1337,6 +1669,51 @@ fn alter_table_drop_column_cascades_to_fk_and_index() {
     assert!(
         users.indexes.is_empty(),
         "index referencing dropped column should be removed"
+    );
+}
+
+#[test]
+fn alter_table_drop_column_clears_dangling_primary_key_name() {
+    let sql = r"
+    CREATE TABLE t (
+      id BIGINT,
+      name TEXT,
+      CONSTRAINT pk_t PRIMARY KEY (id)
+    );
+    ALTER TABLE t DROP COLUMN id;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let table = &schema.tables[0];
+    assert!(!table.columns.iter().any(|c| c.name == "id"));
+    assert!(
+        !table.columns.iter().any(|c| c.is_primary_key),
+        "no primary-key columns should remain"
+    );
+    assert_eq!(
+        table.primary_key_name, None,
+        "primary key name must not dangle after its only column is dropped"
+    );
+}
+
+#[test]
+fn alter_table_drop_column_keeps_primary_key_name_for_remaining_columns() {
+    let sql = r"
+    CREATE TABLE t (
+      tenant_id BIGINT,
+      id BIGINT,
+      name TEXT,
+      CONSTRAINT pk_t PRIMARY KEY (tenant_id, id)
+    );
+    ALTER TABLE t DROP COLUMN name;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let table = &schema.tables[0];
+    assert_eq!(
+        table.primary_key_name,
+        Some("pk_t".to_string()),
+        "dropping a non-key column must not clear the primary key name"
     );
 }
 
@@ -1847,6 +2224,27 @@ fn alter_table_drop_unknown_index_warns() {
             .diagnostics
             .iter()
             .any(|d| d.message.contains("ghost"))
+    );
+}
+
+#[test]
+fn alter_table_unsupported_operation_truncates_debug_output() {
+    let sql = r"
+    CREATE TABLE t (id BIGINT PRIMARY KEY);
+    ALTER TABLE t OWNER TO some_role;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    let message = output
+        .diagnostics
+        .iter()
+        .find(|d| d.message.contains("ALTER TABLE operation (unsupported)"))
+        .map(|d| d.message.as_str())
+        .expect("an unsupported ALTER operation should be diagnosed");
+
+    assert!(
+        message.contains("..."),
+        "the operation's debug rendering should be truncated, got: {message}"
     );
 }
 

@@ -21,6 +21,7 @@ mod drop;
 mod enum_type;
 mod mysql_enum;
 mod names;
+mod query_columns;
 mod recovery;
 mod view;
 
@@ -43,7 +44,7 @@ use diagnostics::{error_summary, truncate_unsupported_debug};
 use dialect::{dialect_impl, resolve_dialect};
 use drop::apply_drop_statement;
 use enum_type::parse_create_type_enum;
-use mysql_enum::populate_mysql_enum_columns;
+use mysql_enum::populate_inline_enum_columns;
 use recovery::parse_statements_with_recovery;
 use view::parse_create_view;
 
@@ -323,9 +324,11 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
         }
     }
 
-    if ctx.dialect == SqlDialect::Mysql {
-        populate_mysql_enum_columns(&mut ctx, &mut tables);
-    }
+    // Inline ENUM(...) / SET(...) column types are canonicalized regardless of
+    // dialect, so their values are recovered regardless of dialect too. Gating
+    // this on MySQL would drop enum values whenever auto-detection misread a
+    // MySQL dump as another dialect.
+    populate_inline_enum_columns(&mut ctx, &mut tables);
 
     let is_empty_schema = tables.is_empty() && views.is_empty() && enums.is_empty();
     if is_empty_schema && !ctx.has_errors() {

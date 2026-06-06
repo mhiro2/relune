@@ -1,7 +1,7 @@
 //! `CREATE INDEX` parsing and attachment to existing tables.
 
 use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_spanned};
-use crate::create_table::extract_column_name;
+use crate::create_table::{plain_column_names, warn_expression_key};
 use crate::names::{
     normalized_stable_id_for_object_name_with_diagnostics, object_name_part_to_string,
 };
@@ -39,12 +39,22 @@ pub(crate) fn parse_create_index(
         return;
     };
 
-    // Extract index columns
-    let index_columns: Vec<String> = create_index
-        .columns
-        .iter()
-        .map(extract_column_name)
-        .collect();
+    // A functional/expression index (e.g. on `lower(email)`) cannot be modeled
+    // faithfully; drop the whole index rather than keeping a partial column
+    // list that would assert false leading-column coverage.
+    let Some(index_columns) = plain_column_names(&create_index.columns) else {
+        warn_expression_key(
+            ctx,
+            span_from_spanned(input, offsets, create_index),
+            &stable_id,
+            "CREATE INDEX",
+        );
+        return;
+    };
+
+    if index_columns.is_empty() {
+        return;
+    }
 
     let index = Index {
         name: create_index.name.as_ref().map(|ident| {

@@ -118,14 +118,16 @@ pub(crate) fn canonicalize_mysql_enum_like_type(
         .map(|(kind, values)| serialize_mysql_enum_like_type(&kind, &values)))
 }
 
-/// Populates `Column::enum_values` for `MySQL` inline `ENUM(...)` / `SET(...)`
-/// columns, and emits warnings for malformed definitions.
+/// Populates `Column::enum_values` for inline `ENUM(...)` / `SET(...)` columns,
+/// and emits warnings for malformed definitions.
 ///
-/// `MySQL` inline enums/sets are anonymous, per-column value lists rather than
-/// named types, so they belong on the `Column` itself instead of being lifted
-/// into `Schema::enums` under a synthetic, non-identifier name like
-/// `enum('a','b')`.
-pub(crate) fn populate_mysql_enum_columns(ctx: &mut ParseContext, tables: &mut [Table]) {
+/// Inline enums/sets are anonymous, per-column value lists rather than named
+/// types, so they belong on the `Column` itself instead of being lifted into
+/// `Schema::enums` under a synthetic, non-identifier name like `enum('a','b')`.
+/// The syntax originates in `MySQL`, but the column type string is canonicalized
+/// for every dialect, so values are recovered unconditionally: an input that
+/// dialect auto-detection misclassifies must not silently drop its enum values.
+pub(crate) fn populate_inline_enum_columns(ctx: &mut ParseContext, tables: &mut [Table]) {
     for table in tables.iter_mut() {
         let qualified_name = table.qualified_name();
         for column in &mut table.columns {
@@ -138,7 +140,7 @@ pub(crate) fn populate_mysql_enum_columns(ctx: &mut ParseContext, tables: &mut [
                     ctx.diagnostics.push(Diagnostic::warning(
                         codes::parse_unsupported(),
                         format!(
-                            "Malformed MySQL enum/set definition on {}.{}: {} ({error})",
+                            "Malformed inline enum/set definition on {}.{}: {} ({error})",
                             qualified_name, column.name, column.data_type
                         ),
                     ));

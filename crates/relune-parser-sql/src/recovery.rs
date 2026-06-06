@@ -12,6 +12,12 @@ use sqlparser::tokenizer::Token;
 /// Instead of using `Parser::parse_sql` which aborts on the first error,
 /// this function parses statement-by-statement and skips to the next
 /// semicolon on error, allowing subsequent statements to be parsed.
+///
+/// Recovery is semicolon-delimited: on a parse error the parser discards tokens
+/// up to the next `;`. A malformed statement that is **not** terminated by a
+/// semicolon therefore consumes the following statement(s) up to the next
+/// semicolon, so inputs should keep statements semicolon-terminated for each
+/// one to recover independently.
 pub(crate) fn parse_statements_with_recovery(
     dialect: &dyn Dialect,
     input: &str,

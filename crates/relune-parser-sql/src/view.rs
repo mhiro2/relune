@@ -2,6 +2,7 @@
 
 use crate::context::{LineOffsets, ParseContext};
 use crate::names::{normalized_stable_id, split_object_name_with_diagnostics};
+use crate::query_columns::columns_from_query;
 use relune_core::{Column, ColumnId, View, normalize_identifier};
 use sqlparser::ast::ObjectName;
 
@@ -30,7 +31,7 @@ pub(crate) fn parse_create_view(
 
     // Extract columns: prefer explicit column list, fall back to SELECT items
     let columns = if view_columns.is_empty() {
-        extract_view_columns_from_query(query)
+        columns_from_query(query)
     } else {
         extract_view_columns_from_defs(view_columns)
     };
@@ -64,56 +65,4 @@ fn extract_view_columns_from_defs(defs: &[sqlparser::ast::ViewColumnDef]) -> Vec
             }
         })
         .collect()
-}
-
-/// Extract column names from the top-level `SELECT` items in a view query.
-///
-/// Complex queries such as nested subqueries, set operations, or wildcard-only
-/// projections may not yield derived column names here unless the view declares
-/// them explicitly in `CREATE VIEW ... (col1, col2)`.
-fn extract_view_columns_from_query(query: &sqlparser::ast::Query) -> Vec<Column> {
-    use sqlparser::ast::{SelectItem, SetExpr};
-
-    let SetExpr::Select(select) = query.body.as_ref() else {
-        return Vec::new();
-    };
-
-    let mut columns = Vec::new();
-    for item in &select.projection {
-        let names: Vec<String> = match item {
-            SelectItem::UnnamedExpr(expr) => extract_expr_column_name(expr).into_iter().collect(),
-            SelectItem::ExprWithAlias { alias, .. } => vec![normalize_identifier(&alias.value)],
-            SelectItem::ExprWithAliases { aliases, .. } => aliases
-                .iter()
-                .map(|alias| normalize_identifier(&alias.value))
-                .collect(),
-            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => Vec::new(),
-        };
-        for name in names {
-            columns.push(Column {
-                id: ColumnId((columns.len() as u64) + 1),
-                name,
-                data_type: "unknown".to_string(),
-                nullable: true,
-                is_primary_key: false,
-                comment: None,
-                enum_values: None,
-            });
-        }
-    }
-    columns
-}
-
-/// Try to extract a column name from a simple expression.
-fn extract_expr_column_name(expr: &sqlparser::ast::Expr) -> Option<String> {
-    use sqlparser::ast::Expr;
-
-    match expr {
-        Expr::Identifier(ident) => Some(normalize_identifier(&ident.value)),
-        Expr::CompoundIdentifier(parts) => {
-            // Take the last part (e.g., "t.column_name" -> "column_name")
-            parts.last().map(|ident| normalize_identifier(&ident.value))
-        }
-        _ => None,
-    }
 }
