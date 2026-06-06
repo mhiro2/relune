@@ -6,7 +6,10 @@ use relune_core::Schema;
 use sqlx::sqlite::SqlitePoolOptions;
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::connect::{acquire_timeout, close_pool_when_done, pool_max_connections_with_default};
+use crate::connect::{
+    acquire_timeout, close_pool_when_done, pool_max_connections_with_default,
+    with_introspection_deadline,
+};
 use crate::error::{IntrospectError, connect_error};
 
 const DEFAULT_POOL_MAX_CONNECTIONS: u32 = 1;
@@ -54,7 +57,8 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
 
     close_pool_when_done(&pool, async {
         info!("Fetching database catalog metadata");
-        let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
+        let raw_schema =
+            with_introspection_deadline(catalog::fetch_catalog_metadata(&pool)).await?;
 
         debug!(
             tables = raw_schema.tables.len(),

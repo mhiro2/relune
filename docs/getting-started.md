@@ -55,8 +55,10 @@ relune render --db-url "$DATABASE_URL" -o erd.svg
 ```
 
 Dialects and URL schemes follow CLI help (`relune render --help`).
-For PostgreSQL and MySQL/MariaDB, Relune applies a 30 second introspection statement deadline by default.
+For PostgreSQL and MySQL/MariaDB, Relune applies a 30 second per-statement deadline by default. Connecting is bounded by a 30 second acquire timeout, and the whole catalog fetch is capped by an overall deadline (default 600 seconds; raise it for very large schemas with `RELUNE_DB_INTROSPECTION_TIMEOUT_SECS`). This keeps SQLite — and MySQL servers that cannot set a session timeout — bounded too.
 Remote TCP connections also default to verifying TLS (`sslmode=verify-full` for PostgreSQL, `ssl-mode=verify-identity` for MySQL/MariaDB), so the server certificate chain and hostname must match. Pass an explicit `sslmode=require` / `ssl-mode=required` in the URL to keep encryption while accepting self-signed clusters. Unix sockets and loopback-only local connections are left untouched.
+
+The connection URL is **fully trusted** — Relune connects to exactly the host you name with no destination filtering — so never point it at an untrusted DSN. Introspection needs read-only access: PostgreSQL reads its system catalogs (`pg_catalog` / `information_schema`); MySQL/MariaDB needs `SELECT` on `information_schema` plus the `SHOW VIEW` privilege to read view definitions (without it, views appear with no definition and a warning is logged); SQLite needs to read the database file.
 
 ## Next steps
 

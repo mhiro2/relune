@@ -174,7 +174,7 @@ Supported paths into a `Schema`:
 | Normalized schema JSON | Deserialized directly into `relune-core` types |
 | Live database | `relune-introspect` (PostgreSQL, MySQL/MariaDB, SQLite) |
 
-`relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries. PostgreSQL/MySQL/MariaDB introspection applies a default 30 second statement deadline, and remote TCP connections default to verifying TLS (PostgreSQL `verify-full`, MySQL/MariaDB `verify-identity`) — set `sslmode=require` / `ssl-mode=required` in the URL to keep encryption while accepting self-signed clusters. Native file-backed SQL and schema JSON inputs are size-limited before reading.
+`relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries. PostgreSQL/MySQL/MariaDB introspection applies a default 30 second per-statement deadline, and remote TCP connections default to verifying TLS (PostgreSQL `verify-full`, MySQL/MariaDB `verify-identity`) — set `sslmode=require` / `ssl-mode=required` in the URL to keep encryption while accepting self-signed clusters. Connection acquisition (including the initial TCP/TLS connect) is bounded by a 30 second acquire timeout, and the entire catalog fetch is bounded by an overall introspection deadline (default 600 seconds, overridable with `RELUNE_DB_INTROSPECTION_TIMEOUT_SECS`) so backends without an enforceable per-statement deadline — SQLite, or MySQL servers that cannot set a session timeout — still complete in bounded time. Native file-backed SQL and schema JSON inputs are size-limited before reading.
 
 ---
 
@@ -260,7 +260,7 @@ The composite GitHub Action under `action/` is a thin shell over the same `relun
 ## 14. Security notes
 
 - **SQL DDL mode** — Parsing only; never executes SQL.
-- **Introspection** — Read-only metadata; document required DB privileges.
+- **Introspection** — Read-only metadata queries. The connection URL is **fully trusted**: Relune connects to exactly the host it names and performs no allow/deny-listing of destinations (no SSRF guard against link-local, private, or cloud-metadata addresses), so never hand it an untrusted DSN. Required privileges: PostgreSQL needs read access to the system catalogs (`pg_catalog` / `information_schema`); MySQL/MariaDB needs `SELECT` on `information_schema` plus the `SHOW VIEW` privilege to populate view definitions (without it `VIEW_DEFINITION` comes back empty, which is normalized to "no definition" and logged); SQLite needs read access to the database file. Servers that cannot set a session statement timeout fall back to the overall introspection deadline.
 - **HTML** — Self-contained output; escape untrusted names in SVG/HTML layers (maintain parity when adding fields).
 
 ---

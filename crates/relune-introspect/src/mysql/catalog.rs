@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sqlx::MySqlPool;
 use thiserror::Error;
+use tracing::warn;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
@@ -132,15 +133,7 @@ impl ParallelCatalogReader for MySqlCatalog {
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch views", e))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| RawView {
-                view_name: row.view_name,
-                schema_name: row.schema_name,
-                definition: row.definition,
-                view_comment: row.view_comment,
-            })
-            .collect())
+        Ok(rows.into_iter().map(map_view_row).collect())
     }
 
     async fn fetch_enums(&self) -> Result<Vec<RawEnum>, IntrospectError> {
@@ -318,6 +311,34 @@ struct RawViewRow {
 struct RawEnumRow {
     schema_name: String,
     column_type: String,
+}
+
+/// Maps a raw `information_schema.VIEWS` row to a [`RawView`].
+///
+/// `MySQL` returns an empty `VIEW_DEFINITION` (rather than an error) when the
+/// connection lacks the `SHOW VIEW` privilege, which is indistinguishable from
+/// a definition the server simply did not record. Empty definitions are
+/// normalized to `None` and logged so the gap is visible rather than surfacing
+/// as a view with a blank body.
+fn map_view_row(row: RawViewRow) -> RawView {
+    let definition = row
+        .definition
+        .filter(|definition| !definition.trim().is_empty());
+
+    if definition.is_none() {
+        warn!(
+            schema = %row.schema_name,
+            view = %row.view_name,
+            "MySQL view definition is empty; the connection may lack the SHOW VIEW privilege"
+        );
+    }
+
+    RawView {
+        view_name: row.view_name,
+        schema_name: row.schema_name,
+        definition,
+        view_comment: row.view_comment,
+    }
 }
 
 fn raw_enum_from_mysql_column_type(
@@ -571,6 +592,30 @@ mod tests {
             parse_mysql_enum_like_values("enum('bad\\)"),
             Err(MySqlEnumLikeParseError::TrailingEscapeSequence)
         );
+    }
+
+    #[test]
+    fn map_view_row_keeps_non_empty_definitions() {
+        let view = map_view_row(RawViewRow {
+            schema_name: "app".to_string(),
+            view_name: "active_users".to_string(),
+            definition: Some("select 1".to_string()),
+            view_comment: None,
+        });
+        assert_eq!(view.definition.as_deref(), Some("select 1"));
+    }
+
+    #[test]
+    fn map_view_row_normalizes_empty_definitions_to_none() {
+        for definition in [None, Some(String::new()), Some("   ".to_string())] {
+            let view = map_view_row(RawViewRow {
+                schema_name: "app".to_string(),
+                view_name: "active_users".to_string(),
+                definition,
+                view_comment: None,
+            });
+            assert_eq!(view.definition, None);
+        }
     }
 
     #[test]

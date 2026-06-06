@@ -11,6 +11,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::connect::{
     acquire_timeout, close_pool_when_done, configure_mysql_session, mysql_connect_options,
+    with_introspection_deadline,
 };
 use crate::error::{IntrospectError, connect_error};
 
@@ -65,7 +66,8 @@ pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectEr
 
     close_pool_when_done(&pool, async {
         info!("Fetching database catalog metadata");
-        let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
+        let raw_schema =
+            with_introspection_deadline(catalog::fetch_catalog_metadata(&pool)).await?;
 
         debug!(
             tables = raw_schema.tables.len(),

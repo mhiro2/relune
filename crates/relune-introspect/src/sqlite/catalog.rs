@@ -71,8 +71,9 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
 /// `SQLite` has no server-side `statement_timeout` equivalent, so a
 /// hostile or corrupted database file could cause `sqlx::query_as(...)
 /// .fetch_all(...)` to hang forever. Mirroring the 30s deadline used by
-/// `PostgreSQL` and `MySQL` ensures introspection always returns within
-/// a bounded time.
+/// `PostgreSQL` and `MySQL` bounds each individual query. The total catalog
+/// fetch (one set of `PRAGMA`s per table) is bounded separately by the overall
+/// introspection deadline applied in `sqlite::introspect_sqlite`.
 async fn with_query_timeout<T, F>(context: &'static str, fut: F) -> Result<T, IntrospectError>
 where
     F: Future<Output = Result<T, IntrospectError>>,
