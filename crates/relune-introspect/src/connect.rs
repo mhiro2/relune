@@ -5,15 +5,37 @@ use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::Duration;
 
-use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlSslMode};
+use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlDatabaseError, MySqlSslMode};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{Database, Pool, query, query_scalar};
+use tracing::warn;
 
 use crate::error::{IntrospectError, connect_error};
+
+/// `MySQL` `ER_UNKNOWN_SYSTEM_VARIABLE` error number.
+///
+/// Returned when a server predating the session statement-timeout variable
+/// (older `MySQL`/`MariaDB`) is asked to `SET` it.
+const ER_UNKNOWN_SYSTEM_VARIABLE: u16 = 1193;
 
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Upper bound on the total wall-clock time spent fetching catalog metadata.
+///
+/// The per-statement deadline only bounds a single query, so a backend that
+/// runs many sequential queries (notably `SQLite`, one set of `PRAGMA`s per
+/// table) or a server that cannot enforce a session timeout could otherwise
+/// accumulate unbounded total time. This deadline caps the whole catalog fetch.
+const OVERALL_INTROSPECTION_TIMEOUT: Duration = Duration::from_mins(10);
+
+/// Environment variable that overrides the default overall introspection deadline.
+///
+/// Accepts a positive integer number of seconds. Operators introspecting very
+/// large schemas can raise the cap; values that are non-positive, non-numeric,
+/// or empty are ignored and the built-in default applies.
+pub(crate) const INTROSPECTION_TIMEOUT_ENV: &str = "RELUNE_DB_INTROSPECTION_TIMEOUT_SECS";
 
 /// Environment variable that overrides the default per-dialect pool max.
 ///
@@ -40,6 +62,50 @@ pub(crate) const fn acquire_timeout() -> Duration {
 #[must_use]
 pub(crate) const fn statement_timeout() -> Duration {
     STATEMENT_TIMEOUT
+}
+
+/// Resolves the effective overall introspection deadline.
+///
+/// Reads `RELUNE_DB_INTROSPECTION_TIMEOUT_SECS`; a positive integer wins,
+/// otherwise the built-in [`OVERALL_INTROSPECTION_TIMEOUT`] applies.
+#[must_use]
+pub(crate) fn introspection_timeout() -> Duration {
+    introspection_timeout_override_from(std::env::var(INTROSPECTION_TIMEOUT_ENV).ok().as_deref())
+        .unwrap_or(OVERALL_INTROSPECTION_TIMEOUT)
+}
+
+fn introspection_timeout_override_from(value: Option<&str>) -> Option<Duration> {
+    value
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+}
+
+/// Bounds a catalog-fetch future by the overall introspection deadline.
+///
+/// Returns [`IntrospectError::Timeout`] if the future does not resolve within
+/// the deadline. Cancelling the future drops any in-flight queries; the caller
+/// is expected to close the pool afterwards (see [`close_pool_when_done`]).
+pub(crate) async fn with_introspection_deadline<T, F>(fut: F) -> Result<T, IntrospectError>
+where
+    F: Future<Output = Result<T, IntrospectError>>,
+{
+    run_with_deadline(introspection_timeout(), fut).await
+}
+
+async fn run_with_deadline<T, F>(deadline: Duration, fut: F) -> Result<T, IntrospectError>
+where
+    F: Future<Output = Result<T, IntrospectError>>,
+{
+    match tokio::time::timeout(deadline, fut).await {
+        Ok(result) => result,
+        Err(_) => Err(IntrospectError::timeout(format!(
+            "Catalog introspection did not complete within {} seconds",
+            deadline.as_secs()
+        ))),
+    }
 }
 
 /// Resolves the effective pool max connection count for a dialect.
@@ -106,6 +172,13 @@ pub(crate) fn mysql_connect_options(
 }
 
 /// Configures a per-session statement execution deadline for `MySQL`/`MariaDB`.
+///
+/// Servers that predate the session timeout variable reject it as an unknown
+/// system variable; that is downgraded to a warning so introspection still
+/// proceeds (the overall introspection deadline remains the client-side bound).
+/// A failure here must not abort the connection: sqlx retries `after_connect`
+/// in a backoff loop until the acquire deadline, so a hard error would surface
+/// as a misleading "connection timed out" after a 30 second hang.
 pub(crate) async fn configure_mysql_session(
     connection: &mut MySqlConnection,
 ) -> Result<(), sqlx::Error> {
@@ -113,19 +186,38 @@ pub(crate) async fn configure_mysql_session(
         .fetch_one(&mut *connection)
         .await?;
 
-    if version.to_ascii_lowercase().contains("mariadb") {
+    let outcome = if version.to_ascii_lowercase().contains("mariadb") {
         query("SET SESSION max_statement_time = ?")
             .bind(STATEMENT_TIMEOUT.as_secs_f64())
             .execute(&mut *connection)
-            .await?;
+            .await
     } else {
         query("SET SESSION max_execution_time = ?")
             .bind(statement_timeout_millis())
             .execute(&mut *connection)
-            .await?;
-    }
+            .await
+    };
 
-    Ok(())
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(error) if is_unknown_system_variable(&error) => {
+            warn!(
+                error = %error,
+                "MySQL server does not support a session statement timeout; \
+                 relying on the overall introspection deadline instead"
+            );
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Returns true when a `MySQL` error is `ER_UNKNOWN_SYSTEM_VARIABLE`.
+fn is_unknown_system_variable(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|database_error| database_error.try_downcast_ref::<MySqlDatabaseError>())
+        .is_some_and(|mysql_error| mysql_error.number() == ER_UNKNOWN_SYSTEM_VARIABLE)
 }
 
 /// Ensures explicit pool draining runs before returning from introspection.
@@ -273,6 +365,13 @@ mod tests {
     }
 
     #[test]
+    fn is_unknown_system_variable_ignores_non_database_errors() {
+        // Connection/pool-level errors carry no database error payload, so they
+        // must never be mistaken for an unsupported session variable.
+        assert!(!is_unknown_system_variable(&sqlx::Error::PoolClosed));
+    }
+
+    #[test]
     fn is_local_host_recognises_loopback_with_ipv6_zone_id() {
         assert!(is_local_host("::1%lo0"));
         assert!(is_local_host("[::1%eth0]"));
@@ -286,6 +385,50 @@ mod tests {
         assert!(is_local_host("127.0.0.1"));
         assert!(is_local_host("::1"));
         assert!(is_local_host("[::1]"));
+    }
+
+    #[test]
+    fn introspection_timeout_override_accepts_positive_seconds() {
+        assert_eq!(
+            introspection_timeout_override_from(Some("125")),
+            Some(Duration::from_secs(125))
+        );
+        assert_eq!(
+            introspection_timeout_override_from(Some("  45 ")),
+            Some(Duration::from_secs(45))
+        );
+    }
+
+    #[test]
+    fn introspection_timeout_override_rejects_invalid_or_non_positive_values() {
+        assert_eq!(introspection_timeout_override_from(None), None);
+        assert_eq!(introspection_timeout_override_from(Some("")), None);
+        assert_eq!(introspection_timeout_override_from(Some("   ")), None);
+        assert_eq!(introspection_timeout_override_from(Some("0")), None);
+        assert_eq!(introspection_timeout_override_from(Some("-5")), None);
+        assert_eq!(introspection_timeout_override_from(Some("soon")), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_with_deadline_times_out_when_future_exceeds_budget() {
+        let deadline = Duration::from_secs(30);
+        let result: Result<(), IntrospectError> = run_with_deadline(deadline, async {
+            tokio::time::sleep(deadline * 2).await;
+            Ok(())
+        })
+        .await;
+
+        let err = result.expect_err("a future exceeding the deadline should time out");
+        assert!(matches!(err, IntrospectError::Timeout(_)));
+        assert!(err.to_string().contains("30 seconds"));
+    }
+
+    #[tokio::test]
+    async fn run_with_deadline_returns_inner_result_within_budget() {
+        let value = run_with_deadline(Duration::from_secs(30), async { Ok(11_u32) })
+            .await
+            .expect("a fast future should resolve within the deadline");
+        assert_eq!(value, 11);
     }
 
     #[test]

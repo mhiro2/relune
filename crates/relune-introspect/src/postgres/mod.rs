@@ -45,7 +45,9 @@ use relune_core::Schema;
 use sqlx::postgres::PgPoolOptions;
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::connect::{acquire_timeout, close_pool_when_done, postgres_connect_options};
+use crate::connect::{
+    acquire_timeout, close_pool_when_done, postgres_connect_options, with_introspection_deadline,
+};
 use crate::error::{IntrospectError, connect_error};
 
 /// Introspects a `PostgreSQL` database and extracts its schema metadata.
@@ -130,7 +132,8 @@ pub async fn introspect_postgres(database_url: &str) -> Result<Schema, Introspec
     close_pool_when_done(&pool, async {
         // Fetch metadata from catalog
         info!("Fetching database catalog metadata");
-        let raw_schema = catalog::fetch_catalog_metadata(&pool).await?;
+        let raw_schema =
+            with_introspection_deadline(catalog::fetch_catalog_metadata(&pool)).await?;
 
         debug!(
             tables = raw_schema.tables.len(),
