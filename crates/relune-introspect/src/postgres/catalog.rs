@@ -162,20 +162,39 @@ impl ParallelCatalogReader for PostgresCatalog {
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch foreign keys", e))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| RawForeignKey {
-                constraint_name: row.constraint_name,
-                schema_name: row.schema_name,
-                from_table: row.from_table,
-                from_columns: row.from_columns.unwrap_or_default(),
-                to_schema: Some(row.to_schema),
-                to_table: row.to_table,
-                to_columns: row.to_columns.unwrap_or_default(),
-                on_delete: parse_referential_action(&row.on_delete_code),
-                on_update: parse_referential_action(&row.on_update_code),
+        rows.into_iter()
+            .map(|row| {
+                // A foreign key must reference at least one column on each side.
+                // PostgreSQL guarantees this for `contype = 'f'`, so this is a
+                // mapping-layer invariant guard: should `array_agg` ever surface
+                // a NULL/empty set, reject it rather than silently emit a
+                // column-less constraint that would corrupt the schema.
+                let from_columns = require_fk_columns(
+                    &row.schema_name,
+                    &row.constraint_name,
+                    "source",
+                    row.from_columns,
+                )?;
+                let to_columns = require_fk_columns(
+                    &row.schema_name,
+                    &row.constraint_name,
+                    "referenced",
+                    row.to_columns,
+                )?;
+
+                Ok::<RawForeignKey, IntrospectError>(RawForeignKey {
+                    constraint_name: row.constraint_name,
+                    schema_name: row.schema_name,
+                    from_table: row.from_table,
+                    from_columns,
+                    to_schema: Some(row.to_schema),
+                    to_table: row.to_table,
+                    to_columns,
+                    on_delete: parse_referential_action(&row.on_delete_code),
+                    on_update: parse_referential_action(&row.on_update_code),
+                })
             })
-            .collect())
+            .collect::<Result<Vec<RawForeignKey>, IntrospectError>>()
     }
 
     /// Fetch all indexes from the database.
@@ -270,6 +289,26 @@ impl ParallelCatalogReader for PostgresCatalog {
                 values: row.values.unwrap_or_default(),
             })
             .collect())
+    }
+}
+
+/// Validates that an aggregated foreign-key column set is present and non-empty.
+///
+/// `array_agg` can aggregate to SQL `NULL` (mapped to `None`) when the join
+/// produces no rows; an empty column list would describe a foreign key that
+/// references nothing. Both cases are reported as a mapping error so the broken
+/// constraint surfaces instead of being silently dropped.
+fn require_fk_columns(
+    schema_name: &str,
+    constraint_name: &str,
+    side: &str,
+    columns: Option<Vec<String>>,
+) -> Result<Vec<String>, IntrospectError> {
+    match columns {
+        Some(columns) if !columns.is_empty() => Ok(columns),
+        _ => Err(IntrospectError::metadata_mapping(format!(
+            "foreign key {schema_name}.{constraint_name} has no {side} columns"
+        ))),
     }
 }
 
@@ -456,6 +495,29 @@ mod tests {
         // Whichever value wins (default or env override), it must remain
         // positive so the pool can be constructed.
         assert!(pool_max_connections() > 0);
+    }
+
+    #[test]
+    fn require_fk_columns_accepts_non_empty_sets() {
+        let columns = require_fk_columns(
+            "public",
+            "fk_posts_user",
+            "source",
+            Some(vec!["user_id".into()]),
+        )
+        .expect("non-empty FK columns should be accepted");
+        assert_eq!(columns, vec!["user_id".to_string()]);
+    }
+
+    #[test]
+    fn require_fk_columns_rejects_null_and_empty_sets() {
+        for columns in [None, Some(Vec::new())] {
+            let err = require_fk_columns("public", "fk_posts_user", "referenced", columns)
+                .expect_err("missing FK columns should be rejected");
+            assert!(matches!(err, IntrospectError::MetadataMapping(_)));
+            assert!(err.to_string().contains("fk_posts_user"));
+            assert!(err.to_string().contains("referenced"));
+        }
     }
 
     #[test]
