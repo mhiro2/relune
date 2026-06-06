@@ -2117,7 +2117,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "relune-app"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "insta",
  "relune-core",
@@ -2139,7 +2139,7 @@ dependencies = [
 
 [[package]]
 name = "relune-cli"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2166,7 +2166,7 @@ dependencies = [
 
 [[package]]
 name = "relune-core"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "petgraph",
  "serde",
@@ -2178,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "relune-introspect"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "relune-core",
  "relune-parser-sql",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "relune-layout"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "insta",
  "petgraph",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "relune-parser-sql"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "insta",
  "proptest",
@@ -2222,7 +2222,7 @@ dependencies = [
 
 [[package]]
 name = "relune-render-html"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "base64 0.22.1",
  "insta",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "relune-render-svg"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "insta",
  "relune-core",
@@ -2252,7 +2252,7 @@ dependencies = [
 
 [[package]]
 name = "relune-render-theme"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2260,7 +2260,7 @@ dependencies = [
 
 [[package]]
 name = "relune-testkit"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "insta",
  "relune-core",
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "relune-wasm"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "console_error_panic_hook",
  "relune-app",
