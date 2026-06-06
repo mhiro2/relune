@@ -2,53 +2,94 @@
 
 /// Masks credentials in a database URL for safe logging.
 ///
-/// Replaces `user:password@` with `***:***@` so that secrets
-/// are never emitted in tracing spans or log lines.
+/// Replaces `user:password@` with `***:***@` and redacts secret query
+/// parameters so that secrets are never emitted in tracing spans or log lines.
+///
+/// The authority is located before the query string is split off, so a raw
+/// (unencoded) `?` or `#` inside the password cannot smuggle credentials past
+/// the masker. The userinfo boundary is also detected fail-closed: an authority
+/// that was truncated mid-`user:password` by a raw separator is still masked
+/// (see [`userinfo_separator`]).
+#[must_use]
 pub fn mask_credentials(url: &str) -> String {
-    let (prefix, fragment) = url
+    let Some(scheme_end) = url.find("://") else {
+        // No authority component (e.g. `sqlite:file.db?...`); only query
+        // secrets are maskable.
+        return mask_query_in_tail(url);
+    };
+    let scheme = &url[..scheme_end];
+    let rest = &url[scheme_end + 3..];
+
+    let Some(at) = userinfo_separator(rest) else {
+        return format!("{scheme}://{}", mask_query_in_tail(rest));
+    };
+
+    // The host ends at the first path/query/fragment delimiter after the
+    // userinfo separator; everything before that delimiter is `host[:port]`.
+    let host_start = at + 1;
+    let host_end = rest[host_start..]
+        .find(['/', '?', '#'])
+        .map_or(rest.len(), |offset| host_start + offset);
+    let host = &rest[host_start..host_end];
+    let tail = &rest[host_end..];
+
+    format!("{scheme}://***:***@{host}{}", mask_query_in_tail(tail))
+}
+
+/// Locates the byte index of the `@` separating userinfo from host when the
+/// authority carries credentials.
+///
+/// The authority normally terminates at the first `/`, `?`, or `#`, and any
+/// `@` within it is the userinfo separator. A raw (unencoded) `/`, `?`, or `#`
+/// inside the password truncates that span before the real `@`, so a fallback
+/// recovers it: when the truncated span looks like the leading half of a
+/// `user:password` pair (it contains a `:`) and a later `@` is followed by a
+/// host *and* a path delimiter, that `@` is the hidden userinfo terminator.
+///
+/// Requiring a path delimiter after the candidate `@` is what distinguishes a
+/// hidden separator (`user:p/w@host/db` — `@host/db` has a `/`) from a
+/// credential-free URL whose path or port merely contains an `@`
+/// (`host:5432/db@tag` — nothing structured follows the `@`). The masker errs
+/// toward redaction: the residual false positives are rare credential-free URLs
+/// with an `@` mid-path, which only lose log fidelity, never leak a secret.
+fn userinfo_separator(rest: &str) -> Option<usize> {
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+
+    if let Some(at) = authority.rfind('@') {
+        return Some(at);
+    }
+
+    // The naive authority was truncated before any `@`. Only a `:`-bearing span
+    // (the start of `user:password`) can hide credentials this way.
+    if !authority.contains(':') {
+        return None;
+    }
+
+    let at = authority_end + rest[authority_end..].find('@')?;
+    rest[at + 1..].contains(['/', '?', '#']).then_some(at)
+}
+
+/// Masks secret query parameters in the portion of a URL after the host,
+/// leaving the path and fragment untouched.
+fn mask_query_in_tail(tail: &str) -> String {
+    let (prefix, fragment) = tail
         .split_once('#')
-        .map_or((url, None), |(head, tail)| (head, Some(tail)));
+        .map_or((tail, None), |(head, frag)| (head, Some(frag)));
     let (base, query) = prefix
         .split_once('?')
-        .map_or((prefix, None), |(head, tail)| (head, Some(tail)));
+        .map_or((prefix, None), |(head, q)| (head, Some(q)));
 
-    let masked_base = mask_authority_credentials(base);
-    let masked_query = query.map(mask_query_secrets);
-
-    let mut masked = masked_base;
-    if let Some(query) = masked_query {
+    let mut masked = base.to_string();
+    if let Some(query) = query {
         masked.push('?');
-        masked.push_str(&query);
+        masked.push_str(&mask_query_secrets(query));
     }
     if let Some(fragment) = fragment {
         masked.push('#');
         masked.push_str(fragment);
     }
-
     masked
-}
-
-fn mask_authority_credentials(url: &str) -> String {
-    let Some(scheme_end) = url.find("://") else {
-        return url.to_string();
-    };
-    let after_scheme = scheme_end + 3; // skip past "://"
-    let rest = &url[after_scheme..];
-
-    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let authority = &rest[..authority_end];
-
-    // If there is no '@' in the authority portion, there are no credentials to mask.
-    let Some(at) = authority.rfind('@') else {
-        return url.to_string();
-    };
-
-    format!(
-        "{}://***:***@{}{}",
-        &url[..scheme_end],
-        &authority[at + 1..],
-        &rest[authority_end..]
-    )
 }
 
 pub(crate) fn sanitize_error_message(database_url: &str, message: &str) -> String {
@@ -240,6 +281,53 @@ mod tests {
     fn does_not_mask_urls_without_credentials() {
         let url = "postgres://localhost/db@v1";
         assert_eq!(mask_credentials(url), url);
+    }
+
+    #[test]
+    fn does_not_mask_authority_with_at_sign_only_in_path() {
+        // An `@` that appears in the path with nothing structured after it
+        // carries no credentials, so neither a port nor an IPv6 host may be
+        // mistaken for userinfo.
+        for url in [
+            "postgres://localhost:5432/db@v1",
+            "postgres://[::1]/db@tag",
+            "postgres://[::1]:5432/db@tag",
+        ] {
+            assert_eq!(mask_credentials(url), url, "should not mask {url}");
+        }
+    }
+
+    #[test]
+    fn masks_credentials_with_unencoded_password_separators() {
+        // Raw `/`, `?`, and `#` inside a password truncate the naive authority
+        // before the real `@`; the masker must still redact the credentials,
+        // even when the password is numeric (and would parse as a port).
+        for url in [
+            "postgres://user:p/w@host/db",
+            "postgres://user:p?w@host/db",
+            "postgres://user:p#w@host/db",
+            "postgres://user:123/w@host/db",
+        ] {
+            assert_eq!(
+                mask_credentials(url),
+                "postgres://***:***@host/db",
+                "failed to mask {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn masks_credentials_for_bracketed_ipv6_hosts() {
+        let masked = mask_credentials("postgres://user:pass@[::1]:5432/db");
+        assert_eq!(masked, "postgres://***:***@[::1]:5432/db");
+    }
+
+    #[test]
+    fn masks_credentials_when_password_separator_precedes_query() {
+        // The query string is split only after the authority is located, so a
+        // raw `?` in the password does not leak the credentials or the secret.
+        let masked = mask_credentials("postgres://user:p?w@host/db?password=hunter2");
+        assert_eq!(masked, "postgres://***:***@host/db?password=***");
     }
 
     #[test]
