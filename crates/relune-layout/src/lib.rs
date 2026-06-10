@@ -27,7 +27,7 @@ pub use graph::{
 };
 pub use layout::{
     ColumnFlags, ColumnRelationFlags, LayoutConfig, LayoutConfigValidationError, LayoutError,
-    LayoutMode, PositionedColumn, PositionedEdge, PositionedEdgeRoutingDebug, PositionedGraph,
+    PositionedColumn, PositionedEdge, PositionedEdgeRoutingDebug, PositionedGraph,
     PositionedGraphRoutingDebug, PositionedGroup, PositionedNode, build_layout,
     build_layout_from_graph_with_config, build_layout_with_config,
 };
