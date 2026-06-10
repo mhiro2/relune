@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+publish = false
 description = "WebAssembly bindings for relune"
 
 [package.metadata.wasm-pack.profile.release]

@@ -31,11 +31,10 @@ ignore = [
 
 [bans]
 multiple-versions = "warn"
-# Workspace internal crates are referenced by path without explicit
-# versions, which cargo-deny reports as wildcards. Keep this as "warn"
-# until the workspace adopts `publish = false` per crate; external
-# wildcard deps will still surface in CI logs.
-wildcards = "warn"
+# Path-only deps between workspace crates are exempted via
+# allow-wildcard-paths because every crate is `publish = false`;
+# wildcard version requirements on external crates are denied.
+wildcards = "deny"
 allow-wildcard-paths = true
 
 [sources]
