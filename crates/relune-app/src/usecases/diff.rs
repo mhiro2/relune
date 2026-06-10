@@ -112,7 +112,6 @@ fn render_with_schema(
         show_legend: request.options.show_legend,
         show_stats: request.options.show_stats,
         embed_css: true,
-        compact: false,
         show_tooltips: true,
     };
     let svg = render_svg_with_overlay(&positioned, svg_options, request.overlay.as_ref())?;
