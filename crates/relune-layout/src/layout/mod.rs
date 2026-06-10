@@ -31,9 +31,6 @@ use groups::position_groups;
 use hierarchical::assign_coordinates;
 use spacing::{expand_bounds_for_edges, measure_node_sizes};
 
-/// Layout mode alias shared with `relune-core`.
-pub type LayoutMode = LayoutAlgorithm;
-
 /// Default number of iterations for force-directed layout.
 const fn default_force_iterations() -> usize {
     150
@@ -78,7 +75,7 @@ pub struct LayoutConfig {
     pub show_columns: bool,
     /// Layout mode (hierarchical or force-directed).
     #[serde(default)]
-    pub mode: LayoutMode,
+    pub mode: LayoutAlgorithm,
     /// Number of iterations for force-directed layout.
     #[serde(default = "default_force_iterations")]
     pub force_iterations: usize,

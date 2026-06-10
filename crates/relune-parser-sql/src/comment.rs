@@ -1,6 +1,6 @@
 //! `COMMENT ON` parsing for tables and columns.
 
-use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, span_from_spanned};
 use crate::names::{
     normalized_stable_id, normalized_stable_id_for_object_name_with_diagnostics,
     split_object_name_parts, warn_truncated_object_name,

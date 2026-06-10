@@ -15,10 +15,6 @@ pub struct HtmlRenderOptions {
     /// If provided, appears in both the `title` tag and as an H1 heading.
     pub title: Option<String>,
 
-    /// Whether to include a legend/stats section.
-    /// Default: false (not implemented in MVP)
-    pub include_legend: bool,
-
     /// Whether to enable pan/zoom interaction.
     /// Default: true
     pub enable_pan_zoom: bool,
@@ -48,7 +44,6 @@ impl Default for HtmlRenderOptions {
         Self {
             theme: Theme::Light,
             title: None,
-            include_legend: false,
             enable_pan_zoom: true,
             enable_search: true,
             enable_group_toggles: true,
@@ -65,7 +60,6 @@ impl HtmlRenderOptions {
         Self {
             theme: Theme::Dark,
             title: None,
-            include_legend: false,
             enable_pan_zoom: true,
             enable_search: true,
             enable_group_toggles: true,
@@ -80,7 +74,6 @@ impl HtmlRenderOptions {
         Self {
             theme: Theme::Light,
             title: None,
-            include_legend: false,
             enable_pan_zoom: true,
             enable_search: true,
             enable_group_toggles: true,
@@ -141,7 +134,6 @@ mod tests {
         let options = HtmlRenderOptions::default();
         assert_eq!(options.theme, Theme::Light);
         assert!(options.title.is_none());
-        assert!(!options.include_legend);
         assert!(options.enable_pan_zoom);
         assert!(options.enable_search);
         assert!(options.enable_group_toggles);

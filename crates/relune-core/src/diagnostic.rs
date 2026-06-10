@@ -147,6 +147,15 @@ impl Diagnostic {
         self
     }
 
+    /// Adds a source span to the diagnostic when one is available.
+    #[must_use]
+    pub const fn with_span_opt(mut self, span: Option<SourceSpan>) -> Self {
+        if let Some(span) = span {
+            self.span = Some(span);
+        }
+        self
+    }
+
     /// Adds a source file path to the diagnostic.
     #[must_use]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {

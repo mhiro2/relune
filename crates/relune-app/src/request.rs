@@ -203,13 +203,6 @@ impl RenderRequest {
         self
     }
 
-    /// Set the output file path.
-    #[must_use]
-    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.output_path = Some(path.into());
-        self
-    }
-
     /// Set the focus specification.
     #[must_use]
     pub fn with_focus(mut self, focus: FocusSpec) -> Self {
@@ -228,13 +221,6 @@ impl RenderRequest {
     #[must_use]
     pub const fn with_grouping(mut self, grouping: GroupingSpec) -> Self {
         self.grouping = grouping;
-        self
-    }
-
-    /// Set the layout specification.
-    #[must_use]
-    pub const fn with_layout(mut self, layout: LayoutSpec) -> Self {
-        self.layout = layout;
         self
     }
 }
@@ -271,13 +257,6 @@ impl InspectRequest {
     #[must_use]
     pub const fn with_format(mut self, format: InspectFormat) -> Self {
         self.format = format;
-        self
-    }
-
-    /// Request a schema summary instead of table details.
-    #[must_use]
-    pub fn summary(mut self) -> Self {
-        self.table = None;
         self
     }
 }
@@ -332,13 +311,6 @@ impl ExportRequest {
         self
     }
 
-    /// Set the output file path.
-    #[must_use]
-    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.output_path = Some(path.into());
-        self
-    }
-
     /// Set the focus specification.
     #[must_use]
     pub fn with_focus(mut self, focus: FocusSpec) -> Self {
@@ -350,13 +322,6 @@ impl ExportRequest {
     #[must_use]
     pub fn with_filter(mut self, filter: FilterSpec) -> Self {
         self.filter = filter;
-        self
-    }
-
-    /// Set the grouping specification.
-    #[must_use]
-    pub const fn with_grouping(mut self, grouping: GroupingSpec) -> Self {
-        self.grouping = grouping;
         self
     }
 
@@ -438,20 +403,6 @@ impl LintRequest {
         self
     }
 
-    /// Set rules to exclude from the active rule set.
-    #[must_use]
-    pub fn with_exclude_rules(mut self, rules: Vec<String>) -> Self {
-        self.exclude_rules = rules;
-        self
-    }
-
-    /// Restrict the active rule set to specific categories.
-    #[must_use]
-    pub fn with_categories(mut self, categories: Vec<LintRuleCategory>) -> Self {
-        self.categories = categories;
-        self
-    }
-
     /// Set the lint profile.
     #[must_use]
     pub const fn with_profile(mut self, profile: LintProfile) -> Self {
@@ -463,13 +414,6 @@ impl LintRequest {
     #[must_use]
     pub fn with_except_tables(mut self, patterns: Vec<String>) -> Self {
         self.except_tables = patterns;
-        self
-    }
-
-    /// Set the minimum severity that causes non-zero exit.
-    #[must_use]
-    pub const fn with_fail_on(mut self, severity: relune_core::Severity) -> Self {
-        self.fail_on = Some(severity);
         self
     }
 }
@@ -529,13 +473,6 @@ impl DiffRequest {
         self.format = format;
         self
     }
-
-    /// Set the output file path.
-    #[must_use]
-    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.output_path = Some(path.into());
-        self
-    }
 }
 
 /// Request to generate schema documentation.
@@ -563,13 +500,6 @@ impl DocRequest {
     #[must_use]
     pub const fn with_format(mut self, format: DocFormat) -> Self {
         self.format = format;
-        self
-    }
-
-    /// Set the output file path.
-    #[must_use]
-    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.output_path = Some(path.into());
         self
     }
 }
@@ -676,13 +606,6 @@ impl ReviewRequest {
         self
     }
 
-    /// Set the output file path.
-    #[must_use]
-    pub fn with_output_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.output_path = Some(path.into());
-        self
-    }
-
     /// Set the rule allow-list.
     #[must_use]
     pub fn with_rules(mut self, rules: Vec<String>) -> Self {
@@ -765,11 +688,10 @@ mod tests {
     #[test]
     fn test_render_request_builder() {
         let req = RenderRequest::from_sql("CREATE TABLE test (id INT);")
-            .with_output_format(OutputFormat::Html)
-            .with_output_path("output.html");
+            .with_output_format(OutputFormat::Html);
 
         assert_eq!(req.output_format, OutputFormat::Html);
-        assert_eq!(req.output_path, Some(PathBuf::from("output.html")));
+        assert!(req.output_path.is_none());
     }
 
     #[test]
@@ -799,11 +721,10 @@ mod tests {
     #[test]
     fn test_export_request_builder() {
         let req = ExportRequest::from_sql("CREATE TABLE test (id INT);")
-            .with_format(ExportFormat::GraphJson)
-            .with_output_path("graph.json");
+            .with_format(ExportFormat::GraphJson);
 
         assert_eq!(req.format, ExportFormat::GraphJson);
-        assert_eq!(req.output_path, Some(PathBuf::from("graph.json")));
+        assert!(req.output_path.is_none());
     }
 
     #[test]

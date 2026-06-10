@@ -195,7 +195,6 @@ fn render_svg_output(
         show_legend: options.show_legend,
         show_stats: options.show_stats,
         embed_css: true,
-        compact: false,
         show_tooltips: true,
     };
     Ok(render_svg_with_overlay(positioned, options, overlay)?.into_string())
@@ -215,7 +214,6 @@ fn render_html_output(
         show_legend: options.show_legend,
         show_stats: options.show_stats,
         embed_css: true,
-        compact: false,
         show_tooltips: true,
     };
     let svg = render_svg_with_overlay(positioned, svg_options, overlay)?;
@@ -223,7 +221,6 @@ fn render_html_output(
     // Then wrap in HTML (with overlay)
     let html_options = HtmlRenderOptions {
         theme: map_html_theme(options.theme),
-        include_legend: options.show_legend || options.show_stats,
         ..Default::default()
     };
     let html = relune_render_html::render_html_with_overlay(graph, &svg, &html_options, overlay)?;

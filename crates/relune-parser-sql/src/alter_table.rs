@@ -1,6 +1,6 @@
 //! `ALTER TABLE` operation handling.
 
-use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_ident, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, span_from_ident, span_from_spanned};
 use crate::create_table::{
     canonicalize_data_type, column_attributes_from_options, parsed_column_from_column_def,
     plain_column_names, push_unique_index, warn_expression_key,

@@ -1,6 +1,6 @@
 //! Object-name normalization, span-aware diagnostics, and foreign-key building.
 
-use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, span_from_spanned};
 use relune_core::{
     Diagnostic, ForeignKey, ReferentialAction, diagnostic::codes, normalize_identifier,
 };

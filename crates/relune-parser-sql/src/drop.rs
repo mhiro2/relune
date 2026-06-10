@@ -5,7 +5,7 @@
 //! produce an accurate final schema instead of silently retaining the
 //! created object behind a `parse_unsupported` warning.
 
-use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, span_from_spanned};
 use crate::names::{normalized_stable_id, split_object_name_with_diagnostics};
 use relune_core::{Diagnostic, Enum, Table, View, diagnostic::codes};
 use sqlparser::ast::{ObjectName, ObjectType};
