@@ -1,6 +1,6 @@
 //! `CREATE INDEX` parsing and attachment to existing tables.
 
-use crate::context::{LineOffsets, ParseContext, WithSpanOpt, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, span_from_spanned};
 use crate::create_table::{plain_column_names, warn_expression_key};
 use crate::names::{
     normalized_stable_id_for_object_name_with_diagnostics, object_name_part_to_string,

@@ -150,20 +150,6 @@ impl ParsedColumn {
     }
 }
 
-/// Extension trait to add optional span support.
-pub(crate) trait WithSpanOpt: Sized {
-    fn with_span_opt(self, span: Option<SourceSpan>) -> Self;
-}
-
-impl WithSpanOpt for Diagnostic {
-    fn with_span_opt(mut self, span: Option<SourceSpan>) -> Self {
-        if let Some(s) = span {
-            self.span = Some(s);
-        }
-        self
-    }
-}
-
 pub(crate) fn source_span_from_sql_span(
     input: &str,
     offsets: &LineOffsets,

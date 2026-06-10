@@ -1,6 +1,6 @@
 //! `CREATE TABLE` parsing and shared column helpers.
 
-use crate::context::{LineOffsets, ParseContext, ParsedColumn, WithSpanOpt, span_from_spanned};
+use crate::context::{LineOffsets, ParseContext, ParsedColumn, span_from_spanned};
 use crate::mysql_enum::canonicalize_mysql_enum_like_type;
 use crate::names::{build_foreign_key, normalized_stable_id, split_object_name_with_diagnostics};
 use crate::query_columns::columns_from_query;
