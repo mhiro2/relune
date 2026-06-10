@@ -125,7 +125,6 @@ fn render_with_schema(
             };
             let html_options = HtmlRenderOptions {
                 theme: html_theme,
-                include_legend: request.options.show_legend || request.options.show_stats,
                 ..Default::default()
             };
             let html = relune_render_html::render_html_with_overlay(
