@@ -82,7 +82,7 @@
     const svgRoot = document.querySelector(".canvas svg");
     if (!(host instanceof SVGSVGElement) || svgRoot === null) {
     } else {
-      let updateFrame = function(state) {
+      let updateFrame2 = function(state) {
         const viewX = (-state.panX / state.scale - bounds.x) / state.contentWidth * 100;
         const viewY = (-state.panY / state.scale - bounds.y) / state.contentHeight * 100;
         const viewWidth = state.viewportWidth / state.scale / state.contentWidth * 100;
@@ -91,7 +91,7 @@
         frame.setAttribute("y", String(viewY));
         frame.setAttribute("width", String(viewWidth));
         frame.setAttribute("height", String(viewHeight));
-      }, focusPoint = function(event) {
+      }, focusPoint2 = function(event) {
         const rect = hostSvg.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) {
           return;
@@ -102,7 +102,7 @@
         const contentY = bounds.y + percentY * bounds.height;
         runtime.viewport?.center(contentX, contentY);
       };
-      updateFrame2 = updateFrame, focusPoint2 = focusPoint;
+      updateFrame = updateFrame2, focusPoint = focusPoint2;
       const hostSvg = host;
       hostSvg.innerHTML = "";
       const frame = document.createElementNS("http://www.w3.org/2000/svg", "rect");
@@ -145,7 +145,7 @@
       }
       document.addEventListener("relune:viewport-changed", (event) => {
         const customEvent = event;
-        updateFrame(customEvent.detail);
+        updateFrame2(customEvent.detail);
       });
       document.addEventListener("relune:node-selected", (event) => {
         const customEvent = event;
@@ -161,12 +161,12 @@
       let dragging = false;
       hostSvg.addEventListener("mousedown", (event) => {
         dragging = true;
-        focusPoint(event);
+        focusPoint2(event);
         event.preventDefault();
       });
       document.addEventListener("mousemove", (event) => {
         if (dragging) {
-          focusPoint(event);
+          focusPoint2(event);
         }
       });
       document.addEventListener("mouseup", () => {
@@ -174,7 +174,7 @@
       });
       const initialState = runtime.viewport?.getState();
       if (initialState !== null && initialState !== void 0) {
-        updateFrame(initialState);
+        updateFrame2(initialState);
       }
       hostSvg.addEventListener("click", (event) => {
         const clickBounds = runtime.viewport?.getDiagramBounds();
@@ -194,6 +194,6 @@
       });
     }
   }
-  var updateFrame2;
-  var focusPoint2;
+  var updateFrame;
+  var focusPoint;
 })();

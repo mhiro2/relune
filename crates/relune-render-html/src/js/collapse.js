@@ -115,7 +115,7 @@
     styled.style.display = display;
   }
   {
-    let saveState = function() {
+    let saveState2 = function() {
       if (sessionStorageRef === null) {
         return;
       }
@@ -128,7 +128,7 @@
         reportSessionStorageError("saving collapsed tables", error);
       }
     };
-    saveState2 = saveState;
+    saveState = saveState2;
     const metadata = parseReluneMetadata();
     const columnCounts = {};
     if (metadata?.tables) {
@@ -156,7 +156,7 @@
     const canvas = document.getElementById("canvas");
     const svg = canvas?.querySelector("svg");
     if (svg) {
-      let applyCollapseState = function(tableId, collapse) {
+      let applyCollapseState2 = function(tableId, collapse) {
         const entry = tableNodeMap.get(tableId);
         if (entry === void 0) return;
         const tableNode = entry.node;
@@ -179,7 +179,7 @@
           if (badge) badge.style.display = "none";
         }
       };
-      applyCollapseState2 = applyCollapseState;
+      applyCollapseState = applyCollapseState2;
       const tableNodes = [];
       svg.querySelectorAll(".table-node[data-table-id]").forEach((node) => {
         const id = node.getAttribute("data-table-id");
@@ -280,7 +280,7 @@
               countBadge.style.display = "none";
             }
           }
-          saveState();
+          saveState2();
           emitViewerEvent("relune:collapse-changed", void 0);
         });
       }
@@ -294,18 +294,18 @@
           const target = new Set(tableIds);
           for (const id of collapsedTables) {
             if (!target.has(id)) {
-              applyCollapseState(id, false);
+              applyCollapseState2(id, false);
             }
           }
           for (const id of target) {
-            applyCollapseState(id, true);
+            applyCollapseState2(id, true);
           }
-          saveState();
+          saveState2();
         }
       };
       markViewerModuleReady("collapse");
     }
   }
-  var applyCollapseState2;
-  var saveState2;
+  var applyCollapseState;
+  var saveState;
 })();

@@ -35,12 +35,12 @@
       }
     }
   }
-  function updateEdgeVisibility(svg, isNodeHidden) {
+  function updateEdgeVisibility(svg, isNodeHidden2) {
     svg.querySelectorAll(".edge").forEach((edge) => {
       const fromId = edge.getAttribute("data-from");
       const toId = edge.getAttribute("data-to");
-      const fromHidden = fromId ? isNodeHidden(fromId) : false;
-      const toHidden = toId ? isNodeHidden(toId) : false;
+      const fromHidden = fromId ? isNodeHidden2(fromId) : false;
+      const toHidden = toId ? isNodeHidden2(toId) : false;
       edge.classList.toggle("hidden-by-group", fromHidden || toHidden);
     });
   }
@@ -168,12 +168,12 @@
           groupPanel.style.display = "none";
         }
       } else {
-        let applyPanelCollapsed = function(collapsed) {
+        let applyPanelCollapsed2 = function(collapsed) {
           if (!groupPanel || !collapseBtn) return;
           groupPanel.classList.toggle("group-panel-collapsed", collapsed);
           collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
           collapseBtn.textContent = collapsed ? "\u25B8" : "\u25BE";
-        }, isNodeHidden = function(nodeId) {
+        }, isNodeHidden2 = function(nodeId) {
           for (const groupId of Object.keys(groupTableMap)) {
             if (!visibleGroups[groupId]) {
               const tableIds = groupTableMap[groupId];
@@ -181,40 +181,40 @@
             }
           }
           return false;
-        }, toggleGroup = function(groupId, visible) {
+        }, toggleGroup2 = function(groupId, visible) {
           visibleGroups[groupId] = visible;
           const svg = document.querySelector(".canvas svg");
           if (!svg) return;
           applyGroupVisibility(svg, groupTableMap[groupId] ?? [], visible);
-          updateEdgeVisibility(svg, isNodeHidden);
+          updateEdgeVisibility(svg, isNodeHidden2);
           syncGroupItemClass(groupId, visible);
           emitViewerEvent("relune:groups-changed", {
             visibleGroups: { ...visibleGroups }
           });
-        }, showAllGroups = function() {
+        }, showAllGroups2 = function() {
           for (const group of groups) {
             const checkbox = document.getElementById(`group-${group.id}`);
             if (checkbox instanceof HTMLInputElement && !checkbox.checked) {
               checkbox.checked = true;
-              toggleGroup(group.id, true);
+              toggleGroup2(group.id, true);
             }
           }
-        }, hideAllGroups = function() {
+        }, hideAllGroups2 = function() {
           for (const group of groups) {
             const checkbox = document.getElementById(`group-${group.id}`);
             if (checkbox instanceof HTMLInputElement && checkbox.checked) {
               checkbox.checked = false;
-              toggleGroup(group.id, false);
+              toggleGroup2(group.id, false);
             }
           }
         };
-        applyPanelCollapsed2 = applyPanelCollapsed, isNodeHidden2 = isNodeHidden, toggleGroup2 = toggleGroup, showAllGroups2 = showAllGroups, hideAllGroups2 = hideAllGroups;
+        applyPanelCollapsed = applyPanelCollapsed2, isNodeHidden = isNodeHidden2, toggleGroup = toggleGroup2, showAllGroups = showAllGroups2, hideAllGroups = hideAllGroups2;
         const collapseBtn = document.getElementById("group-panel-collapse");
         const COLLAPSE_KEY = "relune-group-panel-collapsed";
         const sessionStorageRef = getSessionStorage();
         collapseBtn?.addEventListener("click", () => {
           const next = !groupPanel?.classList.contains("group-panel-collapsed");
-          applyPanelCollapsed(next);
+          applyPanelCollapsed2(next);
           if (sessionStorageRef === null) {
             return;
           }
@@ -226,7 +226,7 @@
         });
         try {
           if (sessionStorageRef?.getItem(COLLAPSE_KEY) === "1") {
-            applyPanelCollapsed(true);
+            applyPanelCollapsed2(true);
           }
         } catch (error) {
           reportSessionStorageError("restoring the group panel state", error);
@@ -241,15 +241,15 @@
         }
         const showAllBtn = document.getElementById("show-all-groups");
         const hideAllBtn = document.getElementById("hide-all-groups");
-        showAllBtn?.addEventListener("click", showAllGroups);
-        hideAllBtn?.addEventListener("click", hideAllGroups);
+        showAllBtn?.addEventListener("click", showAllGroups2);
+        hideAllBtn?.addEventListener("click", hideAllGroups2);
         const runtime = getViewerRuntime();
         runtime.groups = {
           setVisibility(groupId, visible) {
             const checkbox = document.getElementById(`group-${groupId}`);
             if (checkbox instanceof HTMLInputElement && checkbox.checked !== visible) {
               checkbox.checked = visible;
-              toggleGroup(groupId, visible);
+              toggleGroup2(groupId, visible);
             }
           },
           getHiddenGroups() {
@@ -258,14 +258,14 @@
         };
         markViewerModuleReady("groups");
         if (groupList) {
-          buildGroupListDOM(groups, groupList, toggleGroup);
+          buildGroupListDOM(groups, groupList, toggleGroup2);
         }
       }
     }
   }
-  var applyPanelCollapsed2;
-  var isNodeHidden2;
-  var toggleGroup2;
-  var showAllGroups2;
-  var hideAllGroups2;
+  var applyPanelCollapsed;
+  var isNodeHidden;
+  var toggleGroup;
+  var showAllGroups;
+  var hideAllGroups;
 })();
