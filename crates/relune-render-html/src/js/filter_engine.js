@@ -403,7 +403,7 @@
     const resetButton = document.getElementById("filter-reset-button");
     if (sectionEl === null || headerEl === null || summaryEl === null || facetsEl === null || svgEl === null) {
     } else {
-      let applyFilter = function() {
+      let applyFilter2 = function() {
         const nodes = svgRoot.querySelectorAll(".node");
         const active = hasActiveFilters(state);
         if (!active) {
@@ -423,7 +423,7 @@
         }
         syncEdgeDimming(svgRoot);
         if (active && state.mode === "focus") {
-          fitToVisibleNodes();
+          fitToVisibleNodes2();
         }
         const summaryItems = activeFilterSummary(state);
         for (const [facetId, details] of facetDetails) {
@@ -446,7 +446,7 @@
           mode: state.mode,
           facets: summaryItems
         });
-      }, clearAll = function() {
+      }, clearAll2 = function() {
         for (const facet of state.facets.values()) {
           facet.selectedValues.clear();
         }
@@ -464,7 +464,7 @@
             } else {
               facet.selectedValues.delete(value);
             }
-            applyFilter();
+            applyFilter2();
           };
           if (facetId === "columnType") {
             rebuildColumnTypeFacet(details, facet, "", onChange);
@@ -478,8 +478,8 @@
             );
           }
         }
-        applyFilter();
-      }, fitToVisibleNodes = function() {
+        applyFilter2();
+      }, fitToVisibleNodes2 = function() {
         const nodes = svgRoot.querySelectorAll(".node:not(.hidden-by-filter)");
         if (nodes.length === 0) {
           runtime.viewport?.fit();
@@ -502,7 +502,7 @@
           runtime.viewport?.fitToRect({ x: minX, y: minY, width: maxX - minX, height: maxY - minY });
         }
       };
-      applyFilter2 = applyFilter, clearAll2 = clearAll, fitToVisibleNodes2 = fitToVisibleNodes;
+      applyFilter = applyFilter2, clearAll = clearAll2, fitToVisibleNodes = fitToVisibleNodes2;
       const runtime = getViewerRuntime();
       const svgRoot = svgEl;
       const summaryRoot = summaryEl;
@@ -519,14 +519,14 @@
       const modeSwitcher = buildFilterModeSwitcher(state.mode, (mode) => {
         state.mode = mode;
         syncModeSwitcher(modeSwitcher, mode);
-        applyFilter();
+        applyFilter2();
       });
       const resetAllBtn = document.createElement("button");
       resetAllBtn.type = "button";
       resetAllBtn.className = "filter-section-reset";
       resetAllBtn.textContent = "Reset";
       resetAllBtn.hidden = true;
-      resetAllBtn.addEventListener("click", clearAll);
+      resetAllBtn.addEventListener("click", clearAll2);
       headerEl.append(titleSpan, modeSwitcher, resetAllBtn);
       const columnTypeQuery = { value: "" };
       const facetDetails = /* @__PURE__ */ new Map();
@@ -537,7 +537,7 @@
           } else {
             facet.selectedValues.delete(value);
           }
-          applyFilter();
+          applyFilter2();
         };
         const onSearchInput = facet.id === "columnType" ? (query) => {
           columnTypeQuery.value = query;
@@ -561,10 +561,10 @@
         }
         facetsEl.appendChild(details);
       }
-      resetButton?.addEventListener("click", clearAll);
+      resetButton?.addEventListener("click", clearAll2);
       runtime.filters = {
         reset() {
-          clearAll();
+          clearAll2();
         },
         hasActiveFilters() {
           return hasActiveFilters(state);
@@ -575,7 +575,7 @@
         setMode(mode) {
           state.mode = mode;
           syncModeSwitcher(modeSwitcher, mode);
-          applyFilter();
+          applyFilter2();
         },
         getFacetSelection(facetId) {
           const facet = state.facets.get(facetId);
@@ -598,7 +598,7 @@
               } else {
                 facet.selectedValues.delete(value);
               }
-              applyFilter();
+              applyFilter2();
             };
             if (facetId === "columnType") {
               rebuildColumnTypeFacet(details, facet, columnTypeQuery.value, onChange);
@@ -612,17 +612,17 @@
               );
             }
           }
-          applyFilter();
+          applyFilter2();
         },
         getAvailableFacets() {
           return [...state.facets.keys()];
         }
       };
       markViewerModuleReady("filters");
-      applyFilter();
+      applyFilter2();
     }
   }
-  var applyFilter2;
-  var clearAll2;
-  var fitToVisibleNodes2;
+  var applyFilter;
+  var clearAll;
+  var fitToVisibleNodes;
 })();

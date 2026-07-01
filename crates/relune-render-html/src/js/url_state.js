@@ -54,19 +54,19 @@
 
   // ts/url_state.ts
   {
-    let readHash = function() {
+    let readHash2 = function() {
       const raw = location.hash.replace(/^#/, "");
       return new URLSearchParams(raw);
-    }, maxViewportPanMagnitude = function() {
+    }, maxViewportPanMagnitude2 = function() {
       const bounds = runtime.viewport?.getDiagramBounds();
       if (bounds === null || bounds === void 0) {
         return MIN_VIEWPORT_PAN_LIMIT;
       }
       const extent = Math.max(Math.abs(bounds.x), Math.abs(bounds.y), bounds.width, bounds.height, 1);
       return Math.max(extent * MAX_VIEWPORT_SCALE * 4, MIN_VIEWPORT_PAN_LIMIT);
-    }, hasValidViewportState = function(scale, panX, panY) {
-      return Number.isFinite(scale) && Number.isFinite(panX) && Number.isFinite(panY) && scale >= MIN_VIEWPORT_SCALE && scale <= MAX_VIEWPORT_SCALE && Math.abs(panX) <= maxViewportPanMagnitude() && Math.abs(panY) <= maxViewportPanMagnitude();
-    }, matchesMetadataSearch = function(table, query) {
+    }, hasValidViewportState2 = function(scale, panX, panY) {
+      return Number.isFinite(scale) && Number.isFinite(panX) && Number.isFinite(panY) && scale >= MIN_VIEWPORT_SCALE && scale <= MAX_VIEWPORT_SCALE && Math.abs(panX) <= maxViewportPanMagnitude2() && Math.abs(panY) <= maxViewportPanMagnitude2();
+    }, matchesMetadataSearch2 = function(table, query) {
       const normalizedQuery = query.trim().toLowerCase();
       if (normalizedQuery === "") {
         return false;
@@ -80,17 +80,17 @@
         ...(table.columns ?? []).flatMap((column) => [column.name, column.data_type ?? ""])
       ].join("\n").toLowerCase();
       return searchable.includes(normalizedQuery);
-    }, hasMetadataSearchMatch = function(query) {
-      return tables.some((table) => matchesMetadataSearch(table, query));
-    }, scheduleWrite = function() {
+    }, hasMetadataSearchMatch2 = function(query) {
+      return tables.some((table) => matchesMetadataSearch2(table, query));
+    }, scheduleWrite2 = function() {
       if (writeTimer !== null) {
         clearTimeout(writeTimer);
       }
-      writeTimer = setTimeout(writeHash, 300);
-    }, scheduleDiscreteWrite = function() {
+      writeTimer = setTimeout(writeHash2, 300);
+    }, scheduleDiscreteWrite2 = function() {
       pendingPush = true;
-      scheduleWrite();
-    }, buildHashParams = function() {
+      scheduleWrite2();
+    }, buildHashParams2 = function() {
       const params = new URLSearchParams();
       const query = runtime.search?.getQuery() ?? "";
       if (query !== "") {
@@ -128,8 +128,8 @@
         params.set(PARAM_MINIMAP_VISIBLE, "1");
       }
       return params;
-    }, writeHash = function() {
-      const str = buildHashParams().toString();
+    }, writeHash2 = function() {
+      const str = buildHashParams2().toString();
       const newHash = str === "" ? "" : `#${str}`;
       if (newHash !== location.hash && newHash !== "#") {
         const url = newHash || location.pathname + location.search;
@@ -143,8 +143,8 @@
         }
       }
       pendingPush = false;
-    }, restoreFromHash = function() {
-      const params = readHash();
+    }, restoreFromHash2 = function() {
+      const params = readHash2();
       runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== "1", { silent: true });
       if (params.toString() === "") {
         return;
@@ -156,12 +156,12 @@
         const scale = Number.parseFloat(s);
         const panX = Number.parseFloat(x);
         const panY = Number.parseFloat(y);
-        if (hasValidViewportState(scale, panX, panY)) {
+        if (hasValidViewportState2(scale, panX, panY)) {
           runtime.viewport?.setState(scale, panX, panY);
         }
       }
       const query = params.get(PARAM_SEARCH);
-      if (query !== null && query !== "" && hasMetadataSearchMatch(query)) {
+      if (query !== null && query !== "" && hasMetadataSearchMatch2(query)) {
         runtime.search?.setQuery(query);
       }
       const fmRaw = params.get(PARAM_FILTER_MODE);
@@ -195,7 +195,7 @@
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
       }
-    }, expectedViewerModules = function() {
+    }, expectedViewerModules2 = function() {
       const modules = [];
       if (document.getElementById("zoom-fit") !== null) {
         modules.push("viewport");
@@ -220,7 +220,7 @@
       }
       return modules;
     };
-    readHash2 = readHash, maxViewportPanMagnitude2 = maxViewportPanMagnitude, hasValidViewportState2 = hasValidViewportState, matchesMetadataSearch2 = matchesMetadataSearch, hasMetadataSearchMatch2 = hasMetadataSearchMatch, scheduleWrite2 = scheduleWrite, scheduleDiscreteWrite2 = scheduleDiscreteWrite, buildHashParams2 = buildHashParams, writeHash2 = writeHash, restoreFromHash2 = restoreFromHash, expectedViewerModules2 = expectedViewerModules;
+    readHash = readHash2, maxViewportPanMagnitude = maxViewportPanMagnitude2, hasValidViewportState = hasValidViewportState2, matchesMetadataSearch = matchesMetadataSearch2, hasMetadataSearchMatch = hasMetadataSearchMatch2, scheduleWrite = scheduleWrite2, scheduleDiscreteWrite = scheduleDiscreteWrite2, buildHashParams = buildHashParams2, writeHash = writeHash2, restoreFromHash = restoreFromHash2, expectedViewerModules = expectedViewerModules2;
     const runtime = getViewerRuntime();
     const metadata = parseReluneMetadata();
     const tables = metadata?.tables ?? [];
@@ -252,30 +252,30 @@
     let writeTimer = null;
     let pendingPush = false;
     let restoringFromPopstate = false;
-    document.addEventListener("relune:search-changed", scheduleDiscreteWrite);
-    document.addEventListener("relune:node-selected", scheduleDiscreteWrite);
-    document.addEventListener("relune:node-cleared", scheduleDiscreteWrite);
-    document.addEventListener("relune:viewport-changed", scheduleWrite);
-    document.addEventListener("relune:filters-changed", scheduleDiscreteWrite);
-    document.addEventListener("relune:groups-changed", scheduleDiscreteWrite);
-    document.addEventListener("relune:collapse-changed", scheduleDiscreteWrite);
-    document.addEventListener("relune:minimap-toggled", scheduleDiscreteWrite);
+    document.addEventListener("relune:search-changed", scheduleDiscreteWrite2);
+    document.addEventListener("relune:node-selected", scheduleDiscreteWrite2);
+    document.addEventListener("relune:node-cleared", scheduleDiscreteWrite2);
+    document.addEventListener("relune:viewport-changed", scheduleWrite2);
+    document.addEventListener("relune:filters-changed", scheduleDiscreteWrite2);
+    document.addEventListener("relune:groups-changed", scheduleDiscreteWrite2);
+    document.addEventListener("relune:collapse-changed", scheduleDiscreteWrite2);
+    document.addEventListener("relune:minimap-toggled", scheduleDiscreteWrite2);
     window.addEventListener("popstate", () => {
       restoringFromPopstate = true;
-      restoreFromHash();
+      restoreFromHash2();
       restoringFromPopstate = false;
     });
-    waitForViewerModules(expectedViewerModules(), restoreFromHash);
+    waitForViewerModules(expectedViewerModules2(), restoreFromHash2);
   }
-  var readHash2;
-  var maxViewportPanMagnitude2;
-  var hasValidViewportState2;
-  var matchesMetadataSearch2;
-  var hasMetadataSearchMatch2;
-  var scheduleWrite2;
-  var scheduleDiscreteWrite2;
-  var buildHashParams2;
-  var writeHash2;
-  var restoreFromHash2;
-  var expectedViewerModules2;
+  var readHash;
+  var maxViewportPanMagnitude;
+  var hasValidViewportState;
+  var matchesMetadataSearch;
+  var hasMetadataSearchMatch;
+  var scheduleWrite;
+  var scheduleDiscreteWrite;
+  var buildHashParams;
+  var writeHash;
+  var restoreFromHash;
+  var expectedViewerModules;
 })();
