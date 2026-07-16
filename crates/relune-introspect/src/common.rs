@@ -350,6 +350,7 @@ fn map_table(
         foreign_keys: mapped_fks,
         indexes: mapped_indexes,
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: raw_table.table_comment,
     }
 }
@@ -363,6 +364,7 @@ fn map_column(raw_column: &RawColumn, table_stable_id: &str, is_primary_key: boo
         is_primary_key,
         comment: raw_column.column_comment.clone(),
         enum_values: None,
+        semantics: relune_core::ColumnSemantics::default(),
     }
 }
 

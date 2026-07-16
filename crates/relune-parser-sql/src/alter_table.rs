@@ -234,6 +234,7 @@ fn apply_single_alter_operation(
             let table = &mut tables[idx];
             let before_fk = table.foreign_keys.len();
             let before_ix = table.indexes.len();
+            let before_check = table.check_constraints.len();
             let pk_match = table
                 .primary_key_name
                 .as_ref()
@@ -244,6 +245,9 @@ fn apply_single_alter_operation(
             table.indexes.retain(|ix| {
                 ix.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
             });
+            table.check_constraints.retain(|c| {
+                c.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
+            });
             if pk_match {
                 for column in &mut table.columns {
                     column.is_primary_key = false;
@@ -252,6 +256,7 @@ fn apply_single_alter_operation(
             }
             if table.foreign_keys.len() == before_fk
                 && table.indexes.len() == before_ix
+                && table.check_constraints.len() == before_check
                 && !pk_match
                 && !if_exists
             {
@@ -522,11 +527,21 @@ fn apply_alter_column(
         AlterColumnOperation::SetDataType { data_type, .. } => {
             set_column_data_type(column, data_type);
         }
-        // The model tracks neither DEFAULT values nor identity/generated
-        // metadata, so these operations have no observable schema effect.
-        AlterColumnOperation::SetDefault { .. }
-        | AlterColumnOperation::DropDefault
-        | AlterColumnOperation::AddGenerated { .. } => {}
+        AlterColumnOperation::SetDefault { value } => {
+            column.semantics.default_expression = Some(value.to_string());
+        }
+        AlterColumnOperation::DropDefault => {
+            column.semantics.default_expression = None;
+        }
+        AlterColumnOperation::AddGenerated {
+            generated_as,
+            sequence_options: _,
+        } => {
+            use sqlparser::ast::GeneratedAs;
+            column.semantics.identity = Some(relune_core::IdentitySpec {
+                always: matches!(generated_as, Some(GeneratedAs::Always)),
+            });
+        }
     }
 }
 
@@ -558,6 +573,9 @@ fn redefine_column_in_table(
             column.nullable = false;
         }
         column.comment = attrs.comment;
+        // MySQL MODIFY/CHANGE fully redefines the column, so extended semantics
+        // are replaced wholesale (an omitted attribute clears the old value).
+        column.semantics = attrs.semantics;
         set_column_data_type(column, data_type);
     }
 
@@ -760,7 +778,13 @@ fn apply_add_table_constraint(
                 "ALTER TABLE ADD CONSTRAINT FOREIGN KEY",
             ));
         }
-        TableConstraint::Check(_) | TableConstraint::Index(_) => {}
+        TableConstraint::Check(check) => {
+            table.check_constraints.push(relune_core::CheckConstraint {
+                name: check.name.as_ref().map(|n| normalize_identifier(&n.value)),
+                expression: check.expr.to_string(),
+            });
+        }
+        TableConstraint::Index(_) => {}
         TableConstraint::FulltextOrSpatial(_) => {
             ctx.warn_unsupported(
                 "FULLTEXT/SPATIAL constraint",

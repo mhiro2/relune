@@ -1,6 +1,6 @@
 ---
-source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 3049
+source: crates/relune-parser-sql/src/tests.rs
+assertion_line: 1158
 expression: snapshot_data(&output)
 ---
 {
@@ -17,7 +17,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -49,7 +52,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "(datetime('now'))"
+            }
           }
         ],
         "comment": null,
@@ -83,7 +89,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -123,7 +132,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "published",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -131,7 +143,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "(datetime('now'))"
+            }
           },
           {
             "comment": null,
@@ -192,7 +207,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -277,7 +295,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -309,7 +330,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "(datetime('now'))"
+            }
           }
         ],
         "comment": null,

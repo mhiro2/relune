@@ -1183,6 +1183,7 @@ mod tests {
             foreign_keys,
             indexes,
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -1204,6 +1205,7 @@ mod tests {
             foreign_keys,
             indexes,
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -1217,6 +1219,7 @@ mod tests {
             is_primary_key: is_pk,
             comment: None,
             enum_values: None,
+            semantics: crate::model::ColumnSemantics::default(),
         }
     }
 

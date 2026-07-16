@@ -2198,6 +2198,7 @@ mod tests {
             }],
             fk_diffs: vec![],
             index_diffs: vec![],
+            check_diffs: vec![],
         });
         diff_result.summary = DiffSummary {
             tables_added: 1,

@@ -1,6 +1,6 @@
 ---
-source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 3004
+source: crates/relune-parser-sql/src/tests.rs
+assertion_line: 1113
 expression: snapshot_data(&output)
 ---
 {
@@ -41,7 +41,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -115,7 +118,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           },
           {
             "comment": null,
@@ -123,7 +129,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "updated_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -201,7 +210,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,

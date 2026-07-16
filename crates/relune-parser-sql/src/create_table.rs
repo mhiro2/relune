@@ -5,9 +5,13 @@ use crate::mysql_enum::canonicalize_mysql_enum_like_type;
 use crate::names::{build_foreign_key, normalized_stable_id, split_object_name_with_diagnostics};
 use crate::query_columns::columns_from_query;
 use relune_core::{
-    ColumnId, Diagnostic, Index, SourceSpan, Table, diagnostic::codes, normalize_identifier,
+    CheckConstraint, ColumnId, ColumnSemantics, Diagnostic, GeneratedColumn, IdentitySpec, Index,
+    SourceSpan, Table, diagnostic::codes, normalize_identifier,
 };
-use sqlparser::ast::{ColumnOption, DataType, IndexColumn, TableConstraint};
+use sqlparser::ast::{
+    ColumnOption, DataType, GeneratedAs, GeneratedExpressionMode, IndexColumn, TableConstraint,
+};
+use sqlparser::tokenizer::Token;
 
 /// Parse a CREATE TABLE statement into a Table.
 #[allow(clippy::too_many_lines)]
@@ -56,6 +60,7 @@ pub(crate) fn parse_create_table(
     let mut foreign_keys = Vec::new();
     let mut primary_key_name: Option<String> = None;
     let mut indexes: Vec<Index> = Vec::new();
+    let mut table_check_constraints: Vec<CheckConstraint> = Vec::new();
     for column in &create.columns {
         for option in &column.options {
             match &option.option {
@@ -146,8 +151,14 @@ pub(crate) fn parse_create_table(
                     "CREATE TABLE FOREIGN KEY",
                 ));
             }
-            TableConstraint::Check(_) | TableConstraint::Index(_) => {
-                // Check constraints and Index constraints are informational only
+            TableConstraint::Check(check) => {
+                table_check_constraints.push(CheckConstraint {
+                    name: check.name.as_ref().map(|n| normalize_identifier(&n.value)),
+                    expression: check.expr.to_string(),
+                });
+            }
+            TableConstraint::Index(_) => {
+                // Index constraints are informational only.
             }
             TableConstraint::FulltextOrSpatial(_) => {
                 ctx.warn_unsupported(
@@ -178,6 +189,7 @@ pub(crate) fn parse_create_table(
         indexes, // Inline UNIQUE indexes; CREATE INDEX statements are merged in a second pass.
         primary_key_name,
         comment: None, // Comments are added in third pass
+        check_constraints: table_check_constraints,
     })
 }
 
@@ -273,15 +285,20 @@ pub(crate) struct ColumnAttributes {
     pub(crate) nullable: bool,
     pub(crate) is_primary_key: bool,
     pub(crate) comment: Option<String>,
+    pub(crate) semantics: ColumnSemantics,
 }
 
-/// Interpret column options into the subset of attributes tracked by the model.
+/// Interpret column options into the subset of attributes tracked by the model,
+/// including the extended semantics (`DEFAULT`, `CHECK`, generated, identity,
+/// collation, character set, auto-increment, `ON UPDATE`) needed so `diff` does
+/// not silently miss changes to them.
 pub(crate) fn column_attributes_from_options<'a>(
     options: impl IntoIterator<Item = &'a ColumnOption>,
 ) -> ColumnAttributes {
     let mut nullable = true;
     let mut is_primary_key = false;
     let mut comment: Option<String> = None;
+    let mut semantics = ColumnSemantics::default();
 
     for option in options {
         match option {
@@ -294,20 +311,62 @@ pub(crate) fn column_attributes_from_options<'a>(
             ColumnOption::Comment(text) => {
                 comment = Some(text.clone());
             }
+            ColumnOption::Default(expr) => {
+                semantics.default_expression = Some(expr.to_string());
+            }
+            ColumnOption::Check(check) => {
+                semantics.check_constraints.push(CheckConstraint {
+                    name: check.name.as_ref().map(|n| normalize_identifier(&n.value)),
+                    expression: check.expr.to_string(),
+                });
+            }
+            ColumnOption::CharacterSet(name) => {
+                semantics.character_set = Some(name.to_string());
+            }
+            ColumnOption::Collation(name) => {
+                semantics.collation = Some(name.to_string());
+            }
+            ColumnOption::OnUpdate(expr) => {
+                semantics.on_update = Some(expr.to_string());
+            }
+            ColumnOption::Generated {
+                generated_as,
+                generation_expr,
+                generation_expr_mode,
+                ..
+            } => {
+                if let Some(expr) = generation_expr {
+                    semantics.generated = Some(GeneratedColumn {
+                        expression: expr.to_string(),
+                        stored: matches!(
+                            (generated_as, generation_expr_mode),
+                            (GeneratedAs::ExpStored, _)
+                                | (_, Some(GeneratedExpressionMode::Stored))
+                        ),
+                    });
+                } else {
+                    // `GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY` carries no
+                    // expression; record it as an identity column instead.
+                    semantics.identity = Some(IdentitySpec {
+                        always: matches!(generated_as, GeneratedAs::Always),
+                    });
+                }
+            }
+            ColumnOption::Identity(_) => {
+                semantics.identity = Some(IdentitySpec { always: true });
+                semantics.auto_increment = true;
+            }
+            ColumnOption::DialectSpecific(tokens) => {
+                if tokens_contain_auto_increment(tokens) {
+                    semantics.auto_increment = true;
+                }
+            }
             ColumnOption::Unique(_)
-            | ColumnOption::Default(_)
-            | ColumnOption::Check(_)
-            | ColumnOption::DialectSpecific(_)
-            | ColumnOption::CharacterSet(_)
-            | ColumnOption::Collation(_)
-            | ColumnOption::OnUpdate(_)
-            | ColumnOption::Generated { .. }
             | ColumnOption::ForeignKey(_)
             | ColumnOption::Materialized(_)
             | ColumnOption::Ephemeral(_)
             | ColumnOption::Alias(_)
             | ColumnOption::Options(_)
-            | ColumnOption::Identity(_)
             | ColumnOption::OnConflict(_)
             | ColumnOption::Policy(_)
             | ColumnOption::Tags(_)
@@ -320,7 +379,20 @@ pub(crate) fn column_attributes_from_options<'a>(
         nullable,
         is_primary_key,
         comment,
+        semantics,
     }
+}
+
+/// Returns `true` when a dialect-specific token stream declares an
+/// auto-increment column (`AUTO_INCREMENT` / `AUTOINCREMENT`).
+fn tokens_contain_auto_increment(tokens: &[Token]) -> bool {
+    tokens.iter().any(|token| match token {
+        Token::Word(word) => {
+            word.value.eq_ignore_ascii_case("AUTO_INCREMENT")
+                || word.value.eq_ignore_ascii_case("AUTOINCREMENT")
+        }
+        _ => false,
+    })
 }
 
 /// Render a `DataType` into the model's data-type string, canonicalizing
@@ -341,5 +413,6 @@ pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) 
         nullable: attrs.nullable,
         is_primary_key: attrs.is_primary_key,
         comment: attrs.comment,
+        semantics: attrs.semantics,
     }
 }

@@ -630,10 +630,12 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -649,6 +651,7 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -661,6 +664,7 @@ mod tests {
                     }],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
             ],
@@ -693,10 +697,12 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -712,6 +718,7 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -724,6 +731,7 @@ mod tests {
                     }],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -739,6 +747,7 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![ForeignKey {
                         name: None,
@@ -751,6 +760,7 @@ mod tests {
                     }],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -766,6 +776,7 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![
                         ForeignKey {
@@ -789,6 +800,7 @@ mod tests {
                     ],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -804,6 +816,7 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![
                         ForeignKey {
@@ -827,6 +840,7 @@ mod tests {
                     ],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
             ],

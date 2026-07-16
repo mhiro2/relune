@@ -1,5 +1,6 @@
 ---
-source: crates/relune-parser-sql/src/lib.rs
+source: crates/relune-parser-sql/src/tests.rs
+assertion_line: 1158
 expression: snapshot_data(&output)
 ---
 {
@@ -16,7 +17,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -48,7 +52,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           },
           {
             "comment": null,
@@ -56,7 +63,11 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "updated_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP",
+              "on_update": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -83,7 +94,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -99,7 +113,10 @@ expression: snapshot_data(&output)
             "id": 3,
             "is_primary_key": false,
             "name": "parent_id",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "NULL"
+            }
           }
         ],
         "comment": null,
@@ -130,7 +147,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -170,7 +190,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "stock_quantity",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -178,7 +201,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "is_active",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "1"
+            }
           },
           {
             "comment": null,
@@ -186,7 +212,10 @@ expression: snapshot_data(&output)
             "id": 8,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -216,7 +245,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,
@@ -239,7 +271,10 @@ expression: snapshot_data(&output)
             "id": 3,
             "is_primary_key": false,
             "name": "status",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "'pending'"
+            }
           },
           {
             "comment": null,
@@ -255,7 +290,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -286,7 +324,10 @@ expression: snapshot_data(&output)
             "id": 1,
             "is_primary_key": true,
             "name": "id",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "auto_increment": true
+            }
           },
           {
             "comment": null,

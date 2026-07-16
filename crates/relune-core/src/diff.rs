@@ -49,6 +49,9 @@ pub struct DiffSummary {
     pub foreign_keys_changed: usize,
     /// Total number of index changes.
     pub indexes_changed: usize,
+    /// Total number of table-level `CHECK` constraint changes.
+    #[serde(default)]
+    pub check_constraints_changed: usize,
     /// Number of views added.
     pub views_added: usize,
     /// Number of views removed.
@@ -79,6 +82,7 @@ impl DiffSummary {
             && self.columns_changed == 0
             && self.foreign_keys_changed == 0
             && self.indexes_changed == 0
+            && self.check_constraints_changed == 0
             && self.views_added == 0
             && self.views_removed == 0
             && self.views_modified == 0
@@ -99,6 +103,7 @@ impl DiffSummary {
             + self.columns_changed
             + self.foreign_keys_changed
             + self.indexes_changed
+            + self.check_constraints_changed
             + self.views_added
             + self.views_removed
             + self.views_modified
@@ -182,6 +187,7 @@ impl ColumnDiff {
             data_type: col.data_type.clone(),
             nullable: col.nullable,
             primary_key: col.is_primary_key,
+            semantics: col.semantics.clone(),
         }
     }
 }
@@ -229,7 +235,10 @@ fn diff_columns_with(
 }
 
 fn columns_differ(a: &Column, b: &Column) -> bool {
-    a.data_type != b.data_type || a.nullable != b.nullable || a.is_primary_key != b.is_primary_key
+    a.data_type != b.data_type
+        || a.nullable != b.nullable
+        || a.is_primary_key != b.is_primary_key
+        || a.semantics != b.semantics
 }
 
 fn view_columns_differ(a: &Column, b: &Column) -> bool {
@@ -373,6 +382,19 @@ impl IndexDiff {
     }
 }
 
+/// Diff for a single table-level `CHECK` constraint between two schemas.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckConstraintDiff {
+    /// Constraint name, if named.
+    pub name: Option<String>,
+    /// Kind of change.
+    pub change_kind: ChangeKind,
+    /// Old check expression (present for Modified and Removed).
+    pub old_value: Option<String>,
+    /// New check expression (present for Modified and Added).
+    pub new_value: Option<String>,
+}
+
 /// Diff for a single table between two schemas.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TableDiff {
@@ -387,6 +409,9 @@ pub struct TableDiff {
     /// Index diffs within this table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub index_diffs: Vec<IndexDiff>,
+    /// Table-level `CHECK` constraint diffs within this table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_diffs: Vec<CheckConstraintDiff>,
 }
 
 impl TableDiff {
@@ -403,6 +428,16 @@ impl TableDiff {
                 .map(ForeignKeyDiff::added)
                 .collect(),
             index_diffs: table.indexes.iter().map(IndexDiff::added).collect(),
+            check_diffs: table
+                .check_constraints
+                .iter()
+                .map(|c| CheckConstraintDiff {
+                    name: c.name.clone(),
+                    change_kind: ChangeKind::Added,
+                    old_value: None,
+                    new_value: Some(c.expression.clone()),
+                })
+                .collect(),
         }
     }
 
@@ -419,6 +454,16 @@ impl TableDiff {
                 .map(ForeignKeyDiff::removed)
                 .collect(),
             index_diffs: table.indexes.iter().map(IndexDiff::removed).collect(),
+            check_diffs: table
+                .check_constraints
+                .iter()
+                .map(|c| CheckConstraintDiff {
+                    name: c.name.clone(),
+                    change_kind: ChangeKind::Removed,
+                    old_value: Some(c.expression.clone()),
+                    new_value: None,
+                })
+                .collect(),
         }
     }
 
@@ -428,6 +473,10 @@ impl TableDiff {
         let column_diffs = diff_columns(&old_table.columns, &new_table.columns);
         let fk_diffs = Self::diff_foreign_keys(&old_table.foreign_keys, &new_table.foreign_keys);
         let index_diffs = Self::diff_indexes(&old_table.indexes, &new_table.indexes);
+        let check_diffs = Self::diff_check_constraints(
+            &old_table.check_constraints,
+            &new_table.check_constraints,
+        );
 
         Self {
             table_name: new_table.qualified_name(),
@@ -435,7 +484,62 @@ impl TableDiff {
             column_diffs,
             fk_diffs,
             index_diffs,
+            check_diffs,
         }
+    }
+
+    fn diff_check_constraints(
+        old_checks: &[crate::model::CheckConstraint],
+        new_checks: &[crate::model::CheckConstraint],
+    ) -> Vec<CheckConstraintDiff> {
+        // Key by name when present; otherwise by the (lowercased) expression so
+        // that an unnamed check keeps its identity across before/after.
+        fn key(check: &crate::model::CheckConstraint) -> String {
+            match &check.name {
+                Some(name) if !name.is_empty() => format!("n:{name}"),
+                _ => format!("e:{}", check.expression.to_lowercase()),
+            }
+        }
+
+        let old_map: HashMap<String, &crate::model::CheckConstraint> =
+            old_checks.iter().map(|c| (key(c), c)).collect();
+        let new_map: HashMap<String, &crate::model::CheckConstraint> =
+            new_checks.iter().map(|c| (key(c), c)).collect();
+        let old_keys: HashSet<&String> = old_map.keys().collect();
+        let new_keys: HashSet<&String> = new_map.keys().collect();
+
+        let mut diffs = Vec::new();
+        for k in old_keys.difference(&new_keys) {
+            let c = old_map[k.as_str()];
+            diffs.push(CheckConstraintDiff {
+                name: c.name.clone(),
+                change_kind: ChangeKind::Removed,
+                old_value: Some(c.expression.clone()),
+                new_value: None,
+            });
+        }
+        for k in new_keys.difference(&old_keys) {
+            let c = new_map[k.as_str()];
+            diffs.push(CheckConstraintDiff {
+                name: c.name.clone(),
+                change_kind: ChangeKind::Added,
+                old_value: None,
+                new_value: Some(c.expression.clone()),
+            });
+        }
+        for k in old_keys.intersection(&new_keys) {
+            let old_c = old_map[k.as_str()];
+            let new_c = new_map[k.as_str()];
+            if old_c.expression != new_c.expression {
+                diffs.push(CheckConstraintDiff {
+                    name: new_c.name.clone(),
+                    change_kind: ChangeKind::Modified,
+                    old_value: Some(old_c.expression.clone()),
+                    new_value: Some(new_c.expression.clone()),
+                });
+            }
+        }
+        diffs
     }
 
     fn diff_foreign_keys(old_fks: &[ForeignKey], new_fks: &[ForeignKey]) -> Vec<ForeignKeyDiff> {
@@ -614,7 +718,10 @@ impl TableDiff {
     /// Returns true if this table has any changes.
     #[must_use]
     pub const fn has_changes(&self) -> bool {
-        !self.column_diffs.is_empty() || !self.fk_diffs.is_empty() || !self.index_diffs.is_empty()
+        !self.column_diffs.is_empty()
+            || !self.fk_diffs.is_empty()
+            || !self.index_diffs.is_empty()
+            || !self.check_diffs.is_empty()
     }
 }
 
@@ -990,6 +1097,8 @@ pub fn diff_schemas(before: &Schema, after: &Schema) -> SchemaDiff {
     let columns_changed: usize = modified_tables.iter().map(|t| t.column_diffs.len()).sum();
     let foreign_keys_changed: usize = modified_tables.iter().map(|t| t.fk_diffs.len()).sum();
     let indexes_changed: usize = modified_tables.iter().map(|t| t.index_diffs.len()).sum();
+    let check_constraints_changed: usize =
+        modified_tables.iter().map(|t| t.check_diffs.len()).sum();
     let view_columns_changed: usize = modified_views
         .iter()
         .map(|view| view.column_diffs.len())
@@ -1010,6 +1119,7 @@ pub fn diff_schemas(before: &Schema, after: &Schema) -> SchemaDiff {
         columns_changed,
         foreign_keys_changed,
         indexes_changed,
+        check_constraints_changed,
         views_added: added_views.len(),
         views_removed: removed_views.len(),
         views_modified: modified_views.len(),
@@ -1061,6 +1171,7 @@ mod tests {
                     is_primary_key: pk,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 })
                 .collect(),
             foreign_keys: fks
@@ -1081,6 +1192,7 @@ mod tests {
                 .collect(),
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -1101,6 +1213,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 })
                 .collect(),
             definition: definition.map(ToString::to_string),
@@ -1617,6 +1730,7 @@ mod tests {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: crate::model::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(1),
@@ -1626,6 +1740,7 @@ mod tests {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: crate::model::ColumnSemantics::default(),
                     },
                 ],
                 definition: Some("SELECT id, email FROM users".to_string()),
@@ -1721,6 +1836,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 definition: Some("SELECT id FROM users".to_string()),
             }],
@@ -1742,6 +1858,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 definition: Some("SELECT id FROM users WHERE active".to_string()),
             }],
@@ -1811,6 +1928,7 @@ mod tests {
                 columns_changed: 0,
                 foreign_keys_changed: 0,
                 indexes_changed: 0,
+                check_constraints_changed: 0,
                 views_added: 0,
                 views_removed: 0,
                 views_modified: 0,
@@ -1833,5 +1951,119 @@ mod tests {
         assert_eq!(format!("{}", ChangeKind::Added), "added");
         assert_eq!(format!("{}", ChangeKind::Removed), "removed");
         assert_eq!(format!("{}", ChangeKind::Modified), "modified");
+    }
+
+    #[test]
+    fn test_column_default_change_is_detected() {
+        let mut before = create_test_table("t", vec![("enabled", "boolean", false, false)], vec![]);
+        before.columns[0].semantics.default_expression = Some("false".to_string());
+        let mut after = before.clone();
+        after.columns[0].semantics.default_expression = Some("true".to_string());
+
+        let schema_before = Schema {
+            tables: vec![before],
+            views: vec![],
+            enums: vec![],
+        };
+        let schema_after = Schema {
+            tables: vec![after],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&schema_before, &schema_after);
+        assert_eq!(diff.summary.columns_changed, 1);
+        let table = &diff.modified_tables[0];
+        assert_eq!(table.column_diffs.len(), 1);
+        assert_eq!(table.column_diffs[0].change_kind, ChangeKind::Modified);
+        assert_eq!(
+            table.column_diffs[0]
+                .new_value
+                .as_ref()
+                .unwrap()
+                .semantics
+                .default_expression
+                .as_deref(),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn test_column_check_change_is_detected() {
+        let mut before = create_test_table("t", vec![("amount", "integer", false, false)], vec![]);
+        before.columns[0].semantics.check_constraints = vec![crate::model::CheckConstraint {
+            name: None,
+            expression: "amount >= 0".to_string(),
+        }];
+        // Removing the column-level check must register as a change.
+        let mut after = before.clone();
+        after.columns[0].semantics.check_constraints.clear();
+
+        let schema_before = Schema {
+            tables: vec![before],
+            views: vec![],
+            enums: vec![],
+        };
+        let schema_after = Schema {
+            tables: vec![after],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&schema_before, &schema_after);
+        assert_eq!(diff.summary.columns_changed, 1);
+    }
+
+    #[test]
+    fn test_table_check_constraint_add_remove_and_change() {
+        let base = create_test_table("t", vec![("amount", "integer", false, false)], vec![]);
+
+        let mut with_check = base.clone();
+        with_check.check_constraints = vec![crate::model::CheckConstraint {
+            name: Some("amount_positive".to_string()),
+            expression: "amount >= 0".to_string(),
+        }];
+
+        let empty = Schema {
+            tables: vec![base],
+            views: vec![],
+            enums: vec![],
+        };
+        let checked = Schema {
+            tables: vec![with_check.clone()],
+            views: vec![],
+            enums: vec![],
+        };
+
+        // Added.
+        let added = diff_schemas(&empty, &checked);
+        assert_eq!(added.summary.check_constraints_changed, 1);
+        assert_eq!(
+            added.modified_tables[0].check_diffs[0].change_kind,
+            ChangeKind::Added
+        );
+
+        // Removed.
+        let removed = diff_schemas(&checked, &empty);
+        assert_eq!(removed.summary.check_constraints_changed, 1);
+        assert_eq!(
+            removed.modified_tables[0].check_diffs[0].change_kind,
+            ChangeKind::Removed
+        );
+
+        // Modified expression (same constraint name).
+        let mut changed_table = with_check;
+        changed_table.check_constraints[0].expression = "amount > 0".to_string();
+        let changed = Schema {
+            tables: vec![changed_table],
+            views: vec![],
+            enums: vec![],
+        };
+        let modified = diff_schemas(&checked, &changed);
+        assert_eq!(modified.summary.check_constraints_changed, 1);
+        assert_eq!(
+            modified.modified_tables[0].check_diffs[0].change_kind,
+            ChangeKind::Modified
+        );
     }
 }

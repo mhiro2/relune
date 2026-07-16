@@ -1,6 +1,6 @@
 ---
-source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 3004
+source: crates/relune-parser-sql/src/tests.rs
+assertion_line: 1113
 expression: snapshot_data(&output)
 ---
 {
@@ -57,7 +57,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "hire_date",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "CURRENT_DATE"
+            }
           },
           {
             "comment": null,
@@ -65,7 +68,14 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "salary",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "salary > 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -73,7 +83,10 @@ expression: snapshot_data(&output)
             "id": 8,
             "is_primary_key": false,
             "name": "is_active",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "true"
+            }
           }
         ],
         "comment": null,
@@ -158,7 +171,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "level",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -174,7 +190,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "sort_order",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -182,7 +201,10 @@ expression: snapshot_data(&output)
             "id": 8,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -267,7 +289,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -346,7 +371,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "depth",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -354,7 +382,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -424,7 +455,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -487,7 +521,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -550,7 +587,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -613,7 +653,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "budget",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -621,7 +664,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -691,7 +737,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "status",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "'planning'"
+            }
           },
           {
             "comment": null,
@@ -715,7 +764,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -786,7 +838,10 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -849,7 +904,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -904,7 +962,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,

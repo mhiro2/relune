@@ -54,6 +54,78 @@ fn parses_primary_keys_and_foreign_keys() {
 }
 
 #[test]
+fn captures_column_and_table_semantics() {
+    let sql = r"
+    CREATE TABLE accounts (
+      id BIGINT PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT false,
+      amount INTEGER NOT NULL CHECK (amount >= 0),
+      full_name TEXT GENERATED ALWAYS AS (id) STORED,
+      CONSTRAINT amount_and_id CHECK (amount < id)
+    );
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let accounts = &schema.tables[0];
+
+    let enabled = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "enabled")
+        .unwrap();
+    assert_eq!(
+        enabled.semantics.default_expression.as_deref(),
+        Some("false")
+    );
+
+    let amount = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "amount")
+        .unwrap();
+    assert_eq!(amount.semantics.check_constraints.len(), 1);
+    assert_eq!(
+        amount.semantics.check_constraints[0].expression,
+        "amount >= 0"
+    );
+
+    let full_name = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "full_name")
+        .unwrap();
+    let generated = full_name.semantics.generated.as_ref().unwrap();
+    assert!(generated.stored);
+    assert_eq!(generated.expression, "id");
+
+    assert_eq!(accounts.check_constraints.len(), 1);
+    assert_eq!(
+        accounts.check_constraints[0].name.as_deref(),
+        Some("amount_and_id")
+    );
+    assert_eq!(accounts.check_constraints[0].expression, "amount < id");
+}
+
+#[test]
+fn alter_column_default_change_is_captured() {
+    let sql = r"
+    CREATE TABLE t (id INT PRIMARY KEY, enabled BOOLEAN DEFAULT false);
+    ALTER TABLE t ALTER COLUMN enabled SET DEFAULT true;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let enabled = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "enabled")
+        .unwrap();
+    assert_eq!(
+        enabled.semantics.default_expression.as_deref(),
+        Some("true")
+    );
+}
+
+#[test]
 fn parses_target_schema_for_create_table_foreign_keys() {
     let sql = r"
     CREATE TABLE auth.accounts (
@@ -1455,10 +1527,12 @@ fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
             is_primary_key: false,
             comment: None,
             enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
         }],
         foreign_keys: vec![],
         indexes: vec![],
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: None,
     }];
 

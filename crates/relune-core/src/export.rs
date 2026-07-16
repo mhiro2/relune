@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Column, Enum, ForeignKey, Index, Schema, Table, View};
+use crate::model::{Column, ColumnSemantics, Enum, ForeignKey, Index, Schema, Table, View};
 
 /// Stable schema export format for JSON serialization.
 /// This format is designed for long-term stability and should not
@@ -71,6 +71,9 @@ pub struct ColumnExport {
     pub nullable: bool,
     /// Whether this column is part of the primary key.
     pub primary_key: bool,
+    /// Extended column semantics (`DEFAULT`, `CHECK`, generated, identity, ...).
+    #[serde(default, skip_serializing_if = "ColumnSemantics::is_empty")]
+    pub semantics: ColumnSemantics,
 }
 
 /// Export format for a foreign key.
@@ -171,6 +174,7 @@ fn export_column(col: &Column) -> ColumnExport {
         data_type: col.data_type.clone(),
         nullable: col.nullable,
         primary_key: col.is_primary_key,
+        semantics: col.semantics.clone(),
     }
 }
 
@@ -323,6 +327,7 @@ fn import_table(index: usize, export: &TableExport) -> Table {
         foreign_keys: export.foreign_keys.iter().map(import_fk).collect(),
         indexes: export.indexes.iter().map(import_index).collect(),
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: None,
     }
 }
@@ -339,6 +344,7 @@ fn import_column(index: usize, export: &ColumnExport) -> Column {
         is_primary_key: export.primary_key,
         comment: None,
         enum_values: None,
+        semantics: export.semantics.clone(),
     }
 }
 
@@ -435,6 +441,7 @@ mod tests {
             is_primary_key: primary_key,
             comment: None,
             enum_values: None,
+            semantics: crate::model::ColumnSemantics::default(),
         }
     }
 
@@ -455,6 +462,7 @@ mod tests {
             foreign_keys,
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -491,12 +499,14 @@ mod tests {
                     data_type: "bigint".to_string(),
                     nullable: false,
                     primary_key: true,
+                    semantics: crate::model::ColumnSemantics::default(),
                 },
                 ColumnExport {
                     name: "email".to_string(),
                     data_type: "varchar(255)".to_string(),
                     nullable: false,
                     primary_key: false,
+                    semantics: crate::model::ColumnSemantics::default(),
                 },
             ],
             foreign_keys: vec![],
@@ -686,6 +696,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 definition: Some("SELECT id FROM users WHERE active".to_string()),
             }],
@@ -820,6 +831,7 @@ mod tests {
                     data_type: "uuid".to_string(),
                     nullable: false,
                     primary_key: true,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
@@ -834,12 +846,14 @@ mod tests {
                         data_type: "uuid".to_string(),
                         nullable: false,
                         primary_key: true,
+                        semantics: crate::model::ColumnSemantics::default(),
                     },
                     ColumnExport {
                         name: "account_id".to_string(),
                         data_type: "uuid".to_string(),
                         nullable: false,
                         primary_key: false,
+                        semantics: crate::model::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![ForeignKeyExport {

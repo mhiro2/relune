@@ -134,6 +134,7 @@ pub(crate) struct ParsedColumn {
     pub(crate) nullable: bool,
     pub(crate) is_primary_key: bool,
     pub(crate) comment: Option<String>,
+    pub(crate) semantics: relune_core::ColumnSemantics,
 }
 
 impl ParsedColumn {
@@ -146,6 +147,7 @@ impl ParsedColumn {
             is_primary_key: self.is_primary_key,
             comment: self.comment,
             enum_values: None,
+            semantics: self.semantics,
         }
     }
 }

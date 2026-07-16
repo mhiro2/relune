@@ -25,6 +25,7 @@ pub(crate) fn columns_from_query(query: &sqlparser::ast::Query) -> Vec<Column> {
             is_primary_key: false,
             comment: None,
             enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
         })
         .collect()
 }

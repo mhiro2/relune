@@ -1,6 +1,6 @@
 ---
-source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 3004
+source: crates/relune-parser-sql/src/tests.rs
+assertion_line: 1113
 expression: snapshot_data(&output)
 ---
 {
@@ -57,7 +57,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           },
           {
             "comment": null,
@@ -65,7 +68,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "updated_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -132,7 +138,10 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -224,7 +233,14 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "price",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "price >= 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -232,7 +248,14 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "compare_at_price",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "compare_at_price >= 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -240,7 +263,15 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "stock_quantity",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "stock_quantity >= 0"
+                }
+              ],
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -248,7 +279,10 @@ expression: snapshot_data(&output)
             "id": 8,
             "is_primary_key": false,
             "name": "is_active",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "true"
+            }
           },
           {
             "comment": null,
@@ -256,7 +290,10 @@ expression: snapshot_data(&output)
             "id": 9,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           },
           {
             "comment": null,
@@ -264,7 +301,10 @@ expression: snapshot_data(&output)
             "id": 10,
             "is_primary_key": false,
             "name": "updated_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -328,7 +368,10 @@ expression: snapshot_data(&output)
             "id": 3,
             "is_primary_key": false,
             "name": "is_primary",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "false"
+            }
           },
           {
             "comment": null,
@@ -336,7 +379,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "sort_order",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "0"
+            }
           }
         ],
         "comment": null,
@@ -410,7 +456,10 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "status",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "'pending'"
+            }
           },
           {
             "comment": null,
@@ -418,7 +467,14 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "subtotal",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "subtotal >= 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -426,7 +482,15 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "tax_amount",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "tax_amount >= 0"
+                }
+              ],
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -434,7 +498,15 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "shipping_amount",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "shipping_amount >= 0"
+                }
+              ],
+              "default_expression": "0"
+            }
           },
           {
             "comment": null,
@@ -442,7 +514,14 @@ expression: snapshot_data(&output)
             "id": 8,
             "is_primary_key": false,
             "name": "total_amount",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "total_amount >= 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -450,7 +529,10 @@ expression: snapshot_data(&output)
             "id": 9,
             "is_primary_key": false,
             "name": "currency",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "'USD'"
+            }
           },
           {
             "comment": null,
@@ -466,7 +548,10 @@ expression: snapshot_data(&output)
             "id": 11,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           },
           {
             "comment": null,
@@ -474,7 +559,10 @@ expression: snapshot_data(&output)
             "id": 12,
             "is_primary_key": false,
             "name": "updated_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -558,7 +646,14 @@ expression: snapshot_data(&output)
             "id": 4,
             "is_primary_key": false,
             "name": "quantity",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "quantity > 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -566,7 +661,14 @@ expression: snapshot_data(&output)
             "id": 5,
             "is_primary_key": false,
             "name": "unit_price",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "unit_price >= 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -574,7 +676,14 @@ expression: snapshot_data(&output)
             "id": 6,
             "is_primary_key": false,
             "name": "total_price",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "total_price >= 0"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -582,7 +691,10 @@ expression: snapshot_data(&output)
             "id": 7,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
@@ -655,7 +767,14 @@ expression: snapshot_data(&output)
             "id": 3,
             "is_primary_key": false,
             "name": "address_type",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "check_constraints": [
+                {
+                  "expression": "address_type IN ('billing', 'shipping')"
+                }
+              ]
+            }
           },
           {
             "comment": null,
@@ -711,7 +830,10 @@ expression: snapshot_data(&output)
             "id": 10,
             "is_primary_key": false,
             "name": "is_default",
-            "nullable": false
+            "nullable": false,
+            "semantics": {
+              "default_expression": "false"
+            }
           },
           {
             "comment": null,
@@ -719,7 +841,10 @@ expression: snapshot_data(&output)
             "id": 11,
             "is_primary_key": false,
             "name": "created_at",
-            "nullable": true
+            "nullable": true,
+            "semantics": {
+              "default_expression": "CURRENT_TIMESTAMP"
+            }
           }
         ],
         "comment": null,
