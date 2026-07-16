@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/tests.rs
-assertion_line: 1113
+assertion_line: 1185
 expression: snapshot_data(&output)
 ---
 {
@@ -52,17 +52,25 @@ expression: snapshot_data(&output)
         "id": 1,
         "indexes": [
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": "idx_users_email"
           }
         ],
@@ -152,18 +160,27 @@ expression: snapshot_data(&output)
         "id": 2,
         "indexes": [
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_posts_user_id"
           },
           {
-            "columns": [
-              "published_at"
-            ],
             "is_unique": false,
-            "name": "idx_posts_published_at"
+            "key_parts": [
+              {
+                "column": {
+                  "name": "published_at"
+                }
+              }
+            ],
+            "name": "idx_posts_published_at",
+            "predicate": "published_at IS NOT NULL"
           }
         ],
         "name": "posts",
@@ -244,17 +261,25 @@ expression: snapshot_data(&output)
         "id": 3,
         "indexes": [
           {
-            "columns": [
-              "post_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "post_id"
+                }
+              }
+            ],
             "name": "idx_comments_post_id"
           },
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_comments_user_id"
           }
         ],

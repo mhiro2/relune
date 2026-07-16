@@ -192,7 +192,9 @@ fn apply_single_alter_operation(
 
                     let table = &mut tables[idx];
                     table.columns.remove(p);
-                    table.indexes.retain(|ix| !ix.columns.contains(&col_name));
+                    table
+                        .indexes
+                        .retain(|ix| !ix.column_names().iter().any(|c| *c == col_name));
 
                     for (table_idx, table) in tables.iter_mut().enumerate() {
                         let mut fk_idx = 0usize;
@@ -473,9 +475,11 @@ fn rename_column_in_tables(tables: &mut [Table], idx: usize, old: &str, new: &st
         }
     }
     for ix in &mut table.indexes {
-        for c in &mut ix.columns {
-            if *c == old {
-                new.clone_into(c);
+        for part in &mut ix.key_parts {
+            if let relune_core::IndexKey::Column(column) = part
+                && column.name == old
+            {
+                new.clone_into(&mut column.name);
             }
         }
     }

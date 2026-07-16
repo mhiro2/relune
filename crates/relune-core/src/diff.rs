@@ -11,6 +11,18 @@ use std::collections::{HashMap, HashSet};
 use crate::export::{ColumnExport, ForeignKeyExport, IndexExport};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
 
+/// Order-preserving, case-insensitive fingerprint of an index used to decide
+/// whether two indexes with the same identity actually differ: key parts
+/// (`0` = column, `1` = expression), uniqueness, predicate, `INCLUDE`
+/// columns, and access method.
+type IndexSignature = (
+    Vec<(u8, String)>,
+    bool,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+);
+
 /// The kind of change detected in a diff.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -374,11 +386,7 @@ impl IndexDiff {
     }
 
     fn export_index(idx: &crate::model::Index) -> IndexExport {
-        IndexExport {
-            name: idx.name.clone(),
-            columns: idx.columns.clone(),
-            unique: idx.is_unique,
-        }
+        IndexExport::from_index(idx)
     }
 }
 
@@ -694,13 +702,19 @@ impl TableDiff {
         match &idx.name {
             Some(name) if !name.is_empty() => Cow::Borrowed(name),
             // Build an unambiguous key for unnamed indexes by length-prefixing
-            // each lowercased column name. A naive `_`-join collides on
-            // boundary cases such as `["a_b", "c"]` vs `["a", "b_c"]`.
+            // each lowercased key part. A naive `_`-join collides on boundary
+            // cases such as `["a_b", "c"]` vs `["a", "b_c"]`. Column and
+            // expression parts are tagged so a column named like an expression
+            // does not collide with a genuine expression part.
             _ => {
                 let mut key = String::from("idx_");
-                for column in &idx.columns {
-                    let lowered = column.to_lowercase();
-                    Self::push_key_part(&mut key, &lowered);
+                for part in &idx.key_parts {
+                    let (tag, text) = match part {
+                        crate::model::IndexKey::Column(column) => ("c", column.name.to_lowercase()),
+                        crate::model::IndexKey::Expression(expr) => ("e", expr.to_lowercase()),
+                    };
+                    key.push_str(tag);
+                    Self::push_key_part(&mut key, &text);
                 }
                 Cow::Owned(key)
             }
@@ -708,11 +722,28 @@ impl TableDiff {
     }
 
     fn indexes_differ(a: &crate::model::Index, b: &crate::model::Index) -> bool {
-        Self::index_columns_lower(a) != Self::index_columns_lower(b) || a.is_unique != b.is_unique
+        Self::index_signature(a) != Self::index_signature(b)
     }
 
-    fn index_columns_lower(idx: &crate::model::Index) -> Vec<String> {
-        idx.columns.iter().map(|c| c.to_lowercase()).collect()
+    fn index_signature(idx: &crate::model::Index) -> IndexSignature {
+        let key_parts = idx
+            .key_parts
+            .iter()
+            .map(|part| match part {
+                crate::model::IndexKey::Column(column) => (0u8, column.name.to_lowercase()),
+                crate::model::IndexKey::Expression(expr) => (1u8, expr.to_lowercase()),
+            })
+            .collect();
+        (
+            key_parts,
+            idx.is_unique,
+            idx.predicate.as_ref().map(|p| p.to_lowercase()),
+            idx.included_columns
+                .iter()
+                .map(|c| c.to_lowercase())
+                .collect(),
+            idx.method.as_ref().map(|m| m.to_lowercase()),
+        )
     }
 
     /// Returns true if this table has any changes.
@@ -1944,6 +1975,37 @@ mod tests {
         let json = serde_json::to_string(&diff).unwrap();
         let parsed: SchemaDiff = serde_json::from_str(&json).unwrap();
         assert_eq!(diff, parsed);
+    }
+
+    #[test]
+    fn test_index_predicate_change_is_detected() {
+        let mut before = create_test_table("t", vec![("email", "text", false, false)], vec![]);
+        before.indexes = vec![crate::model::Index::from_columns(
+            Some("idx_email".to_string()),
+            vec!["email".to_string()],
+            false,
+        )];
+        // Same key, but the "after" index becomes partial.
+        let mut after = before.clone();
+        after.indexes[0].predicate = Some("active".to_string());
+
+        let schema_before = Schema {
+            tables: vec![before],
+            views: vec![],
+            enums: vec![],
+        };
+        let schema_after = Schema {
+            tables: vec![after],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&schema_before, &schema_after);
+        assert_eq!(diff.summary.indexes_changed, 1);
+        assert_eq!(
+            diff.modified_tables[0].index_diffs[0].change_kind,
+            ChangeKind::Modified
+        );
     }
 
     #[test]

@@ -7,7 +7,8 @@ use sqlx::sqlite::SqlitePool;
 
 use crate::catalog::raw_schema;
 use crate::common::{
-    RawColumn, RawForeignKey, RawIndex, RawSchema, RawTable, RawView, parse_referential_action,
+    RawColumn, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable, RawView,
+    parse_referential_action,
 };
 use crate::connect::statement_timeout;
 use crate::error::IntrospectError;
@@ -245,7 +246,6 @@ struct SqliteIndexListRow {
     #[sqlx(rename = "unique")]
     is_unique_flag: i64,
     origin: String,
-    #[allow(dead_code)]
     partial: i64,
 }
 
@@ -315,20 +315,131 @@ async fn collect_table_indexes(
         let quoted_idx = quote_ident(&index_name)?;
         let mut info = pragma_index_info(pool, &quoted_idx).await?;
         info.sort_by_key(|r| r.seqno);
-        let col_names: Vec<String> = info.into_iter().filter_map(|r| r.name).collect();
-        if col_names.is_empty() {
+
+        // PRAGMA index_info reports NULL column names for expression key parts
+        // and exposes no predicate. Recover both from the CREATE INDEX text so
+        // expression indexes are neither dropped nor mistaken for plain-column
+        // indexes.
+        let def_sql = fetch_index_sql(pool, &index_name).await?;
+        let (key_defs, predicate) = def_sql
+            .as_deref()
+            .map(split_sqlite_index_def)
+            .unwrap_or_default();
+
+        let key_parts: Vec<RawIndexKeyPart> = info
+            .iter()
+            .enumerate()
+            .map(|(pos, r)| match &r.name {
+                Some(name) => RawIndexKeyPart::column(name.clone()),
+                None => RawIndexKeyPart::Expression(
+                    key_defs
+                        .get(pos)
+                        .cloned()
+                        .unwrap_or_else(|| "(expression)".to_string()),
+                ),
+            })
+            .collect();
+        if key_parts.is_empty() {
             continue;
         }
         out.push(RawIndex {
             index_name: index_name.clone(),
             schema_name: MAIN_SCHEMA.to_string(),
             table_name: table_name.to_string(),
-            columns: col_names,
+            key_parts,
             is_unique: entry.is_unique_flag != 0,
             is_primary: false,
+            predicate: if entry.partial != 0 { predicate } else { None },
+            included_columns: Vec::new(),
+            method: None,
         });
     }
     Ok(out)
+}
+
+/// Fetch the `CREATE INDEX` text for a named index from `sqlite_master`.
+async fn fetch_index_sql(
+    pool: &SqlitePool,
+    index_name: &str,
+) -> Result<Option<String>, IntrospectError> {
+    with_query_timeout("sqlite_master index sql", async {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1",
+        )
+        .bind(index_name)
+        .fetch_optional(pool)
+        .await
+        .map(Option::flatten)
+        .map_err(|e| IntrospectError::query_with_source("Failed to read index definition", e))
+    })
+    .await
+}
+
+/// Split a `CREATE INDEX ... ON t (<key list>) [WHERE <predicate>]` definition
+/// into the ordered key-part texts and the optional partial predicate.
+///
+/// Best-effort parse over the raw DDL: it locates the top-level parenthesised
+/// key list and any trailing `WHERE`, splitting the key list on top-level
+/// commas. Used only to label expression key parts and recover the predicate;
+/// plain-column parts come from `PRAGMA index_info`.
+fn split_sqlite_index_def(sql: &str) -> (Vec<String>, Option<String>) {
+    let bytes = sql.as_bytes();
+    let Some(open) = sql.find('(') else {
+        return (Vec::new(), None);
+    };
+    let mut depth = 0usize;
+    let mut close = None;
+    for (i, &b) in bytes.iter().enumerate().skip(open) {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return (Vec::new(), None);
+    };
+
+    let inner = &sql[open + 1..close];
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, &b) in inner.as_bytes().iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                parts.push(inner[start..i].trim().to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(inner[start..].trim().to_string());
+
+    let tail = &sql[close + 1..];
+    let predicate = tail
+        .char_indices()
+        .find_map(|(i, _)| {
+            let rest = &tail[i..];
+            let upper = rest
+                .get(..5)
+                .is_some_and(|s| s.eq_ignore_ascii_case("where"));
+            if upper {
+                Some(rest[5..].trim().to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|p| !p.is_empty());
+
+    (parts, predicate)
 }
 
 #[cfg(test)]

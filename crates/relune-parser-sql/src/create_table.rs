@@ -213,7 +213,7 @@ pub(crate) fn push_unique_index(
             return true;
         }
         let existing_lower: Vec<String> = existing
-            .columns
+            .column_names()
             .iter()
             .map(|c| c.to_ascii_lowercase())
             .collect();
@@ -222,11 +222,7 @@ pub(crate) fn push_unique_index(
     if already_present {
         return;
     }
-    indexes.push(Index {
-        name,
-        columns,
-        is_unique: true,
-    });
+    indexes.push(Index::from_columns(name, columns, true));
 }
 
 /// Extract the referenced column name from an `IndexColumn`, if it is a plain
@@ -257,6 +253,46 @@ fn extract_column_name(index_col: &IndexColumn) -> Option<String> {
 /// drop the whole index/constraint when this returns `None`.
 pub(crate) fn plain_column_names(columns: &[IndexColumn]) -> Option<Vec<String>> {
     columns.iter().map(extract_column_name).collect()
+}
+
+/// Build structured [`relune_core::IndexKey`] parts from a parsed index column
+/// list, preserving sort/nulls ordering for plain columns and recording
+/// functional/expression parts as [`relune_core::IndexKey::Expression`].
+pub(crate) fn index_key_parts(columns: &[IndexColumn]) -> Vec<relune_core::IndexKey> {
+    use relune_core::{IndexColumn as ModelIndexColumn, IndexKey, NullsOrder, SortOrder};
+    use sqlparser::ast::Expr;
+
+    columns
+        .iter()
+        .map(|index_col| {
+            let order_by = &index_col.column;
+            let name = match &order_by.expr {
+                Expr::Identifier(ident) => Some(normalize_identifier(&ident.value)),
+                Expr::CompoundIdentifier(parts) => {
+                    parts.last().map(|ident| normalize_identifier(&ident.value))
+                }
+                _ => None,
+            };
+            match name {
+                Some(name) => IndexKey::Column(ModelIndexColumn {
+                    name,
+                    order: order_by
+                        .options
+                        .asc
+                        .map(|asc| if asc { SortOrder::Asc } else { SortOrder::Desc }),
+                    nulls: order_by.options.nulls_first.map(|first| {
+                        if first {
+                            NullsOrder::First
+                        } else {
+                            NullsOrder::Last
+                        }
+                    }),
+                    prefix_length: None,
+                }),
+                None => IndexKey::Expression(order_by.expr.to_string()),
+            }
+        })
+        .collect()
 }
 
 /// Warn that an index or key is dropped because it contains a

@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/tests.rs
-assertion_line: 1113
+assertion_line: 1185
 expression: snapshot_data(&output)
 ---
 {
@@ -96,24 +96,36 @@ expression: snapshot_data(&output)
         "id": 1,
         "indexes": [
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": "idx_tenants_slug"
           },
           {
-            "columns": [
-              "plan"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "plan"
+                }
+              }
+            ],
             "name": "idx_tenants_plan"
           }
         ],
@@ -219,33 +231,57 @@ expression: snapshot_data(&output)
         "id": 2,
         "indexes": [
           {
-            "columns": [
-              "tenant_id",
-              "email"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_users_tenant_id"
           },
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": "idx_users_email"
           },
           {
-            "columns": [
-              "tenant_id",
-              "email"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": "idx_users_tenant_email"
           }
         ],
@@ -327,18 +363,30 @@ expression: snapshot_data(&output)
         "id": 3,
         "indexes": [
           {
-            "columns": [
-              "tenant_id",
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_roles_tenant_id"
           }
         ],
@@ -423,17 +471,25 @@ expression: snapshot_data(&output)
         "id": 4,
         "indexes": [
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_user_roles_user_id"
           },
           {
-            "columns": [
-              "role_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "role_id"
+                }
+              }
+            ],
             "name": "idx_user_roles_role_id"
           }
         ],
@@ -489,10 +545,14 @@ expression: snapshot_data(&output)
         "id": 5,
         "indexes": [
           {
-            "columns": [
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           }
         ],
@@ -547,17 +607,25 @@ expression: snapshot_data(&output)
         "id": 6,
         "indexes": [
           {
-            "columns": [
-              "role_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "role_id"
+                }
+              }
+            ],
             "name": "idx_role_permissions_role_id"
           },
           {
-            "columns": [
-              "permission_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "permission_id"
+                }
+              }
+            ],
             "name": "idx_role_permissions_perm_id"
           }
         ],
@@ -685,24 +753,36 @@ expression: snapshot_data(&output)
         "id": 7,
         "indexes": [
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_projects_tenant_id"
           },
           {
-            "columns": [
-              "status"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "status"
+                }
+              }
+            ],
             "name": "idx_projects_status"
           },
           {
-            "columns": [
-              "created_by"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "created_by"
+                }
+              }
+            ],
             "name": "idx_projects_created_by"
           }
         ],
@@ -773,10 +853,14 @@ expression: snapshot_data(&output)
         "id": 8,
         "indexes": [
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_teams_tenant_id"
           }
         ],
@@ -853,17 +937,25 @@ expression: snapshot_data(&output)
         "id": 9,
         "indexes": [
           {
-            "columns": [
-              "project_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "project_id"
+                }
+              }
+            ],
             "name": "idx_project_teams_project"
           },
           {
-            "columns": [
-              "team_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "team_id"
+                }
+              }
+            ],
             "name": "idx_project_teams_team"
           }
         ],
@@ -940,17 +1032,25 @@ expression: snapshot_data(&output)
         "id": 10,
         "indexes": [
           {
-            "columns": [
-              "team_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "team_id"
+                }
+              }
+            ],
             "name": "idx_team_members_team"
           },
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_team_members_user"
           }
         ],
@@ -1024,18 +1124,30 @@ expression: snapshot_data(&output)
         "id": 11,
         "indexes": [
           {
-            "columns": [
-              "tenant_id",
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_tags_tenant"
           }
         ],
@@ -1212,45 +1324,69 @@ expression: snapshot_data(&output)
         "id": 12,
         "indexes": [
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_tasks_tenant_id"
           },
           {
-            "columns": [
-              "project_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "project_id"
+                }
+              }
+            ],
             "name": "idx_tasks_project_id"
           },
           {
-            "columns": [
-              "assignee_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "assignee_id"
+                }
+              }
+            ],
             "name": "idx_tasks_assignee"
           },
           {
-            "columns": [
-              "status"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "status"
+                }
+              }
+            ],
             "name": "idx_tasks_status"
           },
           {
-            "columns": [
-              "priority"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "priority"
+                }
+              }
+            ],
             "name": "idx_tasks_priority"
           },
           {
-            "columns": [
-              "due_date"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "due_date"
+                }
+              }
+            ],
             "name": "idx_tasks_due_date"
           }
         ],
@@ -1305,17 +1441,25 @@ expression: snapshot_data(&output)
         "id": 13,
         "indexes": [
           {
-            "columns": [
-              "task_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "task_id"
+                }
+              }
+            ],
             "name": "idx_task_tags_task"
           },
           {
-            "columns": [
-              "tag_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tag_id"
+                }
+              }
+            ],
             "name": "idx_task_tags_tag"
           }
         ],
@@ -1392,17 +1536,25 @@ expression: snapshot_data(&output)
         "id": 14,
         "indexes": [
           {
-            "columns": [
-              "task_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "task_id"
+                }
+              }
+            ],
             "name": "idx_task_deps_task"
           },
           {
-            "columns": [
-              "depends_on_task_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "depends_on_task_id"
+                }
+              }
+            ],
             "name": "idx_task_deps_depends"
           }
         ],
@@ -1530,25 +1682,41 @@ expression: snapshot_data(&output)
         "id": 15,
         "indexes": [
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_comments_tenant"
           },
           {
-            "columns": [
-              "author_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "author_id"
+                }
+              }
+            ],
             "name": "idx_comments_author"
           },
           {
-            "columns": [
-              "commentable_type",
-              "commentable_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "commentable_type"
+                }
+              },
+              {
+                "column": {
+                  "name": "commentable_id"
+                }
+              }
+            ],
             "name": "idx_comments_commentable"
           }
         ],
@@ -1670,25 +1838,41 @@ expression: snapshot_data(&output)
         "id": 16,
         "indexes": [
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_attachments_tenant"
           },
           {
-            "columns": [
-              "uploader_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "uploader_id"
+                }
+              }
+            ],
             "name": "idx_attachments_uploader"
           },
           {
-            "columns": [
-              "attachable_type",
-              "attachable_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "attachable_type"
+                }
+              },
+              {
+                "column": {
+                  "name": "attachable_id"
+                }
+              }
+            ],
             "name": "idx_attachments_attachable"
           }
         ],
@@ -1821,19 +2005,32 @@ expression: snapshot_data(&output)
         "id": 17,
         "indexes": [
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_notifications_user"
           },
           {
-            "columns": [
-              "user_id",
-              "is_read"
-            ],
             "is_unique": false,
-            "name": "idx_notifications_unread"
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "is_read"
+                }
+              }
+            ],
+            "name": "idx_notifications_unread",
+            "predicate": "is_read = false"
           }
         ],
         "name": "notifications",
@@ -1941,32 +2138,52 @@ expression: snapshot_data(&output)
         "id": 18,
         "indexes": [
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_activities_tenant"
           },
           {
-            "columns": [
-              "actor_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "actor_id"
+                }
+              }
+            ],
             "name": "idx_activities_actor"
           },
           {
-            "columns": [
-              "subject_type",
-              "subject_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "subject_type"
+                }
+              },
+              {
+                "column": {
+                  "name": "subject_id"
+                }
+              }
+            ],
             "name": "idx_activities_subject"
           },
           {
-            "columns": [
-              "created_at"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "created_at"
+                }
+              }
+            ],
             "name": "idx_activities_created"
           }
         ],
@@ -2032,17 +2249,25 @@ expression: snapshot_data(&output)
         "id": 19,
         "indexes": [
           {
-            "columns": [
-              "task_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "task_id"
+                }
+              }
+            ],
             "name": "idx_task_watchers_task"
           },
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_task_watchers_user"
           }
         ],
@@ -2108,17 +2333,25 @@ expression: snapshot_data(&output)
         "id": 20,
         "indexes": [
           {
-            "columns": [
-              "project_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "project_id"
+                }
+              }
+            ],
             "name": "idx_project_watchers_project"
           },
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_project_watchers_user"
           }
         ],
@@ -2182,10 +2415,14 @@ expression: snapshot_data(&output)
         "id": 21,
         "indexes": [
           {
-            "columns": [
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           }
         ],
@@ -2305,25 +2542,41 @@ expression: snapshot_data(&output)
         "id": 22,
         "indexes": [
           {
-            "columns": [
-              "tenant_id",
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "tenant_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "tenant_id"
+                }
+              }
+            ],
             "name": "idx_integrations_tenant"
           },
           {
-            "columns": [
-              "integration_type_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "integration_type_id"
+                }
+              }
+            ],
             "name": "idx_integrations_type"
           }
         ],
@@ -2408,17 +2661,25 @@ expression: snapshot_data(&output)
         "id": 23,
         "indexes": [
           {
-            "columns": [
-              "project_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "project_id"
+                }
+              }
+            ],
             "name": "idx_project_integrations_project"
           },
           {
-            "columns": [
-              "integration_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "integration_id"
+                }
+              }
+            ],
             "name": "idx_project_integrations_integration"
           }
         ],

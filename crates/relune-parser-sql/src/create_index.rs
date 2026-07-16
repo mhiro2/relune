@@ -1,7 +1,7 @@
 //! `CREATE INDEX` parsing and attachment to existing tables.
 
 use crate::context::{LineOffsets, ParseContext, span_from_spanned};
-use crate::create_table::{plain_column_names, warn_expression_key};
+use crate::create_table::index_key_parts;
 use crate::names::{
     normalized_stable_id_for_object_name_with_diagnostics, object_name_part_to_string,
 };
@@ -39,35 +39,40 @@ pub(crate) fn parse_create_index(
         return;
     };
 
-    // A functional/expression index (e.g. on `lower(email)`) cannot be modeled
-    // faithfully; drop the whole index rather than keeping a partial column
-    // list that would assert false leading-column coverage.
-    let Some(index_columns) = plain_column_names(&create_index.columns) else {
-        warn_expression_key(
-            ctx,
-            span_from_spanned(input, offsets, create_index),
-            &stable_id,
-            "CREATE INDEX",
-        );
-        return;
-    };
-
-    if index_columns.is_empty() {
+    // Functional/expression key parts (e.g. `lower(email)`) are recorded as
+    // explicit expression parts rather than dropped, so the index still counts
+    // toward uniqueness/coverage decisions and is detected on removal.
+    let key_parts = index_key_parts(&create_index.columns);
+    if key_parts.is_empty() {
         return;
     }
 
+    let name = create_index.name.as_ref().map(|ident| {
+        // ObjectName is a wrapper around Vec<ObjectNamePart>.
+        // Use the last part as the actual index name (earlier parts are schema qualifiers).
+        ident
+            .0
+            .last()
+            .map(|part| normalize_identifier(&object_name_part_to_string(part)))
+            .unwrap_or_default()
+    });
+
+    let included_columns = create_index
+        .include
+        .iter()
+        .map(|ident| normalize_identifier(&ident.value))
+        .collect();
+
     let index = Index {
-        name: create_index.name.as_ref().map(|ident| {
-            // ObjectName is a wrapper around Vec<ObjectNamePart>.
-            // Use the last part as the actual index name (earlier parts are schema qualifiers).
-            ident
-                .0
-                .last()
-                .map(|part| normalize_identifier(&object_name_part_to_string(part)))
-                .unwrap_or_default()
-        }),
-        columns: index_columns,
+        name,
+        key_parts,
         is_unique: create_index.unique,
+        predicate: create_index.predicate.as_ref().map(ToString::to_string),
+        included_columns,
+        method: create_index
+            .using
+            .as_ref()
+            .map(|using| using.to_string().to_lowercase()),
     };
 
     tables[table_idx].indexes.push(index);

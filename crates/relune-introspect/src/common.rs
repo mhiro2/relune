@@ -99,6 +99,31 @@ pub fn parse_referential_action(s: &str) -> ReferentialAction {
     }
 }
 
+/// A single key part of a raw catalog index: a plain column or an expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawIndexKeyPart {
+    /// A plain column reference (with optional indexed prefix length).
+    Column {
+        /// Column name.
+        name: String,
+        /// Indexed prefix length (e.g. `MySQL` `col(10)`), if any.
+        prefix_length: Option<u32>,
+    },
+    /// A functional/expression key part, as catalog-rendered SQL text.
+    Expression(String),
+}
+
+impl RawIndexKeyPart {
+    /// Convenience constructor for a plain column key part.
+    #[must_use]
+    pub fn column(name: impl Into<String>) -> Self {
+        Self::Column {
+            name: name.into(),
+            prefix_length: None,
+        }
+    }
+}
+
 /// Raw index metadata from a database catalog.
 #[derive(Debug, Clone)]
 pub struct RawIndex {
@@ -108,12 +133,18 @@ pub struct RawIndex {
     pub schema_name: String,
     /// Name of the table the index is on.
     pub table_name: String,
-    /// Names of the columns in the index (in order).
-    pub columns: Vec<String>,
+    /// Ordered key parts (columns and expressions).
+    pub key_parts: Vec<RawIndexKeyPart>,
     /// Whether the index is unique.
     pub is_unique: bool,
     /// Whether the index is the primary key.
     pub is_primary: bool,
+    /// Partial-index predicate (`WHERE ...`), if any.
+    pub predicate: Option<String>,
+    /// Non-key columns carried by the index (`INCLUDE (...)`).
+    pub included_columns: Vec<String>,
+    /// Index access method (e.g. `btree`, `gin`), if known.
+    pub method: Option<String>,
 }
 
 /// Raw view metadata from a database catalog.
@@ -381,10 +412,32 @@ fn map_foreign_key(raw_fk: &RawForeignKey) -> ForeignKey {
 }
 
 fn map_index(raw_index: &RawIndex) -> Index {
+    use relune_core::{IndexColumn, IndexKey};
+
+    let key_parts = raw_index
+        .key_parts
+        .iter()
+        .map(|part| match part {
+            RawIndexKeyPart::Column {
+                name,
+                prefix_length,
+            } => IndexKey::Column(IndexColumn {
+                name: name.clone(),
+                order: None,
+                nulls: None,
+                prefix_length: *prefix_length,
+            }),
+            RawIndexKeyPart::Expression(expr) => IndexKey::Expression(expr.clone()),
+        })
+        .collect();
+
     Index {
         name: Some(raw_index.index_name.clone()),
-        columns: raw_index.columns.clone(),
+        key_parts,
         is_unique: raw_index.is_unique,
+        predicate: raw_index.predicate.clone(),
+        included_columns: raw_index.included_columns.clone(),
+        method: raw_index.method.clone(),
     }
 }
 

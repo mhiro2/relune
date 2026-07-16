@@ -372,6 +372,62 @@ async fn test_introspect_mysql_minimal() {
 // A proper cyclic FK test would need to split the SQL and execute in the correct order.
 
 #[tokio::test]
+async fn test_introspect_postgres_expression_and_partial_indexes() {
+    let sql = r"
+        CREATE TABLE users (
+            id BIGINT PRIMARY KEY,
+            email TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT true
+        );
+        CREATE INDEX idx_lower_email ON users (lower(email));
+        CREATE INDEX idx_active_email ON users (email) WHERE active;
+        CREATE INDEX idx_email_incl ON users (email) INCLUDE (id);
+    ";
+
+    let (database_url, _container) = setup_postgres_with_sql(sql).await.expect("postgres setup");
+    let schema = introspect_postgres(&database_url)
+        .await
+        .expect("introspect postgres");
+
+    let users = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "users")
+        .expect("users table");
+
+    // The expression index must be recovered as an expression key part, not
+    // dropped and not mistaken for a plain-column index.
+    let expr_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_lower_email"))
+        .expect("expression index present");
+    assert!(expr_idx.has_expression(), "expected an expression key part");
+    assert!(expr_idx.column_names().is_empty());
+
+    // The partial-index predicate must be captured.
+    let partial_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_active_email"))
+        .expect("partial index present");
+    assert!(
+        partial_idx.predicate.is_some(),
+        "expected a partial-index predicate, got {:?}",
+        partial_idx.predicate
+    );
+
+    // INCLUDE columns are separated from the key.
+    let incl_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_email_incl"))
+        .expect("include index present");
+    assert_eq!(incl_idx.column_names(), vec!["email"]);
+    assert_eq!(incl_idx.included_columns, vec!["id".to_string()]);
+}
+
+#[tokio::test]
 async fn test_introspect_postgres_empty_database() {
     let container = Postgres::default()
         .with_tag(POSTGRES_TAG)
@@ -470,7 +526,7 @@ async fn test_introspect_postgres_handles_reserved_words_and_composite_keys() {
     let composite_unique = items
         .indexes
         .iter()
-        .find(|idx| idx.is_unique && idx.columns == vec!["tenant_id", "sku"])
+        .find(|idx| idx.is_unique && idx.column_names() == vec!["tenant_id", "sku"])
         .expect("composite unique index over (tenant_id, sku)");
     assert_eq!(
         composite_unique.name.as_deref(),

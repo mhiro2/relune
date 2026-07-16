@@ -13,7 +13,7 @@ use petgraph::graphmap::DiGraphMap;
 
 use crate::diagnostic::{DiagnosticCode, Severity};
 use crate::model::{
-    ForeignKey, ForeignKeyTargetResolution, Schema, Table, TableId, resolve_table_reference,
+    ForeignKey, ForeignKeyTargetResolution, Index, Schema, Table, TableId, resolve_table_reference,
 };
 
 /// Unique identifier for a lint rule.
@@ -857,7 +857,21 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
     table
         .indexes
         .iter()
-        .any(|idx| column_list_has_prefix(&idx.columns, fk_cols))
+        .any(|idx| index_covers_prefix(idx, fk_cols))
+}
+
+/// Returns whether the ordered index key parts start with `fk_cols`. An
+/// expression key part in a leading position never matches a plain FK column,
+/// so a functional index does not spuriously satisfy the coverage check.
+fn index_covers_prefix(idx: &Index, fk_cols: &[String]) -> bool {
+    let slots = idx.key_slots();
+    if slots.len() < fk_cols.len() {
+        return false;
+    }
+    slots
+        .iter()
+        .zip(fk_cols.iter())
+        .all(|(slot, fk)| slot.is_some_and(|name| name.eq_ignore_ascii_case(fk)))
 }
 
 fn resolve_referenced_table<'a>(
@@ -939,8 +953,12 @@ fn referenced_columns_are_unique(ref_table: &Table, to_columns: &[String]) -> bo
         if !idx.is_unique {
             return false;
         }
-        let mut sorted_idx: Vec<String> =
-            idx.columns.iter().map(|s| s.to_ascii_lowercase()).collect();
+        // An index with an expression key part does not guarantee uniqueness
+        // over a plain-column set, so only all-column indexes qualify.
+        let Some(cols) = idx.plain_columns() else {
+            return false;
+        };
+        let mut sorted_idx: Vec<String> = cols.iter().map(|s| s.to_ascii_lowercase()).collect();
         sorted_idx.sort_unstable();
         sorted_idx == sorted_to
     })
@@ -1425,11 +1443,11 @@ mod tests {
                 create_column("name", false, false),
             ],
             vec![],
-            vec![Index {
-                name: Some("users_email_unique".to_string()),
-                columns: vec!["email".to_string()],
-                is_unique: true,
-            }],
+            vec![Index::from_columns(
+                Some("users_email_unique".to_string()),
+                vec!["email".to_string()],
+                true,
+            )],
         );
 
         let mut result = LintResult::new();
@@ -1612,11 +1630,11 @@ mod tests {
                 create_column("user_id", false, false),
             ],
             vec![create_fk("users", &["user_id"])],
-            vec![Index {
-                name: Some("posts_user_id_idx".to_string()),
-                columns: vec!["user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_id_idx".to_string()),
+                vec!["user_id".to_string()],
+                false,
+            )],
         );
         let mut result = LintResult::new();
         check_foreign_key_indexes_nullable_and_target(&Schema::default(), &table, &mut result);
@@ -1657,11 +1675,11 @@ mod tests {
                 create_column("email", false, false),
             ],
             vec![],
-            vec![Index {
-                name: Some("auth_users_email_idx".to_string()),
-                columns: vec!["email".to_string()],
-                is_unique: true,
-            }],
+            vec![Index::from_columns(
+                Some("auth_users_email_idx".to_string()),
+                vec!["email".to_string()],
+                true,
+            )],
         );
         let posts = create_test_table_with_schema(
             None,
@@ -1712,11 +1730,11 @@ mod tests {
                 create_column("user_id", true, false),
             ],
             vec![create_fk("users", &["user_id"])],
-            vec![Index {
-                name: Some("i".to_string()),
-                columns: vec!["user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("i".to_string()),
+                vec!["user_id".to_string()],
+                false,
+            )],
         );
         let mut result = LintResult::new();
         check_foreign_key_indexes_nullable_and_target(&Schema::default(), &table, &mut result);
@@ -1737,11 +1755,11 @@ mod tests {
                 create_column("cycle_b_id", false, false),
             ],
             vec![create_fk("cycle_b", &["cycle_b_id"])],
-            vec![Index {
-                name: Some("idx_cycle_a_ref".to_string()),
-                columns: vec!["cycle_b_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("idx_cycle_a_ref".to_string()),
+                vec!["cycle_b_id".to_string()],
+                false,
+            )],
         );
         let cycle_b = create_test_table(
             "cycle_b",
@@ -1750,11 +1768,11 @@ mod tests {
                 create_column("cycle_a_id", false, false),
             ],
             vec![create_fk("cycle_a", &["cycle_a_id"])],
-            vec![Index {
-                name: Some("idx_cycle_b_ref".to_string()),
-                columns: vec!["cycle_a_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("idx_cycle_b_ref".to_string()),
+                vec!["cycle_a_id".to_string()],
+                false,
+            )],
         );
         let result = lint_schema(&Schema {
             tables: vec![cycle_a, cycle_b],
@@ -1778,11 +1796,11 @@ mod tests {
                 create_column("manager_id", true, false),
             ],
             vec![create_fk("employees", &["manager_id"])],
-            vec![Index {
-                name: Some("employees_manager_id_idx".to_string()),
-                columns: vec!["manager_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("employees_manager_id_idx".to_string()),
+                vec!["manager_id".to_string()],
+                false,
+            )],
         );
         let result = lint_schema(&Schema {
             tables: vec![employees],
@@ -1823,11 +1841,11 @@ mod tests {
                 on_delete: ReferentialAction::NoAction,
                 on_update: ReferentialAction::NoAction,
             }],
-            vec![Index {
-                name: Some("posts_user_ref".to_string()),
-                columns: vec!["user_ref".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_ref".to_string()),
+                vec!["user_ref".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![users, posts],
@@ -1871,11 +1889,11 @@ mod tests {
                 on_delete: ReferentialAction::NoAction,
                 on_update: ReferentialAction::NoAction,
             }],
-            vec![Index {
-                name: Some("idx_posts_fk".to_string()),
-                columns: vec!["tenant_id".to_string(), "user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("idx_posts_fk".to_string()),
+                vec!["tenant_id".to_string(), "user_id".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![users, posts],
@@ -1911,11 +1929,11 @@ mod tests {
                 create_column("email", false, false),
             ],
             vec![],
-            vec![Index {
-                name: Some("auth_users_email_unique".to_string()),
-                columns: vec!["email".to_string()],
-                is_unique: true,
-            }],
+            vec![Index::from_columns(
+                Some("auth_users_email_unique".to_string()),
+                vec!["email".to_string()],
+                true,
+            )],
         );
         let posts = create_test_table_with_schema(
             None,
@@ -1933,11 +1951,11 @@ mod tests {
                 on_delete: ReferentialAction::NoAction,
                 on_update: ReferentialAction::NoAction,
             }],
-            vec![Index {
-                name: Some("posts_user_email_idx".to_string()),
-                columns: vec!["user_email".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_email_idx".to_string()),
+                vec!["user_email".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![public_users, auth_users, posts],
@@ -2055,11 +2073,11 @@ mod tests {
                 create_column("email", false, false),
             ],
             vec![],
-            vec![Index {
-                name: Some("auth_users_email_unique".to_string()),
-                columns: vec!["email".to_string()],
-                is_unique: true,
-            }],
+            vec![Index::from_columns(
+                Some("auth_users_email_unique".to_string()),
+                vec!["email".to_string()],
+                true,
+            )],
         );
         let posts = create_test_table_with_schema(
             Some("auth"),
@@ -2077,11 +2095,11 @@ mod tests {
                 on_delete: ReferentialAction::NoAction,
                 on_update: ReferentialAction::NoAction,
             }],
-            vec![Index {
-                name: Some("posts_user_email_idx".to_string()),
-                columns: vec!["user_email".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_email_idx".to_string()),
+                vec!["user_email".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![public_users, auth_users, posts],
@@ -2140,11 +2158,11 @@ mod tests {
                 create_column("user_id", false, false),
             ],
             vec![create_fk("nonexistent_table", &["user_id"])],
-            vec![Index {
-                name: Some("posts_user_id_idx".to_string()),
-                columns: vec!["user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_id_idx".to_string()),
+                vec!["user_id".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![posts],
@@ -2203,11 +2221,11 @@ mod tests {
                 on_delete: ReferentialAction::NoAction,
                 on_update: ReferentialAction::NoAction,
             }],
-            vec![Index {
-                name: Some("posts_user_id_idx".to_string()),
-                columns: vec!["user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_id_idx".to_string()),
+                vec!["user_id".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![public_users, auth_users, posts],
@@ -2249,11 +2267,11 @@ mod tests {
                 create_column("user_id", false, false),
             ],
             vec![create_fk("ghost_table", &["user_id"])],
-            vec![Index {
-                name: Some("posts_user_id_idx".to_string()),
-                columns: vec!["user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_id_idx".to_string()),
+                vec!["user_id".to_string()],
+                false,
+            )],
         );
         let result = lint_schema(&Schema {
             tables: vec![posts],
@@ -2285,11 +2303,11 @@ mod tests {
                 create_column("user_id", false, false),
             ],
             vec![create_fk("users", &["user_id"])],
-            vec![Index {
-                name: Some("posts_user_id_idx".to_string()),
-                columns: vec!["user_id".to_string()],
-                is_unique: false,
-            }],
+            vec![Index::from_columns(
+                Some("posts_user_id_idx".to_string()),
+                vec!["user_id".to_string()],
+                false,
+            )],
         );
         let schema = Schema {
             tables: vec![users, posts],

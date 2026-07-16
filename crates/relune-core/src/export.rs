@@ -7,7 +7,9 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Column, ColumnSemantics, Enum, ForeignKey, Index, Schema, Table, View};
+use crate::model::{
+    Column, ColumnSemantics, Enum, ForeignKey, Index, IndexKey, Schema, Table, View,
+};
 
 /// Stable schema export format for JSON serialization.
 /// This format is designed for long-term stability and should not
@@ -104,14 +106,67 @@ fn is_export_no_action(action: &Option<String>) -> bool {
 }
 
 /// Export format for an index.
+///
+/// `columns` carries the plain column names (expression parts omitted) and is
+/// retained for readers of the `1.0.0` format. `key_parts` (added in `1.1.0`)
+/// is the authoritative structured representation and, when present, takes
+/// precedence on import.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexExport {
     /// Index name, if named.
     pub name: Option<String>,
-    /// Column names in the index.
+    /// Plain column names in key order (expression parts omitted).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub columns: Vec<String>,
+    /// Structured key parts (columns and expressions), authoritative on import.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_parts: Vec<IndexKey>,
     /// Whether the index is unique.
     pub unique: bool,
+    /// Partial-index predicate (`WHERE ...`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Non-key columns carried by the index (`INCLUDE (...)`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_columns: Vec<String>,
+    /// Index access method (e.g. `btree`, `gin`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+impl IndexExport {
+    /// Build the stable export representation of an index.
+    #[must_use]
+    pub fn from_index(idx: &Index) -> Self {
+        Self {
+            name: idx.name.clone(),
+            columns: idx.column_names().into_iter().map(String::from).collect(),
+            key_parts: idx.key_parts.clone(),
+            unique: idx.is_unique,
+            predicate: idx.predicate.clone(),
+            included_columns: idx.included_columns.clone(),
+            method: idx.method.clone(),
+        }
+    }
+
+    /// Reconstruct an [`Index`] from the export, preferring the structured
+    /// `key_parts` and falling back to the plain `columns` for `1.0.0` inputs.
+    #[must_use]
+    pub fn to_index(&self) -> Index {
+        let key_parts = if self.key_parts.is_empty() {
+            self.columns.iter().cloned().map(IndexKey::column).collect()
+        } else {
+            self.key_parts.clone()
+        };
+        Index {
+            name: self.name.clone(),
+            key_parts,
+            is_unique: self.unique,
+            predicate: self.predicate.clone(),
+            included_columns: self.included_columns.clone(),
+            method: self.method.clone(),
+        }
+    }
 }
 
 /// Export format for a single view.
@@ -202,11 +257,7 @@ fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
 
 /// Export an Index to the stable format.
 fn export_index(idx: &Index) -> IndexExport {
-    IndexExport {
-        name: idx.name.clone(),
-        columns: idx.columns.clone(),
-        unique: idx.is_unique,
-    }
+    IndexExport::from_index(idx)
 }
 
 /// Export a View to the stable format.
@@ -388,11 +439,7 @@ fn parse_referential_action(action: Option<&str>) -> crate::model::ReferentialAc
 
 /// Import an Index from the stable format.
 fn import_index(export: &IndexExport) -> Index {
-    Index {
-        name: export.name.clone(),
-        columns: export.columns.clone(),
-        is_unique: export.unique,
-    }
+    export.to_index()
 }
 
 /// Import a View from the stable format.
@@ -513,7 +560,11 @@ mod tests {
             indexes: vec![IndexExport {
                 name: Some("idx_email".to_string()),
                 columns: vec!["email".to_string()],
+                key_parts: vec![IndexKey::column("email".to_string())],
                 unique: true,
+                predicate: None,
+                included_columns: Vec::new(),
+                method: None,
             }],
         }]);
 

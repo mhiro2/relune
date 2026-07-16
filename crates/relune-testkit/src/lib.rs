@@ -441,11 +441,11 @@ impl TableBuilder {
     /// Adds an index.
     #[must_use]
     pub fn index(mut self, name: Option<&str>, columns: &[&str], is_unique: bool) -> Self {
-        self.table.indexes.push(Index {
-            name: name.map(String::from),
-            columns: columns.iter().map(|c| (*c).to_string()).collect(),
+        self.table.indexes.push(Index::from_columns(
+            name.map(String::from),
+            columns.iter().map(|c| (*c).to_string()),
             is_unique,
-        });
+        ));
         self
     }
 

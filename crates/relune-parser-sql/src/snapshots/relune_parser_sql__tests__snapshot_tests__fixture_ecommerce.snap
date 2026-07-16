@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/tests.rs
-assertion_line: 1113
+assertion_line: 1185
 expression: snapshot_data(&output)
 ---
 {
@@ -79,10 +79,14 @@ expression: snapshot_data(&output)
         "id": 1,
         "indexes": [
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": null
           }
         ],
@@ -161,31 +165,47 @@ expression: snapshot_data(&output)
         "id": 2,
         "indexes": [
           {
-            "columns": [
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": "idx_categories_slug"
           },
           {
-            "columns": [
-              "parent_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "parent_id"
+                }
+              }
+            ],
             "name": "idx_categories_parent_id"
           }
         ],
@@ -312,31 +332,48 @@ expression: snapshot_data(&output)
         "id": 3,
         "indexes": [
           {
-            "columns": [
-              "sku"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "sku"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "sku"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "sku"
+                }
+              }
+            ],
             "name": "idx_products_sku"
           },
           {
-            "columns": [
-              "is_active"
-            ],
             "is_unique": false,
-            "name": "idx_products_is_active"
+            "key_parts": [
+              {
+                "column": {
+                  "name": "is_active"
+                }
+              }
+            ],
+            "name": "idx_products_is_active",
+            "predicate": "is_active = true"
           },
           {
-            "columns": [
-              "price"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "price"
+                }
+              }
+            ],
             "name": "idx_products_price"
           }
         ],
@@ -413,10 +450,14 @@ expression: snapshot_data(&output)
         "id": 4,
         "indexes": [
           {
-            "columns": [
-              "category_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "category_id"
+                }
+              }
+            ],
             "name": "idx_product_categories_category_id"
           }
         ],
@@ -582,31 +623,47 @@ expression: snapshot_data(&output)
         "id": 5,
         "indexes": [
           {
-            "columns": [
-              "order_number"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "order_number"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "customer_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "customer_id"
+                }
+              }
+            ],
             "name": "idx_orders_customer_id"
           },
           {
-            "columns": [
-              "status"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "status"
+                }
+              }
+            ],
             "name": "idx_orders_status"
           },
           {
-            "columns": [
-              "created_at"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "created_at"
+                }
+              }
+            ],
             "name": "idx_orders_created_at"
           }
         ],
@@ -725,17 +782,25 @@ expression: snapshot_data(&output)
         "id": 6,
         "indexes": [
           {
-            "columns": [
-              "order_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "order_id"
+                }
+              }
+            ],
             "name": "idx_order_items_order_id"
           },
           {
-            "columns": [
-              "product_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "product_id"
+                }
+              }
+            ],
             "name": "idx_order_items_product_id"
           }
         ],
@@ -864,18 +929,30 @@ expression: snapshot_data(&output)
         "id": 7,
         "indexes": [
           {
-            "columns": [
-              "customer_id",
-              "address_type"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "customer_id"
+                }
+              },
+              {
+                "column": {
+                  "name": "address_type"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "customer_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "customer_id"
+                }
+              }
+            ],
             "name": "idx_addresses_customer_id"
           }
         ],

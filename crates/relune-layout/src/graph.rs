@@ -28,7 +28,13 @@ fn column_flag_sets(table: &Table) -> (BTreeSet<String>, BTreeSet<String>) {
     let indexed_columns = table
         .indexes
         .iter()
-        .flat_map(|index| index.columns.iter().cloned())
+        .flat_map(|index| {
+            index
+                .column_names()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
         .collect();
     (foreign_key_columns, indexed_columns)
 }
@@ -111,10 +117,12 @@ fn has_unique_column_set(table: &Table, columns: &[String]) -> bool {
         return true;
     }
 
-    table
-        .indexes
-        .iter()
-        .any(|index| index.is_unique && index.columns == columns)
+    table.indexes.iter().any(|index| {
+        index.is_unique
+            && index
+                .plain_columns()
+                .is_some_and(|cols| cols.iter().copied().eq(columns.iter().map(String::as_str)))
+    })
 }
 
 fn infer_target_cardinality(
@@ -1291,11 +1299,11 @@ mod tests {
                     },
                 ],
                 foreign_keys: vec![],
-                indexes: vec![Index {
-                    name: Some("idx_users_status".to_string()),
-                    columns: vec!["status".to_string()],
-                    is_unique: false,
-                }],
+                indexes: vec![Index::from_columns(
+                    Some("idx_users_status".to_string()),
+                    vec!["status".to_string()],
+                    false,
+                )],
                 primary_key_name: None,
                 check_constraints: Vec::new(),
                 comment: None,
@@ -1666,11 +1674,11 @@ mod tests {
                     on_delete: ReferentialAction::NoAction,
                     on_update: ReferentialAction::NoAction,
                 }],
-                indexes: vec![Index {
-                    name: Some("idx_posts_user_id".to_string()),
-                    columns: vec!["user_id".to_string()],
-                    is_unique: false,
-                }],
+                indexes: vec![Index::from_columns(
+                    Some("idx_posts_user_id".to_string()),
+                    vec!["user_id".to_string()],
+                    false,
+                )],
                 primary_key_name: None,
                 check_constraints: Vec::new(),
                 comment: None,
@@ -1727,11 +1735,11 @@ mod tests {
                         },
                     ],
                     foreign_keys: vec![],
-                    indexes: vec![Index {
-                        name: Some("users_email_key".to_string()),
-                        columns: vec!["email".to_string()],
-                        is_unique: true,
-                    }],
+                    indexes: vec![Index::from_columns(
+                        Some("users_email_key".to_string()),
+                        vec!["email".to_string()],
+                        true,
+                    )],
                     primary_key_name: None,
                     check_constraints: Vec::new(),
                     comment: None,
@@ -1878,11 +1886,11 @@ mod tests {
                         semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![],
-                    indexes: vec![Index {
-                        name: Some("auth_users_email_key".to_string()),
-                        columns: vec!["email".to_string()],
-                        is_unique: true,
-                    }],
+                    indexes: vec![Index::from_columns(
+                        Some("auth_users_email_key".to_string()),
+                        vec!["email".to_string()],
+                        true,
+                    )],
                     primary_key_name: None,
                     check_constraints: Vec::new(),
                     comment: None,
@@ -1966,11 +1974,11 @@ mod tests {
                         semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![],
-                    indexes: vec![Index {
-                        name: Some("auth_users_email_key".to_string()),
-                        columns: vec!["email".to_string()],
-                        is_unique: true,
-                    }],
+                    indexes: vec![Index::from_columns(
+                        Some("auth_users_email_key".to_string()),
+                        vec!["email".to_string()],
+                        true,
+                    )],
                     primary_key_name: None,
                     check_constraints: Vec::new(),
                     comment: None,

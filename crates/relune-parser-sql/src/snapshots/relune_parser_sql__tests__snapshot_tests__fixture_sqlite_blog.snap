@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/tests.rs
-assertion_line: 1158
+assertion_line: 1230
 expression: snapshot_data(&output)
 ---
 {
@@ -63,17 +63,25 @@ expression: snapshot_data(&output)
         "id": 1,
         "indexes": [
           {
-            "columns": [
-              "username"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "username"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": null
           }
         ],
@@ -174,24 +182,36 @@ expression: snapshot_data(&output)
         "id": 2,
         "indexes": [
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "author_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "author_id"
+                }
+              }
+            ],
             "name": "idx_posts_author"
           },
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": "idx_posts_slug"
           }
         ],
@@ -226,10 +246,14 @@ expression: snapshot_data(&output)
         "id": 3,
         "indexes": [
           {
-            "columns": [
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           }
         ],
@@ -364,17 +388,25 @@ expression: snapshot_data(&output)
         "id": 5,
         "indexes": [
           {
-            "columns": [
-              "post_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "post_id"
+                }
+              }
+            ],
             "name": "idx_comments_post"
           },
           {
-            "columns": [
-              "user_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
             "name": "idx_comments_user"
           }
         ],

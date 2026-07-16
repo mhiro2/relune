@@ -8,7 +8,7 @@ use tracing::warn;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
-    RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
+    RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable, RawView,
     parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
@@ -225,6 +225,9 @@ impl MySqlCatalog {
                 CONVERT(TABLE_NAME USING utf8mb4) AS table_name,
                 CONVERT(INDEX_NAME USING utf8mb4) AS index_name,
                 CONVERT(COLUMN_NAME USING utf8mb4) AS column_name,
+                CONVERT(EXPRESSION USING utf8mb4) AS expression,
+                SUB_PART AS sub_part,
+                CONVERT(INDEX_TYPE USING utf8mb4) AS index_type,
                 SEQ_IN_INDEX AS seq_in_index,
                 NON_UNIQUE AS non_unique,
                 IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
@@ -233,7 +236,6 @@ impl MySqlCatalog {
                 'information_schema', 'mysql', 'performance_schema', 'sys',
                 'mysql_innodb_cluster_metadata'
               )
-              AND COLUMN_NAME IS NOT NULL
             ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
             ",
         )
@@ -293,7 +295,13 @@ struct IndexColumnRow {
     schema_name: String,
     table_name: String,
     index_name: String,
-    column_name: String,
+    // NULL for a functional key part; `expression` carries the text instead.
+    column_name: Option<String>,
+    // Functional-index expression (MySQL 8.0.13+); NULL for plain columns.
+    expression: Option<String>,
+    // Indexed prefix length (e.g. `col(10)`); NULL when the whole column is indexed.
+    sub_part: Option<i64>,
+    index_type: Option<String>,
     seq_in_index: u64,
     non_unique: i64, // 0 = UNIQUE or PRIMARY
     is_primary: bool,
@@ -531,14 +539,31 @@ fn group_indexes(rows: Vec<IndexColumnRow>) -> Vec<RawIndex> {
         let Some(first) = first else {
             continue;
         };
-        let index_columns: Vec<String> = cols.iter().map(|r| r.column_name.clone()).collect();
+        let is_primary = first.is_primary;
+        let is_unique = first.non_unique == 0 && !first.is_primary;
+        let method = first.index_type.as_ref().map(|t| t.to_lowercase());
+        let key_parts: Vec<RawIndexKeyPart> = cols
+            .iter()
+            .map(|r| match &r.column_name {
+                Some(name) => RawIndexKeyPart::Column {
+                    name: name.clone(),
+                    prefix_length: r.sub_part.and_then(|p| u32::try_from(p).ok()),
+                },
+                // A functional key part reports a NULL column and carries its
+                // definition in EXPRESSION.
+                None => RawIndexKeyPart::Expression(r.expression.clone().unwrap_or_default()),
+            })
+            .collect();
         out.push(RawIndex {
             index_name: key.index.clone(),
             schema_name: key.schema,
             table_name: key.table,
-            columns: index_columns,
-            is_unique: first.non_unique == 0 && !first.is_primary,
-            is_primary: first.is_primary,
+            key_parts,
+            is_unique,
+            is_primary,
+            predicate: None,
+            included_columns: Vec::new(),
+            method,
         });
     }
     out

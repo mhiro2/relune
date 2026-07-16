@@ -8,7 +8,7 @@ use sqlx::PgPool;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
-    RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
+    RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable, RawView,
     parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
@@ -198,6 +198,12 @@ impl ParallelCatalogReader for PostgresCatalog {
     }
 
     /// Fetch all indexes from the database.
+    ///
+    /// One row is returned per index key position (in order). Expression key
+    /// parts (`indkey` entry `0`) are recovered via `pg_get_indexdef` rather
+    /// than dropped, `INCLUDE` columns (positions beyond `indnkeyatts`) are
+    /// separated out, and the partial-index predicate and access method are
+    /// captured. Rows are grouped back into one `RawIndex` per index below.
     async fn fetch_indexes(&self) -> Result<Vec<RawIndex>, IntrospectError> {
         let rows: Vec<RawIndexRow> = sqlx::query_as(
             r"
@@ -205,40 +211,38 @@ impl ParallelCatalogReader for PostgresCatalog {
                 i.relname AS index_name,
                 n.nspname AS schema_name,
                 t.relname AS table_name,
-                array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) AS columns,
                 ix.indisunique AS is_unique,
-                ix.indisprimary AS is_primary
+                ix.indisprimary AS is_primary,
+                am.amname AS method,
+                pg_get_expr(ix.indpred, ix.indrelid) AS predicate,
+                (k.ord < ix.indnkeyatts) AS is_key,
+                a.attname AS column_name,
+                CASE
+                    WHEN ix.indkey[k.ord] = 0
+                    THEN pg_get_indexdef(ix.indexrelid, (k.ord + 1)::int, true)
+                    ELSE NULL
+                END AS expression
             FROM pg_catalog.pg_index ix
             INNER JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
             INNER JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
             INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-            INNER JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+            INNER JOIN pg_catalog.pg_am am ON am.oid = i.relam
+            INNER JOIN LATERAL generate_series(0, ix.indnatts - 1) AS k(ord) ON true
+            LEFT JOIN pg_catalog.pg_attribute a
+                ON a.attrelid = t.oid
+                AND a.attnum = ix.indkey[k.ord]
+                AND ix.indkey[k.ord] <> 0
             WHERE t.relkind = 'r'
                 AND n.nspname NOT IN ('pg_catalog', 'information_schema')
                 AND n.nspname NOT LIKE 'pg_%'
-                -- Skip expression indexes: indkey entries of 0 represent
-                -- expressions, which have no matching pg_attribute row and
-                -- would silently truncate the index column list.
-                AND 0 <> ALL(ix.indkey)
-            GROUP BY i.relname, n.nspname, t.relname, ix.indisunique, ix.indisprimary
-            ORDER BY n.nspname, t.relname, i.relname
+            ORDER BY n.nspname, t.relname, i.relname, k.ord
             ",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| RawIndex {
-                index_name: row.index_name,
-                schema_name: row.schema_name,
-                table_name: row.table_name,
-                columns: row.columns.unwrap_or_default(),
-                is_unique: row.is_unique,
-                is_primary: row.is_primary,
-            })
-            .collect())
+        Ok(group_index_rows(rows))
     }
 
     /// Fetch all views from the database.
@@ -370,9 +374,58 @@ struct RawIndexRow {
     index_name: String,
     schema_name: String,
     table_name: String,
-    columns: Option<Vec<String>>,
     is_unique: bool,
     is_primary: bool,
+    method: Option<String>,
+    predicate: Option<String>,
+    is_key: bool,
+    column_name: Option<String>,
+    expression: Option<String>,
+}
+
+/// Group per-key-position index rows (ordered by schema, table, index, key
+/// position) into one [`RawIndex`] per index, separating key parts from
+/// `INCLUDE` columns and preserving key order.
+fn group_index_rows(rows: Vec<RawIndexRow>) -> Vec<RawIndex> {
+    use std::collections::HashMap;
+
+    let mut order: Vec<RawIndex> = Vec::new();
+    let mut seen: HashMap<(String, String, String), usize> = HashMap::new();
+
+    for row in rows {
+        let key = (
+            row.schema_name.clone(),
+            row.table_name.clone(),
+            row.index_name.clone(),
+        );
+        let idx = *seen.entry(key).or_insert_with(|| {
+            order.push(RawIndex {
+                index_name: row.index_name.clone(),
+                schema_name: row.schema_name.clone(),
+                table_name: row.table_name.clone(),
+                key_parts: Vec::new(),
+                is_unique: row.is_unique,
+                is_primary: row.is_primary,
+                predicate: row.predicate.clone(),
+                included_columns: Vec::new(),
+                method: row.method.clone(),
+            });
+            order.len() - 1
+        });
+        let index = &mut order[idx];
+        if row.is_key {
+            let part = match row.column_name {
+                Some(name) => RawIndexKeyPart::column(name),
+                None => RawIndexKeyPart::Expression(row.expression.unwrap_or_default()),
+            };
+            index.key_parts.push(part);
+        } else if let Some(name) = row.column_name {
+            // INCLUDE columns are always plain columns.
+            index.included_columns.push(name);
+        }
+    }
+
+    order
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -448,9 +501,12 @@ mod tests {
             index_name: "idx_users_email".to_string(),
             schema_name: "public".to_string(),
             table_name: "users".to_string(),
-            columns: vec!["email".to_string()],
+            key_parts: vec![RawIndexKeyPart::column("email")],
             is_unique: true,
             is_primary: false,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: Some("btree".to_string()),
         };
         assert_eq!(index.index_name, "idx_users_email");
         assert!(index.is_unique);

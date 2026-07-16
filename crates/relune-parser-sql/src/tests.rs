@@ -178,64 +178,55 @@ fn parses_create_index() {
 
     let email_idx = &users.indexes[0];
     assert_eq!(email_idx.name, Some("idx_users_email".to_string()));
-    assert_eq!(email_idx.columns, vec!["email"]);
+    assert_eq!(email_idx.column_names(), vec!["email"]);
     assert!(!email_idx.is_unique);
 
     let id_idx = &users.indexes[1];
     assert_eq!(id_idx.name, Some("idx_users_id".to_string()));
-    assert_eq!(id_idx.columns, vec!["id"]);
+    assert_eq!(id_idx.column_names(), vec!["id"]);
     assert!(id_idx.is_unique);
 }
 
 #[test]
-fn create_index_drops_expression_only_index_with_warning() {
+fn create_index_keeps_expression_only_index() {
+    use relune_core::IndexKey;
+
     let sql = r"
     CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
     CREATE INDEX idx_lower_email ON users (lower(email));
     ";
 
-    let output = parse_sql_to_schema_with_diagnostics(sql);
-    let schema = output.schema.expect("schema should exist");
+    let schema = parse_sql_to_schema(sql).expect("schema should exist");
     let users = &schema.tables[0];
 
-    assert!(
-        users.indexes.is_empty(),
-        "an index over only an expression references no modeled column"
-    );
-    assert!(
-        output
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == Severity::Warning
-                && d.message.contains("functional/expression")),
-        "dropping an expression index must be diagnosed"
-    );
+    // The expression index is retained (not dropped) so it counts toward
+    // coverage/uniqueness and is detected on removal, but exposes no plain
+    // column.
+    assert_eq!(users.indexes.len(), 1);
+    let idx = &users.indexes[0];
+    assert!(idx.has_expression());
+    assert!(idx.column_names().is_empty());
+    assert!(matches!(idx.key_parts[0], IndexKey::Expression(_)));
 }
 
 #[test]
-fn create_index_drops_whole_mixed_expression_index() {
-    // A partial column list (keeping only `tenant_id`) would falsely claim the
-    // index leads with `tenant_id`, so the whole index is dropped.
+fn create_index_keeps_mixed_expression_index_in_order() {
+    use relune_core::IndexKey;
+
     let sql = r"
     CREATE TABLE users (tenant_id BIGINT, email TEXT NOT NULL);
     CREATE INDEX idx_mixed ON users (tenant_id, lower(email));
     ";
 
-    let output = parse_sql_to_schema_with_diagnostics(sql);
-    let schema = output.schema.expect("schema should exist");
+    let schema = parse_sql_to_schema(sql).expect("schema should exist");
     let users = &schema.tables[0];
 
-    assert!(
-        users.indexes.is_empty(),
-        "a mixed expression index cannot be represented as a plain prefix"
-    );
-    assert!(
-        output
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == Severity::Warning
-                && d.message.contains("functional/expression"))
-    );
+    assert_eq!(users.indexes.len(), 1);
+    let idx = &users.indexes[0];
+    // The leading column stays a plain column; the trailing part is recorded as
+    // an expression, preserving order for prefix-coverage checks.
+    assert_eq!(idx.key_slots(), vec![Some("tenant_id"), None]);
+    assert!(matches!(idx.key_parts[1], IndexKey::Expression(_)));
 }
 
 #[test]
@@ -416,7 +407,7 @@ fn alter_table_add_column_before_create_index() {
         table
             .indexes
             .iter()
-            .any(|i| i.columns.iter().any(|c| c == "email"))
+            .any(|i| i.column_names().contains(&"email"))
     );
 }
 
@@ -1868,9 +1859,7 @@ fn alter_table_rename_column_updates_fk_and_index() {
         "FK from_columns should be updated after rename"
     );
     assert!(
-        users.indexes[0]
-            .columns
-            .contains(&"organization_id".to_string()),
+        users.indexes[0].column_names().contains(&"organization_id"),
         "index columns should be updated after rename"
     );
 }
@@ -2537,9 +2526,7 @@ fn alter_table_change_column_updates_fk_and_index() {
         "CHANGE COLUMN should update the local FK's from_columns"
     );
     assert!(
-        users.indexes[0]
-            .columns
-            .contains(&"organization_id".to_string()),
+        users.indexes[0].column_names().contains(&"organization_id"),
         "CHANGE COLUMN should update index columns"
     );
 }
@@ -2560,7 +2547,7 @@ fn alter_table_modify_column_with_unique_adds_index() {
         users
             .indexes
             .iter()
-            .any(|ix| ix.is_unique && ix.columns == vec!["email".to_string()]),
+            .any(|ix| ix.is_unique && ix.column_names() == vec!["email"]),
         "MODIFY ... UNIQUE should add a unique index on the column"
     );
 }

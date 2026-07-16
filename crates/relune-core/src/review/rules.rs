@@ -1338,12 +1338,17 @@ fn already_unique_in(table: &Table, columns: &[String]) -> bool {
     }
 
     table.indexes.iter().any(|idx| {
-        if !idx.is_unique || idx.columns.is_empty() {
+        if !idx.is_unique {
             return false;
         }
-        idx.columns
-            .iter()
-            .all(|c| new_cols.contains(&c.to_ascii_lowercase()))
+        // Only all-column indexes guarantee uniqueness over a plain-column set.
+        let Some(cols) = idx.plain_columns() else {
+            return false;
+        };
+        !cols.is_empty()
+            && cols
+                .iter()
+                .all(|c| new_cols.contains(&c.to_ascii_lowercase()))
     })
 }
 
@@ -1778,12 +1783,10 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
     ) {
         return true;
     }
-    table.indexes.iter().any(|idx| {
-        column_list_has_prefix(
-            &idx.columns.iter().map(String::as_str).collect::<Vec<_>>(),
-            fk_cols,
-        )
-    })
+    table
+        .indexes
+        .iter()
+        .any(|idx| index_covers_prefix(idx, fk_cols))
 }
 
 fn column_list_has_prefix(index_cols: &[&str], fk_cols: &[String]) -> bool {
@@ -1794,6 +1797,20 @@ fn column_list_has_prefix(index_cols: &[&str], fk_cols: &[String]) -> bool {
         .iter()
         .zip(fk_cols.iter())
         .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
+/// Returns whether the ordered index key parts start with `fk_cols`. An
+/// expression key part in a leading position never matches, so a functional
+/// index does not spuriously satisfy coverage.
+fn index_covers_prefix(idx: &crate::model::Index, fk_cols: &[String]) -> bool {
+    let slots = idx.key_slots();
+    if slots.len() < fk_cols.len() {
+        return false;
+    }
+    slots
+        .iter()
+        .zip(fk_cols.iter())
+        .all(|(slot, fk)| slot.is_some_and(|name| name.eq_ignore_ascii_case(fk)))
 }
 
 /// Decide whether `fk` (owned by a table in `owner_schema`) references
@@ -1950,11 +1967,11 @@ mod tests {
     }
 
     fn index(name: &str, columns: &[&str], unique: bool) -> ModelIndex {
-        ModelIndex {
-            name: Some(name.into()),
-            columns: columns.iter().map(|c| (*c).to_string()).collect(),
-            is_unique: unique,
-        }
+        ModelIndex::from_columns(
+            Some(name.into()),
+            columns.iter().map(|c| (*c).to_string()),
+            unique,
+        )
     }
 
     fn table(

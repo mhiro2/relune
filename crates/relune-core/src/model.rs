@@ -268,7 +268,7 @@ impl Schema {
         col_names: &HashSet<String>,
         errors: &mut Vec<ValidationError>,
     ) {
-        if index.columns.is_empty() {
+        if index.key_parts.is_empty() {
             errors.push(ValidationError {
                 table: Some(table.name.clone()),
                 message: match index.name.as_deref() {
@@ -279,14 +279,10 @@ impl Schema {
             return;
         }
 
-        for col in &index.columns {
-            // Expression indexes (e.g. `LOWER(email)`) are stringified by the
-            // parser into the same `Index.columns` slot as bare column refs,
-            // so skip entries that are not plain identifiers to avoid false
-            // positives until the model carries an explicit expression form.
-            if !is_simple_column_reference(col) {
-                continue;
-            }
+        // Only plain-column key parts reference a single named column;
+        // expression parts (e.g. `LOWER(email)`) reference none, so they are
+        // not checked here.
+        for col in index.column_names() {
             if !col_names.contains(&col.to_lowercase()) {
                 errors.push(ValidationError {
                     table: Some(table.name.clone()),
@@ -440,17 +436,6 @@ pub(crate) enum ForeignKeyTargetResolution<'a> {
     Found(&'a Table),
     Missing,
     Ambiguous,
-}
-
-/// Returns `true` when `s` looks like a bare column identifier rather than
-/// an expression. The SQL parser flattens expression indexes such as
-/// `LOWER(email)` into the same `Index.columns` slot as plain column
-/// references, so validation needs a way to tell them apart.
-fn is_simple_column_reference(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    !s.chars().any(|c| matches!(c, '(' | ')' | ',' | ' ' | '\t'))
 }
 
 pub(crate) fn resolve_table_reference<'a>(
@@ -744,10 +729,172 @@ fn is_no_action(action: &ReferentialAction) -> bool {
 pub struct Index {
     /// Index name if named.
     pub name: Option<String>,
-    /// Column names in the index.
-    pub columns: Vec<String>,
+    /// Ordered key parts. Each part is either a plain column or a
+    /// functional/expression key (e.g. `lower(email)`). Storing expression
+    /// parts explicitly, rather than dropping the index or keeping only its
+    /// plain columns, avoids asserting false uniqueness or index coverage and
+    /// lets `diff` detect index removal.
+    pub key_parts: Vec<IndexKey>,
     /// Whether the index is unique.
     pub is_unique: bool,
+    /// Partial-index predicate (`WHERE ...`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Non-key columns carried by the index (`INCLUDE (...)`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_columns: Vec<String>,
+    /// Index access method (e.g. `btree`, `gin`, `hash`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+impl Index {
+    /// Construct a plain-column index (every key part is a bare column) with no
+    /// predicate, included columns, or explicit method. Convenience for the
+    /// common case and for tests.
+    #[must_use]
+    pub fn from_columns(
+        name: Option<String>,
+        columns: impl IntoIterator<Item = String>,
+        is_unique: bool,
+    ) -> Self {
+        Self {
+            name,
+            key_parts: columns.into_iter().map(IndexKey::column).collect(),
+            is_unique,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        }
+    }
+
+    /// Plain column names in key order, with expression parts skipped.
+    ///
+    /// Use this where dropping expression parts is semantically correct, such
+    /// as marking which real columns are indexed. Do **not** use it for
+    /// leading-prefix coverage or uniqueness checks; see [`Index::key_slots`]
+    /// and [`Index::plain_columns`].
+    #[must_use]
+    pub fn column_names(&self) -> Vec<&str> {
+        self.key_parts
+            .iter()
+            .filter_map(IndexKey::as_column_name)
+            .collect()
+    }
+
+    /// Ordered key slots: `Some(name)` for a plain column, `None` for an
+    /// expression. Preserves position so leading-prefix matching treats an
+    /// expression as a non-matching slot.
+    #[must_use]
+    pub fn key_slots(&self) -> Vec<Option<&str>> {
+        self.key_parts
+            .iter()
+            .map(IndexKey::as_column_name)
+            .collect()
+    }
+
+    /// All key parts as plain column names, or `None` if any part is an
+    /// expression. Use for exact set/uniqueness comparisons that must not treat
+    /// an expression index as covering a plain-column set.
+    #[must_use]
+    pub fn plain_columns(&self) -> Option<Vec<&str>> {
+        self.key_parts
+            .iter()
+            .map(IndexKey::as_column_name)
+            .collect()
+    }
+
+    /// `true` if any key part is an expression.
+    #[must_use]
+    pub fn has_expression(&self) -> bool {
+        self.key_parts
+            .iter()
+            .any(|part| matches!(part, IndexKey::Expression(_)))
+    }
+
+    /// Human-readable label for each key part (column name or expression text).
+    #[must_use]
+    pub fn key_labels(&self) -> Vec<String> {
+        self.key_parts.iter().map(IndexKey::label).collect()
+    }
+}
+
+/// A single key part of an index.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexKey {
+    /// A plain column reference.
+    Column(IndexColumn),
+    /// A functional/expression key part (e.g. `lower(email)`), stored as
+    /// canonical SQL text.
+    Expression(String),
+}
+
+impl IndexKey {
+    /// Construct a plain-column key part with no sort/nulls/prefix detail.
+    #[must_use]
+    pub const fn column(name: String) -> Self {
+        Self::Column(IndexColumn {
+            name,
+            order: None,
+            nulls: None,
+            prefix_length: None,
+        })
+    }
+
+    /// The column name when this part is a plain column, else `None`.
+    #[must_use]
+    pub fn as_column_name(&self) -> Option<&str> {
+        match self {
+            Self::Column(column) => Some(&column.name),
+            Self::Expression(_) => None,
+        }
+    }
+
+    /// Human-readable label (column name or expression text).
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Column(column) => column.name.clone(),
+            Self::Expression(expr) => expr.clone(),
+        }
+    }
+}
+
+/// A plain-column key part with optional sort/nulls ordering and prefix length.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IndexColumn {
+    /// Column name.
+    pub name: String,
+    /// Sort order (`ASC`/`DESC`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<SortOrder>,
+    /// Nulls ordering (`NULLS FIRST`/`NULLS LAST`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nulls: Option<NullsOrder>,
+    /// Indexed prefix length (e.g. `MySQL` `col(10)`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_length: Option<u32>,
+}
+
+/// Sort order of an index key part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortOrder {
+    /// Ascending.
+    Asc,
+    /// Descending.
+    Desc,
+}
+
+/// Nulls ordering of an index key part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NullsOrder {
+    /// Nulls sorted first.
+    First,
+    /// Nulls sorted last.
+    Last,
 }
 
 /// A database view.
@@ -1219,11 +1366,11 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id", "name"],
-                vec![Index {
-                    name: Some("idx_users_email".to_string()),
-                    columns: vec!["email".to_string()],
-                    is_unique: false,
-                }],
+                vec![Index::from_columns(
+                    Some("idx_users_email".to_string()),
+                    vec!["email".to_string()],
+                    false,
+                )],
             )],
             views: vec![],
             enums: vec![],
@@ -1240,11 +1387,11 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id", "email"],
-                vec![Index {
-                    name: Some("idx_users_email".to_string()),
-                    columns: vec!["email".to_string()],
-                    is_unique: false,
-                }],
+                vec![Index::from_columns(
+                    Some("idx_users_email".to_string()),
+                    vec!["email".to_string()],
+                    false,
+                )],
             )],
             views: vec![],
             enums: vec![],
@@ -1258,11 +1405,7 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id", "Email"],
-                vec![Index {
-                    name: None,
-                    columns: vec!["email".to_string()],
-                    is_unique: true,
-                }],
+                vec![Index::from_columns(None, vec!["email".to_string()], true)],
             )],
             views: vec![],
             enums: vec![],
@@ -1278,8 +1421,11 @@ mod tests {
                 &["id", "email"],
                 vec![Index {
                     name: Some("idx_users_lower_email".to_string()),
-                    columns: vec!["lower(email)".to_string()],
+                    key_parts: vec![IndexKey::Expression("lower(email)".to_string())],
                     is_unique: false,
+                    predicate: None,
+                    included_columns: Vec::new(),
+                    method: None,
                 }],
             )],
             views: vec![],
@@ -1294,11 +1440,11 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id"],
-                vec![Index {
-                    name: Some("idx_empty".to_string()),
-                    columns: vec![],
-                    is_unique: false,
-                }],
+                vec![Index::from_columns(
+                    Some("idx_empty".to_string()),
+                    vec![],
+                    false,
+                )],
             )],
             views: vec![],
             enums: vec![],

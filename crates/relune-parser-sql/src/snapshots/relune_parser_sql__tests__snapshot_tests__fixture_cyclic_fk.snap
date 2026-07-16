@@ -1,6 +1,6 @@
 ---
 source: crates/relune-parser-sql/src/tests.rs
-assertion_line: 1113
+assertion_line: 1185
 expression: snapshot_data(&output)
 ---
 {
@@ -106,24 +106,36 @@ expression: snapshot_data(&output)
         "id": 1,
         "indexes": [
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "manager_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "manager_id"
+                }
+              }
+            ],
             "name": "idx_employees_manager_id"
           },
           {
-            "columns": [
-              "department"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "department"
+                }
+              }
+            ],
             "name": "idx_employees_department"
           }
         ],
@@ -224,24 +236,36 @@ expression: snapshot_data(&output)
         "id": 2,
         "indexes": [
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "parent_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "parent_id"
+                }
+              }
+            ],
             "name": "idx_categories_parent_id"
           },
           {
-            "columns": [
-              "slug"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "slug"
+                }
+              }
+            ],
             "name": "idx_categories_slug"
           }
         ],
@@ -312,10 +336,14 @@ expression: snapshot_data(&output)
         "id": 3,
         "indexes": [
           {
-            "columns": [
-              "parent_org_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "parent_org_id"
+                }
+              }
+            ],
             "name": "idx_organizations_parent"
           }
         ],
@@ -405,17 +433,25 @@ expression: snapshot_data(&output)
         "id": 4,
         "indexes": [
           {
-            "columns": [
-              "parent_comment_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "parent_comment_id"
+                }
+              }
+            ],
             "name": "idx_threaded_comments_parent"
           },
           {
-            "columns": [
-              "post_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "post_id"
+                }
+              }
+            ],
             "name": "idx_threaded_comments_post"
           }
         ],
@@ -478,10 +514,14 @@ expression: snapshot_data(&output)
         "id": 5,
         "indexes": [
           {
-            "columns": [
-              "cycle_c_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "cycle_c_id"
+                }
+              }
+            ],
             "name": "idx_cycle_a_ref"
           }
         ],
@@ -544,10 +584,14 @@ expression: snapshot_data(&output)
         "id": 6,
         "indexes": [
           {
-            "columns": [
-              "cycle_a_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "cycle_a_id"
+                }
+              }
+            ],
             "name": "idx_cycle_b_ref"
           }
         ],
@@ -610,10 +654,14 @@ expression: snapshot_data(&output)
         "id": 7,
         "indexes": [
           {
-            "columns": [
-              "cycle_b_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "cycle_b_id"
+                }
+              }
+            ],
             "name": "idx_cycle_c_ref"
           }
         ],
@@ -687,17 +735,25 @@ expression: snapshot_data(&output)
         "id": 8,
         "indexes": [
           {
-            "columns": [
-              "name"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "name"
+                }
+              }
+            ],
             "name": null
           },
           {
-            "columns": [
-              "lead_project_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "lead_project_id"
+                }
+              }
+            ],
             "name": "idx_departments_lead_project"
           }
         ],
@@ -787,10 +843,14 @@ expression: snapshot_data(&output)
         "id": 9,
         "indexes": [
           {
-            "columns": [
-              "department_id"
-            ],
             "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "department_id"
+                }
+              }
+            ],
             "name": "idx_projects_department"
           }
         ],
@@ -861,10 +921,14 @@ expression: snapshot_data(&output)
         "id": 10,
         "indexes": [
           {
-            "columns": [
-              "email"
-            ],
             "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
             "name": null
           }
         ],

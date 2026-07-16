@@ -322,18 +322,30 @@ impl From<&relune_core::ForeignKey> for ForeignKeyDetails {
 pub struct IndexDetails {
     /// Index name, if named.
     pub name: Option<String>,
-    /// Indexed columns.
+    /// Indexed key parts (column names or expressions), in order.
     pub columns: Vec<String>,
     /// Whether the index is unique.
     pub is_unique: bool,
+    /// Partial-index predicate (`WHERE ...`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Non-key columns carried by the index (`INCLUDE (...)`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_columns: Vec<String>,
+    /// Index access method (e.g. `btree`, `gin`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
 }
 
 impl From<&relune_core::Index> for IndexDetails {
     fn from(index: &relune_core::Index) -> Self {
         Self {
             name: index.name.clone(),
-            columns: index.columns.clone(),
+            columns: index.key_labels(),
             is_unique: index.is_unique,
+            predicate: index.predicate.clone(),
+            included_columns: index.included_columns.clone(),
+            method: index.method.clone(),
         }
     }
 }
