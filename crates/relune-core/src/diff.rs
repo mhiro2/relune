@@ -199,6 +199,8 @@ impl ColumnDiff {
             data_type: col.data_type.clone(),
             nullable: col.nullable,
             primary_key: col.is_primary_key,
+            comment: col.comment.clone(),
+            enum_values: col.enum_values.clone(),
             semantics: col.semantics.clone(),
         }
     }

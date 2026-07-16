@@ -8,7 +8,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
-    Column, ColumnSemantics, Enum, ForeignKey, Index, IndexKey, Schema, Table, View,
+    CheckConstraint, Column, ColumnSemantics, Enum, ForeignKey, Index, IndexKey, Schema, Table,
+    View,
 };
 
 /// Stable schema export format for JSON serialization.
@@ -30,7 +31,14 @@ pub struct SchemaExport {
 
 impl SchemaExport {
     /// Export format version.
-    pub const VERSION: &'static str = "1.0.0";
+    ///
+    /// `1.x` is the stable line. Minor bumps are additive: newer minors add
+    /// optional fields that older readers ignore, and unknown minors are
+    /// accepted on import. A different major version is rejected on import.
+    pub const VERSION: &'static str = "1.1.0";
+
+    /// Major version of the current format, used to reject incompatible inputs.
+    pub const MAJOR_VERSION: u64 = 1;
 
     /// Creates a new schema export from tables only. Views and enums default to empty.
     #[must_use]
@@ -60,6 +68,15 @@ pub struct TableExport {
     /// Indexes on this table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub indexes: Vec<IndexExport>,
+    /// Name of the primary-key constraint, if declared with one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_key_name: Option<String>,
+    /// Table comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// Table-level `CHECK` constraints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_constraints: Vec<CheckConstraint>,
 }
 
 /// Export format for a column.
@@ -73,6 +90,12 @@ pub struct ColumnExport {
     pub nullable: bool,
     /// Whether this column is part of the primary key.
     pub primary_key: bool,
+    /// Column comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// Inline enum/set values, when the column type carries them directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
     /// Extended column semantics (`DEFAULT`, `CHECK`, generated, identity, ...).
     #[serde(default, skip_serializing_if = "ColumnSemantics::is_empty")]
     pub semantics: ColumnSemantics,
@@ -219,6 +242,9 @@ fn export_table(table: &Table) -> TableExport {
         columns: table.columns.iter().map(export_column).collect(),
         foreign_keys: table.foreign_keys.iter().map(export_fk).collect(),
         indexes: table.indexes.iter().map(export_index).collect(),
+        primary_key_name: table.primary_key_name.clone(),
+        comment: table.comment.clone(),
+        check_constraints: table.check_constraints.clone(),
     }
 }
 
@@ -229,6 +255,8 @@ fn export_column(col: &Column) -> ColumnExport {
         data_type: col.data_type.clone(),
         nullable: col.nullable,
         primary_key: col.is_primary_key,
+        comment: col.comment.clone(),
+        enum_values: col.enum_values.clone(),
         semantics: col.semantics.clone(),
     }
 }
@@ -281,12 +309,43 @@ fn export_enum(enum_: &Enum) -> EnumExport {
     }
 }
 
+/// Parse and validate the export format version.
+///
+/// Rejects an empty or malformed version, and any major version other than
+/// [`SchemaExport::MAJOR_VERSION`]. Unknown minor/patch versions within the
+/// supported major are accepted (additive-compatibility contract), so a newer
+/// writer's file still imports on an older reader, dropping only fields the
+/// reader does not know about.
+fn validate_export_version(version: &str) -> Result<(), ImportError> {
+    let major = version
+        .split('.')
+        .next()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse::<u64>().ok())
+        .ok_or_else(|| ImportError {
+            message: format!(
+                "unsupported schema export version '{version}': expected 'MAJOR.MINOR.PATCH'"
+            ),
+        })?;
+    if major != SchemaExport::MAJOR_VERSION {
+        return Err(ImportError {
+            message: format!(
+                "unsupported schema export major version {major} (this build supports major {}); version string was '{version}'",
+                SchemaExport::MAJOR_VERSION
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Import a Schema from the stable JSON format.
 ///
-/// Returns an error if any table, view, or enum has an empty or duplicate stable
-/// identifier. Duplicates would silently collapse entries in downstream diff and
-/// overlay operations, which key tables by `stable_id`.
+/// Returns an error if the format version has an unsupported major version, or
+/// if any table, view, or enum has an empty or duplicate stable identifier.
+/// Duplicates would silently collapse entries in downstream diff and overlay
+/// operations, which key tables by `stable_id`.
 pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
+    validate_export_version(&export.version)?;
     let mut table_ids = HashSet::with_capacity(export.tables.len());
     let tables = export
         .tables
@@ -377,9 +436,9 @@ fn import_table(index: usize, export: &TableExport) -> Table {
             .collect(),
         foreign_keys: export.foreign_keys.iter().map(import_fk).collect(),
         indexes: export.indexes.iter().map(import_index).collect(),
-        primary_key_name: None,
-        check_constraints: Vec::new(),
-        comment: None,
+        primary_key_name: export.primary_key_name.clone(),
+        check_constraints: export.check_constraints.clone(),
+        comment: export.comment.clone(),
     }
 }
 
@@ -393,8 +452,8 @@ fn import_column(index: usize, export: &ColumnExport) -> Column {
         data_type: export.data_type.clone(),
         nullable: export.nullable,
         is_primary_key: export.primary_key,
-        comment: None,
-        enum_values: None,
+        comment: export.comment.clone(),
+        enum_values: export.enum_values.clone(),
         semantics: export.semantics.clone(),
     }
 }
@@ -546,6 +605,8 @@ mod tests {
                     data_type: "bigint".to_string(),
                     nullable: false,
                     primary_key: true,
+                    comment: None,
+                    enum_values: None,
                     semantics: crate::model::ColumnSemantics::default(),
                 },
                 ColumnExport {
@@ -553,10 +614,15 @@ mod tests {
                     data_type: "varchar(255)".to_string(),
                     nullable: false,
                     primary_key: false,
+                    comment: None,
+                    enum_values: None,
                     semantics: crate::model::ColumnSemantics::default(),
                 },
             ],
             foreign_keys: vec![],
+            primary_key_name: None,
+            comment: None,
+            check_constraints: Vec::new(),
             indexes: vec![IndexExport {
                 name: Some("idx_email".to_string()),
                 columns: vec!["email".to_string()],
@@ -576,7 +642,7 @@ mod tests {
     #[test]
     fn test_export_version() {
         let export = SchemaExport::new(vec![]);
-        assert_eq!(export.version, "1.0.0");
+        assert_eq!(export.version, "1.1.0");
     }
 
     #[test]
@@ -599,6 +665,9 @@ mod tests {
                 name: "users".to_string(),
                 columns: vec![],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
             TableExport {
@@ -607,6 +676,9 @@ mod tests {
                 name: "orders".to_string(),
                 columns: vec![],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
             TableExport {
@@ -615,6 +687,9 @@ mod tests {
                 name: "products".to_string(),
                 columns: vec![],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
         ]);
@@ -817,6 +892,9 @@ mod tests {
             name: name.to_string(),
             columns: vec![],
             foreign_keys: vec![],
+            primary_key_name: None,
+            comment: None,
+            check_constraints: Vec::new(),
             indexes: vec![],
         };
         let export = SchemaExport::new(vec![table("a"), table("b")]);
@@ -882,9 +960,14 @@ mod tests {
                     data_type: "uuid".to_string(),
                     nullable: false,
                     primary_key: true,
+                    comment: None,
+                    enum_values: None,
                     semantics: crate::model::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
             TableExport {
@@ -897,6 +980,8 @@ mod tests {
                         data_type: "uuid".to_string(),
                         nullable: false,
                         primary_key: true,
+                        comment: None,
+                        enum_values: None,
                         semantics: crate::model::ColumnSemantics::default(),
                     },
                     ColumnExport {
@@ -904,6 +989,8 @@ mod tests {
                         data_type: "uuid".to_string(),
                         nullable: false,
                         primary_key: false,
+                        comment: None,
+                        enum_values: None,
                         semantics: crate::model::ColumnSemantics::default(),
                     },
                 ],
@@ -917,6 +1004,9 @@ mod tests {
                     on_update: Some("set default".to_string()),
                 }],
                 indexes: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
             },
         ]);
 
@@ -934,5 +1024,139 @@ mod tests {
             normalized.tables[1].foreign_keys[0].on_update.as_deref(),
             Some("SET DEFAULT")
         );
+    }
+
+    #[test]
+    fn test_roundtrip_preserves_comments_enum_and_constraints() {
+        use crate::model::{
+            CheckConstraint, ColumnSemantics, GeneratedColumn, Index, IndexKey, TableId,
+        };
+
+        let column = Column {
+            id: ColumnId(1),
+            name: "status".to_string(),
+            data_type: "text".to_string(),
+            nullable: false,
+            is_primary_key: false,
+            comment: Some("lifecycle state".to_string()),
+            enum_values: Some(vec!["active".to_string(), "inactive".to_string()]),
+            semantics: ColumnSemantics {
+                default_expression: Some("'active'".to_string()),
+                check_constraints: vec![CheckConstraint {
+                    name: Some("status_not_empty".to_string()),
+                    expression: "status <> ''".to_string(),
+                }],
+                generated: Some(GeneratedColumn {
+                    expression: "upper(status)".to_string(),
+                    stored: true,
+                }),
+                ..ColumnSemantics::default()
+            },
+        };
+
+        let table = Table {
+            id: TableId(1),
+            stable_id: "public.accounts".to_string(),
+            schema_name: Some("public".to_string()),
+            name: "accounts".to_string(),
+            columns: vec![
+                Column {
+                    id: ColumnId(2),
+                    name: "id".to_string(),
+                    data_type: "bigint".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                    enum_values: None,
+                    semantics: ColumnSemantics::default(),
+                },
+                column,
+            ],
+            foreign_keys: vec![],
+            indexes: vec![Index {
+                name: Some("idx_lower_status".to_string()),
+                key_parts: vec![IndexKey::Expression("lower(status)".to_string())],
+                is_unique: false,
+                predicate: Some("id > 0".to_string()),
+                included_columns: vec!["id".to_string()],
+                method: Some("btree".to_string()),
+            }],
+            primary_key_name: Some("accounts_pkey".to_string()),
+            comment: Some("user accounts".to_string()),
+            check_constraints: vec![CheckConstraint {
+                name: Some("id_positive".to_string()),
+                expression: "id > 0".to_string(),
+            }],
+        };
+
+        let schema = Schema {
+            tables: vec![table],
+            views: vec![],
+            enums: vec![],
+        };
+
+        // The imported schema must retain every previously-dropped attribute.
+        let imported = import_schema(&export_schema(&schema)).unwrap();
+        let t = &imported.tables[0];
+        assert_eq!(t.comment.as_deref(), Some("user accounts"));
+        assert_eq!(t.primary_key_name.as_deref(), Some("accounts_pkey"));
+        assert_eq!(t.check_constraints.len(), 1);
+        assert_eq!(t.check_constraints[0].expression, "id > 0");
+
+        let status = t.columns.iter().find(|c| c.name == "status").unwrap();
+        assert_eq!(status.comment.as_deref(), Some("lifecycle state"));
+        assert_eq!(
+            status.enum_values.as_deref(),
+            Some(["active".to_string(), "inactive".to_string()].as_slice())
+        );
+        assert_eq!(
+            status.semantics.default_expression.as_deref(),
+            Some("'active'")
+        );
+        assert_eq!(status.semantics.check_constraints.len(), 1);
+        assert!(status.semantics.generated.as_ref().unwrap().stored);
+
+        let idx = &t.indexes[0];
+        assert!(idx.has_expression());
+        assert_eq!(idx.predicate.as_deref(), Some("id > 0"));
+        assert_eq!(idx.included_columns, vec!["id".to_string()]);
+        assert_eq!(idx.method.as_deref(), Some("btree"));
+
+        // Full export -> import -> export round-trip is stable.
+        let once = export_schema(&schema);
+        let twice = export_schema(&import_schema(&once).unwrap());
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_import_rejects_unsupported_major_version() {
+        let mut export = SchemaExport::new(vec![]);
+        export.version = "2.0.0".to_string();
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("major version 2"),
+            "unexpected error: {}",
+            err.message
+        );
+
+        export.version = "999.0.0".to_string();
+        assert!(import_schema(&export).is_err());
+    }
+
+    #[test]
+    fn test_import_accepts_unknown_minor_version() {
+        // A newer additive minor from a future writer must still import.
+        let mut export = SchemaExport::new(vec![]);
+        export.version = "1.99.0".to_string();
+        assert!(import_schema(&export).is_ok());
+    }
+
+    #[test]
+    fn test_import_rejects_malformed_version() {
+        let mut export = SchemaExport::new(vec![]);
+        export.version = String::new();
+        assert!(import_schema(&export).is_err());
+        export.version = "not-a-version".to_string();
+        assert!(import_schema(&export).is_err());
     }
 }
