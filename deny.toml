@@ -15,10 +15,6 @@ confidence-threshold = 0.8
 [advisories]
 yanked = "deny"
 ignore = [
-  # rsa: Marvin Attack timing sidechannel. Pulled in transitively by
-  # sqlx-mysql and not yet fixed upstream. Revisit when sqlx adopts a
-  # patched rsa release.
-  "RUSTSEC-2023-0071",
   # rustls-pemfile: marked unmaintained. Reached transitively via
   # sqlx-postgres / hyper-rustls; replacement landed in newer sqlx
   # releases.
@@ -31,6 +27,10 @@ ignore = [
   # usvg / rustybuzz for SVG rasterization; no safe upgrade available
   # upstream. Revisit when resvg migrates off ttf-parser.
   "RUSTSEC-2026-0192",
+  # rustybuzz: marked unmaintained. Reached transitively via resvg /
+  # usvg for SVG rasterization; no safe upgrade available upstream.
+  # Revisit when resvg migrates to harfrust.
+  "RUSTSEC-2026-0206",
 ]
 
 [bans]
