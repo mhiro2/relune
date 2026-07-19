@@ -317,16 +317,19 @@ fn export_enum(enum_: &Enum) -> EnumExport {
 /// writer's file still imports on an older reader, dropping only fields the
 /// reader does not know about.
 fn validate_export_version(version: &str) -> Result<(), ImportError> {
-    let major = version
-        .split('.')
-        .next()
-        .filter(|s| !s.is_empty())
-        .and_then(|s| s.parse::<u64>().ok())
-        .ok_or_else(|| ImportError {
-            message: format!(
-                "unsupported schema export version '{version}': expected 'MAJOR.MINOR.PATCH'"
-            ),
-        })?;
+    let malformed = || ImportError {
+        message: format!(
+            "unsupported schema export version '{version}': expected 'MAJOR.MINOR.PATCH' with numeric components"
+        ),
+    };
+    // Require exactly three numeric components so a malformed string (e.g. "1",
+    // "1.foo", "1.2.3.extra") is rejected rather than silently accepted on its
+    // leading number, keeping the error message truthful.
+    let components: Vec<&str> = version.split('.').collect();
+    if components.len() != 3 || components.iter().any(|c| c.parse::<u64>().is_err()) {
+        return Err(malformed());
+    }
+    let major = components[0].parse::<u64>().map_err(|_| malformed())?;
     if major != SchemaExport::MAJOR_VERSION {
         return Err(ImportError {
             message: format!(
@@ -1154,9 +1157,20 @@ mod tests {
     #[test]
     fn test_import_rejects_malformed_version() {
         let mut export = SchemaExport::new(vec![]);
-        export.version = String::new();
-        assert!(import_schema(&export).is_err());
-        export.version = "not-a-version".to_string();
-        assert!(import_schema(&export).is_err());
+        for bad in [
+            "",
+            "not-a-version",
+            "1",
+            "1.foo",
+            "1.2",
+            "1.2.3.extra",
+            "1..0",
+        ] {
+            export.version = bad.to_string();
+            assert!(
+                import_schema(&export).is_err(),
+                "version '{bad}' should be rejected as malformed"
+            );
+        }
     }
 }

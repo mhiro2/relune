@@ -384,62 +384,135 @@ async fn fetch_index_sql(
 /// plain-column parts come from `PRAGMA index_info`.
 fn split_sqlite_index_def(sql: &str) -> (Vec<String>, Option<String>) {
     let bytes = sql.as_bytes();
-    let Some(open) = sql.find('(') else {
+
+    // Locate the top-level key-list parentheses, ignoring any '(' that appears
+    // inside a quoted identifier or string literal (e.g. a quoted index name
+    // `"idx(foo)"`).
+    let mut i = 0usize;
+    let mut open = None;
+    while i < bytes.len() {
+        let skipped = skip_sqlite_quote(bytes, i);
+        if skipped != i {
+            i = skipped;
+            continue;
+        }
+        if bytes[i] == b'(' {
+            open = Some(i);
+            break;
+        }
+        i += 1;
+    }
+    let Some(open) = open else {
         return (Vec::new(), None);
     };
+
     let mut depth = 0usize;
     let mut close = None;
-    for (i, &b) in bytes.iter().enumerate().skip(open) {
-        match b {
+    let mut j = open;
+    while j < bytes.len() {
+        let skipped = skip_sqlite_quote(bytes, j);
+        if skipped != j {
+            j = skipped;
+            continue;
+        }
+        match bytes[j] {
             b'(' => depth += 1,
             b')' => {
                 depth -= 1;
                 if depth == 0 {
-                    close = Some(i);
+                    close = Some(j);
                     break;
                 }
             }
             _ => {}
         }
+        j += 1;
     }
     let Some(close) = close else {
         return (Vec::new(), None);
     };
 
-    let inner = &sql[open + 1..close];
+    // Split the key list on top-level commas, skipping quotes and nested parens.
     let mut parts = Vec::new();
     let mut depth = 0usize;
-    let mut start = 0usize;
-    for (i, &b) in inner.as_bytes().iter().enumerate() {
-        match b {
+    let mut seg_start = open + 1;
+    let mut k = open + 1;
+    while k < close {
+        let skipped = skip_sqlite_quote(bytes, k);
+        if skipped != k {
+            k = skipped.min(close);
+            continue;
+        }
+        match bytes[k] {
             b'(' => depth += 1,
             b')' => depth = depth.saturating_sub(1),
             b',' if depth == 0 => {
-                parts.push(inner[start..i].trim().to_string());
-                start = i + 1;
+                parts.push(sql[seg_start..k].trim().to_string());
+                seg_start = k + 1;
             }
             _ => {}
         }
+        k += 1;
     }
-    parts.push(inner[start..].trim().to_string());
+    parts.push(sql[seg_start..close].trim().to_string());
 
-    let tail = &sql[close + 1..];
-    let predicate = tail
-        .char_indices()
-        .find_map(|(i, _)| {
-            let rest = &tail[i..];
-            let upper = rest
-                .get(..5)
-                .is_some_and(|s| s.eq_ignore_ascii_case("where"));
-            if upper {
-                Some(rest[5..].trim().to_string())
-            } else {
-                None
+    // Find the top-level `WHERE` keyword in the tail, ignoring occurrences
+    // inside quoted strings/identifiers and matching only a whole word.
+    let mut predicate = None;
+    let mut m = close + 1;
+    while m < bytes.len() {
+        let skipped = skip_sqlite_quote(bytes, m);
+        if skipped != m {
+            m = skipped;
+            continue;
+        }
+        let is_where = bytes
+            .get(m..m + 5)
+            .is_some_and(|w| w.eq_ignore_ascii_case(b"where"));
+        let prev_boundary = m == 0 || !is_ident_byte(bytes[m - 1]);
+        let next_boundary = bytes.get(m + 5).is_none_or(|b| !is_ident_byte(*b));
+        if is_where && prev_boundary && next_boundary {
+            let candidate = sql[m + 5..].trim();
+            if !candidate.is_empty() {
+                predicate = Some(candidate.to_string());
             }
-        })
-        .filter(|p| !p.is_empty());
+            break;
+        }
+        m += 1;
+    }
 
     (parts, predicate)
+}
+
+/// If `bytes[i]` opens a quoted string/identifier (`'`, `"`, `` ` ``, `[`),
+/// return the index just past its close; otherwise return `i` unchanged.
+/// Doubled quote characters are treated as escapes (SQLite/SQL convention).
+fn skip_sqlite_quote(bytes: &[u8], i: usize) -> usize {
+    let close = match bytes[i] {
+        b'\'' => b'\'',
+        b'"' => b'"',
+        b'`' => b'`',
+        b'[' => b']',
+        _ => return i,
+    };
+    let doubled_escape = bytes[i] != b'[';
+    let mut j = i + 1;
+    while j < bytes.len() {
+        if bytes[j] == close {
+            if doubled_escape && bytes.get(j + 1) == Some(&close) {
+                j += 2;
+                continue;
+            }
+            return j + 1;
+        }
+        j += 1;
+    }
+    bytes.len()
+}
+
+/// `true` for bytes that can appear inside an unquoted SQL identifier/keyword.
+const fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]
@@ -457,6 +530,38 @@ mod tests {
     fn quotes_identifiers_with_double_quotes() {
         let quoted = quote_ident(r#"na"me"#).expect("identifier should be quoted");
         assert_eq!(quoted, r#""na""me""#);
+    }
+
+    #[test]
+    fn split_index_def_handles_quoted_name_with_paren() {
+        // A '(' inside the quoted index name must not be treated as the start
+        // of the key list.
+        let (parts, predicate) = split_sqlite_index_def(r#"CREATE INDEX "idx(foo)" ON t (a, b)"#);
+        assert_eq!(parts, vec!["a".to_string(), "b".to_string()]);
+        assert!(predicate.is_none());
+    }
+
+    #[test]
+    fn split_index_def_recovers_expression_and_predicate() {
+        let (parts, predicate) =
+            split_sqlite_index_def("CREATE INDEX i ON t (lower(email), id) WHERE id > 0");
+        assert_eq!(parts, vec!["lower(email)".to_string(), "id".to_string()]);
+        assert_eq!(predicate.as_deref(), Some("id > 0"));
+    }
+
+    #[test]
+    fn split_index_def_ignores_where_inside_string_literal() {
+        // The literal contains "where"; the real predicate keyword follows it.
+        let (parts, predicate) =
+            split_sqlite_index_def("CREATE INDEX i ON t (note) WHERE note = 'nowhere land'");
+        assert_eq!(parts, vec!["note".to_string()]);
+        assert_eq!(predicate.as_deref(), Some("note = 'nowhere land'"));
+    }
+
+    #[test]
+    fn split_index_def_does_not_split_commas_in_expression() {
+        let (parts, _) = split_sqlite_index_def("CREATE INDEX i ON t (coalesce(a, b), c)");
+        assert_eq!(parts, vec!["coalesce(a, b)".to_string(), "c".to_string()]);
     }
 
     #[test]
