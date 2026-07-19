@@ -7,8 +7,8 @@ use sqlx::sqlite::SqlitePool;
 
 use crate::catalog::raw_schema;
 use crate::common::{
-    RawColumn, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable, RawView,
-    parse_referential_action,
+    RawCheckConstraint, RawColumn, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable,
+    RawView, parse_referential_action,
 };
 use crate::connect::statement_timeout;
 use crate::error::IntrospectError;
@@ -22,6 +22,7 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
     let mut foreign_keys = Vec::new();
     let mut indexes = Vec::new();
     let mut tables = Vec::new();
+    let mut checks = Vec::new();
 
     for table_name in &table_names {
         let q = quote_ident(table_name)?;
@@ -36,16 +37,18 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
             let ordinal_position =
                 ordinal_position_from_row(row.cid.saturating_add(1), table_name)?;
 
-            columns.push(RawColumn {
-                table_name: table_name.clone(),
-                schema_name: MAIN_SCHEMA.to_string(),
-                column_name: row.name,
-                data_type: row.col_type,
-                is_nullable: row.notnull == 0,
-                is_primary_key: row.pk > 0,
-                column_comment: None,
+            let mut column = RawColumn::new(
+                table_name.clone(),
+                MAIN_SCHEMA.to_string(),
+                row.name,
+                row.col_type,
+                row.notnull == 0,
+                row.pk > 0,
+                None,
                 ordinal_position,
-            });
+            );
+            column.default_expression = row.dflt_value;
+            columns.push(column);
         }
 
         let fk_rows = pragma_foreign_key_list(pool, &q).await?;
@@ -53,6 +56,18 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
 
         let idx_rows = pragma_index_list(pool, &q).await?;
         indexes.extend(collect_table_indexes(pool, table_name, idx_rows).await?);
+
+        // SQLite exposes CHECK constraints only through the CREATE TABLE text.
+        if let Some(sql) = fetch_table_sql(pool, table_name).await? {
+            for (name, expression) in parse_sqlite_table_checks(&sql) {
+                checks.push(RawCheckConstraint {
+                    schema_name: MAIN_SCHEMA.to_string(),
+                    table_name: table_name.clone(),
+                    name,
+                    expression,
+                });
+            }
+        }
     }
 
     let views = list_views(pool).await?;
@@ -64,7 +79,176 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
         indexes,
         views,
         Vec::new(),
+        checks,
     ))
+}
+
+/// Fetch the `CREATE TABLE` text for a named table from `sqlite_master`.
+async fn fetch_table_sql(
+    pool: &SqlitePool,
+    table_name: &str,
+) -> Result<Option<String>, IntrospectError> {
+    with_query_timeout("sqlite_master table sql", async {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        )
+        .bind(table_name)
+        .fetch_optional(pool)
+        .await
+        .map(Option::flatten)
+        .map_err(|e| IntrospectError::query_with_source("Failed to read table definition", e))
+    })
+    .await
+}
+
+/// Best-effort extraction of top-level `CHECK (<expr>)` constraints from a
+/// `CREATE TABLE` statement, quote- and depth-aware. Returns each constraint's
+/// optional name (from a preceding `CONSTRAINT <name>`) and expression text.
+///
+/// This covers both table-level checks and column-level `CHECK` clauses, since
+/// catalogs do not distinguish them; both are attached at table level.
+fn parse_sqlite_table_checks(sql: &str) -> Vec<(Option<String>, String)> {
+    let bytes = sql.as_bytes();
+    // Enter the outermost parenthesised body.
+    let mut i = 0usize;
+    let mut body_open = None;
+    while i < bytes.len() {
+        let skipped = skip_sqlite_quote(bytes, i);
+        if skipped != i {
+            i = skipped;
+            continue;
+        }
+        if bytes[i] == b'(' {
+            body_open = Some(i);
+            break;
+        }
+        i += 1;
+    }
+    let Some(body_open) = body_open else {
+        return Vec::new();
+    };
+
+    let mut checks = Vec::new();
+    let mut depth = 0usize;
+    let mut pending_name: Option<String> = None;
+    let mut k = body_open;
+    while k < bytes.len() {
+        let skipped = skip_sqlite_quote(bytes, k);
+        if skipped != k {
+            k = skipped;
+            continue;
+        }
+        match bytes[k] {
+            b'(' => {
+                depth += 1;
+                k += 1;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+                k += 1;
+            }
+            _ if depth == 1 => {
+                // Track `CONSTRAINT <name>` so a following CHECK is named.
+                if keyword_at(bytes, k, b"constraint") {
+                    let after = k + "constraint".len();
+                    let (name, next) = read_identifier(sql, bytes, skip_ws(bytes, after));
+                    pending_name = name;
+                    k = next;
+                    continue;
+                }
+                if keyword_at(bytes, k, b"check") {
+                    let paren = skip_ws(bytes, k + "check".len());
+                    if paren < bytes.len()
+                        && bytes[paren] == b'('
+                        && let Some((expr, next)) = read_balanced(sql, bytes, paren)
+                    {
+                        checks.push((pending_name.take(), expr.trim().to_string()));
+                        k = next;
+                        continue;
+                    }
+                }
+                // A comma at the top level ends the current column/constraint.
+                if bytes[k] == b',' {
+                    pending_name = None;
+                }
+                k += 1;
+            }
+            _ => k += 1,
+        }
+    }
+
+    checks
+}
+
+/// `true` if a whole-word (case-insensitive) keyword `kw` starts at `pos`.
+fn keyword_at(bytes: &[u8], pos: usize, kw: &[u8]) -> bool {
+    let end = pos + kw.len();
+    let matches = bytes
+        .get(pos..end)
+        .is_some_and(|s| s.eq_ignore_ascii_case(kw));
+    let prev_ok = pos == 0 || !is_ident_byte(bytes[pos - 1]);
+    let next_ok = bytes.get(end).is_none_or(|b| !is_ident_byte(*b));
+    matches && prev_ok && next_ok
+}
+
+/// Skip ASCII whitespace, returning the next non-space index.
+fn skip_ws(bytes: &[u8], mut pos: usize) -> usize {
+    while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    pos
+}
+
+/// Read an identifier (optionally quoted) starting at `pos`, returning its
+/// unquoted text and the index just past it.
+fn read_identifier(sql: &str, bytes: &[u8], pos: usize) -> (Option<String>, usize) {
+    if pos >= bytes.len() {
+        return (None, pos);
+    }
+    let end = skip_sqlite_quote(bytes, pos);
+    if end != pos {
+        // Quoted identifier: strip the surrounding quote characters.
+        let inner = sql[pos + 1..end - 1].replace("\"\"", "\"");
+        return (Some(inner), end);
+    }
+    let mut e = pos;
+    while e < bytes.len() && is_ident_byte(bytes[e]) {
+        e += 1;
+    }
+    if e == pos {
+        (None, pos)
+    } else {
+        (Some(sql[pos..e].to_string()), e)
+    }
+}
+
+/// Read a balanced `(...)` group starting at `open`, returning the inner text
+/// and the index just past the closing paren. Quote- and depth-aware.
+fn read_balanced(sql: &str, bytes: &[u8], open: usize) -> Option<(String, usize)> {
+    let mut depth = 0usize;
+    let mut j = open;
+    while j < bytes.len() {
+        let skipped = skip_sqlite_quote(bytes, j);
+        if skipped != j {
+            j = skipped;
+            continue;
+        }
+        match bytes[j] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((sql[open + 1..j].to_string(), j + 1));
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    None
 }
 
 /// Wraps a `SQLite` query future with the shared per-statement deadline.
@@ -221,7 +405,6 @@ struct SqliteTableInfoRow {
     #[sqlx(rename = "type")]
     col_type: String,
     notnull: i64,
-    #[allow(dead_code)]
     dflt_value: Option<String>,
     pk: i64,
 }
@@ -562,6 +745,27 @@ mod tests {
     fn split_index_def_does_not_split_commas_in_expression() {
         let (parts, _) = split_sqlite_index_def("CREATE INDEX i ON t (coalesce(a, b), c)");
         assert_eq!(parts, vec!["coalesce(a, b)".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn parse_table_checks_extracts_named_and_unnamed() {
+        let sql = "CREATE TABLE t (\n  amount INTEGER CHECK (amount >= 0),\n  qty INTEGER,\n  CONSTRAINT qty_positive CHECK (qty > 0)\n)";
+        let checks = parse_sqlite_table_checks(sql);
+        assert_eq!(checks.len(), 2);
+        assert_eq!(checks[0], (None, "amount >= 0".to_string()));
+        assert_eq!(
+            checks[1],
+            (Some("qty_positive".to_string()), "qty > 0".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_table_checks_ignores_check_inside_string_or_nested() {
+        // A parenthesised default expression must not confuse the top-level scan,
+        // and only real CHECK clauses are captured.
+        let sql = "CREATE TABLE t (\n  label TEXT DEFAULT '(check me)',\n  n INTEGER CHECK (n <> (1 + 2))\n)";
+        let checks = parse_sqlite_table_checks(sql);
+        assert_eq!(checks, vec![(None, "n <> (1 + 2)".to_string())]);
     }
 
     #[test]

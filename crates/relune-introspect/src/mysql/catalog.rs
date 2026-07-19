@@ -8,8 +8,8 @@ use tracing::warn;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
-    RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable, RawView,
-    parse_referential_action,
+    RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
+    RawTable, RawView, parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
@@ -68,7 +68,10 @@ impl ParallelCatalogReader for MySqlCatalog {
                 IF(IS_NULLABLE = 'YES', TRUE, FALSE) AS is_nullable,
                 IF(COLUMN_KEY = 'PRI', TRUE, FALSE) AS is_primary_key,
                 NULLIF(CONVERT(COLUMN_COMMENT USING utf8mb4), '') AS column_comment,
-                ORDINAL_POSITION AS ordinal_position
+                ORDINAL_POSITION AS ordinal_position,
+                CONVERT(COLUMN_DEFAULT USING utf8mb4) AS column_default,
+                CONVERT(EXTRA USING utf8mb4) AS extra,
+                NULLIF(CONVERT(GENERATION_EXPRESSION USING utf8mb4), '') AS generation_expression
             FROM information_schema.COLUMNS
             WHERE TABLE_SCHEMA NOT IN (
                 'information_schema', 'mysql', 'performance_schema', 'sys',
@@ -89,18 +92,74 @@ impl ParallelCatalogReader for MySqlCatalog {
                     &row.table_name,
                 )?;
 
-                Ok::<RawColumn, IntrospectError>(RawColumn {
-                    table_name: row.table_name,
-                    schema_name: row.schema_name,
-                    column_name: row.column_name,
-                    data_type: row.data_type,
-                    is_nullable: row.is_nullable,
-                    is_primary_key: row.is_primary_key,
-                    column_comment: row.column_comment,
+                let mut column = RawColumn::new(
+                    row.table_name,
+                    row.schema_name,
+                    row.column_name,
+                    row.data_type,
+                    row.is_nullable,
+                    row.is_primary_key,
+                    row.column_comment,
                     ordinal_position,
-                })
+                );
+                let extra = row.extra.unwrap_or_default();
+                let extra_lower = extra.to_lowercase();
+                column.auto_increment = extra_lower.contains("auto_increment");
+                let is_generated = (extra_lower.contains("stored generated")
+                    || extra_lower.contains("virtual generated"))
+                    && row.generation_expression.is_some();
+                if is_generated {
+                    column.generated_expression = row.generation_expression;
+                    column.generated_stored = extra_lower.contains("stored generated");
+                } else {
+                    column.default_expression = row.column_default;
+                }
+                if let Some(pos) = extra_lower.find("on update ") {
+                    let rest = extra[pos + "on update ".len()..].trim();
+                    if !rest.is_empty() {
+                        column.on_update = Some(rest.to_string());
+                    }
+                }
+                Ok::<RawColumn, IntrospectError>(column)
             })
             .collect::<Result<Vec<RawColumn>, IntrospectError>>()
+    }
+
+    /// Fetch table-level `CHECK` constraints (`MySQL` 8.0.16+). The
+    /// `CHECK_CLAUSE` is rendered as `(<expr>)`; the outer parentheses are
+    /// stripped to match the parser's representation.
+    async fn fetch_checks(&self) -> Result<Vec<RawCheckConstraint>, IntrospectError> {
+        let rows: Vec<RawCheckRow> = sqlx::query_as(
+            r"
+            SELECT
+                CONVERT(tc.TABLE_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(tc.TABLE_NAME USING utf8mb4) AS table_name,
+                CONVERT(cc.CONSTRAINT_NAME USING utf8mb4) AS name,
+                CONVERT(cc.CHECK_CLAUSE USING utf8mb4) AS check_clause
+            FROM information_schema.CHECK_CONSTRAINTS cc
+            INNER JOIN information_schema.TABLE_CONSTRAINTS tc
+                ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+                AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+            WHERE tc.TABLE_SCHEMA NOT IN (
+                'information_schema', 'mysql', 'performance_schema', 'sys',
+                'mysql_innodb_cluster_metadata'
+            )
+            ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, cc.CONSTRAINT_NAME
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch check constraints", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RawCheckConstraint {
+                schema_name: row.schema_name,
+                table_name: row.table_name,
+                name: Some(row.name),
+                expression: strip_outer_parens(&row.check_clause),
+            })
+            .collect())
     }
 
     async fn fetch_foreign_keys(&self) -> Result<Vec<RawForeignKey>, IntrospectError> {
@@ -274,6 +333,27 @@ struct RawColumnRow {
     is_primary_key: bool,
     column_comment: Option<String>,
     ordinal_position: u64,
+    column_default: Option<String>,
+    extra: Option<String>,
+    generation_expression: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RawCheckRow {
+    schema_name: String,
+    table_name: String,
+    name: String,
+    check_clause: String,
+}
+
+/// Remove one balanced layer of surrounding parentheses (e.g. a `MySQL`
+/// `CHECK_CLAUSE` `(expr)` or a `pg`-style wrapped expression).
+fn strip_outer_parens(clause: &str) -> String {
+    let trimmed = clause.trim();
+    trimmed
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .map_or_else(|| trimmed.to_string(), |inner| inner.trim().to_string())
 }
 
 #[derive(Debug, sqlx::FromRow, Clone)]

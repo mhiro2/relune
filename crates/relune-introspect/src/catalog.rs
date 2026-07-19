@@ -1,6 +1,8 @@
 //! Shared catalog fetching helpers.
 
-use crate::common::{RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView};
+use crate::common::{
+    RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
+};
 use crate::error::IntrospectError;
 
 /// Builds a [`RawSchema`] from fetched catalog sections.
@@ -12,6 +14,7 @@ pub(crate) const fn raw_schema(
     indexes: Vec<RawIndex>,
     views: Vec<RawView>,
     enums: Vec<RawEnum>,
+    checks: Vec<RawCheckConstraint>,
 ) -> RawSchema {
     RawSchema {
         tables,
@@ -20,6 +23,7 @@ pub(crate) const fn raw_schema(
         indexes,
         views,
         enums,
+        checks,
     }
 }
 
@@ -43,15 +47,19 @@ pub(crate) trait ParallelCatalogReader {
     /// Fetches all enum-like definitions.
     async fn fetch_enums(&self) -> Result<Vec<RawEnum>, IntrospectError>;
 
+    /// Fetches all table-level `CHECK` constraints.
+    async fn fetch_checks(&self) -> Result<Vec<RawCheckConstraint>, IntrospectError>;
+
     /// Fetches all catalog sections concurrently and assembles a [`RawSchema`].
     async fn fetch_all(&self) -> Result<RawSchema, IntrospectError> {
-        let (tables, columns, foreign_keys, indexes, views, enums) = tokio::try_join!(
+        let (tables, columns, foreign_keys, indexes, views, enums, checks) = tokio::try_join!(
             self.fetch_tables(),
             self.fetch_columns(),
             self.fetch_foreign_keys(),
             self.fetch_indexes(),
             self.fetch_views(),
-            self.fetch_enums()
+            self.fetch_enums(),
+            self.fetch_checks()
         )?;
 
         Ok(raw_schema(
@@ -61,6 +69,7 @@ pub(crate) trait ParallelCatalogReader {
             indexes,
             views,
             enums,
+            checks,
         ))
     }
 }

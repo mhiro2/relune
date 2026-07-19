@@ -30,6 +30,7 @@ pub struct RawTable {
 
 /// Raw column metadata from a database catalog.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // distinct catalog attributes, not a state enum
 pub struct RawColumn {
     /// Name of the relation containing the column.
     pub table_name: String,
@@ -47,6 +48,71 @@ pub struct RawColumn {
     pub column_comment: Option<String>,
     /// Position of the column in the table (1-based).
     pub ordinal_position: i16,
+    /// `DEFAULT` expression, if any (canonical SQL text).
+    pub default_expression: Option<String>,
+    /// Generated/computed column expression, if any.
+    pub generated_expression: Option<String>,
+    /// Whether a generated column is `STORED` (`false` = `VIRTUAL`/unknown).
+    pub generated_stored: bool,
+    /// Identity column: `Some(true)` = `GENERATED ALWAYS`, `Some(false)` = `BY DEFAULT`.
+    pub identity_always: Option<bool>,
+    /// Whether the column carries an auto-increment attribute.
+    pub auto_increment: bool,
+    /// Column collation.
+    pub collation: Option<String>,
+    /// Column character set.
+    pub character_set: Option<String>,
+    /// `ON UPDATE` expression (e.g. `MySQL` `ON UPDATE CURRENT_TIMESTAMP`).
+    pub on_update: Option<String>,
+}
+
+impl RawColumn {
+    /// Constructs a `RawColumn` with the given core fields and no extended
+    /// semantics. Dialect catalogs fill the semantic fields afterwards.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        table_name: String,
+        schema_name: String,
+        column_name: String,
+        data_type: String,
+        is_nullable: bool,
+        is_primary_key: bool,
+        column_comment: Option<String>,
+        ordinal_position: i16,
+    ) -> Self {
+        Self {
+            table_name,
+            schema_name,
+            column_name,
+            data_type,
+            is_nullable,
+            is_primary_key,
+            column_comment,
+            ordinal_position,
+            default_expression: None,
+            generated_expression: None,
+            generated_stored: false,
+            identity_always: None,
+            auto_increment: false,
+            collation: None,
+            character_set: None,
+            on_update: None,
+        }
+    }
+}
+
+/// Raw `CHECK` constraint metadata from a database catalog.
+#[derive(Debug, Clone)]
+pub struct RawCheckConstraint {
+    /// Schema name containing the table.
+    pub schema_name: String,
+    /// Table the constraint is defined on.
+    pub table_name: String,
+    /// Constraint name, if named.
+    pub name: Option<String>,
+    /// The check expression, as catalog-rendered SQL text.
+    pub expression: String,
 }
 
 /// Raw foreign key metadata from a database catalog.
@@ -186,6 +252,8 @@ pub struct RawSchema {
     pub views: Vec<RawView>,
     /// All enum types in the database.
     pub enums: Vec<RawEnum>,
+    /// All table-level `CHECK` constraints in the database.
+    pub checks: Vec<RawCheckConstraint>,
 }
 
 // ============================================================================
@@ -252,11 +320,21 @@ pub fn map_to_schema(raw_schema: RawSchema) -> Result<Schema, IntrospectError> {
         indexes,
         views,
         enums,
+        checks,
     } = raw_schema;
-    map_schema(tables, &columns, &foreign_keys, &indexes, views, enums)
+    map_schema(
+        tables,
+        &columns,
+        &foreign_keys,
+        &indexes,
+        views,
+        enums,
+        &checks,
+    )
 }
 
 /// Maps raw database catalog data to a complete `Schema`.
+#[allow(clippy::too_many_arguments)]
 pub fn map_schema(
     tables: Vec<RawTable>,
     columns: &[RawColumn],
@@ -264,6 +342,7 @@ pub fn map_schema(
     indexes: &[RawIndex],
     views: Vec<RawView>,
     enums: Vec<RawEnum>,
+    checks: &[RawCheckConstraint],
 ) -> Result<Schema, IntrospectError> {
     // Build a set of primary key column identifiers for quick lookup
     let pk_set: HashSet<(&str, &str, &str)> = columns
@@ -305,6 +384,15 @@ pub fn map_schema(
             .push(idx);
     }
 
+    // Group CHECK constraints by table
+    let mut checks_by_table: HashMap<(&str, &str), Vec<&RawCheckConstraint>> = HashMap::new();
+    for check in checks {
+        checks_by_table
+            .entry((check.schema_name.as_str(), check.table_name.as_str()))
+            .or_default()
+            .push(check);
+    }
+
     // Map tables
     let mapped_tables: Vec<Table> = tables
         .into_iter()
@@ -316,8 +404,16 @@ pub fn map_schema(
             let table_columns = columns_by_relation.get(&key).cloned().unwrap_or_default();
             let table_fks = fks_by_table.get(&key).cloned().unwrap_or_default();
             let table_indexes = indexes_by_table.get(&key).cloned().unwrap_or_default();
+            let table_checks = checks_by_table.get(&key).cloned().unwrap_or_default();
 
-            map_table(raw_table, table_columns, &pk_set, table_fks, table_indexes)
+            map_table(
+                raw_table,
+                table_columns,
+                &pk_set,
+                table_fks,
+                table_indexes,
+                table_checks,
+            )
         })
         .collect();
 
@@ -348,6 +444,7 @@ fn map_table(
     pk_set: &HashSet<(&str, &str, &str)>,
     foreign_keys: Vec<&RawForeignKey>,
     indexes: Vec<&RawIndex>,
+    checks: Vec<&RawCheckConstraint>,
 ) -> Table {
     let stable_id = qualified_stable_id(&raw_table.schema_name, &raw_table.table_name);
     let id = generate_table_id(&raw_table.schema_name, &raw_table.table_name);
@@ -372,6 +469,14 @@ fn map_table(
         .map(map_index)
         .collect();
 
+    let mapped_checks: Vec<relune_core::CheckConstraint> = checks
+        .into_iter()
+        .map(|c| relune_core::CheckConstraint {
+            name: c.name.clone(),
+            expression: c.expression.clone(),
+        })
+        .collect();
+
     Table {
         id,
         stable_id,
@@ -381,12 +486,35 @@ fn map_table(
         foreign_keys: mapped_fks,
         indexes: mapped_indexes,
         primary_key_name: None,
-        check_constraints: Vec::new(),
+        check_constraints: mapped_checks,
         comment: raw_table.table_comment,
     }
 }
 
 fn map_column(raw_column: &RawColumn, table_stable_id: &str, is_primary_key: bool) -> Column {
+    use relune_core::{ColumnSemantics, GeneratedColumn, IdentitySpec};
+
+    let semantics = ColumnSemantics {
+        default_expression: raw_column.default_expression.clone(),
+        // Catalogs expose CHECK constraints at table level; they are mapped onto
+        // `Table::check_constraints` rather than split back onto columns.
+        check_constraints: Vec::new(),
+        generated: raw_column
+            .generated_expression
+            .clone()
+            .map(|expression| GeneratedColumn {
+                expression,
+                stored: raw_column.generated_stored,
+            }),
+        identity: raw_column
+            .identity_always
+            .map(|always| IdentitySpec { always }),
+        collation: raw_column.collation.clone(),
+        character_set: raw_column.character_set.clone(),
+        auto_increment: raw_column.auto_increment,
+        on_update: raw_column.on_update.clone(),
+    };
+
     Column {
         id: generate_column_id(table_stable_id, &raw_column.column_name),
         name: raw_column.column_name.clone(),
@@ -395,7 +523,7 @@ fn map_column(raw_column: &RawColumn, table_stable_id: &str, is_primary_key: boo
         is_primary_key,
         comment: raw_column.column_comment.clone(),
         enum_values: None,
-        semantics: relune_core::ColumnSemantics::default(),
+        semantics,
     }
 }
 
@@ -481,36 +609,36 @@ mod tests {
                 table_comment: None,
             }],
             &[
-                RawColumn {
-                    table_name: "users".to_string(),
-                    schema_name: "public".to_string(),
-                    column_name: "id".to_string(),
-                    data_type: "integer".to_string(),
-                    is_nullable: false,
-                    is_primary_key: true,
-                    column_comment: None,
-                    ordinal_position: 1,
-                },
-                RawColumn {
-                    table_name: "active_users".to_string(),
-                    schema_name: "public".to_string(),
-                    column_name: "id".to_string(),
-                    data_type: "integer".to_string(),
-                    is_nullable: false,
-                    is_primary_key: false,
-                    column_comment: None,
-                    ordinal_position: 1,
-                },
-                RawColumn {
-                    table_name: "active_users".to_string(),
-                    schema_name: "public".to_string(),
-                    column_name: "email".to_string(),
-                    data_type: "text".to_string(),
-                    is_nullable: false,
-                    is_primary_key: false,
-                    column_comment: None,
-                    ordinal_position: 2,
-                },
+                RawColumn::new(
+                    "users".to_string(),
+                    "public".to_string(),
+                    "id".to_string(),
+                    "integer".to_string(),
+                    false,
+                    true,
+                    None,
+                    1,
+                ),
+                RawColumn::new(
+                    "active_users".to_string(),
+                    "public".to_string(),
+                    "id".to_string(),
+                    "integer".to_string(),
+                    false,
+                    false,
+                    None,
+                    1,
+                ),
+                RawColumn::new(
+                    "active_users".to_string(),
+                    "public".to_string(),
+                    "email".to_string(),
+                    "text".to_string(),
+                    false,
+                    false,
+                    None,
+                    2,
+                ),
             ],
             &[],
             &[],
@@ -521,6 +649,7 @@ mod tests {
                 view_comment: None,
             }],
             vec![],
+            &[],
         )
         .expect("schema mapping should succeed");
 

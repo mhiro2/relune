@@ -8,8 +8,8 @@ use sqlx::PgPool;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
-    RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema, RawTable, RawView,
-    parse_referential_action,
+    RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
+    RawTable, RawView, parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
@@ -31,10 +31,14 @@ const FETCH_COLUMNS_QUERY: &str = r"
                 CASE WHEN a.attnotnull THEN false ELSE true END AS is_nullable,
                 COALESCE(pk.is_pk, false) AS is_primary_key,
                 pg_catalog.col_description(a.attrelid, a.attnum) AS column_comment,
-                a.attnum AS ordinal_position
+                a.attnum AS ordinal_position,
+                pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS default_or_generation_expr,
+                a.attgenerated::text AS generated_kind,
+                a.attidentity::text AS identity_kind
             FROM pg_catalog.pg_attribute a
             INNER JOIN pg_catalog.pg_class t ON t.oid = a.attrelid
             INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
             LEFT JOIN (
                 SELECT
                     i.indrelid,
@@ -114,15 +118,66 @@ impl ParallelCatalogReader for PostgresCatalog {
 
         Ok(rows
             .into_iter()
-            .map(|row| RawColumn {
-                table_name: row.table_name,
+            .map(|row| {
+                let is_generated = row.generated_kind.as_deref() == Some("s");
+                let mut column = RawColumn::new(
+                    row.table_name,
+                    row.schema_name,
+                    row.column_name,
+                    row.data_type,
+                    row.is_nullable,
+                    row.is_primary_key,
+                    row.column_comment,
+                    row.ordinal_position,
+                );
+                if is_generated {
+                    column.generated_expression = row.default_or_generation_expr;
+                    column.generated_stored = true;
+                } else {
+                    column.default_expression = row.default_or_generation_expr;
+                }
+                column.identity_always = match row.identity_kind.as_deref() {
+                    Some("a") => Some(true),
+                    Some("d") => Some(false),
+                    _ => None,
+                };
+                column
+            })
+            .collect())
+    }
+
+    /// Fetch table-level `CHECK` constraints. `pg_get_constraintdef` renders
+    /// `CHECK (<expr>)`; the wrapping keyword and outer parentheses are stripped
+    /// so the stored expression matches the parser's representation.
+    async fn fetch_checks(&self) -> Result<Vec<RawCheckConstraint>, IntrospectError> {
+        let rows: Vec<RawCheckRow> = sqlx::query_as(
+            r"
+            SELECT
+                n.nspname AS schema_name,
+                t.relname AS table_name,
+                c.conname AS name,
+                pg_catalog.pg_get_constraintdef(c.oid, true) AS definition
+            FROM pg_catalog.pg_constraint c
+            INNER JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            WHERE c.contype = 'c'
+                AND t.relkind = 'r'
+                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                AND n.nspname NOT LIKE 'pg_%'
+            ORDER BY n.nspname, t.relname, c.conname
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch check constraints", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RawCheckConstraint {
                 schema_name: row.schema_name,
-                column_name: row.column_name,
-                data_type: row.data_type,
-                is_nullable: row.is_nullable,
-                is_primary_key: row.is_primary_key,
-                column_comment: row.column_comment,
-                ordinal_position: row.ordinal_position,
+                table_name: row.table_name,
+                name: Some(row.name),
+                expression: strip_pg_check_definition(&row.definition),
             })
             .collect())
     }
@@ -354,6 +409,37 @@ struct RawColumnRow {
     is_primary_key: bool,
     column_comment: Option<String>,
     ordinal_position: i16,
+    default_or_generation_expr: Option<String>,
+    generated_kind: Option<String>,
+    identity_kind: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct RawCheckRow {
+    schema_name: String,
+    table_name: String,
+    name: String,
+    definition: String,
+}
+
+/// Convert a `pg_get_constraintdef` CHECK rendering (`CHECK (<expr>)`) into the
+/// bare expression, matching how the SQL parser stores check expressions.
+fn strip_pg_check_definition(definition: &str) -> String {
+    let trimmed = definition.trim();
+    let without_keyword = trimmed
+        .strip_prefix("CHECK ")
+        .or_else(|| trimmed.strip_prefix("CHECK"))
+        .unwrap_or(trimmed)
+        .trim();
+    // Remove one balanced layer of surrounding parentheses if present.
+    if let Some(inner) = without_keyword
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        inner.trim().to_string()
+    } else {
+        without_keyword.to_string()
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -462,16 +548,16 @@ mod tests {
 
     #[test]
     fn test_raw_column_fields() {
-        let column = RawColumn {
-            table_name: "users".to_string(),
-            schema_name: "public".to_string(),
-            column_name: "id".to_string(),
-            data_type: "integer".to_string(),
-            is_nullable: false,
-            is_primary_key: true,
-            column_comment: None,
-            ordinal_position: 1,
-        };
+        let column = RawColumn::new(
+            "users".to_string(),
+            "public".to_string(),
+            "id".to_string(),
+            "integer".to_string(),
+            false,
+            true,
+            None,
+            1,
+        );
         assert_eq!(column.column_name, "id");
         assert!(column.is_primary_key);
         assert!(!column.is_nullable);
