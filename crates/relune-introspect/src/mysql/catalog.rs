@@ -112,7 +112,19 @@ impl ParallelCatalogReader for MySqlCatalog {
                     column.generated_expression = row.generation_expression;
                     column.generated_stored = extra_lower.contains("stored generated");
                 } else {
-                    column.default_expression = row.column_default;
+                    // MySQL returns literal string defaults unquoted in
+                    // COLUMN_DEFAULT (e.g. `active` for DEFAULT 'active'), while
+                    // expression defaults are flagged via EXTRA=DEFAULT_GENERATED.
+                    // Restore the quoting for literal string-typed defaults so
+                    // the value round-trips as SQL and matches the parser.
+                    let is_expression_default = extra_lower.contains("default_generated");
+                    column.default_expression = row.column_default.map(|value| {
+                        if !is_expression_default && is_mysql_string_type(&column.data_type) {
+                            format!("'{}'", value.replace('\'', "''"))
+                        } else {
+                            value
+                        }
+                    });
                 }
                 if let Some(pos) = extra_lower.find("on update ") {
                     let rest = extra[pos + "on update ".len()..].trim();
@@ -344,6 +356,16 @@ struct RawCheckRow {
     table_name: String,
     name: String,
     check_clause: String,
+}
+
+/// Returns `true` for `MySQL` column types whose literal `DEFAULT` values are
+/// reported unquoted by `information_schema.COLUMN_DEFAULT` and therefore need
+/// quoting restored (character, text, enum/set types).
+fn is_mysql_string_type(column_type: &str) -> bool {
+    let lower = column_type.to_ascii_lowercase();
+    ["char", "text", "enum", "set"]
+        .iter()
+        .any(|kind| lower.contains(kind))
 }
 
 /// Remove one balanced layer of surrounding parentheses (e.g. a `MySQL`

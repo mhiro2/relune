@@ -151,11 +151,19 @@ fn parse_sqlite_table_checks(sql: &str) -> Vec<(Option<String>, String)> {
                 k += 1;
             }
             _ if depth == 1 => {
-                // Track `CONSTRAINT <name>` so a following CHECK is named.
+                // Track `CONSTRAINT <name>` only when it directly names a CHECK
+                // (`CONSTRAINT c CHECK (...)`). A name in front of a different
+                // constraint type (e.g. `CONSTRAINT x_nn NOT NULL`) must not
+                // leak onto a later CHECK clause.
                 if keyword_at(bytes, k, b"constraint") {
                     let after = k + "constraint".len();
                     let (name, next) = read_identifier(sql, bytes, skip_ws(bytes, after));
-                    pending_name = name;
+                    let following = skip_ws(bytes, next);
+                    pending_name = if keyword_at(bytes, following, b"check") {
+                        name
+                    } else {
+                        None
+                    };
                     k = next;
                     continue;
                 }
@@ -757,6 +765,14 @@ mod tests {
             checks[1],
             (Some("qty_positive".to_string()), "qty > 0".to_string())
         );
+    }
+
+    #[test]
+    fn parse_table_checks_does_not_leak_constraint_name_to_later_check() {
+        // `x_nn` names the NOT NULL constraint, not the unnamed CHECK.
+        let sql = "CREATE TABLE t (\n  x INTEGER CONSTRAINT x_nn NOT NULL CHECK (x > 0)\n)";
+        let checks = parse_sqlite_table_checks(sql);
+        assert_eq!(checks, vec![(None, "x > 0".to_string())]);
     }
 
     #[test]

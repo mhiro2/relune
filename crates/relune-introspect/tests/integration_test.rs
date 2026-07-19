@@ -427,6 +427,7 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
         CREATE TABLE accounts (
             id INT AUTO_INCREMENT PRIMARY KEY,
             enabled TINYINT(1) NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             amount INT NOT NULL,
             CONSTRAINT amount_positive CHECK (amount >= 0)
@@ -444,6 +445,17 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
 
     let id = accounts.columns.iter().find(|c| c.name == "id").unwrap();
     assert!(id.semantics.auto_increment, "id should be auto-increment");
+
+    // A literal string default must round-trip with quoting restored.
+    let status = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "status")
+        .unwrap();
+    assert_eq!(
+        status.semantics.default_expression.as_deref(),
+        Some("'active'")
+    );
 
     let updated_at = accounts
         .columns
