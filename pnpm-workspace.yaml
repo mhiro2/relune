@@ -4,8 +4,8 @@ packages:
 
 catalog:
   esbuild: 0.28.1
-  oxfmt: 0.57.0
-  oxlint: 1.72.0
+  oxfmt: 0.59.0
+  oxlint: 1.74.0
   oxlint-tsgolint: 0.24.0
   "@typescript/native-preview": 7.0.0-dev.20260707.2
 
