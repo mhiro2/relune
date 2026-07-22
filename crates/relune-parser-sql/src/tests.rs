@@ -126,6 +126,80 @@ fn alter_column_default_change_is_captured() {
 }
 
 #[test]
+fn column_level_check_constraint_name_is_preserved() {
+    let sql = "CREATE TABLE t (x INT CONSTRAINT x_positive CHECK (x > 0));";
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let x = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "x")
+        .unwrap();
+    assert_eq!(x.semantics.check_constraints.len(), 1);
+    assert_eq!(
+        x.semantics.check_constraints[0].name.as_deref(),
+        Some("x_positive")
+    );
+}
+
+#[test]
+fn drop_constraint_removes_column_level_check() {
+    let sql = "\
+        CREATE TABLE t (x INT CONSTRAINT x_positive CHECK (x > 0));\n\
+        ALTER TABLE t DROP CONSTRAINT x_positive;\n\
+    ";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.as_ref().expect("schema should exist");
+    let x = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "x")
+        .unwrap();
+    assert!(
+        x.semantics.check_constraints.is_empty(),
+        "column-level check should be dropped by DROP CONSTRAINT"
+    );
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("no constraint named `x_positive`")),
+        "dropping an existing column-level check must not warn about a missing constraint"
+    );
+}
+
+#[test]
+fn drop_column_removes_index_that_only_includes_it() {
+    let sql = "\
+        CREATE TABLE t (a INT, b INT);\n\
+        CREATE INDEX i ON t (a) INCLUDE (b);\n\
+        ALTER TABLE t DROP COLUMN b;\n\
+    ";
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let t = &schema.tables[0];
+    assert!(
+        t.indexes.is_empty(),
+        "an index depending on a dropped INCLUDE column must not survive: {:?}",
+        t.indexes
+    );
+}
+
+#[test]
+fn rename_column_updates_index_include_columns() {
+    let sql = "\
+        CREATE TABLE t (a INT, b INT);\n\
+        CREATE INDEX i ON t (a) INCLUDE (b);\n\
+        ALTER TABLE t RENAME COLUMN b TO c;\n\
+    ";
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let idx = schema.tables[0]
+        .indexes
+        .iter()
+        .find(|ix| ix.name.as_deref() == Some("i"))
+        .expect("index i should exist");
+    assert_eq!(idx.included_columns, vec!["c".to_string()]);
+}
+
+#[test]
 fn parses_target_schema_for_create_table_foreign_keys() {
     let sql = r"
     CREATE TABLE auth.accounts (

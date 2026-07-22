@@ -32,13 +32,19 @@ pub struct SchemaExport {
 impl SchemaExport {
     /// Export format version.
     ///
-    /// `1.x` is the stable line. Minor bumps are additive: newer minors add
-    /// optional fields that older readers ignore, and unknown minors are
+    /// `2.x` is the current stable line. Minor bumps are additive: newer minors
+    /// add optional fields that older readers ignore, and unknown minors are
     /// accepted on import. A different major version is rejected on import.
-    pub const VERSION: &'static str = "1.1.0";
+    ///
+    /// `2.0.0` is a deliberate breaking change from `1.x`: the flattened
+    /// plain-column `columns` field was removed in favor of the structured
+    /// `key_parts` (see [`IndexExport`]). A `1.x` index carried only `columns`,
+    /// so importing it under `2.x` rules is rejected rather than silently
+    /// dropping the index key.
+    pub const VERSION: &'static str = "2.0.0";
 
     /// Major version of the current format, used to reject incompatible inputs.
-    pub const MAJOR_VERSION: u64 = 1;
+    pub const MAJOR_VERSION: u64 = 2;
 
     /// Creates a new schema export from tables only. Views and enums default to empty.
     #[must_use]
@@ -130,18 +136,17 @@ fn is_export_no_action(action: &Option<String>) -> bool {
 
 /// Export format for an index.
 ///
-/// `columns` carries the plain column names (expression parts omitted) and is
-/// retained for readers of the `1.0.0` format. `key_parts` (added in `1.1.0`)
-/// is the authoritative structured representation and, when present, takes
-/// precedence on import.
+/// `key_parts` is the authoritative structured representation of the index key,
+/// carrying both plain columns and functional/expression parts in order. There
+/// is deliberately no flattened plain-column field: a partial column list (with
+/// expression parts dropped) would let a reader infer false uniqueness or index
+/// coverage from a mixed expression index such as `UNIQUE (tenant_id,
+/// lower(email))`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexExport {
     /// Index name, if named.
     pub name: Option<String>,
-    /// Plain column names in key order (expression parts omitted).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub columns: Vec<String>,
-    /// Structured key parts (columns and expressions), authoritative on import.
+    /// Structured key parts (columns and expressions) in key order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_parts: Vec<IndexKey>,
     /// Whether the index is unique.
@@ -163,7 +168,6 @@ impl IndexExport {
     pub fn from_index(idx: &Index) -> Self {
         Self {
             name: idx.name.clone(),
-            columns: idx.column_names().into_iter().map(String::from).collect(),
             key_parts: idx.key_parts.clone(),
             unique: idx.is_unique,
             predicate: idx.predicate.clone(),
@@ -172,18 +176,26 @@ impl IndexExport {
         }
     }
 
-    /// Reconstruct an [`Index`] from the export, preferring the structured
-    /// `key_parts` and falling back to the plain `columns` for `1.0.0` inputs.
+    /// Plain column names in key order, skipping functional/expression parts.
+    ///
+    /// Use only where dropping expression parts is semantically correct (e.g.
+    /// display labels); do not use it to infer uniqueness or index coverage,
+    /// since a mixed expression index would appear to cover fewer columns than
+    /// it constrains.
+    #[must_use]
+    pub fn column_names(&self) -> Vec<String> {
+        self.key_parts
+            .iter()
+            .filter_map(|part| part.as_column_name().map(String::from))
+            .collect()
+    }
+
+    /// Reconstruct an [`Index`] from the export's structured `key_parts`.
     #[must_use]
     pub fn to_index(&self) -> Index {
-        let key_parts = if self.key_parts.is_empty() {
-            self.columns.iter().cloned().map(IndexKey::column).collect()
-        } else {
-            self.key_parts.clone()
-        };
         Index {
             name: self.name.clone(),
-            key_parts,
+            key_parts: self.key_parts.clone(),
             is_unique: self.unique,
             predicate: self.predicate.clone(),
             included_columns: self.included_columns.clone(),
@@ -356,6 +368,7 @@ pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
         .enumerate()
         .map(|(i, t)| {
             check_stable_id(&mut table_ids, &t.id, "table", "stable_id", i)?;
+            validate_index_exports(t)?;
             Ok(import_table(i, t))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -384,6 +397,25 @@ pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
         views,
         enums,
     })
+}
+
+/// Reject any index that carries no key parts.
+///
+/// A `1.x` export stored index keys only in the removed `columns` field, so a
+/// `1.x` file deserializes with empty `key_parts`. Importing it would silently
+/// drop the index key; rejecting it makes the format break explicit instead.
+fn validate_index_exports(table: &TableExport) -> Result<(), ImportError> {
+    for (position, index) in table.indexes.iter().enumerate() {
+        if index.key_parts.is_empty() {
+            return Err(ImportError {
+                message: format!(
+                    "table '{}' index at position {position} has no key parts; the pre-2.0.0 flattened `columns` field is no longer supported",
+                    table.id
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Validate that a stable identifier is non-empty and unique within its kind.
@@ -628,7 +660,6 @@ mod tests {
             check_constraints: Vec::new(),
             indexes: vec![IndexExport {
                 name: Some("idx_email".to_string()),
-                columns: vec!["email".to_string()],
                 key_parts: vec![IndexKey::column("email".to_string())],
                 unique: true,
                 predicate: None,
@@ -645,7 +676,7 @@ mod tests {
     #[test]
     fn test_export_version() {
         let export = SchemaExport::new(vec![]);
-        assert_eq!(export.version, "1.1.0");
+        assert_eq!(export.version, "2.0.0");
     }
 
     #[test]
@@ -1133,11 +1164,14 @@ mod tests {
 
     #[test]
     fn test_import_rejects_unsupported_major_version() {
+        // The `1.x` line is no longer supported (the flattened `columns` field
+        // was removed), so a `1.x` file must be rejected rather than importing
+        // with empty index keys.
         let mut export = SchemaExport::new(vec![]);
-        export.version = "2.0.0".to_string();
+        export.version = "1.0.0".to_string();
         let err = import_schema(&export).unwrap_err();
         assert!(
-            err.message.contains("major version 2"),
+            err.message.contains("major version 1"),
             "unexpected error: {}",
             err.message
         );
@@ -1150,8 +1184,41 @@ mod tests {
     fn test_import_accepts_unknown_minor_version() {
         // A newer additive minor from a future writer must still import.
         let mut export = SchemaExport::new(vec![]);
-        export.version = "1.99.0".to_string();
+        export.version = "2.99.0".to_string();
         assert!(import_schema(&export).is_ok());
+    }
+
+    #[test]
+    fn test_import_rejects_index_without_key_parts() {
+        // A pre-2.0.0 index carried only the removed `columns` field, so it
+        // deserializes with empty `key_parts`; importing it must fail loudly
+        // rather than silently dropping the index key.
+        let mut export = SchemaExport::new(vec![TableExport {
+            id: "public.users".to_string(),
+            schema: Some("public".to_string()),
+            name: "users".to_string(),
+            columns: vec![],
+            foreign_keys: vec![],
+            primary_key_name: None,
+            comment: None,
+            check_constraints: Vec::new(),
+            indexes: vec![IndexExport {
+                name: Some("idx_email".to_string()),
+                key_parts: Vec::new(),
+                unique: true,
+                predicate: None,
+                included_columns: Vec::new(),
+                method: None,
+            }],
+        }]);
+        export.version = SchemaExport::VERSION.to_string();
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("no key parts"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

@@ -392,16 +392,19 @@ async fn pragma_index_list(
     .await
 }
 
-async fn pragma_index_info(
+async fn pragma_index_xinfo(
     pool: &SqlitePool,
     quoted_index: &str,
 ) -> Result<Vec<SqliteIndexInfoRow>, IntrospectError> {
-    let sql = format!("PRAGMA index_info({quoted_index})");
-    with_query_timeout("PRAGMA index_info", async {
+    // `index_xinfo` (unlike `index_info`) reports the per-column sort order
+    // (`desc`) and marks auxiliary trailing columns (`key = 0`, e.g. the
+    // appended rowid) so they can be filtered out.
+    let sql = format!("PRAGMA index_xinfo({quoted_index})");
+    with_query_timeout("PRAGMA index_xinfo", async {
         sqlx::query_as::<_, SqliteIndexInfoRow>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
-            .map_err(|e| IntrospectError::query_with_source("PRAGMA index_info failed", e))
+            .map_err(|e| IntrospectError::query_with_source("PRAGMA index_xinfo failed", e))
     })
     .await
 }
@@ -446,6 +449,12 @@ struct SqliteIndexInfoRow {
     #[allow(dead_code)]
     cid: i64,
     name: Option<String>,
+    // `1` when the column is sorted descending, `0` ascending.
+    #[sqlx(rename = "desc")]
+    descending: i64,
+    // `1` for an actual key column, `0` for an auxiliary trailing column.
+    #[sqlx(rename = "key")]
+    is_key: i64,
 }
 
 fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignKey> {
@@ -504,7 +513,10 @@ async fn collect_table_indexes(
             continue;
         }
         let quoted_idx = quote_ident(&index_name)?;
-        let mut info = pragma_index_info(pool, &quoted_idx).await?;
+        let mut info = pragma_index_xinfo(pool, &quoted_idx).await?;
+        // Keep only declared key columns; `index_xinfo` also lists auxiliary
+        // trailing columns (`key = 0`) that are not part of the index key.
+        info.retain(|r| r.is_key != 0);
         info.sort_by_key(|r| r.seqno);
 
         // PRAGMA index_info reports NULL column names for expression key parts
@@ -521,7 +533,17 @@ async fn collect_table_indexes(
             .iter()
             .enumerate()
             .map(|(pos, r)| match &r.name {
-                Some(name) => RawIndexKeyPart::column(name.clone()),
+                Some(name) => RawIndexKeyPart::Column {
+                    name: name.clone(),
+                    order: Some(if r.descending != 0 {
+                        relune_core::SortOrder::Desc
+                    } else {
+                        relune_core::SortOrder::Asc
+                    }),
+                    // SQLite index columns carry no explicit NULLS ordering.
+                    nulls: None,
+                    prefix_length: None,
+                },
                 None => RawIndexKeyPart::Expression(
                     key_defs
                         .get(pos)

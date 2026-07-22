@@ -168,10 +168,17 @@ pub fn parse_referential_action(s: &str) -> ReferentialAction {
 /// A single key part of a raw catalog index: a plain column or an expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RawIndexKeyPart {
-    /// A plain column reference (with optional indexed prefix length).
+    /// A plain column reference (with optional sort order, nulls ordering, and
+    /// indexed prefix length).
     Column {
         /// Column name.
         name: String,
+        /// Sort order (`ASC`/`DESC`) as reported by the catalog, if known.
+        /// Populated so the diff can compare an explicit order from parsed SQL
+        /// against the live index rather than seeing an unspecified value.
+        order: Option<relune_core::SortOrder>,
+        /// Nulls ordering (`NULLS FIRST`/`NULLS LAST`), if the catalog reports it.
+        nulls: Option<relune_core::NullsOrder>,
         /// Indexed prefix length (e.g. `MySQL` `col(10)`), if any.
         prefix_length: Option<u32>,
     },
@@ -180,11 +187,14 @@ pub enum RawIndexKeyPart {
 }
 
 impl RawIndexKeyPart {
-    /// Convenience constructor for a plain column key part.
+    /// Convenience constructor for a plain column key part with no sort/nulls
+    /// ordering or prefix length.
     #[must_use]
     pub fn column(name: impl Into<String>) -> Self {
         Self::Column {
             name: name.into(),
+            order: None,
+            nulls: None,
             prefix_length: None,
         }
     }
@@ -548,11 +558,13 @@ fn map_index(raw_index: &RawIndex) -> Index {
         .map(|part| match part {
             RawIndexKeyPart::Column {
                 name,
+                order,
+                nulls,
                 prefix_length,
             } => IndexKey::Column(IndexColumn {
                 name: name.clone(),
-                order: None,
-                nulls: None,
+                order: *order,
+                nulls: *nulls,
                 prefix_length: *prefix_length,
             }),
             RawIndexKeyPart::Expression(expr) => IndexKey::Expression(expr.clone()),

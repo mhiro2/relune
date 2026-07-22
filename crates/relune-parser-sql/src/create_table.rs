@@ -9,7 +9,8 @@ use relune_core::{
     SourceSpan, Table, diagnostic::codes, normalize_identifier,
 };
 use sqlparser::ast::{
-    ColumnOption, DataType, GeneratedAs, GeneratedExpressionMode, IndexColumn, TableConstraint,
+    ColumnOption, DataType, GeneratedAs, GeneratedExpressionMode, Ident, IndexColumn,
+    TableConstraint,
 };
 use sqlparser::tokenizer::Token;
 
@@ -328,15 +329,21 @@ pub(crate) struct ColumnAttributes {
 /// including the extended semantics (`DEFAULT`, `CHECK`, generated, identity,
 /// collation, character set, auto-increment, `ON UPDATE`) needed so `diff` does
 /// not silently miss changes to them.
+/// Each item pairs a column option with the optional constraint name from its
+/// enclosing `ColumnOptionDef` (e.g. `CONSTRAINT x_positive CHECK (...)`).
+/// Column-level `CHECK` constraints carry their name on the outer definition
+/// rather than the inner option, so callers that have it (`CREATE TABLE`) must
+/// thread it through; callers that lack it (`MODIFY`/`CHANGE COLUMN`) pass
+/// `None`.
 pub(crate) fn column_attributes_from_options<'a>(
-    options: impl IntoIterator<Item = &'a ColumnOption>,
+    options: impl IntoIterator<Item = (Option<&'a Ident>, &'a ColumnOption)>,
 ) -> ColumnAttributes {
     let mut nullable = true;
     let mut is_primary_key = false;
     let mut comment: Option<String> = None;
     let mut semantics = ColumnSemantics::default();
 
-    for option in options {
+    for (constraint_name, option) in options {
         match option {
             ColumnOption::NotNull => nullable = false,
             ColumnOption::Null => nullable = true,
@@ -351,8 +358,16 @@ pub(crate) fn column_attributes_from_options<'a>(
                 semantics.default_expression = Some(expr.to_string());
             }
             ColumnOption::Check(check) => {
+                // A column-level check records its name on the enclosing
+                // `ColumnOptionDef` (`CONSTRAINT <name> CHECK (...)`); the inner
+                // option's own name is always `None`, so fall back to it.
+                let name = check
+                    .name
+                    .as_ref()
+                    .or(constraint_name)
+                    .map(|n| normalize_identifier(&n.value));
                 semantics.check_constraints.push(CheckConstraint {
-                    name: check.name.as_ref().map(|n| normalize_identifier(&n.value)),
+                    name,
                     expression: check.expr.to_string(),
                 });
             }
@@ -442,7 +457,12 @@ pub(crate) fn canonicalize_data_type(data_type: &DataType) -> String {
 }
 
 pub(crate) fn parsed_column_from_column_def(column: &sqlparser::ast::ColumnDef) -> ParsedColumn {
-    let attrs = column_attributes_from_options(column.options.iter().map(|option| &option.option));
+    let attrs = column_attributes_from_options(
+        column
+            .options
+            .iter()
+            .map(|option| (option.name.as_ref(), &option.option)),
+    );
     ParsedColumn {
         name: normalize_identifier(&column.name.value),
         data_type: canonicalize_data_type(&column.data_type),

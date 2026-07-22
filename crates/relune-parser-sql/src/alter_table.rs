@@ -192,9 +192,13 @@ fn apply_single_alter_operation(
 
                     let table = &mut tables[idx];
                     table.columns.remove(p);
-                    table
-                        .indexes
-                        .retain(|ix| !ix.column_names().iter().any(|c| *c == col_name));
+                    // Dropping a column that an index depends on drops the whole
+                    // index, whether the column is a key part or an `INCLUDE`
+                    // payload column; keeping it would leave a dangling reference.
+                    table.indexes.retain(|ix| {
+                        !ix.column_names().iter().any(|c| *c == col_name)
+                            && !ix.included_columns.contains(&col_name)
+                    });
 
                     for (table_idx, table) in tables.iter_mut().enumerate() {
                         let mut fk_idx = 0usize;
@@ -250,6 +254,19 @@ fn apply_single_alter_operation(
             table.check_constraints.retain(|c| {
                 c.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
             });
+            // A column-level `CONSTRAINT <name> CHECK (...)` is stored on the
+            // owning column's semantics, so the named constraint must be dropped
+            // there too, not just among table-level checks.
+            let mut removed_column_check = false;
+            for column in &mut table.columns {
+                let before = column.semantics.check_constraints.len();
+                column.semantics.check_constraints.retain(|c| {
+                    c.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
+                });
+                if column.semantics.check_constraints.len() != before {
+                    removed_column_check = true;
+                }
+            }
             if pk_match {
                 for column in &mut table.columns {
                     column.is_primary_key = false;
@@ -259,6 +276,7 @@ fn apply_single_alter_operation(
             if table.foreign_keys.len() == before_fk
                 && table.indexes.len() == before_ix
                 && table.check_constraints.len() == before_check
+                && !removed_column_check
                 && !pk_match
                 && !if_exists
             {
@@ -482,6 +500,13 @@ fn rename_column_in_tables(tables: &mut [Table], idx: usize, old: &str, new: &st
                 new.clone_into(&mut column.name);
             }
         }
+        // `INCLUDE` payload columns reference the same column and must track the
+        // rename too, otherwise the index keeps a stale column name.
+        for included in &mut ix.included_columns {
+            if *included == old {
+                new.clone_into(included);
+            }
+        }
     }
     for (table_idx, fk_idx) in referencing_fks {
         if let Some(fk) = tables
@@ -567,7 +592,9 @@ fn redefine_column_in_table(
     data_type: &DataType,
     options: &[ColumnOption],
 ) {
-    let attrs = column_attributes_from_options(options);
+    // MODIFY/CHANGE COLUMN options carry no enclosing constraint name, so any
+    // column-level CHECK here is recorded unnamed.
+    let attrs = column_attributes_from_options(options.iter().map(|option| (None, option)));
     if let Some(column) = table.columns.iter_mut().find(|c| c.name == col_name) {
         column.nullable = attrs.nullable;
         if attrs.is_primary_key {

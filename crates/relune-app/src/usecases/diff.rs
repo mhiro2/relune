@@ -171,9 +171,7 @@ pub fn format_diff_text(result: &DiffResult) -> String {
     if !result.diff.modified_tables.is_empty() {
         output.push_str("\nModified tables:\n");
         for table_diff in &result.diff.modified_tables {
-            let change_count = table_diff.column_diffs.len()
-                + table_diff.fk_diffs.len()
-                + table_diff.index_diffs.len();
+            let change_count = table_diff.change_count();
             let _ = writeln!(
                 output,
                 "  ~ {} ({change_count} changes)",
@@ -217,6 +215,19 @@ pub fn format_diff_text(result: &DiffResult) -> String {
                     };
                     let index_name = index_diff.name.as_deref().unwrap_or("unnamed");
                     let _ = writeln!(output, "      {indicator} {index_name}");
+                }
+            }
+
+            if !table_diff.check_diffs.is_empty() {
+                output.push_str("    Checks:\n");
+                for check_diff in &table_diff.check_diffs {
+                    let indicator = match check_diff.change_kind {
+                        ChangeKind::Added => "+",
+                        ChangeKind::Removed => "-",
+                        ChangeKind::Modified => "~",
+                    };
+                    let check_name = check_diff.name.as_deref().unwrap_or("unnamed");
+                    let _ = writeln!(output, "      {indicator} {check_name}");
                 }
             }
         }
@@ -335,8 +346,11 @@ pub fn format_diff_text(result: &DiffResult) -> String {
     );
     let _ = writeln!(
         output,
-        "         table internals: {} column change(s), {} FK change(s), {} index change(s)",
-        summary.columns_changed, summary.foreign_keys_changed, summary.indexes_changed
+        "         table internals: {} column change(s), {} FK change(s), {} index change(s), {} check change(s)",
+        summary.columns_changed,
+        summary.foreign_keys_changed,
+        summary.indexes_changed,
+        summary.check_constraints_changed
     );
     let _ = writeln!(
         output,
@@ -469,8 +483,7 @@ pub fn format_diff_markdown(result: &DiffResult) -> String {
 }
 
 fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
-    let change_count =
-        table_diff.column_diffs.len() + table_diff.fk_diffs.len() + table_diff.index_diffs.len();
+    let change_count = table_diff.change_count();
     let name = escape_html(&table_diff.table_name);
     let _ = writeln!(
         out,
@@ -503,6 +516,16 @@ fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
             let indicator = change_indicator(index_diff.change_kind);
             let index_name = escape_html(index_diff.name.as_deref().unwrap_or("unnamed"));
             let _ = writeln!(out, "- <code>{indicator}</code> <code>{index_name}</code>");
+        }
+        out.push('\n');
+    }
+
+    if !table_diff.check_diffs.is_empty() {
+        out.push_str("**Checks:**\n\n");
+        for check_diff in &table_diff.check_diffs {
+            let indicator = change_indicator(check_diff.change_kind);
+            let check_name = escape_html(check_diff.name.as_deref().unwrap_or("unnamed"));
+            let _ = writeln!(out, "- <code>{indicator}</code> <code>{check_name}</code>");
         }
         out.push('\n');
     }
@@ -1028,9 +1051,12 @@ fn annotate_modified_table(
         let name = idx.name.as_deref().unwrap_or("unnamed index");
         details.push(format!("{} {name}", change_indicator(idx.change_kind)));
     }
+    for check in &table_diff.check_diffs {
+        let name = check.name.as_deref().unwrap_or("unnamed check");
+        details.push(format!("{} {name}", change_indicator(check.change_kind)));
+    }
 
-    let change_count =
-        table_diff.column_diffs.len() + table_diff.fk_diffs.len() + table_diff.index_diffs.len();
+    let change_count = table_diff.change_count();
     overlay.add_node_annotation(
         stable_id,
         Annotation {
@@ -1312,6 +1338,35 @@ mod tests {
         assert!(text.contains("status"));
         assert!(text.contains("view internals"));
         assert!(text.contains("enum internals"));
+    }
+
+    #[test]
+    fn test_format_diff_includes_check_constraint_changes() {
+        let before = "CREATE TABLE t (x INT, CONSTRAINT x_pos CHECK (x > 0));";
+        let after = "CREATE TABLE t (x INT, CONSTRAINT x_pos CHECK (x > 1));";
+
+        let result = diff(DiffRequest::from_sql(before, after)).unwrap();
+
+        let text = format_diff_text(&result);
+        assert!(
+            text.contains("Checks:"),
+            "text diff should list check changes:\n{text}"
+        );
+        assert!(text.contains("~ x_pos"));
+        assert!(
+            text.contains("~ t (1 changes)"),
+            "change count must include check changes:\n{text}"
+        );
+        assert!(
+            text.contains("1 check change(s)"),
+            "summary must report check changes:\n{text}"
+        );
+
+        let markdown = format_diff_markdown(&result);
+        assert!(
+            markdown.contains("**Checks:**"),
+            "markdown diff should list check changes:\n{markdown}"
+        );
     }
 
     #[test]

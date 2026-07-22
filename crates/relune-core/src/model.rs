@@ -804,6 +804,24 @@ impl Index {
             .collect()
     }
 
+    /// All key parts as plain column names, or `None` if any part is an
+    /// expression **or** a prefix-indexed column (e.g. `MySQL` `email(10)`).
+    /// Use for whole-column uniqueness checks: a prefix index enforces
+    /// uniqueness only over the leading bytes, not the whole column, so it must
+    /// not be treated as guaranteeing uniqueness over the column set.
+    #[must_use]
+    pub fn full_plain_columns(&self) -> Option<Vec<&str>> {
+        self.key_parts
+            .iter()
+            .map(|part| match part {
+                IndexKey::Column(column) if column.prefix_length.is_none() => {
+                    Some(column.name.as_str())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// `true` if any key part is an expression.
     #[must_use]
     pub fn has_expression(&self) -> bool {

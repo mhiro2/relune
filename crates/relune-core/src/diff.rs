@@ -11,17 +11,36 @@ use std::collections::{HashMap, HashSet};
 use crate::export::{ColumnExport, ForeignKeyExport, IndexExport};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
 
-/// Order-preserving, case-insensitive fingerprint of an index used to decide
-/// whether two indexes with the same identity actually differ: key parts
-/// (`0` = column, `1` = expression), uniqueness, predicate, `INCLUDE`
-/// columns, and access method.
-type IndexSignature = (
-    Vec<(u8, String)>,
-    bool,
-    Option<String>,
-    Vec<String>,
-    Option<String>,
-);
+/// Case-insensitive fingerprint of an index's non-key-part attributes:
+/// uniqueness, partial predicate, `INCLUDE` columns, and access method. Key
+/// parts are compared separately (see `key_parts_differ`) so that per-column
+/// sort/nulls/prefix detail can be matched with "unspecified matches anything"
+/// semantics.
+type IndexScalarSignature = (bool, Option<String>, Vec<String>, Option<String>);
+
+/// The effective sort order of a key part: an unspecified order defaults to
+/// `ASC` (the SQL default), so an implicit and an explicit `ASC` compare equal.
+/// Introspection populates the order explicitly, so an unspecified value only
+/// arises from parsed SQL that omitted it.
+fn effective_sort_order(order: Option<crate::model::SortOrder>) -> crate::model::SortOrder {
+    order.unwrap_or(crate::model::SortOrder::Asc)
+}
+
+/// The effective nulls ordering of a key part: an unspecified value defaults to
+/// the SQL default for the effective sort order (`NULLS LAST` for `ASC`,
+/// `NULLS FIRST` for `DESC`), so an implicit and an explicit default compare
+/// equal.
+fn effective_nulls_order(
+    order: Option<crate::model::SortOrder>,
+    nulls: Option<crate::model::NullsOrder>,
+) -> crate::model::NullsOrder {
+    use crate::model::{NullsOrder, SortOrder};
+
+    nulls.unwrap_or_else(|| match effective_sort_order(order) {
+        SortOrder::Asc => NullsOrder::Last,
+        SortOrder::Desc => NullsOrder::First,
+    })
+}
 
 /// The kind of change detected in a diff.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -724,20 +743,12 @@ impl TableDiff {
     }
 
     fn indexes_differ(a: &crate::model::Index, b: &crate::model::Index) -> bool {
-        Self::index_signature(a) != Self::index_signature(b)
+        Self::index_scalar_signature(a) != Self::index_scalar_signature(b)
+            || Self::key_parts_differ(&a.key_parts, &b.key_parts)
     }
 
-    fn index_signature(idx: &crate::model::Index) -> IndexSignature {
-        let key_parts = idx
-            .key_parts
-            .iter()
-            .map(|part| match part {
-                crate::model::IndexKey::Column(column) => (0u8, column.name.to_lowercase()),
-                crate::model::IndexKey::Expression(expr) => (1u8, expr.to_lowercase()),
-            })
-            .collect();
+    fn index_scalar_signature(idx: &crate::model::Index) -> IndexScalarSignature {
         (
-            key_parts,
             idx.is_unique,
             idx.predicate.as_ref().map(|p| p.to_lowercase()),
             idx.included_columns
@@ -748,6 +759,37 @@ impl TableDiff {
         )
     }
 
+    /// Compares ordered key parts for a real difference.
+    ///
+    /// Sort order and nulls ordering are compared by their *effective* value:
+    /// an unspecified order defaults to `ASC`, and an unspecified nulls ordering
+    /// to that order's SQL default, so an implicit `ASC` matches an explicit
+    /// `ASC` while a real `ASC`/`DESC` flip is still reported. Prefix length is
+    /// compared directly (`None` means the whole column). Introspection
+    /// populates these explicitly, so the normalization only absorbs values
+    /// omitted from parsed SQL rather than masking a real difference.
+    fn key_parts_differ(a: &[crate::model::IndexKey], b: &[crate::model::IndexKey]) -> bool {
+        use crate::model::IndexKey;
+
+        if a.len() != b.len() {
+            return true;
+        }
+        a.iter()
+            .zip(b.iter())
+            .any(|(left, right)| match (left, right) {
+                (IndexKey::Column(x), IndexKey::Column(y)) => {
+                    !x.name.eq_ignore_ascii_case(&y.name)
+                        || effective_sort_order(x.order) != effective_sort_order(y.order)
+                        || effective_nulls_order(x.order, x.nulls)
+                            != effective_nulls_order(y.order, y.nulls)
+                        || x.prefix_length != y.prefix_length
+                }
+                (IndexKey::Expression(x), IndexKey::Expression(y)) => !x.eq_ignore_ascii_case(y),
+                // A column part and an expression part are never the same key.
+                _ => true,
+            })
+    }
+
     /// Returns true if this table has any changes.
     #[must_use]
     pub const fn has_changes(&self) -> bool {
@@ -755,6 +797,16 @@ impl TableDiff {
             || !self.fk_diffs.is_empty()
             || !self.index_diffs.is_empty()
             || !self.check_diffs.is_empty()
+    }
+
+    /// Total number of individual changes across columns, foreign keys,
+    /// indexes, and table-level `CHECK` constraints.
+    #[must_use]
+    pub const fn change_count(&self) -> usize {
+        self.column_diffs.len()
+            + self.fk_diffs.len()
+            + self.index_diffs.len()
+            + self.check_diffs.len()
     }
 }
 
@@ -1466,6 +1518,74 @@ mod tests {
             .unwrap();
         assert_eq!(posts_diff.column_diffs.len(), 1); // user_id added
         assert_eq!(posts_diff.fk_diffs.len(), 1); // FK added
+    }
+
+    #[test]
+    fn test_index_sort_order_change_is_detected() {
+        use crate::model::{Index, IndexColumn, IndexKey, SortOrder};
+
+        let make = |order: Option<SortOrder>| Schema {
+            tables: vec![Table {
+                indexes: vec![Index {
+                    name: Some("idx_a".to_string()),
+                    key_parts: vec![IndexKey::Column(IndexColumn {
+                        name: "a".to_string(),
+                        order,
+                        nulls: None,
+                        prefix_length: None,
+                    })],
+                    is_unique: false,
+                    predicate: None,
+                    included_columns: Vec::new(),
+                    method: None,
+                }],
+                ..create_test_table("t", vec![("a", "int", false, false)], vec![])
+            }],
+            views: vec![],
+            enums: vec![],
+        };
+
+        // ASC -> DESC is a real change and must be reported.
+        let diff = diff_schemas(&make(Some(SortOrder::Asc)), &make(Some(SortOrder::Desc)));
+        assert_eq!(diff.summary.indexes_changed, 1);
+
+        // An unspecified order defaults to ASC, so an implicit ASC matches an
+        // explicit ASC (no spurious change).
+        let implicit_asc = diff_schemas(&make(None), &make(Some(SortOrder::Asc)));
+        assert!(implicit_asc.is_empty());
+
+        // ...but an implicit ASC still differs from an explicit DESC.
+        let implicit_vs_desc = diff_schemas(&make(None), &make(Some(SortOrder::Desc)));
+        assert_eq!(implicit_vs_desc.summary.indexes_changed, 1);
+    }
+
+    #[test]
+    fn test_index_prefix_length_change_is_detected() {
+        use crate::model::{Index, IndexColumn, IndexKey};
+
+        let make = |prefix_length: Option<u32>| Schema {
+            tables: vec![Table {
+                indexes: vec![Index {
+                    name: Some("idx_a".to_string()),
+                    key_parts: vec![IndexKey::Column(IndexColumn {
+                        name: "a".to_string(),
+                        order: None,
+                        nulls: None,
+                        prefix_length,
+                    })],
+                    is_unique: false,
+                    predicate: None,
+                    included_columns: Vec::new(),
+                    method: None,
+                }],
+                ..create_test_table("t", vec![("a", "text", false, false)], vec![])
+            }],
+            views: vec![],
+            enums: vec![],
+        };
+
+        let diff = diff_schemas(&make(Some(10)), &make(Some(20)));
+        assert_eq!(diff.summary.indexes_changed, 1);
     }
 
     #[test]

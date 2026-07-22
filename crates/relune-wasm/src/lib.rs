@@ -710,7 +710,7 @@ mod wasm_bindgen_tests {
         // path as `review_from_sql`.
         let schema = r#"
         {
-          "version": "1.0.0",
+          "version": "2.0.0",
           "tables": [
             {
               "id": "users",

@@ -276,7 +276,14 @@ impl ParallelCatalogReader for PostgresCatalog {
                     WHEN ix.indkey[k.ord] = 0
                     THEN pg_get_indexdef(ix.indexrelid, (k.ord + 1)::int, true)
                     ELSE NULL
-                END AS expression
+                END AS expression,
+                -- indoption bit 0 = DESC, bit 1 = NULLS FIRST; only defined for
+                -- key columns, so it is NULL for INCLUDE positions. Cast the
+                -- int2vector element to int so the bitwise AND has an operator.
+                CASE WHEN k.ord < ix.indnkeyatts
+                    THEN (ix.indoption[k.ord]::int & 1) <> 0 END AS descending,
+                CASE WHEN k.ord < ix.indnkeyatts
+                    THEN (ix.indoption[k.ord]::int & 2) <> 0 END AS nulls_first
             FROM pg_catalog.pg_index ix
             INNER JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
             INNER JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
@@ -467,6 +474,10 @@ struct RawIndexRow {
     is_key: bool,
     column_name: Option<String>,
     expression: Option<String>,
+    // Per-key-column sort order from `pg_index.indoption`; NULL for INCLUDE
+    // columns. `descending` maps to `DESC`, `nulls_first` to `NULLS FIRST`.
+    descending: Option<bool>,
+    nulls_first: Option<bool>,
 }
 
 /// Group per-key-position index rows (ordered by schema, table, index, key
@@ -500,8 +511,28 @@ fn group_index_rows(rows: Vec<RawIndexRow>) -> Vec<RawIndex> {
         });
         let index = &mut order[idx];
         if row.is_key {
+            let descending = row.descending;
+            let nulls_first = row.nulls_first;
             let part = match row.column_name {
-                Some(name) => RawIndexKeyPart::column(name),
+                Some(name) => RawIndexKeyPart::Column {
+                    name,
+                    order: descending.map(|d| {
+                        if d {
+                            relune_core::SortOrder::Desc
+                        } else {
+                            relune_core::SortOrder::Asc
+                        }
+                    }),
+                    nulls: nulls_first.map(|f| {
+                        if f {
+                            relune_core::NullsOrder::First
+                        } else {
+                            relune_core::NullsOrder::Last
+                        }
+                    }),
+                    // PostgreSQL has no MySQL-style prefix indexes.
+                    prefix_length: None,
+                },
                 None => RawIndexKeyPart::Expression(row.expression.unwrap_or_default()),
             };
             index.key_parts.push(part);

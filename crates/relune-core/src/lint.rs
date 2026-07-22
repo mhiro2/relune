@@ -864,6 +864,11 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
 /// expression key part in a leading position never matches a plain FK column,
 /// so a functional index does not spuriously satisfy the coverage check.
 fn index_covers_prefix(idx: &Index, fk_cols: &[String]) -> bool {
+    // A partial index only covers rows matching its predicate, so it cannot
+    // satisfy the FK lookup for every referencing row.
+    if idx.predicate.is_some() {
+        return false;
+    }
     let slots = idx.key_slots();
     if slots.len() < fk_cols.len() {
         return false;
@@ -950,12 +955,15 @@ fn referenced_columns_are_unique(ref_table: &Table, to_columns: &[String]) -> bo
         return true;
     }
     ref_table.indexes.iter().any(|idx| {
-        if !idx.is_unique {
+        // A partial unique index only enforces uniqueness over the rows
+        // matching its predicate, so it cannot make the FK target unique.
+        if !idx.is_unique || idx.predicate.is_some() {
             return false;
         }
-        // An index with an expression key part does not guarantee uniqueness
-        // over a plain-column set, so only all-column indexes qualify.
-        let Some(cols) = idx.plain_columns() else {
+        // An expression or prefix (e.g. `email(10)`) key part does not
+        // guarantee whole-column uniqueness, so only full plain-column indexes
+        // qualify.
+        let Some(cols) = idx.full_plain_columns() else {
             return false;
         };
         let mut sorted_idx: Vec<String> = cols.iter().map(|s| s.to_ascii_lowercase()).collect();
@@ -1857,6 +1865,162 @@ mod tests {
                 .issues
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget)
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_partial_unique_target_is_not_unique() {
+        // A partial UNIQUE index only enforces uniqueness over the rows matching
+        // its predicate, so it must not satisfy the FK target-uniqueness check.
+        let mut partial_unique = Index::from_columns(
+            Some("users_email_active".to_string()),
+            vec!["email".to_string()],
+            true,
+        );
+        partial_unique.predicate = Some("active".to_string());
+        let users = create_test_table(
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![partial_unique],
+        );
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_ref", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["user_ref".to_string()],
+                to_schema: None,
+                to_table: "users".to_string(),
+                to_columns: vec!["email".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![Index::from_columns(
+                Some("posts_user_ref".to_string()),
+                vec!["user_ref".to_string()],
+                false,
+            )],
+        );
+        let schema = Schema {
+            tables: vec![users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget),
+            "a partial unique index must not count as a unique FK target"
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_prefix_unique_target_is_not_unique() {
+        use crate::model::{IndexColumn, IndexKey};
+        // A prefix UNIQUE index (e.g. MySQL `email(10)`) only enforces
+        // uniqueness over the leading bytes, so it must not make the FK target
+        // unique.
+        let prefix_unique = Index {
+            name: Some("users_email_uidx".to_string()),
+            key_parts: vec![IndexKey::Column(IndexColumn {
+                name: "email".to_string(),
+                order: None,
+                nulls: None,
+                prefix_length: Some(10),
+            })],
+            is_unique: true,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        };
+        let users = create_test_table(
+            "users",
+            vec![
+                create_column("id", false, true),
+                create_column("email", false, false),
+            ],
+            vec![],
+            vec![prefix_unique],
+        );
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_ref", false, false),
+            ],
+            vec![ForeignKey {
+                name: None,
+                from_columns: vec!["user_ref".to_string()],
+                to_schema: None,
+                to_table: "users".to_string(),
+                to_columns: vec!["email".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            }],
+            vec![Index::from_columns(
+                Some("posts_user_ref".to_string()),
+                vec!["user_ref".to_string()],
+                false,
+            )],
+        );
+        let schema = Schema {
+            tables: vec![users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::ForeignKeyNonUniqueTarget),
+            "a prefix unique index must not count as a unique FK target"
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_partial_index_does_not_cover_columns() {
+        // A partial index does not cover every referencing row, so it must not
+        // satisfy the FK index-coverage check.
+        let mut partial = Index::from_columns(
+            Some("posts_user_ref_active".to_string()),
+            vec!["user_ref".to_string()],
+            false,
+        );
+        partial.predicate = Some("active".to_string());
+        let users = create_test_table(
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_ref", false, false),
+            ],
+            vec![create_fk("users", &["user_ref"])],
+            vec![partial],
+        );
+        let schema = Schema {
+            tables: vec![users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::MissingForeignKeyIndex),
+            "a partial index must not count as FK index coverage"
         );
     }
 
