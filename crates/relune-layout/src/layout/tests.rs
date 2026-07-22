@@ -122,6 +122,7 @@ fn make_test_schema() -> Schema {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(2),
@@ -131,11 +132,13 @@ fn make_test_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -152,6 +155,7 @@ fn make_test_schema() -> Schema {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(4),
@@ -161,6 +165,7 @@ fn make_test_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![ForeignKey {
@@ -174,6 +179,7 @@ fn make_test_schema() -> Schema {
                 }],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
         ],
@@ -224,10 +230,12 @@ fn make_variable_width_schema() -> Schema {
                     is_primary_key: true,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -244,6 +252,7 @@ fn make_variable_width_schema() -> Schema {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(12),
@@ -253,11 +262,13 @@ fn make_variable_width_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -273,10 +284,12 @@ fn make_variable_width_schema() -> Schema {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
         ],
@@ -295,6 +308,7 @@ fn make_tall_rank_schema() -> Schema {
             is_primary_key: index == 0,
             comment: None,
             enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
         })
         .collect();
 
@@ -317,6 +331,7 @@ fn make_tall_rank_schema() -> Schema {
                 }],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -333,6 +348,7 @@ fn make_tall_rank_schema() -> Schema {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(201),
@@ -342,11 +358,13 @@ fn make_tall_rank_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
         ],
@@ -370,6 +388,7 @@ fn make_fully_connected_cycle_schema() -> Schema {
                 is_primary_key: true,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             })
             .chain(
                 table_names
@@ -384,6 +403,7 @@ fn make_fully_connected_cycle_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }),
             )
             .collect();
@@ -410,6 +430,7 @@ fn make_fully_connected_cycle_schema() -> Schema {
                 foreign_keys,
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             }
         })
@@ -458,6 +479,7 @@ fn make_multi_schema_for_grouping() -> Schema {
                 is_primary_key: true,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             },
             Column {
                 id: ColumnId(id * 10 + 1),
@@ -467,6 +489,7 @@ fn make_multi_schema_for_grouping() -> Schema {
                 is_primary_key: false,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             },
         ],
         foreign_keys: fk
@@ -484,6 +507,7 @@ fn make_multi_schema_for_grouping() -> Schema {
             .unwrap_or_default(),
         indexes: vec![],
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: None,
     };
 
@@ -515,6 +539,7 @@ fn make_prefix_grouping_schema() -> Schema {
                 is_primary_key: true,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             },
             Column {
                 id: ColumnId(id * 10 + 1),
@@ -524,6 +549,7 @@ fn make_prefix_grouping_schema() -> Schema {
                 is_primary_key: false,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             },
         ],
         foreign_keys: fk
@@ -541,6 +567,7 @@ fn make_prefix_grouping_schema() -> Schema {
             .unwrap_or_default(),
         indexes: vec![],
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: None,
     };
 
@@ -1446,10 +1473,12 @@ fn make_single_table_schema() -> Schema {
                 is_primary_key: true,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             }],
             foreign_keys: vec![],
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }],
         views: vec![],
@@ -1530,6 +1559,7 @@ fn test_force_layout_avoids_overlap_many_tables() {
                     is_primary_key: c == 0,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 })
                 .collect(),
             foreign_keys: if i > 0 {
@@ -1547,6 +1577,7 @@ fn test_force_layout_avoids_overlap_many_tables() {
             },
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         })
         .collect();
@@ -1818,10 +1849,12 @@ fn test_route_edges_offsets_parallel_foreign_keys() {
                     is_primary_key: true,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -1838,6 +1871,7 @@ fn test_route_edges_offsets_parallel_foreign_keys() {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(3),
@@ -1847,6 +1881,7 @@ fn test_route_edges_offsets_parallel_foreign_keys() {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![
@@ -1871,6 +1906,7 @@ fn test_route_edges_offsets_parallel_foreign_keys() {
                 ],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
         ],
@@ -1904,10 +1940,12 @@ fn test_parallel_edge_labels_do_not_overlap() {
                     is_primary_key: true,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -1924,6 +1962,7 @@ fn test_parallel_edge_labels_do_not_overlap() {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(3),
@@ -1933,6 +1972,7 @@ fn test_parallel_edge_labels_do_not_overlap() {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![
@@ -1957,6 +1997,7 @@ fn test_parallel_edge_labels_do_not_overlap() {
                 ],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
         ],
@@ -2001,6 +2042,7 @@ fn test_self_loop_label_outside_source_node() {
                     is_primary_key: true,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 },
                 Column {
                     id: ColumnId(2),
@@ -2010,6 +2052,7 @@ fn test_self_loop_label_outside_source_node() {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 },
             ],
             foreign_keys: vec![ForeignKey {
@@ -2023,6 +2066,7 @@ fn test_self_loop_label_outside_source_node() {
             }],
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }],
         views: vec![],
@@ -2744,6 +2788,7 @@ fn make_self_loop_schema() -> Schema {
                     is_primary_key: true,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 },
                 Column {
                     id: ColumnId(2),
@@ -2753,6 +2798,7 @@ fn make_self_loop_schema() -> Schema {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 },
             ],
             foreign_keys: vec![ForeignKey {
@@ -2766,6 +2812,7 @@ fn make_self_loop_schema() -> Schema {
             }],
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }],
         views: vec![],
@@ -2789,10 +2836,12 @@ fn make_parallel_edges_schema() -> Schema {
                     is_primary_key: true,
                     comment: None,
                     enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             Table {
@@ -2809,6 +2858,7 @@ fn make_parallel_edges_schema() -> Schema {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(3),
@@ -2818,6 +2868,7 @@ fn make_parallel_edges_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                     Column {
                         id: ColumnId(4),
@@ -2827,6 +2878,7 @@ fn make_parallel_edges_schema() -> Schema {
                         is_primary_key: false,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![
@@ -2851,6 +2903,7 @@ fn make_parallel_edges_schema() -> Schema {
                 ],
                 indexes: vec![],
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
         ],

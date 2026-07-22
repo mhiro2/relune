@@ -54,6 +54,152 @@ fn parses_primary_keys_and_foreign_keys() {
 }
 
 #[test]
+fn captures_column_and_table_semantics() {
+    let sql = r"
+    CREATE TABLE accounts (
+      id BIGINT PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT false,
+      amount INTEGER NOT NULL CHECK (amount >= 0),
+      full_name TEXT GENERATED ALWAYS AS (id) STORED,
+      CONSTRAINT amount_and_id CHECK (amount < id)
+    );
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let accounts = &schema.tables[0];
+
+    let enabled = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "enabled")
+        .unwrap();
+    assert_eq!(
+        enabled.semantics.default_expression.as_deref(),
+        Some("false")
+    );
+
+    let amount = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "amount")
+        .unwrap();
+    assert_eq!(amount.semantics.check_constraints.len(), 1);
+    assert_eq!(
+        amount.semantics.check_constraints[0].expression,
+        "amount >= 0"
+    );
+
+    let full_name = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "full_name")
+        .unwrap();
+    let generated = full_name.semantics.generated.as_ref().unwrap();
+    assert!(generated.stored);
+    assert_eq!(generated.expression, "id");
+
+    assert_eq!(accounts.check_constraints.len(), 1);
+    assert_eq!(
+        accounts.check_constraints[0].name.as_deref(),
+        Some("amount_and_id")
+    );
+    assert_eq!(accounts.check_constraints[0].expression, "amount < id");
+}
+
+#[test]
+fn alter_column_default_change_is_captured() {
+    let sql = r"
+    CREATE TABLE t (id INT PRIMARY KEY, enabled BOOLEAN DEFAULT false);
+    ALTER TABLE t ALTER COLUMN enabled SET DEFAULT true;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let enabled = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "enabled")
+        .unwrap();
+    assert_eq!(
+        enabled.semantics.default_expression.as_deref(),
+        Some("true")
+    );
+}
+
+#[test]
+fn column_level_check_constraint_name_is_preserved() {
+    let sql = "CREATE TABLE t (x INT CONSTRAINT x_positive CHECK (x > 0));";
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let x = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "x")
+        .unwrap();
+    assert_eq!(x.semantics.check_constraints.len(), 1);
+    assert_eq!(
+        x.semantics.check_constraints[0].name.as_deref(),
+        Some("x_positive")
+    );
+}
+
+#[test]
+fn drop_constraint_removes_column_level_check() {
+    let sql = "\
+        CREATE TABLE t (x INT CONSTRAINT x_positive CHECK (x > 0));\n\
+        ALTER TABLE t DROP CONSTRAINT x_positive;\n\
+    ";
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.as_ref().expect("schema should exist");
+    let x = schema.tables[0]
+        .columns
+        .iter()
+        .find(|c| c.name == "x")
+        .unwrap();
+    assert!(
+        x.semantics.check_constraints.is_empty(),
+        "column-level check should be dropped by DROP CONSTRAINT"
+    );
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("no constraint named `x_positive`")),
+        "dropping an existing column-level check must not warn about a missing constraint"
+    );
+}
+
+#[test]
+fn drop_column_removes_index_that_only_includes_it() {
+    let sql = "\
+        CREATE TABLE t (a INT, b INT);\n\
+        CREATE INDEX i ON t (a) INCLUDE (b);\n\
+        ALTER TABLE t DROP COLUMN b;\n\
+    ";
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let t = &schema.tables[0];
+    assert!(
+        t.indexes.is_empty(),
+        "an index depending on a dropped INCLUDE column must not survive: {:?}",
+        t.indexes
+    );
+}
+
+#[test]
+fn rename_column_updates_index_include_columns() {
+    let sql = "\
+        CREATE TABLE t (a INT, b INT);\n\
+        CREATE INDEX i ON t (a) INCLUDE (b);\n\
+        ALTER TABLE t RENAME COLUMN b TO c;\n\
+    ";
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let idx = schema.tables[0]
+        .indexes
+        .iter()
+        .find(|ix| ix.name.as_deref() == Some("i"))
+        .expect("index i should exist");
+    assert_eq!(idx.included_columns, vec!["c".to_string()]);
+}
+
+#[test]
 fn parses_target_schema_for_create_table_foreign_keys() {
     let sql = r"
     CREATE TABLE auth.accounts (
@@ -106,64 +252,55 @@ fn parses_create_index() {
 
     let email_idx = &users.indexes[0];
     assert_eq!(email_idx.name, Some("idx_users_email".to_string()));
-    assert_eq!(email_idx.columns, vec!["email"]);
+    assert_eq!(email_idx.column_names(), vec!["email"]);
     assert!(!email_idx.is_unique);
 
     let id_idx = &users.indexes[1];
     assert_eq!(id_idx.name, Some("idx_users_id".to_string()));
-    assert_eq!(id_idx.columns, vec!["id"]);
+    assert_eq!(id_idx.column_names(), vec!["id"]);
     assert!(id_idx.is_unique);
 }
 
 #[test]
-fn create_index_drops_expression_only_index_with_warning() {
+fn create_index_keeps_expression_only_index() {
+    use relune_core::IndexKey;
+
     let sql = r"
     CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
     CREATE INDEX idx_lower_email ON users (lower(email));
     ";
 
-    let output = parse_sql_to_schema_with_diagnostics(sql);
-    let schema = output.schema.expect("schema should exist");
+    let schema = parse_sql_to_schema(sql).expect("schema should exist");
     let users = &schema.tables[0];
 
-    assert!(
-        users.indexes.is_empty(),
-        "an index over only an expression references no modeled column"
-    );
-    assert!(
-        output
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == Severity::Warning
-                && d.message.contains("functional/expression")),
-        "dropping an expression index must be diagnosed"
-    );
+    // The expression index is retained (not dropped) so it counts toward
+    // coverage/uniqueness and is detected on removal, but exposes no plain
+    // column.
+    assert_eq!(users.indexes.len(), 1);
+    let idx = &users.indexes[0];
+    assert!(idx.has_expression());
+    assert!(idx.column_names().is_empty());
+    assert!(matches!(idx.key_parts[0], IndexKey::Expression(_)));
 }
 
 #[test]
-fn create_index_drops_whole_mixed_expression_index() {
-    // A partial column list (keeping only `tenant_id`) would falsely claim the
-    // index leads with `tenant_id`, so the whole index is dropped.
+fn create_index_keeps_mixed_expression_index_in_order() {
+    use relune_core::IndexKey;
+
     let sql = r"
     CREATE TABLE users (tenant_id BIGINT, email TEXT NOT NULL);
     CREATE INDEX idx_mixed ON users (tenant_id, lower(email));
     ";
 
-    let output = parse_sql_to_schema_with_diagnostics(sql);
-    let schema = output.schema.expect("schema should exist");
+    let schema = parse_sql_to_schema(sql).expect("schema should exist");
     let users = &schema.tables[0];
 
-    assert!(
-        users.indexes.is_empty(),
-        "a mixed expression index cannot be represented as a plain prefix"
-    );
-    assert!(
-        output
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == Severity::Warning
-                && d.message.contains("functional/expression"))
-    );
+    assert_eq!(users.indexes.len(), 1);
+    let idx = &users.indexes[0];
+    // The leading column stays a plain column; the trailing part is recorded as
+    // an expression, preserving order for prefix-coverage checks.
+    assert_eq!(idx.key_slots(), vec![Some("tenant_id"), None]);
+    assert!(matches!(idx.key_parts[1], IndexKey::Expression(_)));
 }
 
 #[test]
@@ -344,7 +481,7 @@ fn alter_table_add_column_before_create_index() {
         table
             .indexes
             .iter()
-            .any(|i| i.columns.iter().any(|c| c == "email"))
+            .any(|i| i.column_names().contains(&"email"))
     );
 }
 
@@ -1455,10 +1592,12 @@ fn test_populate_mysql_enum_columns_warns_on_malformed_definitions() {
             is_primary_key: false,
             comment: None,
             enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
         }],
         foreign_keys: vec![],
         indexes: vec![],
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: None,
     }];
 
@@ -1794,9 +1933,7 @@ fn alter_table_rename_column_updates_fk_and_index() {
         "FK from_columns should be updated after rename"
     );
     assert!(
-        users.indexes[0]
-            .columns
-            .contains(&"organization_id".to_string()),
+        users.indexes[0].column_names().contains(&"organization_id"),
         "index columns should be updated after rename"
     );
 }
@@ -2463,9 +2600,7 @@ fn alter_table_change_column_updates_fk_and_index() {
         "CHANGE COLUMN should update the local FK's from_columns"
     );
     assert!(
-        users.indexes[0]
-            .columns
-            .contains(&"organization_id".to_string()),
+        users.indexes[0].column_names().contains(&"organization_id"),
         "CHANGE COLUMN should update index columns"
     );
 }
@@ -2486,7 +2621,7 @@ fn alter_table_modify_column_with_unique_adds_index() {
         users
             .indexes
             .iter()
-            .any(|ix| ix.is_unique && ix.columns == vec!["email".to_string()]),
+            .any(|ix| ix.is_unique && ix.column_names() == vec!["email"]),
         "MODIFY ... UNIQUE should add a unique index on the column"
     );
 }

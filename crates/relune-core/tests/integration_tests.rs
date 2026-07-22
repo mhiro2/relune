@@ -24,6 +24,7 @@ fn make_table(
         foreign_keys,
         indexes,
         primary_key_name: None,
+        check_constraints: Vec::new(),
         comment: None,
     }
 }
@@ -37,6 +38,7 @@ fn pk_col(id: u64, name: &str) -> Column {
         is_primary_key: true,
         comment: None,
         enum_values: None,
+        semantics: relune_core::ColumnSemantics::default(),
     }
 }
 
@@ -49,6 +51,7 @@ fn fk_col(id: u64, name: &str) -> Column {
         is_primary_key: false,
         comment: None,
         enum_values: None,
+        semantics: relune_core::ColumnSemantics::default(),
     }
 }
 

@@ -636,7 +636,7 @@ mod tests {
     fn test_schema_json_input_disables_comment_review_rules() {
         let json = r#"
         {
-          "version": "1.0.0",
+          "version": "2.0.0",
           "tables": [
             {
               "id": "users",

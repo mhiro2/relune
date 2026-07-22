@@ -7,7 +7,10 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Column, Enum, ForeignKey, Index, Schema, Table, View};
+use crate::model::{
+    CheckConstraint, Column, ColumnSemantics, Enum, ForeignKey, Index, IndexKey, Schema, Table,
+    View,
+};
 
 /// Stable schema export format for JSON serialization.
 /// This format is designed for long-term stability and should not
@@ -28,7 +31,20 @@ pub struct SchemaExport {
 
 impl SchemaExport {
     /// Export format version.
-    pub const VERSION: &'static str = "1.0.0";
+    ///
+    /// `2.x` is the current stable line. Minor bumps are additive: newer minors
+    /// add optional fields that older readers ignore, and unknown minors are
+    /// accepted on import. A different major version is rejected on import.
+    ///
+    /// `2.0.0` is a deliberate breaking change from `1.x`: the flattened
+    /// plain-column `columns` field was removed in favor of the structured
+    /// `key_parts` (see [`IndexExport`]). A `1.x` index carried only `columns`,
+    /// so importing it under `2.x` rules is rejected rather than silently
+    /// dropping the index key.
+    pub const VERSION: &'static str = "2.0.0";
+
+    /// Major version of the current format, used to reject incompatible inputs.
+    pub const MAJOR_VERSION: u64 = 2;
 
     /// Creates a new schema export from tables only. Views and enums default to empty.
     #[must_use]
@@ -58,6 +74,15 @@ pub struct TableExport {
     /// Indexes on this table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub indexes: Vec<IndexExport>,
+    /// Name of the primary-key constraint, if declared with one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_key_name: Option<String>,
+    /// Table comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// Table-level `CHECK` constraints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_constraints: Vec<CheckConstraint>,
 }
 
 /// Export format for a column.
@@ -71,6 +96,15 @@ pub struct ColumnExport {
     pub nullable: bool,
     /// Whether this column is part of the primary key.
     pub primary_key: bool,
+    /// Column comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// Inline enum/set values, when the column type carries them directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
+    /// Extended column semantics (`DEFAULT`, `CHECK`, generated, identity, ...).
+    #[serde(default, skip_serializing_if = "ColumnSemantics::is_empty")]
+    pub semantics: ColumnSemantics,
 }
 
 /// Export format for a foreign key.
@@ -101,14 +135,73 @@ fn is_export_no_action(action: &Option<String>) -> bool {
 }
 
 /// Export format for an index.
+///
+/// `key_parts` is the authoritative structured representation of the index key,
+/// carrying both plain columns and functional/expression parts in order. There
+/// is deliberately no flattened plain-column field: a partial column list (with
+/// expression parts dropped) would let a reader infer false uniqueness or index
+/// coverage from a mixed expression index such as `UNIQUE (tenant_id,
+/// lower(email))`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexExport {
     /// Index name, if named.
     pub name: Option<String>,
-    /// Column names in the index.
-    pub columns: Vec<String>,
+    /// Structured key parts (columns and expressions) in key order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_parts: Vec<IndexKey>,
     /// Whether the index is unique.
     pub unique: bool,
+    /// Partial-index predicate (`WHERE ...`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Non-key columns carried by the index (`INCLUDE (...)`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_columns: Vec<String>,
+    /// Index access method (e.g. `btree`, `gin`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+impl IndexExport {
+    /// Build the stable export representation of an index.
+    #[must_use]
+    pub fn from_index(idx: &Index) -> Self {
+        Self {
+            name: idx.name.clone(),
+            key_parts: idx.key_parts.clone(),
+            unique: idx.is_unique,
+            predicate: idx.predicate.clone(),
+            included_columns: idx.included_columns.clone(),
+            method: idx.method.clone(),
+        }
+    }
+
+    /// Plain column names in key order, skipping functional/expression parts.
+    ///
+    /// Use only where dropping expression parts is semantically correct (e.g.
+    /// display labels); do not use it to infer uniqueness or index coverage,
+    /// since a mixed expression index would appear to cover fewer columns than
+    /// it constrains.
+    #[must_use]
+    pub fn column_names(&self) -> Vec<String> {
+        self.key_parts
+            .iter()
+            .filter_map(|part| part.as_column_name().map(String::from))
+            .collect()
+    }
+
+    /// Reconstruct an [`Index`] from the export's structured `key_parts`.
+    #[must_use]
+    pub fn to_index(&self) -> Index {
+        Index {
+            name: self.name.clone(),
+            key_parts: self.key_parts.clone(),
+            is_unique: self.unique,
+            predicate: self.predicate.clone(),
+            included_columns: self.included_columns.clone(),
+            method: self.method.clone(),
+        }
+    }
 }
 
 /// Export format for a single view.
@@ -161,6 +254,9 @@ fn export_table(table: &Table) -> TableExport {
         columns: table.columns.iter().map(export_column).collect(),
         foreign_keys: table.foreign_keys.iter().map(export_fk).collect(),
         indexes: table.indexes.iter().map(export_index).collect(),
+        primary_key_name: table.primary_key_name.clone(),
+        comment: table.comment.clone(),
+        check_constraints: table.check_constraints.clone(),
     }
 }
 
@@ -171,6 +267,9 @@ fn export_column(col: &Column) -> ColumnExport {
         data_type: col.data_type.clone(),
         nullable: col.nullable,
         primary_key: col.is_primary_key,
+        comment: col.comment.clone(),
+        enum_values: col.enum_values.clone(),
+        semantics: col.semantics.clone(),
     }
 }
 
@@ -198,11 +297,7 @@ fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
 
 /// Export an Index to the stable format.
 fn export_index(idx: &Index) -> IndexExport {
-    IndexExport {
-        name: idx.name.clone(),
-        columns: idx.columns.clone(),
-        unique: idx.is_unique,
-    }
+    IndexExport::from_index(idx)
 }
 
 /// Export a View to the stable format.
@@ -226,12 +321,46 @@ fn export_enum(enum_: &Enum) -> EnumExport {
     }
 }
 
+/// Parse and validate the export format version.
+///
+/// Rejects an empty or malformed version, and any major version other than
+/// [`SchemaExport::MAJOR_VERSION`]. Unknown minor/patch versions within the
+/// supported major are accepted (additive-compatibility contract), so a newer
+/// writer's file still imports on an older reader, dropping only fields the
+/// reader does not know about.
+fn validate_export_version(version: &str) -> Result<(), ImportError> {
+    let malformed = || ImportError {
+        message: format!(
+            "unsupported schema export version '{version}': expected 'MAJOR.MINOR.PATCH' with numeric components"
+        ),
+    };
+    // Require exactly three numeric components so a malformed string (e.g. "1",
+    // "1.foo", "1.2.3.extra") is rejected rather than silently accepted on its
+    // leading number, keeping the error message truthful.
+    let components: Vec<&str> = version.split('.').collect();
+    if components.len() != 3 || components.iter().any(|c| c.parse::<u64>().is_err()) {
+        return Err(malformed());
+    }
+    let major = components[0].parse::<u64>().map_err(|_| malformed())?;
+    if major != SchemaExport::MAJOR_VERSION {
+        return Err(ImportError {
+            message: format!(
+                "unsupported schema export major version {major} (this build supports major {}); version string was '{version}'",
+                SchemaExport::MAJOR_VERSION
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Import a Schema from the stable JSON format.
 ///
-/// Returns an error if any table, view, or enum has an empty or duplicate stable
-/// identifier. Duplicates would silently collapse entries in downstream diff and
-/// overlay operations, which key tables by `stable_id`.
+/// Returns an error if the format version has an unsupported major version, or
+/// if any table, view, or enum has an empty or duplicate stable identifier.
+/// Duplicates would silently collapse entries in downstream diff and overlay
+/// operations, which key tables by `stable_id`.
 pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
+    validate_export_version(&export.version)?;
     let mut table_ids = HashSet::with_capacity(export.tables.len());
     let tables = export
         .tables
@@ -239,6 +368,7 @@ pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
         .enumerate()
         .map(|(i, t)| {
             check_stable_id(&mut table_ids, &t.id, "table", "stable_id", i)?;
+            validate_index_exports(t)?;
             Ok(import_table(i, t))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -267,6 +397,25 @@ pub fn import_schema(export: &SchemaExport) -> Result<Schema, ImportError> {
         views,
         enums,
     })
+}
+
+/// Reject any index that carries no key parts.
+///
+/// A `1.x` export stored index keys only in the removed `columns` field, so a
+/// `1.x` file deserializes with empty `key_parts`. Importing it would silently
+/// drop the index key; rejecting it makes the format break explicit instead.
+fn validate_index_exports(table: &TableExport) -> Result<(), ImportError> {
+    for (position, index) in table.indexes.iter().enumerate() {
+        if index.key_parts.is_empty() {
+            return Err(ImportError {
+                message: format!(
+                    "table '{}' index at position {position} has no key parts; the pre-2.0.0 flattened `columns` field is no longer supported",
+                    table.id
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Validate that a stable identifier is non-empty and unique within its kind.
@@ -322,8 +471,9 @@ fn import_table(index: usize, export: &TableExport) -> Table {
             .collect(),
         foreign_keys: export.foreign_keys.iter().map(import_fk).collect(),
         indexes: export.indexes.iter().map(import_index).collect(),
-        primary_key_name: None,
-        comment: None,
+        primary_key_name: export.primary_key_name.clone(),
+        check_constraints: export.check_constraints.clone(),
+        comment: export.comment.clone(),
     }
 }
 
@@ -337,8 +487,9 @@ fn import_column(index: usize, export: &ColumnExport) -> Column {
         data_type: export.data_type.clone(),
         nullable: export.nullable,
         is_primary_key: export.primary_key,
-        comment: None,
-        enum_values: None,
+        comment: export.comment.clone(),
+        enum_values: export.enum_values.clone(),
+        semantics: export.semantics.clone(),
     }
 }
 
@@ -382,11 +533,7 @@ fn parse_referential_action(action: Option<&str>) -> crate::model::ReferentialAc
 
 /// Import an Index from the stable format.
 fn import_index(export: &IndexExport) -> Index {
-    Index {
-        name: export.name.clone(),
-        columns: export.columns.clone(),
-        is_unique: export.unique,
-    }
+    export.to_index()
 }
 
 /// Import a View from the stable format.
@@ -435,6 +582,7 @@ mod tests {
             is_primary_key: primary_key,
             comment: None,
             enum_values: None,
+            semantics: crate::model::ColumnSemantics::default(),
         }
     }
 
@@ -455,6 +603,7 @@ mod tests {
             foreign_keys,
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -491,19 +640,31 @@ mod tests {
                     data_type: "bigint".to_string(),
                     nullable: false,
                     primary_key: true,
+                    comment: None,
+                    enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 },
                 ColumnExport {
                     name: "email".to_string(),
                     data_type: "varchar(255)".to_string(),
                     nullable: false,
                     primary_key: false,
+                    comment: None,
+                    enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 },
             ],
             foreign_keys: vec![],
+            primary_key_name: None,
+            comment: None,
+            check_constraints: Vec::new(),
             indexes: vec![IndexExport {
                 name: Some("idx_email".to_string()),
-                columns: vec!["email".to_string()],
+                key_parts: vec![IndexKey::column("email".to_string())],
                 unique: true,
+                predicate: None,
+                included_columns: Vec::new(),
+                method: None,
             }],
         }]);
 
@@ -515,7 +676,7 @@ mod tests {
     #[test]
     fn test_export_version() {
         let export = SchemaExport::new(vec![]);
-        assert_eq!(export.version, "1.0.0");
+        assert_eq!(export.version, "2.0.0");
     }
 
     #[test]
@@ -538,6 +699,9 @@ mod tests {
                 name: "users".to_string(),
                 columns: vec![],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
             TableExport {
@@ -546,6 +710,9 @@ mod tests {
                 name: "orders".to_string(),
                 columns: vec![],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
             TableExport {
@@ -554,6 +721,9 @@ mod tests {
                 name: "products".to_string(),
                 columns: vec![],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
         ]);
@@ -686,6 +856,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 definition: Some("SELECT id FROM users WHERE active".to_string()),
             }],
@@ -755,6 +926,9 @@ mod tests {
             name: name.to_string(),
             columns: vec![],
             foreign_keys: vec![],
+            primary_key_name: None,
+            comment: None,
+            check_constraints: Vec::new(),
             indexes: vec![],
         };
         let export = SchemaExport::new(vec![table("a"), table("b")]);
@@ -820,8 +994,14 @@ mod tests {
                     data_type: "uuid".to_string(),
                     nullable: false,
                     primary_key: true,
+                    comment: None,
+                    enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 foreign_keys: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
                 indexes: vec![],
             },
             TableExport {
@@ -834,12 +1014,18 @@ mod tests {
                         data_type: "uuid".to_string(),
                         nullable: false,
                         primary_key: true,
+                        comment: None,
+                        enum_values: None,
+                        semantics: crate::model::ColumnSemantics::default(),
                     },
                     ColumnExport {
                         name: "account_id".to_string(),
                         data_type: "uuid".to_string(),
                         nullable: false,
                         primary_key: false,
+                        comment: None,
+                        enum_values: None,
+                        semantics: crate::model::ColumnSemantics::default(),
                     },
                 ],
                 foreign_keys: vec![ForeignKeyExport {
@@ -852,6 +1038,9 @@ mod tests {
                     on_update: Some("set default".to_string()),
                 }],
                 indexes: vec![],
+                primary_key_name: None,
+                comment: None,
+                check_constraints: Vec::new(),
             },
         ]);
 
@@ -869,5 +1058,186 @@ mod tests {
             normalized.tables[1].foreign_keys[0].on_update.as_deref(),
             Some("SET DEFAULT")
         );
+    }
+
+    #[test]
+    fn test_roundtrip_preserves_comments_enum_and_constraints() {
+        use crate::model::{
+            CheckConstraint, ColumnSemantics, GeneratedColumn, Index, IndexKey, TableId,
+        };
+
+        let column = Column {
+            id: ColumnId(1),
+            name: "status".to_string(),
+            data_type: "text".to_string(),
+            nullable: false,
+            is_primary_key: false,
+            comment: Some("lifecycle state".to_string()),
+            enum_values: Some(vec!["active".to_string(), "inactive".to_string()]),
+            semantics: ColumnSemantics {
+                default_expression: Some("'active'".to_string()),
+                check_constraints: vec![CheckConstraint {
+                    name: Some("status_not_empty".to_string()),
+                    expression: "status <> ''".to_string(),
+                }],
+                generated: Some(GeneratedColumn {
+                    expression: "upper(status)".to_string(),
+                    stored: true,
+                }),
+                ..ColumnSemantics::default()
+            },
+        };
+
+        let table = Table {
+            id: TableId(1),
+            stable_id: "public.accounts".to_string(),
+            schema_name: Some("public".to_string()),
+            name: "accounts".to_string(),
+            columns: vec![
+                Column {
+                    id: ColumnId(2),
+                    name: "id".to_string(),
+                    data_type: "bigint".to_string(),
+                    nullable: false,
+                    is_primary_key: true,
+                    comment: None,
+                    enum_values: None,
+                    semantics: ColumnSemantics::default(),
+                },
+                column,
+            ],
+            foreign_keys: vec![],
+            indexes: vec![Index {
+                name: Some("idx_lower_status".to_string()),
+                key_parts: vec![IndexKey::Expression("lower(status)".to_string())],
+                is_unique: false,
+                predicate: Some("id > 0".to_string()),
+                included_columns: vec!["id".to_string()],
+                method: Some("btree".to_string()),
+            }],
+            primary_key_name: Some("accounts_pkey".to_string()),
+            comment: Some("user accounts".to_string()),
+            check_constraints: vec![CheckConstraint {
+                name: Some("id_positive".to_string()),
+                expression: "id > 0".to_string(),
+            }],
+        };
+
+        let schema = Schema {
+            tables: vec![table],
+            views: vec![],
+            enums: vec![],
+        };
+
+        // The imported schema must retain every previously-dropped attribute.
+        let imported = import_schema(&export_schema(&schema)).unwrap();
+        let t = &imported.tables[0];
+        assert_eq!(t.comment.as_deref(), Some("user accounts"));
+        assert_eq!(t.primary_key_name.as_deref(), Some("accounts_pkey"));
+        assert_eq!(t.check_constraints.len(), 1);
+        assert_eq!(t.check_constraints[0].expression, "id > 0");
+
+        let status = t.columns.iter().find(|c| c.name == "status").unwrap();
+        assert_eq!(status.comment.as_deref(), Some("lifecycle state"));
+        assert_eq!(
+            status.enum_values.as_deref(),
+            Some(["active".to_string(), "inactive".to_string()].as_slice())
+        );
+        assert_eq!(
+            status.semantics.default_expression.as_deref(),
+            Some("'active'")
+        );
+        assert_eq!(status.semantics.check_constraints.len(), 1);
+        assert!(status.semantics.generated.as_ref().unwrap().stored);
+
+        let idx = &t.indexes[0];
+        assert!(idx.has_expression());
+        assert_eq!(idx.predicate.as_deref(), Some("id > 0"));
+        assert_eq!(idx.included_columns, vec!["id".to_string()]);
+        assert_eq!(idx.method.as_deref(), Some("btree"));
+
+        // Full export -> import -> export round-trip is stable.
+        let once = export_schema(&schema);
+        let twice = export_schema(&import_schema(&once).unwrap());
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_import_rejects_unsupported_major_version() {
+        // The `1.x` line is no longer supported (the flattened `columns` field
+        // was removed), so a `1.x` file must be rejected rather than importing
+        // with empty index keys.
+        let mut export = SchemaExport::new(vec![]);
+        export.version = "1.0.0".to_string();
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("major version 1"),
+            "unexpected error: {}",
+            err.message
+        );
+
+        export.version = "999.0.0".to_string();
+        assert!(import_schema(&export).is_err());
+    }
+
+    #[test]
+    fn test_import_accepts_unknown_minor_version() {
+        // A newer additive minor from a future writer must still import.
+        let mut export = SchemaExport::new(vec![]);
+        export.version = "2.99.0".to_string();
+        assert!(import_schema(&export).is_ok());
+    }
+
+    #[test]
+    fn test_import_rejects_index_without_key_parts() {
+        // A pre-2.0.0 index carried only the removed `columns` field, so it
+        // deserializes with empty `key_parts`; importing it must fail loudly
+        // rather than silently dropping the index key.
+        let mut export = SchemaExport::new(vec![TableExport {
+            id: "public.users".to_string(),
+            schema: Some("public".to_string()),
+            name: "users".to_string(),
+            columns: vec![],
+            foreign_keys: vec![],
+            primary_key_name: None,
+            comment: None,
+            check_constraints: Vec::new(),
+            indexes: vec![IndexExport {
+                name: Some("idx_email".to_string()),
+                key_parts: Vec::new(),
+                unique: true,
+                predicate: None,
+                included_columns: Vec::new(),
+                method: None,
+            }],
+        }]);
+        export.version = SchemaExport::VERSION.to_string();
+
+        let err = import_schema(&export).unwrap_err();
+        assert!(
+            err.message.contains("no key parts"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_import_rejects_malformed_version() {
+        let mut export = SchemaExport::new(vec![]);
+        for bad in [
+            "",
+            "not-a-version",
+            "1",
+            "1.foo",
+            "1.2",
+            "1.2.3.extra",
+            "1..0",
+        ] {
+            export.version = bad.to_string();
+            assert!(
+                import_schema(&export).is_err(),
+                "version '{bad}' should be rejected as malformed"
+            );
+        }
     }
 }

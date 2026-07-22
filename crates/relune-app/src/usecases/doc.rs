@@ -118,7 +118,7 @@ fn write_tables(out: &mut String, schema: &Schema) {
             let _ = writeln!(out, "|------|---------|--------|");
             for idx in &table.indexes {
                 let name = idx.name.as_deref().unwrap_or("(unnamed)");
-                let cols = idx.columns.join(", ");
+                let cols = idx.key_labels().join(", ");
                 let unique = if idx.is_unique { "YES" } else { "NO" };
                 let _ = writeln!(out, "| {name} | {cols} | {unique} |");
             }

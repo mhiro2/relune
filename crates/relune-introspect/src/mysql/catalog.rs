@@ -8,8 +8,8 @@ use tracing::warn;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
-    RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
-    parse_referential_action,
+    RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
+    RawTable, RawView, parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
@@ -18,12 +18,44 @@ const PARALLEL_CATALOG_QUERIES: u32 = 6;
 
 /// Fetches all catalog metadata from a `MySQL` database.
 pub async fn fetch_catalog_metadata(pool: &MySqlPool) -> Result<RawSchema, IntrospectError> {
-    let catalog = MySqlCatalog { pool: pool.clone() };
+    let flavor = detect_flavor(pool).await?;
+    let catalog = MySqlCatalog {
+        pool: pool.clone(),
+        flavor,
+    };
     catalog.fetch_all().await
+}
+
+/// Server flavor. `MySQL` and `MariaDB` share the `information_schema` layout
+/// but diverge in details that matter for introspection: `MariaDB`'s
+/// `STATISTICS` table has no `EXPRESSION` column, and its
+/// `COLUMNS.COLUMN_DEFAULT` already stores string literals quoted, whereas
+/// `MySQL` reports them unquoted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MySqlFlavor {
+    MySql,
+    MariaDb,
+}
+
+/// Detects the server flavor from `SELECT VERSION()`; `MariaDB` embeds
+/// `MariaDB` in its version string (e.g. `10.11.6-MariaDB`).
+async fn detect_flavor(pool: &MySqlPool) -> Result<MySqlFlavor, IntrospectError> {
+    let version: String = sqlx::query_scalar("SELECT VERSION()")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            IntrospectError::query_with_source("Failed to detect MySQL server flavor", e)
+        })?;
+    Ok(if version.to_ascii_lowercase().contains("mariadb") {
+        MySqlFlavor::MariaDb
+    } else {
+        MySqlFlavor::MySql
+    })
 }
 
 struct MySqlCatalog {
     pool: MySqlPool,
+    flavor: MySqlFlavor,
 }
 
 impl ParallelCatalogReader for MySqlCatalog {
@@ -68,7 +100,12 @@ impl ParallelCatalogReader for MySqlCatalog {
                 IF(IS_NULLABLE = 'YES', TRUE, FALSE) AS is_nullable,
                 IF(COLUMN_KEY = 'PRI', TRUE, FALSE) AS is_primary_key,
                 NULLIF(CONVERT(COLUMN_COMMENT USING utf8mb4), '') AS column_comment,
-                ORDINAL_POSITION AS ordinal_position
+                ORDINAL_POSITION AS ordinal_position,
+                CONVERT(COLUMN_DEFAULT USING utf8mb4) AS column_default,
+                CONVERT(EXTRA USING utf8mb4) AS extra,
+                NULLIF(CONVERT(GENERATION_EXPRESSION USING utf8mb4), '') AS generation_expression,
+                CONVERT(CHARACTER_SET_NAME USING utf8mb4) AS character_set,
+                CONVERT(COLLATION_NAME USING utf8mb4) AS collation
             FROM information_schema.COLUMNS
             WHERE TABLE_SCHEMA NOT IN (
                 'information_schema', 'mysql', 'performance_schema', 'sys',
@@ -81,6 +118,7 @@ impl ParallelCatalogReader for MySqlCatalog {
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch columns", e))?;
 
+        let flavor = self.flavor;
         rows.into_iter()
             .map(|row| {
                 let ordinal_position = ordinal_position_from_row(
@@ -89,18 +127,81 @@ impl ParallelCatalogReader for MySqlCatalog {
                     &row.table_name,
                 )?;
 
-                Ok::<RawColumn, IntrospectError>(RawColumn {
-                    table_name: row.table_name,
-                    schema_name: row.schema_name,
-                    column_name: row.column_name,
-                    data_type: row.data_type,
-                    is_nullable: row.is_nullable,
-                    is_primary_key: row.is_primary_key,
-                    column_comment: row.column_comment,
+                let mut column = RawColumn::new(
+                    row.table_name,
+                    row.schema_name,
+                    row.column_name,
+                    row.data_type,
+                    row.is_nullable,
+                    row.is_primary_key,
+                    row.column_comment,
                     ordinal_position,
-                })
+                );
+                column.character_set = row.character_set;
+                column.collation = row.collation;
+                let extra = row.extra.unwrap_or_default();
+                let extra_lower = extra.to_lowercase();
+                column.auto_increment = extra_lower.contains("auto_increment");
+                let is_generated = (extra_lower.contains("stored generated")
+                    || extra_lower.contains("virtual generated"))
+                    && row.generation_expression.is_some();
+                if is_generated {
+                    column.generated_expression = row.generation_expression;
+                    column.generated_stored = extra_lower.contains("stored generated");
+                } else {
+                    column.default_expression = normalize_column_default(
+                        flavor,
+                        &extra_lower,
+                        row.column_default,
+                        &column.data_type,
+                    );
+                }
+                if let Some(pos) = extra_lower.find("on update ") {
+                    let rest = extra[pos + "on update ".len()..].trim();
+                    if !rest.is_empty() {
+                        column.on_update = Some(rest.to_string());
+                    }
+                }
+                Ok::<RawColumn, IntrospectError>(column)
             })
             .collect::<Result<Vec<RawColumn>, IntrospectError>>()
+    }
+
+    /// Fetch table-level `CHECK` constraints (`MySQL` 8.0.16+). The
+    /// `CHECK_CLAUSE` is rendered as `(<expr>)`; the outer parentheses are
+    /// stripped to match the parser's representation.
+    async fn fetch_checks(&self) -> Result<Vec<RawCheckConstraint>, IntrospectError> {
+        let rows: Vec<RawCheckRow> = sqlx::query_as(
+            r"
+            SELECT
+                CONVERT(tc.TABLE_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(tc.TABLE_NAME USING utf8mb4) AS table_name,
+                CONVERT(cc.CONSTRAINT_NAME USING utf8mb4) AS name,
+                CONVERT(cc.CHECK_CLAUSE USING utf8mb4) AS check_clause
+            FROM information_schema.CHECK_CONSTRAINTS cc
+            INNER JOIN information_schema.TABLE_CONSTRAINTS tc
+                ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+                AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+            WHERE tc.TABLE_SCHEMA NOT IN (
+                'information_schema', 'mysql', 'performance_schema', 'sys',
+                'mysql_innodb_cluster_metadata'
+            )
+            ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, cc.CONSTRAINT_NAME
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch check constraints", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RawCheckConstraint {
+                schema_name: row.schema_name,
+                table_name: row.table_name,
+                name: Some(row.name),
+                expression: strip_outer_parens(&row.check_clause),
+            })
+            .collect())
     }
 
     async fn fetch_foreign_keys(&self) -> Result<Vec<RawForeignKey>, IntrospectError> {
@@ -218,28 +319,13 @@ impl MySqlCatalog {
     }
 
     async fn fetch_index_rows(&self) -> Result<Vec<IndexColumnRow>, IntrospectError> {
-        let rows: Vec<IndexColumnRow> = sqlx::query_as(
-            r"
-            SELECT
-                CONVERT(TABLE_SCHEMA USING utf8mb4) AS schema_name,
-                CONVERT(TABLE_NAME USING utf8mb4) AS table_name,
-                CONVERT(INDEX_NAME USING utf8mb4) AS index_name,
-                CONVERT(COLUMN_NAME USING utf8mb4) AS column_name,
-                SEQ_IN_INDEX AS seq_in_index,
-                NON_UNIQUE AS non_unique,
-                IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
-            FROM information_schema.STATISTICS
-            WHERE TABLE_SCHEMA NOT IN (
-                'information_schema', 'mysql', 'performance_schema', 'sys',
-                'mysql_innodb_cluster_metadata'
-              )
-              AND COLUMN_NAME IS NOT NULL
-            ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
-            ",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
+        // The query text is assembled from a hardcoded, flavor-selected column
+        // fragment with no external input, so asserting SQL safety is sound.
+        let rows: Vec<IndexColumnRow> =
+            sqlx::query_as(sqlx::AssertSqlSafe(index_rows_query(self.flavor)))
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
 
         Ok(rows)
     }
@@ -272,6 +358,68 @@ struct RawColumnRow {
     is_primary_key: bool,
     column_comment: Option<String>,
     ordinal_position: u64,
+    column_default: Option<String>,
+    extra: Option<String>,
+    generation_expression: Option<String>,
+    character_set: Option<String>,
+    collation: Option<String>,
+}
+
+/// Normalizes a `COLUMN_DEFAULT` value into canonical SQL default text.
+///
+/// `MySQL` reports literal string defaults unquoted (e.g. `active` for
+/// `DEFAULT 'active'`) and flags expression defaults via `EXTRA` containing
+/// `DEFAULT_GENERATED`, so string-typed literals need their quoting restored.
+/// `MariaDB` already stores `COLUMN_DEFAULT` as ready-to-use SQL — string
+/// literals arrive quoted (`'active'`), function defaults as expressions — so
+/// the value is passed through verbatim; re-quoting would double it.
+fn normalize_column_default(
+    flavor: MySqlFlavor,
+    extra_lower: &str,
+    column_default: Option<String>,
+    data_type: &str,
+) -> Option<String> {
+    match flavor {
+        MySqlFlavor::MariaDb => column_default,
+        MySqlFlavor::MySql => {
+            let is_expression_default = extra_lower.contains("default_generated");
+            column_default.map(|value| {
+                if !is_expression_default && is_mysql_string_type(data_type) {
+                    format!("'{}'", value.replace('\'', "''"))
+                } else {
+                    value
+                }
+            })
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RawCheckRow {
+    schema_name: String,
+    table_name: String,
+    name: String,
+    check_clause: String,
+}
+
+/// Returns `true` for `MySQL` column types whose literal `DEFAULT` values are
+/// reported unquoted by `information_schema.COLUMN_DEFAULT` and therefore need
+/// quoting restored (character, text, enum/set types).
+fn is_mysql_string_type(column_type: &str) -> bool {
+    let lower = column_type.to_ascii_lowercase();
+    ["char", "text", "enum", "set"]
+        .iter()
+        .any(|kind| lower.contains(kind))
+}
+
+/// Remove one balanced layer of surrounding parentheses (e.g. a `MySQL`
+/// `CHECK_CLAUSE` `(expr)` or a `pg`-style wrapped expression).
+fn strip_outer_parens(clause: &str) -> String {
+    let trimmed = clause.trim();
+    trimmed
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .map_or_else(|| trimmed.to_string(), |inner| inner.trim().to_string())
 }
 
 #[derive(Debug, sqlx::FromRow, Clone)]
@@ -288,12 +436,55 @@ struct FkColumnRow {
     update_rule: String,
 }
 
+/// Builds the index-metadata query for the connected server flavor.
+///
+/// `MariaDB`'s `information_schema.STATISTICS` has no `EXPRESSION` column
+/// (functional key parts are not reported), so selecting it there fails the
+/// whole catalog fetch. For `MariaDB` the expression column is a typed `NULL`
+/// literal instead, and functional indexes are simply not captured.
+fn index_rows_query(flavor: MySqlFlavor) -> String {
+    let expression = match flavor {
+        MySqlFlavor::MariaDb => "CAST(NULL AS CHAR)",
+        MySqlFlavor::MySql => "CONVERT(EXPRESSION USING utf8mb4)",
+    };
+    format!(
+        r"
+        SELECT
+            CONVERT(TABLE_SCHEMA USING utf8mb4) AS schema_name,
+            CONVERT(TABLE_NAME USING utf8mb4) AS table_name,
+            CONVERT(INDEX_NAME USING utf8mb4) AS index_name,
+            CONVERT(COLUMN_NAME USING utf8mb4) AS column_name,
+            {expression} AS expression,
+            SUB_PART AS sub_part,
+            CONVERT(COLLATION USING utf8mb4) AS collation,
+            CONVERT(INDEX_TYPE USING utf8mb4) AS index_type,
+            SEQ_IN_INDEX AS seq_in_index,
+            NON_UNIQUE AS non_unique,
+            IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA NOT IN (
+            'information_schema', 'mysql', 'performance_schema', 'sys',
+            'mysql_innodb_cluster_metadata'
+          )
+        ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+        "
+    )
+}
+
 #[derive(Debug, sqlx::FromRow, Clone)]
 struct IndexColumnRow {
     schema_name: String,
     table_name: String,
     index_name: String,
-    column_name: String,
+    // NULL for a functional key part; `expression` carries the text instead.
+    column_name: Option<String>,
+    // Functional-index expression (MySQL 8.0.13+); NULL for plain columns.
+    expression: Option<String>,
+    // Indexed prefix length (e.g. `col(10)`); NULL when the whole column is indexed.
+    sub_part: Option<i64>,
+    // Sort order of the key part: 'A' ascending, 'D' descending, NULL unsorted.
+    collation: Option<String>,
+    index_type: Option<String>,
     seq_in_index: u64,
     non_unique: i64, // 0 = UNIQUE or PRIMARY
     is_primary: bool,
@@ -506,6 +697,16 @@ fn ordinal_position_from_row(
     })
 }
 
+/// Maps a `STATISTICS.COLLATION` value to a model sort order: `A` ascending,
+/// `D` descending, and `NULL`/anything else unspecified.
+fn sort_order_from_collation(collation: Option<&str>) -> Option<relune_core::SortOrder> {
+    match collation {
+        Some("A") => Some(relune_core::SortOrder::Asc),
+        Some("D") => Some(relune_core::SortOrder::Desc),
+        _ => None,
+    }
+}
+
 fn group_indexes(rows: Vec<IndexColumnRow>) -> Vec<RawIndex> {
     #[derive(Eq, PartialEq, Ord, PartialOrd, Clone)]
     struct Key {
@@ -531,14 +732,35 @@ fn group_indexes(rows: Vec<IndexColumnRow>) -> Vec<RawIndex> {
         let Some(first) = first else {
             continue;
         };
-        let index_columns: Vec<String> = cols.iter().map(|r| r.column_name.clone()).collect();
+        let is_primary = first.is_primary;
+        let is_unique = first.non_unique == 0 && !first.is_primary;
+        let method = first.index_type.as_ref().map(|t| t.to_lowercase());
+        let key_parts: Vec<RawIndexKeyPart> = cols
+            .iter()
+            .map(|r| match &r.column_name {
+                Some(name) => RawIndexKeyPart::Column {
+                    name: name.clone(),
+                    order: sort_order_from_collation(r.collation.as_deref()),
+                    // MySQL/MariaDB indexes do not carry a per-column NULLS
+                    // ordering, so it is left unspecified.
+                    nulls: None,
+                    prefix_length: r.sub_part.and_then(|p| u32::try_from(p).ok()),
+                },
+                // A functional key part reports a NULL column and carries its
+                // definition in EXPRESSION.
+                None => RawIndexKeyPart::Expression(r.expression.clone().unwrap_or_default()),
+            })
+            .collect();
         out.push(RawIndex {
             index_name: key.index.clone(),
             schema_name: key.schema,
             table_name: key.table,
-            columns: index_columns,
-            is_unique: first.non_unique == 0 && !first.is_primary,
-            is_primary: first.is_primary,
+            key_parts,
+            is_unique,
+            is_primary,
+            predicate: None,
+            included_columns: Vec::new(),
+            method,
         });
     }
     out
@@ -616,6 +838,60 @@ mod tests {
             });
             assert_eq!(view.definition, None);
         }
+    }
+
+    #[test]
+    fn mysql_quotes_unquoted_string_defaults() {
+        let value = normalize_column_default(
+            MySqlFlavor::MySql,
+            "",
+            Some("active".to_string()),
+            "varchar",
+        );
+        assert_eq!(value.as_deref(), Some("'active'"));
+    }
+
+    #[test]
+    fn mysql_leaves_expression_defaults_unquoted() {
+        let value = normalize_column_default(
+            MySqlFlavor::MySql,
+            "default_generated",
+            Some("CURRENT_TIMESTAMP".to_string()),
+            "datetime",
+        );
+        assert_eq!(value.as_deref(), Some("CURRENT_TIMESTAMP"));
+    }
+
+    #[test]
+    fn mariadb_passes_string_defaults_through_verbatim() {
+        // MariaDB already reports string literals quoted, so re-quoting would
+        // double the quotes.
+        let value = normalize_column_default(
+            MySqlFlavor::MariaDb,
+            "",
+            Some("'active'".to_string()),
+            "varchar",
+        );
+        assert_eq!(value.as_deref(), Some("'active'"));
+    }
+
+    #[test]
+    fn maps_statistics_collation_to_sort_order() {
+        use relune_core::SortOrder;
+        assert_eq!(sort_order_from_collation(Some("A")), Some(SortOrder::Asc));
+        assert_eq!(sort_order_from_collation(Some("D")), Some(SortOrder::Desc));
+        assert_eq!(sort_order_from_collation(None), None);
+        assert_eq!(sort_order_from_collation(Some("")), None);
+    }
+
+    #[test]
+    fn mariadb_index_query_omits_expression_column() {
+        let mariadb = index_rows_query(MySqlFlavor::MariaDb);
+        assert!(!mariadb.contains("CONVERT(EXPRESSION"));
+        assert!(mariadb.contains("CAST(NULL AS CHAR) AS expression"));
+
+        let mysql = index_rows_query(MySqlFlavor::MySql);
+        assert!(mysql.contains("CONVERT(EXPRESSION USING utf8mb4) AS expression"));
     }
 
     #[test]

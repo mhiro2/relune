@@ -372,6 +372,209 @@ async fn test_introspect_mysql_minimal() {
 // A proper cyclic FK test would need to split the SQL and execute in the correct order.
 
 #[tokio::test]
+async fn test_introspect_postgres_column_semantics_and_checks() {
+    let sql = r"
+        CREATE TABLE accounts (
+            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT false,
+            full_name TEXT GENERATED ALWAYS AS (id::text) STORED,
+            amount INTEGER NOT NULL,
+            CONSTRAINT amount_positive CHECK (amount >= 0)
+        );
+    ";
+    let (database_url, _container) = setup_postgres_with_sql(sql).await.expect("postgres setup");
+    let schema = introspect_postgres(&database_url)
+        .await
+        .expect("introspect postgres");
+    let accounts = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "accounts")
+        .expect("accounts table");
+
+    let enabled = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "enabled")
+        .unwrap();
+    assert_eq!(
+        enabled.semantics.default_expression.as_deref(),
+        Some("false")
+    );
+
+    let id = accounts.columns.iter().find(|c| c.name == "id").unwrap();
+    assert_eq!(id.semantics.identity.as_ref().map(|i| i.always), Some(true));
+
+    let full_name = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "full_name")
+        .unwrap();
+    let generated = full_name.semantics.generated.as_ref().expect("generated");
+    assert!(generated.stored);
+
+    assert_eq!(accounts.check_constraints.len(), 1);
+    assert_eq!(
+        accounts.check_constraints[0].name.as_deref(),
+        Some("amount_positive")
+    );
+    assert!(accounts.check_constraints[0].expression.contains("amount"));
+}
+
+#[tokio::test]
+async fn test_introspect_mysql_column_semantics_and_checks() {
+    let sql = r"
+        CREATE TABLE accounts (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            enabled TINYINT(1) NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            amount INT NOT NULL,
+            CONSTRAINT amount_positive CHECK (amount >= 0)
+        );
+    ";
+    let (database_url, _container) = setup_mysql_with_sql(sql).await.expect("mysql setup");
+    let schema = introspect_database(&database_url)
+        .await
+        .expect("introspect mysql");
+    let accounts = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "accounts")
+        .expect("accounts table");
+
+    let id = accounts.columns.iter().find(|c| c.name == "id").unwrap();
+    assert!(id.semantics.auto_increment, "id should be auto-increment");
+
+    // A literal string default must round-trip with quoting restored.
+    let status = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "status")
+        .unwrap();
+    assert_eq!(
+        status.semantics.default_expression.as_deref(),
+        Some("'active'")
+    );
+
+    let updated_at = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "updated_at")
+        .unwrap();
+    assert!(
+        updated_at.semantics.on_update.is_some(),
+        "updated_at should carry ON UPDATE, got {:?}",
+        updated_at.semantics.on_update
+    );
+
+    assert_eq!(accounts.check_constraints.len(), 1);
+    assert!(accounts.check_constraints[0].expression.contains("amount"));
+}
+
+#[tokio::test]
+async fn test_introspect_sqlite_column_defaults_and_checks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("app.db");
+    let pool = sqlx::sqlite::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true),
+    )
+    .await
+    .expect("connect sqlite");
+    sqlx::raw_sql(
+        r"
+        CREATE TABLE accounts (
+            id INTEGER PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            amount INTEGER NOT NULL,
+            CONSTRAINT amount_positive CHECK (amount >= 0)
+        );
+        ",
+    )
+    .execute(&pool)
+    .await
+    .expect("ddl");
+    pool.close().await;
+
+    let abs = db_path.canonicalize().expect("canonicalize db path");
+    let url = format!("sqlite://{}", abs.display());
+    let schema = introspect_sqlite(&url).await.expect("introspect sqlite");
+    let accounts = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "accounts")
+        .expect("accounts table");
+
+    let enabled = accounts
+        .columns
+        .iter()
+        .find(|c| c.name == "enabled")
+        .unwrap();
+    assert_eq!(enabled.semantics.default_expression.as_deref(), Some("0"));
+
+    assert_eq!(accounts.check_constraints.len(), 1);
+    assert!(accounts.check_constraints[0].expression.contains("amount"));
+}
+
+#[tokio::test]
+async fn test_introspect_postgres_expression_and_partial_indexes() {
+    let sql = r"
+        CREATE TABLE users (
+            id BIGINT PRIMARY KEY,
+            email TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT true
+        );
+        CREATE INDEX idx_lower_email ON users (lower(email));
+        CREATE INDEX idx_active_email ON users (email) WHERE active;
+        CREATE INDEX idx_email_incl ON users (email) INCLUDE (id);
+    ";
+
+    let (database_url, _container) = setup_postgres_with_sql(sql).await.expect("postgres setup");
+    let schema = introspect_postgres(&database_url)
+        .await
+        .expect("introspect postgres");
+
+    let users = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "users")
+        .expect("users table");
+
+    // The expression index must be recovered as an expression key part, not
+    // dropped and not mistaken for a plain-column index.
+    let expr_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_lower_email"))
+        .expect("expression index present");
+    assert!(expr_idx.has_expression(), "expected an expression key part");
+    assert!(expr_idx.column_names().is_empty());
+
+    // The partial-index predicate must be captured.
+    let partial_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_active_email"))
+        .expect("partial index present");
+    assert!(
+        partial_idx.predicate.is_some(),
+        "expected a partial-index predicate, got {:?}",
+        partial_idx.predicate
+    );
+
+    // INCLUDE columns are separated from the key.
+    let incl_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_email_incl"))
+        .expect("include index present");
+    assert_eq!(incl_idx.column_names(), vec!["email"]);
+    assert_eq!(incl_idx.included_columns, vec!["id".to_string()]);
+}
+
+#[tokio::test]
 async fn test_introspect_postgres_empty_database() {
     let container = Postgres::default()
         .with_tag(POSTGRES_TAG)
@@ -470,7 +673,7 @@ async fn test_introspect_postgres_handles_reserved_words_and_composite_keys() {
     let composite_unique = items
         .indexes
         .iter()
-        .find(|idx| idx.is_unique && idx.columns == vec!["tenant_id", "sku"])
+        .find(|idx| idx.is_unique && idx.column_names() == vec!["tenant_id", "sku"])
         .expect("composite unique index over (tenant_id, sku)");
     assert_eq!(
         composite_unique.name.as_deref(),

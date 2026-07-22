@@ -62,6 +62,7 @@ fn extract_view_columns_from_defs(defs: &[sqlparser::ast::ViewColumnDef]) -> Vec
                 is_primary_key: false,
                 comment: None,
                 enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
             }
         })
         .collect()

@@ -361,6 +361,7 @@ impl TableBuilder {
                 foreign_keys: Vec::new(),
                 indexes: Vec::new(),
                 primary_key_name: None,
+                check_constraints: Vec::new(),
                 comment: None,
             },
             next_column_id: 1,
@@ -378,6 +379,7 @@ impl TableBuilder {
             is_primary_key: false,
             comment: None,
             enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
         });
         self.next_column_id += 1;
         self
@@ -394,6 +396,7 @@ impl TableBuilder {
             is_primary_key: true,
             comment: None,
             enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
         });
         self.next_column_id += 1;
         self
@@ -438,11 +441,11 @@ impl TableBuilder {
     /// Adds an index.
     #[must_use]
     pub fn index(mut self, name: Option<&str>, columns: &[&str], is_unique: bool) -> Self {
-        self.table.indexes.push(Index {
-            name: name.map(String::from),
-            columns: columns.iter().map(|c| (*c).to_string()).collect(),
+        self.table.indexes.push(Index::from_columns(
+            name.map(String::from),
+            columns.iter().map(|c| (*c).to_string()),
             is_unique,
-        });
+        ));
         self
     }
 

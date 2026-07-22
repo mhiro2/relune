@@ -8,8 +8,8 @@ use sqlx::PgPool;
 
 use crate::catalog::ParallelCatalogReader;
 use crate::common::{
-    RawColumn, RawEnum, RawForeignKey, RawIndex, RawSchema, RawTable, RawView,
-    parse_referential_action,
+    RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
+    RawTable, RawView, parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
@@ -31,10 +31,14 @@ const FETCH_COLUMNS_QUERY: &str = r"
                 CASE WHEN a.attnotnull THEN false ELSE true END AS is_nullable,
                 COALESCE(pk.is_pk, false) AS is_primary_key,
                 pg_catalog.col_description(a.attrelid, a.attnum) AS column_comment,
-                a.attnum AS ordinal_position
+                a.attnum AS ordinal_position,
+                pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS default_or_generation_expr,
+                a.attgenerated::text AS generated_kind,
+                a.attidentity::text AS identity_kind
             FROM pg_catalog.pg_attribute a
             INNER JOIN pg_catalog.pg_class t ON t.oid = a.attrelid
             INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
             LEFT JOIN (
                 SELECT
                     i.indrelid,
@@ -114,15 +118,66 @@ impl ParallelCatalogReader for PostgresCatalog {
 
         Ok(rows
             .into_iter()
-            .map(|row| RawColumn {
-                table_name: row.table_name,
+            .map(|row| {
+                let is_generated = row.generated_kind.as_deref() == Some("s");
+                let mut column = RawColumn::new(
+                    row.table_name,
+                    row.schema_name,
+                    row.column_name,
+                    row.data_type,
+                    row.is_nullable,
+                    row.is_primary_key,
+                    row.column_comment,
+                    row.ordinal_position,
+                );
+                if is_generated {
+                    column.generated_expression = row.default_or_generation_expr;
+                    column.generated_stored = true;
+                } else {
+                    column.default_expression = row.default_or_generation_expr;
+                }
+                column.identity_always = match row.identity_kind.as_deref() {
+                    Some("a") => Some(true),
+                    Some("d") => Some(false),
+                    _ => None,
+                };
+                column
+            })
+            .collect())
+    }
+
+    /// Fetch table-level `CHECK` constraints. `pg_get_constraintdef` renders
+    /// `CHECK (<expr>)`; the wrapping keyword and outer parentheses are stripped
+    /// so the stored expression matches the parser's representation.
+    async fn fetch_checks(&self) -> Result<Vec<RawCheckConstraint>, IntrospectError> {
+        let rows: Vec<RawCheckRow> = sqlx::query_as(
+            r"
+            SELECT
+                n.nspname AS schema_name,
+                t.relname AS table_name,
+                c.conname AS name,
+                pg_catalog.pg_get_constraintdef(c.oid, true) AS definition
+            FROM pg_catalog.pg_constraint c
+            INNER JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            WHERE c.contype = 'c'
+                AND t.relkind = 'r'
+                AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                AND n.nspname NOT LIKE 'pg_%'
+            ORDER BY n.nspname, t.relname, c.conname
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to fetch check constraints", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RawCheckConstraint {
                 schema_name: row.schema_name,
-                column_name: row.column_name,
-                data_type: row.data_type,
-                is_nullable: row.is_nullable,
-                is_primary_key: row.is_primary_key,
-                column_comment: row.column_comment,
-                ordinal_position: row.ordinal_position,
+                table_name: row.table_name,
+                name: Some(row.name),
+                expression: strip_pg_check_definition(&row.definition),
             })
             .collect())
     }
@@ -198,6 +253,12 @@ impl ParallelCatalogReader for PostgresCatalog {
     }
 
     /// Fetch all indexes from the database.
+    ///
+    /// One row is returned per index key position (in order). Expression key
+    /// parts (`indkey` entry `0`) are recovered via `pg_get_indexdef` rather
+    /// than dropped, `INCLUDE` columns (positions beyond `indnkeyatts`) are
+    /// separated out, and the partial-index predicate and access method are
+    /// captured. Rows are grouped back into one `RawIndex` per index below.
     async fn fetch_indexes(&self) -> Result<Vec<RawIndex>, IntrospectError> {
         let rows: Vec<RawIndexRow> = sqlx::query_as(
             r"
@@ -205,40 +266,45 @@ impl ParallelCatalogReader for PostgresCatalog {
                 i.relname AS index_name,
                 n.nspname AS schema_name,
                 t.relname AS table_name,
-                array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) AS columns,
                 ix.indisunique AS is_unique,
-                ix.indisprimary AS is_primary
+                ix.indisprimary AS is_primary,
+                am.amname AS method,
+                pg_get_expr(ix.indpred, ix.indrelid) AS predicate,
+                (k.ord < ix.indnkeyatts) AS is_key,
+                a.attname AS column_name,
+                CASE
+                    WHEN ix.indkey[k.ord] = 0
+                    THEN pg_get_indexdef(ix.indexrelid, (k.ord + 1)::int, true)
+                    ELSE NULL
+                END AS expression,
+                -- indoption bit 0 = DESC, bit 1 = NULLS FIRST; only defined for
+                -- key columns, so it is NULL for INCLUDE positions. Cast the
+                -- int2vector element to int so the bitwise AND has an operator.
+                CASE WHEN k.ord < ix.indnkeyatts
+                    THEN (ix.indoption[k.ord]::int & 1) <> 0 END AS descending,
+                CASE WHEN k.ord < ix.indnkeyatts
+                    THEN (ix.indoption[k.ord]::int & 2) <> 0 END AS nulls_first
             FROM pg_catalog.pg_index ix
             INNER JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
             INNER JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
             INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-            INNER JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+            INNER JOIN pg_catalog.pg_am am ON am.oid = i.relam
+            INNER JOIN LATERAL generate_series(0, ix.indnatts - 1) AS k(ord) ON true
+            LEFT JOIN pg_catalog.pg_attribute a
+                ON a.attrelid = t.oid
+                AND a.attnum = ix.indkey[k.ord]
+                AND ix.indkey[k.ord] <> 0
             WHERE t.relkind = 'r'
                 AND n.nspname NOT IN ('pg_catalog', 'information_schema')
                 AND n.nspname NOT LIKE 'pg_%'
-                -- Skip expression indexes: indkey entries of 0 represent
-                -- expressions, which have no matching pg_attribute row and
-                -- would silently truncate the index column list.
-                AND 0 <> ALL(ix.indkey)
-            GROUP BY i.relname, n.nspname, t.relname, ix.indisunique, ix.indisprimary
-            ORDER BY n.nspname, t.relname, i.relname
+            ORDER BY n.nspname, t.relname, i.relname, k.ord
             ",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| RawIndex {
-                index_name: row.index_name,
-                schema_name: row.schema_name,
-                table_name: row.table_name,
-                columns: row.columns.unwrap_or_default(),
-                is_unique: row.is_unique,
-                is_primary: row.is_primary,
-            })
-            .collect())
+        Ok(group_index_rows(rows))
     }
 
     /// Fetch all views from the database.
@@ -350,6 +416,37 @@ struct RawColumnRow {
     is_primary_key: bool,
     column_comment: Option<String>,
     ordinal_position: i16,
+    default_or_generation_expr: Option<String>,
+    generated_kind: Option<String>,
+    identity_kind: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct RawCheckRow {
+    schema_name: String,
+    table_name: String,
+    name: String,
+    definition: String,
+}
+
+/// Convert a `pg_get_constraintdef` CHECK rendering (`CHECK (<expr>)`) into the
+/// bare expression, matching how the SQL parser stores check expressions.
+fn strip_pg_check_definition(definition: &str) -> String {
+    let trimmed = definition.trim();
+    let without_keyword = trimmed
+        .strip_prefix("CHECK ")
+        .or_else(|| trimmed.strip_prefix("CHECK"))
+        .unwrap_or(trimmed)
+        .trim();
+    // Remove one balanced layer of surrounding parentheses if present.
+    if let Some(inner) = without_keyword
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        inner.trim().to_string()
+    } else {
+        without_keyword.to_string()
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -370,9 +467,82 @@ struct RawIndexRow {
     index_name: String,
     schema_name: String,
     table_name: String,
-    columns: Option<Vec<String>>,
     is_unique: bool,
     is_primary: bool,
+    method: Option<String>,
+    predicate: Option<String>,
+    is_key: bool,
+    column_name: Option<String>,
+    expression: Option<String>,
+    // Per-key-column sort order from `pg_index.indoption`; NULL for INCLUDE
+    // columns. `descending` maps to `DESC`, `nulls_first` to `NULLS FIRST`.
+    descending: Option<bool>,
+    nulls_first: Option<bool>,
+}
+
+/// Group per-key-position index rows (ordered by schema, table, index, key
+/// position) into one [`RawIndex`] per index, separating key parts from
+/// `INCLUDE` columns and preserving key order.
+fn group_index_rows(rows: Vec<RawIndexRow>) -> Vec<RawIndex> {
+    use std::collections::HashMap;
+
+    let mut order: Vec<RawIndex> = Vec::new();
+    let mut seen: HashMap<(String, String, String), usize> = HashMap::new();
+
+    for row in rows {
+        let key = (
+            row.schema_name.clone(),
+            row.table_name.clone(),
+            row.index_name.clone(),
+        );
+        let idx = *seen.entry(key).or_insert_with(|| {
+            order.push(RawIndex {
+                index_name: row.index_name.clone(),
+                schema_name: row.schema_name.clone(),
+                table_name: row.table_name.clone(),
+                key_parts: Vec::new(),
+                is_unique: row.is_unique,
+                is_primary: row.is_primary,
+                predicate: row.predicate.clone(),
+                included_columns: Vec::new(),
+                method: row.method.clone(),
+            });
+            order.len() - 1
+        });
+        let index = &mut order[idx];
+        if row.is_key {
+            let descending = row.descending;
+            let nulls_first = row.nulls_first;
+            let part = match row.column_name {
+                Some(name) => RawIndexKeyPart::Column {
+                    name,
+                    order: descending.map(|d| {
+                        if d {
+                            relune_core::SortOrder::Desc
+                        } else {
+                            relune_core::SortOrder::Asc
+                        }
+                    }),
+                    nulls: nulls_first.map(|f| {
+                        if f {
+                            relune_core::NullsOrder::First
+                        } else {
+                            relune_core::NullsOrder::Last
+                        }
+                    }),
+                    // PostgreSQL has no MySQL-style prefix indexes.
+                    prefix_length: None,
+                },
+                None => RawIndexKeyPart::Expression(row.expression.unwrap_or_default()),
+            };
+            index.key_parts.push(part);
+        } else if let Some(name) = row.column_name {
+            // INCLUDE columns are always plain columns.
+            index.included_columns.push(name);
+        }
+    }
+
+    order
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -409,16 +579,16 @@ mod tests {
 
     #[test]
     fn test_raw_column_fields() {
-        let column = RawColumn {
-            table_name: "users".to_string(),
-            schema_name: "public".to_string(),
-            column_name: "id".to_string(),
-            data_type: "integer".to_string(),
-            is_nullable: false,
-            is_primary_key: true,
-            column_comment: None,
-            ordinal_position: 1,
-        };
+        let column = RawColumn::new(
+            "users".to_string(),
+            "public".to_string(),
+            "id".to_string(),
+            "integer".to_string(),
+            false,
+            true,
+            None,
+            1,
+        );
         assert_eq!(column.column_name, "id");
         assert!(column.is_primary_key);
         assert!(!column.is_nullable);
@@ -448,9 +618,12 @@ mod tests {
             index_name: "idx_users_email".to_string(),
             schema_name: "public".to_string(),
             table_name: "users".to_string(),
-            columns: vec!["email".to_string()],
+            key_parts: vec![RawIndexKeyPart::column("email")],
             is_unique: true,
             is_primary: false,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: Some("btree".to_string()),
         };
         assert_eq!(index.index_name, "idx_users_email");
         assert!(index.is_unique);

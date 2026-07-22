@@ -268,7 +268,7 @@ impl Schema {
         col_names: &HashSet<String>,
         errors: &mut Vec<ValidationError>,
     ) {
-        if index.columns.is_empty() {
+        if index.key_parts.is_empty() {
             errors.push(ValidationError {
                 table: Some(table.name.clone()),
                 message: match index.name.as_deref() {
@@ -279,14 +279,10 @@ impl Schema {
             return;
         }
 
-        for col in &index.columns {
-            // Expression indexes (e.g. `LOWER(email)`) are stringified by the
-            // parser into the same `Index.columns` slot as bare column refs,
-            // so skip entries that are not plain identifiers to avoid false
-            // positives until the model carries an explicit expression form.
-            if !is_simple_column_reference(col) {
-                continue;
-            }
+        // Only plain-column key parts reference a single named column;
+        // expression parts (e.g. `LOWER(email)`) reference none, so they are
+        // not checked here.
+        for col in index.column_names() {
             if !col_names.contains(&col.to_lowercase()) {
                 errors.push(ValidationError {
                     table: Some(table.name.clone()),
@@ -442,17 +438,6 @@ pub(crate) enum ForeignKeyTargetResolution<'a> {
     Ambiguous,
 }
 
-/// Returns `true` when `s` looks like a bare column identifier rather than
-/// an expression. The SQL parser flattens expression indexes such as
-/// `LOWER(email)` into the same `Index.columns` slot as plain column
-/// references, so validation needs a way to tell them apart.
-fn is_simple_column_reference(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    !s.chars().any(|c| matches!(c, '(' | ')' | ',' | ' ' | '\t'))
-}
-
 pub(crate) fn resolve_table_reference<'a>(
     schema: &'a Schema,
     from_table: Option<&Table>,
@@ -561,6 +546,9 @@ pub struct Table {
     pub primary_key_name: Option<String>,
     /// Optional table comment.
     pub comment: Option<String>,
+    /// Table-level `CHECK` constraints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_constraints: Vec<CheckConstraint>,
 }
 
 impl Table {
@@ -600,6 +588,84 @@ pub struct Column {
     /// different columns that happen to share the same literal).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<String>>,
+    /// Extended column semantics (`DEFAULT`, `CHECK`, generated, identity,
+    /// collation, character set, auto-increment, `ON UPDATE`).
+    ///
+    /// These attributes are not needed for basic visualization but are
+    /// required so that `diff`/`review` do not silently report "no change"
+    /// when only one of them is altered. They are compared by `diff`.
+    #[serde(default, skip_serializing_if = "ColumnSemantics::is_empty")]
+    pub semantics: ColumnSemantics,
+}
+
+/// Extended, schema-affecting column attributes beyond name/type/nullability.
+///
+/// Grouped into a single field so that adding a new attribute does not force a
+/// churn of every `Column` literal, and so that unset attributes serialize away
+/// entirely (`ColumnSemantics::is_empty`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnSemantics {
+    /// Column `DEFAULT` expression, rendered as canonical SQL text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_expression: Option<String>,
+    /// Column-level `CHECK` constraints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check_constraints: Vec<CheckConstraint>,
+    /// Generated / computed column definition, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated: Option<GeneratedColumn>,
+    /// Identity column specification, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<IdentitySpec>,
+    /// Column collation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
+    /// Column character set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_set: Option<String>,
+    /// Whether the column carries an auto-increment attribute
+    /// (`AUTO_INCREMENT`, `SERIAL`-style).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_increment: bool,
+    /// `ON UPDATE` expression (e.g. `MySQL` `ON UPDATE CURRENT_TIMESTAMP`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_update: Option<String>,
+}
+
+impl ColumnSemantics {
+    /// Returns `true` when no extended attribute is set (the default).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// A `CHECK` constraint, either column-level or table-level.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckConstraint {
+    /// Constraint name, if declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The check expression, rendered as canonical SQL text.
+    pub expression: String,
+}
+
+/// A generated / computed column definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeneratedColumn {
+    /// The generation expression, rendered as canonical SQL text.
+    pub expression: String,
+    /// `true` for `STORED`, `false` for `VIRTUAL`/unspecified.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stored: bool,
+}
+
+/// An identity column specification (`GENERATED ... AS IDENTITY`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentitySpec {
+    /// `true` for `GENERATED ALWAYS`, `false` for `GENERATED BY DEFAULT`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub always: bool,
 }
 
 /// Referential action for ON DELETE / ON UPDATE clauses.
@@ -663,10 +729,190 @@ fn is_no_action(action: &ReferentialAction) -> bool {
 pub struct Index {
     /// Index name if named.
     pub name: Option<String>,
-    /// Column names in the index.
-    pub columns: Vec<String>,
+    /// Ordered key parts. Each part is either a plain column or a
+    /// functional/expression key (e.g. `lower(email)`). Storing expression
+    /// parts explicitly, rather than dropping the index or keeping only its
+    /// plain columns, avoids asserting false uniqueness or index coverage and
+    /// lets `diff` detect index removal.
+    pub key_parts: Vec<IndexKey>,
     /// Whether the index is unique.
     pub is_unique: bool,
+    /// Partial-index predicate (`WHERE ...`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    /// Non-key columns carried by the index (`INCLUDE (...)`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_columns: Vec<String>,
+    /// Index access method (e.g. `btree`, `gin`, `hash`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+impl Index {
+    /// Construct a plain-column index (every key part is a bare column) with no
+    /// predicate, included columns, or explicit method. Convenience for the
+    /// common case and for tests.
+    #[must_use]
+    pub fn from_columns(
+        name: Option<String>,
+        columns: impl IntoIterator<Item = String>,
+        is_unique: bool,
+    ) -> Self {
+        Self {
+            name,
+            key_parts: columns.into_iter().map(IndexKey::column).collect(),
+            is_unique,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        }
+    }
+
+    /// Plain column names in key order, with expression parts skipped.
+    ///
+    /// Use this where dropping expression parts is semantically correct, such
+    /// as marking which real columns are indexed. Do **not** use it for
+    /// leading-prefix coverage or uniqueness checks; see [`Index::key_slots`]
+    /// and [`Index::plain_columns`].
+    #[must_use]
+    pub fn column_names(&self) -> Vec<&str> {
+        self.key_parts
+            .iter()
+            .filter_map(IndexKey::as_column_name)
+            .collect()
+    }
+
+    /// Ordered key slots: `Some(name)` for a plain column, `None` for an
+    /// expression. Preserves position so leading-prefix matching treats an
+    /// expression as a non-matching slot.
+    #[must_use]
+    pub fn key_slots(&self) -> Vec<Option<&str>> {
+        self.key_parts
+            .iter()
+            .map(IndexKey::as_column_name)
+            .collect()
+    }
+
+    /// All key parts as plain column names, or `None` if any part is an
+    /// expression. Use for exact set/uniqueness comparisons that must not treat
+    /// an expression index as covering a plain-column set.
+    #[must_use]
+    pub fn plain_columns(&self) -> Option<Vec<&str>> {
+        self.key_parts
+            .iter()
+            .map(IndexKey::as_column_name)
+            .collect()
+    }
+
+    /// All key parts as plain column names, or `None` if any part is an
+    /// expression **or** a prefix-indexed column (e.g. `MySQL` `email(10)`).
+    /// Use for whole-column uniqueness checks: a prefix index enforces
+    /// uniqueness only over the leading bytes, not the whole column, so it must
+    /// not be treated as guaranteeing uniqueness over the column set.
+    #[must_use]
+    pub fn full_plain_columns(&self) -> Option<Vec<&str>> {
+        self.key_parts
+            .iter()
+            .map(|part| match part {
+                IndexKey::Column(column) if column.prefix_length.is_none() => {
+                    Some(column.name.as_str())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `true` if any key part is an expression.
+    #[must_use]
+    pub fn has_expression(&self) -> bool {
+        self.key_parts
+            .iter()
+            .any(|part| matches!(part, IndexKey::Expression(_)))
+    }
+
+    /// Human-readable label for each key part (column name or expression text).
+    #[must_use]
+    pub fn key_labels(&self) -> Vec<String> {
+        self.key_parts.iter().map(IndexKey::label).collect()
+    }
+}
+
+/// A single key part of an index.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexKey {
+    /// A plain column reference.
+    Column(IndexColumn),
+    /// A functional/expression key part (e.g. `lower(email)`), stored as
+    /// canonical SQL text.
+    Expression(String),
+}
+
+impl IndexKey {
+    /// Construct a plain-column key part with no sort/nulls/prefix detail.
+    #[must_use]
+    pub const fn column(name: String) -> Self {
+        Self::Column(IndexColumn {
+            name,
+            order: None,
+            nulls: None,
+            prefix_length: None,
+        })
+    }
+
+    /// The column name when this part is a plain column, else `None`.
+    #[must_use]
+    pub fn as_column_name(&self) -> Option<&str> {
+        match self {
+            Self::Column(column) => Some(&column.name),
+            Self::Expression(_) => None,
+        }
+    }
+
+    /// Human-readable label (column name or expression text).
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Column(column) => column.name.clone(),
+            Self::Expression(expr) => expr.clone(),
+        }
+    }
+}
+
+/// A plain-column key part with optional sort/nulls ordering and prefix length.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IndexColumn {
+    /// Column name.
+    pub name: String,
+    /// Sort order (`ASC`/`DESC`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<SortOrder>,
+    /// Nulls ordering (`NULLS FIRST`/`NULLS LAST`), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nulls: Option<NullsOrder>,
+    /// Indexed prefix length (e.g. `MySQL` `col(10)`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_length: Option<u32>,
+}
+
+/// Sort order of an index key part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortOrder {
+    /// Ascending.
+    Asc,
+    /// Descending.
+    Desc,
+}
+
+/// Nulls ordering of an index key part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NullsOrder {
+    /// Nulls sorted first.
+    First,
+    /// Nulls sorted last.
+    Last,
 }
 
 /// A database view.
@@ -740,11 +986,13 @@ mod tests {
                     is_primary_key: i == 0,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 })
                 .collect(),
             foreign_keys: fks,
             indexes: vec![],
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -1136,11 +1384,11 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id", "name"],
-                vec![Index {
-                    name: Some("idx_users_email".to_string()),
-                    columns: vec!["email".to_string()],
-                    is_unique: false,
-                }],
+                vec![Index::from_columns(
+                    Some("idx_users_email".to_string()),
+                    vec!["email".to_string()],
+                    false,
+                )],
             )],
             views: vec![],
             enums: vec![],
@@ -1157,11 +1405,11 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id", "email"],
-                vec![Index {
-                    name: Some("idx_users_email".to_string()),
-                    columns: vec!["email".to_string()],
-                    is_unique: false,
-                }],
+                vec![Index::from_columns(
+                    Some("idx_users_email".to_string()),
+                    vec!["email".to_string()],
+                    false,
+                )],
             )],
             views: vec![],
             enums: vec![],
@@ -1175,11 +1423,7 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id", "Email"],
-                vec![Index {
-                    name: None,
-                    columns: vec!["email".to_string()],
-                    is_unique: true,
-                }],
+                vec![Index::from_columns(None, vec!["email".to_string()], true)],
             )],
             views: vec![],
             enums: vec![],
@@ -1195,8 +1439,11 @@ mod tests {
                 &["id", "email"],
                 vec![Index {
                     name: Some("idx_users_lower_email".to_string()),
-                    columns: vec!["lower(email)".to_string()],
+                    key_parts: vec![IndexKey::Expression("lower(email)".to_string())],
                     is_unique: false,
+                    predicate: None,
+                    included_columns: Vec::new(),
+                    method: None,
                 }],
             )],
             views: vec![],
@@ -1211,11 +1458,11 @@ mod tests {
             tables: vec![make_table_with_indexes(
                 "users",
                 &["id"],
-                vec![Index {
-                    name: Some("idx_empty".to_string()),
-                    columns: vec![],
-                    is_unique: false,
-                }],
+                vec![Index::from_columns(
+                    Some("idx_empty".to_string()),
+                    vec![],
+                    false,
+                )],
             )],
             views: vec![],
             enums: vec![],
@@ -1243,6 +1490,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 })
                 .collect(),
             definition: None,
@@ -1320,6 +1568,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 definition: None,
             }],
@@ -1346,6 +1595,7 @@ mod tests {
                     is_primary_key: false,
                     comment: None,
                     enum_values: None,
+                    semantics: crate::model::ColumnSemantics::default(),
                 }],
                 definition: None,
             }],

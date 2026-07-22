@@ -60,8 +60,9 @@ pub use lint::{
     lint_schema,
 };
 pub use model::{
-    Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, SchemaStats, SqlDialect,
-    Table, TableId, ValidationError, View, normalize_identifier,
+    CheckConstraint, Column, ColumnId, ColumnSemantics, Enum, ForeignKey, GeneratedColumn,
+    IdentitySpec, Index, IndexColumn, IndexKey, NullsOrder, ReferentialAction, Schema, SchemaStats,
+    SortOrder, SqlDialect, Table, TableId, ValidationError, View, normalize_identifier,
 };
 pub use review::{
     EffectiveDialect, ReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity,

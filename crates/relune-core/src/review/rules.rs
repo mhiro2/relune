@@ -1017,6 +1017,39 @@ fn check_drop_pk_or_unique_column(
 
 /// `risk/drop-pk-or-unique` (index path) — UNIQUE index dropped or
 /// losing its uniqueness invariant.
+/// `true` when an exported index enforces full uniqueness over its plain
+/// columns: it is unique, non-partial, and every key part is a plain column
+/// with no prefix length. A partial, expression, or prefix (e.g. `email(10)`)
+/// UNIQUE does not guarantee whole-column uniqueness and so cannot back a
+/// foreign key.
+fn index_export_is_full_unique(export: &crate::export::IndexExport) -> bool {
+    export.unique
+        && export.predicate.is_none()
+        && export.key_parts.iter().all(|part| match part {
+            crate::model::IndexKey::Column(column) => column.prefix_length.is_none(),
+            crate::model::IndexKey::Expression(_) => false,
+        })
+}
+
+/// Column names an index constrains by their *raw whole value*: plain columns
+/// with no prefix length, in key order, excluding expression and prefix
+/// (`email(10)`) parts. Uniqueness guaranteed elsewhere over these columns
+/// carries over to this index, whereas prefix/expression uniqueness is over a
+/// transformed value and cannot be substituted for (or by) whole-column
+/// uniqueness.
+fn index_export_raw_plain_columns(export: &crate::export::IndexExport) -> Vec<String> {
+    export
+        .key_parts
+        .iter()
+        .filter_map(|part| match part {
+            crate::model::IndexKey::Column(column) if column.prefix_length.is_none() => {
+                Some(column.name.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn check_drop_pk_or_unique_index(
     table_diff: &TableDiff,
     index_diff: &IndexDiff,
@@ -1028,9 +1061,24 @@ fn check_drop_pk_or_unique_index(
     let lost_unique = match index_diff.change_kind {
         ChangeKind::Removed => index_diff.old_value.as_ref().is_some_and(|v| v.unique),
         ChangeKind::Modified => {
-            let was_unique = index_diff.old_value.as_ref().is_some_and(|v| v.unique);
-            let is_unique_now = index_diff.new_value.as_ref().is_some_and(|v| v.unique);
-            was_unique && !is_unique_now
+            // If the old index was a full UNIQUE, any modification can weaken the
+            // guarantee over its exact column set — losing the flag, degrading to
+            // partial/expression/prefix, or widening the column set (e.g.
+            // `UNIQUE(code)` -> `UNIQUE(code, tenant_id)` drops the `code`-alone
+            // guarantee). The `already_unique_in(after, old_columns)` check below
+            // suppresses it when `after` still guarantees uniqueness over the old
+            // columns. A non-full UNIQUE only counts when it loses the flag.
+            if index_diff
+                .old_value
+                .as_ref()
+                .is_some_and(index_export_is_full_unique)
+            {
+                true
+            } else {
+                let was_unique = index_diff.old_value.as_ref().is_some_and(|v| v.unique);
+                let is_unique_now = index_diff.new_value.as_ref().is_some_and(|v| v.unique);
+                was_unique && !is_unique_now
+            }
         }
         ChangeKind::Added => false,
     };
@@ -1040,19 +1088,35 @@ fn check_drop_pk_or_unique_index(
     let Some(old) = index_diff.old_value.as_ref() else {
         return;
     };
-    let lower_cols: Vec<String> = old.columns.iter().map(|c| c.to_ascii_lowercase()).collect();
-    if already_unique_in(after_table, &lower_cols) {
+    let old_columns = old.column_names();
+    let lower_cols: Vec<String> = old_columns.iter().map(|c| c.to_ascii_lowercase()).collect();
+    // A remaining index only replaces the dropped uniqueness when the dropped
+    // index constrained raw whole columns; a full/PK unique in `after` over the
+    // same columns does not replace a dropped prefix/expression uniqueness (it
+    // constrains a different, transformed value), so judge the replacement on
+    // the dropped index's raw prefix-free plain columns.
+    if already_unique_in(after_table, &index_export_raw_plain_columns(old)) {
         return;
     }
 
-    let (severity, related_fk) = before_table.map_or((ReviewSeverity::Warning, None), |bt| {
-        evaluate_unique_loss_severity(bt, &lower_cols, context)
-    });
+    // Only a full UNIQUE (no predicate, every key part a full plain column)
+    // guarantees uniqueness over the flattened column set, so only then may a
+    // referencing FK escalate the loss to `Breaking`. A partial, expression, or
+    // prefix UNIQUE flattens to a column set it does not actually enforce, which
+    // would wrongly promote an FK that references those columns.
+    let is_full_unique = index_export_is_full_unique(old);
+    let (severity, related_fk) = if is_full_unique {
+        before_table.map_or((ReviewSeverity::Warning, None), |bt| {
+            evaluate_unique_loss_severity(bt, &lower_cols, context)
+        })
+    } else {
+        (ReviewSeverity::Warning, None)
+    };
 
     let label = old
         .name
         .clone()
-        .unwrap_or_else(|| format!("({})", old.columns.join(",")));
+        .unwrap_or_else(|| format!("({})", old_columns.join(",")));
     let message = match (severity, &related_fk) {
         (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
             "UNIQUE index {}.{} is being dropped while FK {} on {} still references the column set ({}). Migration may fail.",
@@ -1060,7 +1124,7 @@ fn check_drop_pk_or_unique_index(
             label,
             fk_label,
             other_qname,
-            old.columns.join(","),
+            old_columns.join(","),
         ),
         _ => format!(
             "UNIQUE index {}.{} is being dropped without replacement. Application logic relying on uniqueness may break.",
@@ -1286,13 +1350,19 @@ fn check_add_unique_on_existing(
     if !new.unique {
         return;
     }
-    // Suppress when the column set is already guaranteed unique in
-    // `before`: e.g. replacing PRIMARY KEY(id) with UNIQUE(id), or
-    // adding UNIQUE(id, tenant_id) on a table that already declared
-    // PRIMARY KEY(id). No new uniqueness invariant is being introduced,
-    // so existing rows cannot fail the new constraint.
+    let new_columns = new.column_names();
+    // Suppress when uniqueness over the new index's raw whole-column key is
+    // already guaranteed in `before`: e.g. replacing PRIMARY KEY(id) with
+    // UNIQUE(id), adding UNIQUE(id, tenant_id) atop PRIMARY KEY(id), or a
+    // partial UNIQUE(email) WHERE ... atop UNIQUE(email). Existing uniqueness
+    // over a subset of those raw columns means no existing row can fail.
+    //
+    // Only the prefix-free plain columns count: a prefix (`email(10)`) or
+    // expression (`lower(email)`) key constrains a transformed value that
+    // whole-column uniqueness does not guarantee, so those parts are excluded
+    // (and a purely prefix/expression UNIQUE is therefore never suppressed).
     if let Some(before) = before_table
-        && already_unique_in(before, &new.columns)
+        && already_unique_in(before, &index_export_raw_plain_columns(new))
     {
         return;
     }
@@ -1300,7 +1370,7 @@ fn check_add_unique_on_existing(
     let label = new
         .name
         .clone()
-        .unwrap_or_else(|| format!("({})", new.columns.join(",")));
+        .unwrap_or_else(|| format!("({})", new_columns.join(",")));
     findings.push(
         RiskFinding::new(
             ReviewRuleId::AddUniqueOnExisting,
@@ -1308,7 +1378,7 @@ fn check_add_unique_on_existing(
             format!(
                 "UNIQUE index {} on ({}) is being added to existing table {}. Existing duplicate rows will fail the constraint.",
                 label,
-                new.columns.join(","),
+                new_columns.join(","),
                 table_diff.table_name,
             ),
         )
@@ -1338,12 +1408,21 @@ fn already_unique_in(table: &Table, columns: &[String]) -> bool {
     }
 
     table.indexes.iter().any(|idx| {
-        if !idx.is_unique || idx.columns.is_empty() {
+        // A partial unique index only enforces uniqueness over the rows
+        // matching its predicate, so it cannot guarantee full uniqueness.
+        if !idx.is_unique || idx.predicate.is_some() {
             return false;
         }
-        idx.columns
-            .iter()
-            .all(|c| new_cols.contains(&c.to_ascii_lowercase()))
+        // An expression or prefix (e.g. `email(10)`) key part does not
+        // guarantee whole-column uniqueness, so only full plain-column indexes
+        // qualify.
+        let Some(cols) = idx.full_plain_columns() else {
+            return false;
+        };
+        !cols.is_empty()
+            && cols
+                .iter()
+                .all(|c| new_cols.contains(&c.to_ascii_lowercase()))
     })
 }
 
@@ -1472,17 +1551,18 @@ fn check_add_index_on_large_table(
         return;
     };
 
+    let new_columns = new.column_names();
     let label = new
         .name
         .clone()
-        .unwrap_or_else(|| format!("({})", new.columns.join(",")));
+        .unwrap_or_else(|| format!("({})", new_columns.join(",")));
     let dialect = dialect_word(context.dialect);
     let (message, mitigation) = match context.dialect {
         EffectiveDialect::Postgres => (
             format!(
                 "New index {label} on existing table {} ({}) ({dialect}). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
                 table_diff.table_name,
-                new.columns.join(","),
+                new_columns.join(","),
             ),
             "Use CREATE INDEX CONCURRENTLY (and DROP INDEX CONCURRENTLY for rollback) in postgres.",
         ),
@@ -1490,7 +1570,7 @@ fn check_add_index_on_large_table(
             format!(
                 "New index {label} on existing table {} ({}) ({dialect}). Default ALGORITHM=INPLACE may still block writes during rebuild on large tables.",
                 table_diff.table_name,
-                new.columns.join(","),
+                new_columns.join(","),
             ),
             "Use ALGORITHM=INPLACE, LOCK=NONE explicitly (5.6+) and verify the column type supports it.",
         ),
@@ -1505,8 +1585,8 @@ fn check_add_index_on_large_table(
     )
     .with_table(&after_table.stable_id, &table_diff.table_name)
     .with_mitigation(mitigation);
-    if new.columns.len() == 1 {
-        finding = finding.with_column(new.columns[0].clone());
+    if new_columns.len() == 1 {
+        finding = finding.with_column(new_columns[0].clone());
     }
     findings.push(finding);
 }
@@ -1778,12 +1858,10 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
     ) {
         return true;
     }
-    table.indexes.iter().any(|idx| {
-        column_list_has_prefix(
-            &idx.columns.iter().map(String::as_str).collect::<Vec<_>>(),
-            fk_cols,
-        )
-    })
+    table
+        .indexes
+        .iter()
+        .any(|idx| index_covers_prefix(idx, fk_cols))
 }
 
 fn column_list_has_prefix(index_cols: &[&str], fk_cols: &[String]) -> bool {
@@ -1794,6 +1872,25 @@ fn column_list_has_prefix(index_cols: &[&str], fk_cols: &[String]) -> bool {
         .iter()
         .zip(fk_cols.iter())
         .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
+/// Returns whether the ordered index key parts start with `fk_cols`. An
+/// expression key part in a leading position never matches, so a functional
+/// index does not spuriously satisfy coverage.
+fn index_covers_prefix(idx: &crate::model::Index, fk_cols: &[String]) -> bool {
+    // A partial index only covers rows matching its predicate, so it cannot
+    // satisfy the FK lookup for every referencing row.
+    if idx.predicate.is_some() {
+        return false;
+    }
+    let slots = idx.key_slots();
+    if slots.len() < fk_cols.len() {
+        return false;
+    }
+    slots
+        .iter()
+        .zip(fk_cols.iter())
+        .all(|(slot, fk)| slot.is_some_and(|name| name.eq_ignore_ascii_case(fk)))
 }
 
 /// Decide whether `fk` (owned by a table in `owner_schema`) references
@@ -1927,6 +2024,7 @@ mod tests {
             is_primary_key: pk,
             comment: None,
             enum_values: None,
+            semantics: crate::model::ColumnSemantics::default(),
         }
     }
 
@@ -1949,11 +2047,11 @@ mod tests {
     }
 
     fn index(name: &str, columns: &[&str], unique: bool) -> ModelIndex {
-        ModelIndex {
-            name: Some(name.into()),
-            columns: columns.iter().map(|c| (*c).to_string()).collect(),
-            is_unique: unique,
-        }
+        ModelIndex::from_columns(
+            Some(name.into()),
+            columns.iter().map(|c| (*c).to_string()),
+            unique,
+        )
     }
 
     fn table(
@@ -1971,6 +2069,7 @@ mod tests {
             foreign_keys,
             indexes,
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -1991,6 +2090,7 @@ mod tests {
             foreign_keys,
             indexes,
             primary_key_name: None,
+            check_constraints: Vec::new(),
             comment: None,
         }
     }
@@ -2063,6 +2163,377 @@ mod tests {
             .expect("expected DropColumnReferenced finding");
         assert_eq!(drop.severity, ReviewSeverity::Breaking);
         assert_eq!(drop.column_name.as_deref(), Some("email"));
+    }
+
+    #[test]
+    fn drop_partial_unique_index_does_not_escalate_to_breaking() {
+        // A partial UNIQUE index does not enforce uniqueness over every row, so
+        // dropping it must not be promoted to Breaking merely because an FK
+        // references the same columns; it stays a Warning.
+        let mut partial_unique = index("users_email_uidx", &["email"], true);
+        partial_unique.predicate = Some("email IS NOT NULL".to_string());
+        let users = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![partial_unique],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_email", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_email_fkey",
+                &["user_email"],
+                "users",
+                &["email"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_email_idx", &["user_email"], false)],
+        );
+        let before = Schema {
+            tables: vec![users, orders.clone()],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("email", "TEXT", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("expected DropPkOrUnique finding for the dropped unique index");
+        assert_eq!(
+            drop.severity,
+            ReviewSeverity::Warning,
+            "dropping a partial unique index must not escalate to Breaking"
+        );
+    }
+
+    #[test]
+    fn degrade_full_unique_to_partial_is_uniqueness_loss() {
+        // `UNIQUE(code)` -> `UNIQUE(code) WHERE active` keeps `unique = true` but
+        // loses the full-uniqueness guarantee, so a remaining FK referencing
+        // `code` must still be flagged as Breaking.
+        let mut partial = index("users_code_uidx", &["code"], true);
+        partial.predicate = Some("active".to_string());
+        let users_before = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("code", "TEXT", false, false),
+            ],
+            vec![],
+            vec![index("users_code_uidx", &["code"], true)],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_code", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_code_fkey",
+                &["user_code"],
+                "users",
+                &["code"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_code_idx", &["user_code"], false)],
+        );
+        let before = Schema {
+            tables: vec![users_before, orders.clone()],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("code", "TEXT", false, false),
+            ],
+            vec![],
+            vec![partial],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("degrading a full UNIQUE to partial should be a uniqueness loss");
+        assert_eq!(
+            drop.severity,
+            ReviewSeverity::Breaking,
+            "losing full uniqueness while an FK still references it is Breaking"
+        );
+    }
+
+    #[test]
+    fn widen_full_unique_column_set_is_uniqueness_loss() {
+        // `UNIQUE(code)` -> `UNIQUE(code, tenant_id)` keeps a full UNIQUE but
+        // drops the `code`-alone guarantee, so an FK on `code` is still Breaking.
+        let users_before = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("code", "TEXT", false, false),
+                col("tenant_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![index("users_code_uidx", &["code"], true)],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_code", "TEXT", true, false),
+            ],
+            vec![fk(
+                "orders_user_code_fkey",
+                &["user_code"],
+                "users",
+                &["code"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("orders_user_code_idx", &["user_code"], false)],
+        );
+        let before = Schema {
+            tables: vec![users_before, orders.clone()],
+            ..Default::default()
+        };
+        let users_after = table(
+            "users",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("code", "TEXT", false, false),
+                col("tenant_id", "BIGINT", false, false),
+            ],
+            vec![],
+            vec![index("users_code_uidx", &["code", "tenant_id"], true)],
+        );
+        let after = Schema {
+            tables: vec![users_after, orders],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("widening a full UNIQUE column set should be a uniqueness loss");
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+    }
+
+    #[test]
+    fn add_prefix_unique_not_suppressed_by_existing_full_unique() {
+        // Adding `UNIQUE(email(10))` is not covered by an existing
+        // `UNIQUE(email)`: distinct emails can share a 10-char prefix, so the
+        // new prefix constraint can still fail and must be warned about.
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true)],
+            )],
+            ..Default::default()
+        };
+        let prefix_unique = ModelIndex {
+            name: Some("users_email_prefix_key".to_string()),
+            key_parts: vec![crate::model::IndexKey::Column(crate::model::IndexColumn {
+                name: "email".to_string(),
+                order: None,
+                nulls: None,
+                prefix_length: Some(10),
+            })],
+            is_unique: true,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true), prefix_unique],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting),
+            "adding a prefix UNIQUE must warn even when a full UNIQUE on the column exists: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_partial_unique_suppressed_by_existing_full_unique() {
+        // Adding `UNIQUE(email) WHERE active` atop an existing `UNIQUE(email)`
+        // introduces no new invariant: full uniqueness already covers the
+        // partial subset, so no existing row can fail.
+        let users = |extra: Vec<ModelIndex>| {
+            let mut indexes = vec![index("users_email_key", &["email"], true)];
+            indexes.extend(extra);
+            table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                indexes,
+            )
+        };
+        let before = Schema {
+            tables: vec![users(vec![])],
+            ..Default::default()
+        };
+        let mut partial = index("users_email_active_key", &["email"], true);
+        partial.predicate = Some("active".to_string());
+        let after = Schema {
+            tables: vec![users(vec![partial])],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddUniqueOnExisting),
+            "a partial UNIQUE atop a full UNIQUE on the same column must be suppressed: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_prefix_unique_not_suppressed_by_remaining_full_unique() {
+        // A remaining `UNIQUE(email)` does not replace a dropped
+        // `UNIQUE(email(10))`: whole-column uniqueness does not guarantee prefix
+        // uniqueness, so the loss must still be reported.
+        let prefix_unique = ModelIndex {
+            name: Some("users_email_prefix_key".to_string()),
+            key_parts: vec![crate::model::IndexKey::Column(crate::model::IndexColumn {
+                name: "email".to_string(),
+                order: None,
+                nulls: None,
+                prefix_length: Some(10),
+            })],
+            is_unique: true,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        };
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true), prefix_unique],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![index("users_email_key", &["email"], true)],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropPkOrUnique),
+            "dropping a prefix UNIQUE is not replaced by a full UNIQUE: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn add_mixed_expression_unique_suppressed_by_leading_plain_unique() {
+        // Adding `UNIQUE(id, lower(email))` atop an existing `UNIQUE(id)`
+        // introduces no new invariant: uniqueness on `id` alone already makes
+        // the composite unique, so no existing row can fail.
+        let columns = || {
+            vec![
+                col("id", "BIGINT", false, false),
+                col("email", "TEXT", false, false),
+            ]
+        };
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                columns(),
+                vec![],
+                vec![index("users_id_key", &["id"], true)],
+            )],
+            ..Default::default()
+        };
+        let mixed = ModelIndex {
+            name: Some("users_id_lower_email_key".to_string()),
+            key_parts: vec![
+                crate::model::IndexKey::Column(crate::model::IndexColumn {
+                    name: "id".to_string(),
+                    order: None,
+                    nulls: None,
+                    prefix_length: None,
+                }),
+                crate::model::IndexKey::Expression("lower(email)".to_string()),
+            ],
+            is_unique: true,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                columns(),
+                vec![],
+                vec![index("users_id_key", &["id"], true), mixed],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::AddUniqueOnExisting),
+            "UNIQUE(id, lower(email)) atop UNIQUE(id) must be suppressed: {findings:?}"
+        );
     }
 
     #[test]

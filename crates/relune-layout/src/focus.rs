@@ -220,10 +220,12 @@ mod tests {
                         is_primary_key: true,
                         comment: None,
                         enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
                     }],
                     foreign_keys: vec![],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -240,6 +242,7 @@ mod tests {
                             is_primary_key: true,
                             comment: None,
                             enum_values: None,
+                            semantics: relune_core::ColumnSemantics::default(),
                         },
                         Column {
                             id: ColumnId(3),
@@ -249,6 +252,7 @@ mod tests {
                             is_primary_key: false,
                             comment: None,
                             enum_values: None,
+                            semantics: relune_core::ColumnSemantics::default(),
                         },
                     ],
                     foreign_keys: vec![ForeignKey {
@@ -262,6 +266,7 @@ mod tests {
                     }],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
                 Table {
@@ -278,6 +283,7 @@ mod tests {
                             is_primary_key: true,
                             comment: None,
                             enum_values: None,
+                            semantics: relune_core::ColumnSemantics::default(),
                         },
                         Column {
                             id: ColumnId(5),
@@ -287,6 +293,7 @@ mod tests {
                             is_primary_key: false,
                             comment: None,
                             enum_values: None,
+                            semantics: relune_core::ColumnSemantics::default(),
                         },
                     ],
                     foreign_keys: vec![ForeignKey {
@@ -300,6 +307,7 @@ mod tests {
                     }],
                     indexes: vec![],
                     primary_key_name: None,
+                    check_constraints: Vec::new(),
                     comment: None,
                 },
             ],

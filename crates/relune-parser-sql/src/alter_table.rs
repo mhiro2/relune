@@ -192,7 +192,13 @@ fn apply_single_alter_operation(
 
                     let table = &mut tables[idx];
                     table.columns.remove(p);
-                    table.indexes.retain(|ix| !ix.columns.contains(&col_name));
+                    // Dropping a column that an index depends on drops the whole
+                    // index, whether the column is a key part or an `INCLUDE`
+                    // payload column; keeping it would leave a dangling reference.
+                    table.indexes.retain(|ix| {
+                        !ix.column_names().iter().any(|c| *c == col_name)
+                            && !ix.included_columns.contains(&col_name)
+                    });
 
                     for (table_idx, table) in tables.iter_mut().enumerate() {
                         let mut fk_idx = 0usize;
@@ -234,6 +240,7 @@ fn apply_single_alter_operation(
             let table = &mut tables[idx];
             let before_fk = table.foreign_keys.len();
             let before_ix = table.indexes.len();
+            let before_check = table.check_constraints.len();
             let pk_match = table
                 .primary_key_name
                 .as_ref()
@@ -244,6 +251,22 @@ fn apply_single_alter_operation(
             table.indexes.retain(|ix| {
                 ix.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
             });
+            table.check_constraints.retain(|c| {
+                c.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
+            });
+            // A column-level `CONSTRAINT <name> CHECK (...)` is stored on the
+            // owning column's semantics, so the named constraint must be dropped
+            // there too, not just among table-level checks.
+            let mut removed_column_check = false;
+            for column in &mut table.columns {
+                let before = column.semantics.check_constraints.len();
+                column.semantics.check_constraints.retain(|c| {
+                    c.name.as_ref().map(|n| normalize_identifier(n)) != Some(cname_norm.clone())
+                });
+                if column.semantics.check_constraints.len() != before {
+                    removed_column_check = true;
+                }
+            }
             if pk_match {
                 for column in &mut table.columns {
                     column.is_primary_key = false;
@@ -252,6 +275,8 @@ fn apply_single_alter_operation(
             }
             if table.foreign_keys.len() == before_fk
                 && table.indexes.len() == before_ix
+                && table.check_constraints.len() == before_check
+                && !removed_column_check
                 && !pk_match
                 && !if_exists
             {
@@ -468,9 +493,18 @@ fn rename_column_in_tables(tables: &mut [Table], idx: usize, old: &str, new: &st
         }
     }
     for ix in &mut table.indexes {
-        for c in &mut ix.columns {
-            if *c == old {
-                new.clone_into(c);
+        for part in &mut ix.key_parts {
+            if let relune_core::IndexKey::Column(column) = part
+                && column.name == old
+            {
+                new.clone_into(&mut column.name);
+            }
+        }
+        // `INCLUDE` payload columns reference the same column and must track the
+        // rename too, otherwise the index keeps a stale column name.
+        for included in &mut ix.included_columns {
+            if *included == old {
+                new.clone_into(included);
             }
         }
     }
@@ -522,11 +556,21 @@ fn apply_alter_column(
         AlterColumnOperation::SetDataType { data_type, .. } => {
             set_column_data_type(column, data_type);
         }
-        // The model tracks neither DEFAULT values nor identity/generated
-        // metadata, so these operations have no observable schema effect.
-        AlterColumnOperation::SetDefault { .. }
-        | AlterColumnOperation::DropDefault
-        | AlterColumnOperation::AddGenerated { .. } => {}
+        AlterColumnOperation::SetDefault { value } => {
+            column.semantics.default_expression = Some(value.to_string());
+        }
+        AlterColumnOperation::DropDefault => {
+            column.semantics.default_expression = None;
+        }
+        AlterColumnOperation::AddGenerated {
+            generated_as,
+            sequence_options: _,
+        } => {
+            use sqlparser::ast::GeneratedAs;
+            column.semantics.identity = Some(relune_core::IdentitySpec {
+                always: matches!(generated_as, Some(GeneratedAs::Always)),
+            });
+        }
     }
 }
 
@@ -548,7 +592,9 @@ fn redefine_column_in_table(
     data_type: &DataType,
     options: &[ColumnOption],
 ) {
-    let attrs = column_attributes_from_options(options);
+    // MODIFY/CHANGE COLUMN options carry no enclosing constraint name, so any
+    // column-level CHECK here is recorded unnamed.
+    let attrs = column_attributes_from_options(options.iter().map(|option| (None, option)));
     if let Some(column) = table.columns.iter_mut().find(|c| c.name == col_name) {
         column.nullable = attrs.nullable;
         if attrs.is_primary_key {
@@ -558,6 +604,9 @@ fn redefine_column_in_table(
             column.nullable = false;
         }
         column.comment = attrs.comment;
+        // MySQL MODIFY/CHANGE fully redefines the column, so extended semantics
+        // are replaced wholesale (an omitted attribute clears the old value).
+        column.semantics = attrs.semantics;
         set_column_data_type(column, data_type);
     }
 
@@ -760,7 +809,13 @@ fn apply_add_table_constraint(
                 "ALTER TABLE ADD CONSTRAINT FOREIGN KEY",
             ));
         }
-        TableConstraint::Check(_) | TableConstraint::Index(_) => {}
+        TableConstraint::Check(check) => {
+            table.check_constraints.push(relune_core::CheckConstraint {
+                name: check.name.as_ref().map(|n| normalize_identifier(&n.value)),
+                expression: check.expr.to_string(),
+            });
+        }
+        TableConstraint::Index(_) => {}
         TableConstraint::FulltextOrSpatial(_) => {
             ctx.warn_unsupported(
                 "FULLTEXT/SPATIAL constraint",
