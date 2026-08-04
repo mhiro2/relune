@@ -7,7 +7,7 @@
     "fmt": "oxfmt -c ../.oxfmtrc.json",
     "fmt:check": "oxfmt -c ../.oxfmtrc.json --check",
     "lint": "oxlint -c ../.oxlintrc.json src esbuild.config.mjs",
-    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "pnpm fmt:check && pnpm lint && pnpm typecheck"
   },
   "dependencies": {
@@ -21,10 +21,10 @@
     "codemirror": "6.0.2"
   },
   "devDependencies": {
-    "@typescript/native-preview": "catalog:",
     "esbuild": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:"
+    "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:"
   }
 }
