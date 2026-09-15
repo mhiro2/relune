@@ -25,9 +25,9 @@ const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Upper bound on the total wall-clock time spent fetching catalog metadata.
 ///
 /// The per-statement deadline only bounds a single query, so a backend that
-/// runs many sequential queries (notably `SQLite`, one set of `PRAGMA`s per
-/// table) or a server that cannot enforce a session timeout could otherwise
-/// accumulate unbounded total time. This deadline caps the whole catalog fetch.
+/// runs its catalog sections sequentially (notably `SQLite`) or a server that
+/// cannot enforce a session timeout could otherwise accumulate unbounded total
+/// time. This deadline caps the whole catalog fetch.
 const OVERALL_INTROSPECTION_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// Environment variable that overrides the default overall introspection deadline.

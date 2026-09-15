@@ -16,60 +16,38 @@ use crate::error::IntrospectError;
 const MAIN_SCHEMA: &str = "main";
 
 /// Fetches all catalog metadata from a `SQLite` database (default `main` schema).
+///
+/// Each section is read with a single query that joins `sqlite_master` against
+/// the table-valued `pragma_*` functions, so the number of round trips stays
+/// constant instead of growing with the number of tables and indexes.
 pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, IntrospectError> {
-    let table_names = list_user_tables(pool).await?;
-    let mut columns = Vec::new();
-    let mut foreign_keys = Vec::new();
-    let mut indexes = Vec::new();
-    let mut tables = Vec::new();
+    let table_defs = list_user_tables(pool).await?;
+
+    let mut tables = Vec::with_capacity(table_defs.len());
     let mut checks = Vec::new();
-
-    for table_name in &table_names {
-        let q = quote_ident(table_name)?;
-        tables.push(RawTable {
-            table_name: table_name.clone(),
-            schema_name: MAIN_SCHEMA.to_string(),
-            table_comment: None,
-        });
-
-        let col_rows = pragma_table_info(pool, &q).await?;
-        for row in col_rows {
-            let ordinal_position =
-                ordinal_position_from_row(row.cid.saturating_add(1), table_name)?;
-
-            let mut column = RawColumn::new(
-                table_name.clone(),
-                MAIN_SCHEMA.to_string(),
-                row.name,
-                row.col_type,
-                row.notnull == 0,
-                row.pk > 0,
-                None,
-                ordinal_position,
-            );
-            column.default_expression = row.dflt_value;
-            columns.push(column);
-        }
-
-        let fk_rows = pragma_foreign_key_list(pool, &q).await?;
-        foreign_keys.extend(group_sqlite_fks(table_name, fk_rows));
-
-        let idx_rows = pragma_index_list(pool, &q).await?;
-        indexes.extend(collect_table_indexes(pool, table_name, idx_rows).await?);
-
+    for def in table_defs {
         // SQLite exposes CHECK constraints only through the CREATE TABLE text.
-        if let Some(sql) = fetch_table_sql(pool, table_name).await? {
-            for (name, expression) in parse_sqlite_table_checks(&sql) {
+        if let Some(sql) = &def.sql {
+            for (name, expression) in parse_sqlite_table_checks(sql) {
                 checks.push(RawCheckConstraint {
                     schema_name: MAIN_SCHEMA.to_string(),
-                    table_name: table_name.clone(),
+                    table_name: def.name.clone(),
                     name,
                     expression,
                 });
             }
         }
+
+        tables.push(RawTable {
+            table_name: def.name,
+            schema_name: MAIN_SCHEMA.to_string(),
+            table_comment: None,
+        });
     }
 
+    let columns = fetch_columns(pool).await?;
+    let foreign_keys = fetch_foreign_keys(pool).await?;
+    let indexes = fetch_indexes(pool).await?;
     let views = list_views(pool).await?;
 
     Ok(raw_schema(
@@ -81,24 +59,6 @@ pub async fn fetch_catalog_metadata(pool: &SqlitePool) -> Result<RawSchema, Intr
         Vec::new(),
         checks,
     ))
-}
-
-/// Fetch the `CREATE TABLE` text for a named table from `sqlite_master`.
-async fn fetch_table_sql(
-    pool: &SqlitePool,
-    table_name: &str,
-) -> Result<Option<String>, IntrospectError> {
-    with_query_timeout("sqlite_master table sql", async {
-        sqlx::query_scalar::<_, Option<String>>(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
-        )
-        .bind(table_name)
-        .fetch_optional(pool)
-        .await
-        .map(Option::flatten)
-        .map_err(|e| IntrospectError::query_with_source("Failed to read table definition", e))
-    })
-    .await
 }
 
 /// Best-effort extraction of top-level `CHECK (<expr>)` constraints from a
@@ -265,8 +225,8 @@ fn read_balanced(sql: &str, bytes: &[u8], open: usize) -> Option<(String, usize)
 /// hostile or corrupted database file could cause `sqlx::query_as(...)
 /// .fetch_all(...)` to hang forever. Mirroring the 30s deadline used by
 /// `PostgreSQL` and `MySQL` bounds each individual query. The total catalog
-/// fetch (one set of `PRAGMA`s per table) is bounded separately by the overall
-/// introspection deadline applied in `sqlite::introspect_sqlite`.
+/// fetch is bounded separately by the overall introspection deadline applied
+/// in `sqlite::introspect_sqlite`.
 async fn with_query_timeout<T, F>(context: &'static str, fut: F) -> Result<T, IntrospectError>
 where
     F: Future<Output = Result<T, IntrospectError>>,
@@ -280,11 +240,11 @@ where
     }
 }
 
-async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<String>, IntrospectError> {
+async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<SqliteTableRow>, IntrospectError> {
     with_query_timeout("Listing tables", async {
-        let rows: Vec<(String,)> = sqlx::query_as(
+        sqlx::query_as(
             r"
-            SELECT name
+            SELECT name, sql
             FROM sqlite_master
             WHERE type = 'table'
               AND name NOT LIKE 'sqlite_%'
@@ -293,9 +253,7 @@ async fn list_user_tables(pool: &SqlitePool) -> Result<Vec<String>, IntrospectEr
         )
         .fetch_all(pool)
         .await
-        .map_err(|e| IntrospectError::query_with_source("Failed to list tables", e))?;
-
-        Ok(rows.into_iter().map(|r| r.0).collect())
+        .map_err(|e| IntrospectError::query_with_source("Failed to list tables", e))
     })
     .await
 }
@@ -328,17 +286,6 @@ async fn list_views(pool: &SqlitePool) -> Result<Vec<RawView>, IntrospectError> 
         .collect())
 }
 
-fn quote_ident(name: &str) -> Result<String, IntrospectError> {
-    if name.contains('\0') {
-        return Err(IntrospectError::metadata_mapping(format!(
-            "SQLite identifier contains NUL byte: {name:?}"
-        )));
-    }
-
-    let escaped = name.replace('"', "\"\"");
-    Ok(format!(r#""{escaped}""#))
-}
-
 fn ordinal_position_from_row(
     ordinal_position: i64,
     table_name: &str,
@@ -350,70 +297,134 @@ fn ordinal_position_from_row(
     })
 }
 
-async fn pragma_table_info(
-    pool: &SqlitePool,
-    quoted_table: &str,
-) -> Result<Vec<SqliteTableInfoRow>, IntrospectError> {
-    let sql = format!("PRAGMA table_info({quoted_table})");
-    with_query_timeout("PRAGMA table_info", async {
-        sqlx::query_as::<_, SqliteTableInfoRow>(sqlx::AssertSqlSafe(sql))
-            .fetch_all(pool)
-            .await
-            .map_err(|e| IntrospectError::query_with_source("PRAGMA table_info failed", e))
+/// Fetches every user table's columns in one join against `pragma_table_info`.
+async fn fetch_columns(pool: &SqlitePool) -> Result<Vec<RawColumn>, IntrospectError> {
+    let rows: Vec<SqliteColumnRow> = with_query_timeout("Listing columns", async {
+        sqlx::query_as(
+            r#"
+            SELECT
+                m.name AS table_name,
+                p.cid AS cid,
+                p.name AS name,
+                p.type AS col_type,
+                p."notnull" AS "notnull",
+                p.dflt_value AS dflt_value,
+                p.pk AS pk
+            FROM sqlite_master m
+            JOIN pragma_table_info(m.name) p
+            WHERE m.type = 'table'
+              AND m.name NOT LIKE 'sqlite_%'
+            ORDER BY m.name, p.cid
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to list columns", e))
     })
-    .await
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let ordinal_position =
+                ordinal_position_from_row(row.cid.saturating_add(1), &row.table_name)?;
+            let mut column = RawColumn::new(
+                row.table_name,
+                MAIN_SCHEMA.to_string(),
+                row.name,
+                row.col_type,
+                row.notnull == 0,
+                row.pk > 0,
+                None,
+                ordinal_position,
+            );
+            column.default_expression = row.dflt_value;
+            Ok(column)
+        })
+        .collect()
 }
 
-async fn pragma_foreign_key_list(
-    pool: &SqlitePool,
-    quoted_table: &str,
-) -> Result<Vec<SqliteFkRow>, IntrospectError> {
-    let sql = format!("PRAGMA foreign_key_list({quoted_table})");
-    with_query_timeout("PRAGMA foreign_key_list", async {
-        sqlx::query_as::<_, SqliteFkRow>(sqlx::AssertSqlSafe(sql))
-            .fetch_all(pool)
-            .await
-            .map_err(|e| IntrospectError::query_with_source("PRAGMA foreign_key_list failed", e))
+/// Fetches every user table's foreign keys in one join against
+/// `pragma_foreign_key_list`.
+async fn fetch_foreign_keys(pool: &SqlitePool) -> Result<Vec<RawForeignKey>, IntrospectError> {
+    let rows: Vec<SqliteFkRow> = with_query_timeout("Listing foreign keys", async {
+        sqlx::query_as(
+            r#"
+            SELECT
+                m.name AS from_table,
+                f.id AS id,
+                f.seq AS seq,
+                f."table" AS to_table,
+                f."from" AS from_col,
+                f."to" AS to_col,
+                f.on_update AS on_update,
+                f.on_delete AS on_delete
+            FROM sqlite_master m
+            JOIN pragma_foreign_key_list(m.name) f
+            WHERE m.type = 'table'
+              AND m.name NOT LIKE 'sqlite_%'
+            ORDER BY m.name, f.id, f.seq
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to list foreign keys", e))
     })
-    .await
+    .await?;
+
+    Ok(group_sqlite_fks(rows))
 }
 
-async fn pragma_index_list(
-    pool: &SqlitePool,
-    quoted_table: &str,
-) -> Result<Vec<SqliteIndexListRow>, IntrospectError> {
-    let sql = format!("PRAGMA index_list({quoted_table})");
-    with_query_timeout("PRAGMA index_list", async {
-        sqlx::query_as::<_, SqliteIndexListRow>(sqlx::AssertSqlSafe(sql))
-            .fetch_all(pool)
-            .await
-            .map_err(|e| IntrospectError::query_with_source("PRAGMA index_list failed", e))
+/// Fetches every user index and its key columns in one query.
+///
+/// `index_xinfo` (unlike `index_info`) reports the per-column sort order
+/// (`desc`) and marks auxiliary trailing columns (`key = 0`) so they can be
+/// filtered out. The `sqlite_master` self-join carries each index's
+/// `CREATE INDEX` text along, which is needed to label expression key parts
+/// and recover partial predicates.
+async fn fetch_indexes(pool: &SqlitePool) -> Result<Vec<RawIndex>, IntrospectError> {
+    let rows: Vec<SqliteIndexRow> = with_query_timeout("Listing indexes", async {
+        sqlx::query_as(
+            r#"
+            SELECT
+                m.name AS table_name,
+                il.name AS index_name,
+                il."unique" AS is_unique_flag,
+                il.origin AS origin,
+                il.partial AS partial,
+                idx.sql AS index_sql,
+                xi.name AS column_name,
+                xi."desc" AS descending,
+                xi."key" AS is_key
+            FROM sqlite_master m
+            JOIN pragma_index_list(m.name) il
+            JOIN pragma_index_xinfo(il.name) xi
+            LEFT JOIN sqlite_master idx
+              ON idx.type = 'index' AND idx.name = il.name
+            WHERE m.type = 'table'
+              AND m.name NOT LIKE 'sqlite_%'
+            ORDER BY m.name, il.seq, xi.seqno
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| IntrospectError::query_with_source("Failed to list indexes", e))
     })
-    .await
-}
+    .await?;
 
-async fn pragma_index_xinfo(
-    pool: &SqlitePool,
-    quoted_index: &str,
-) -> Result<Vec<SqliteIndexInfoRow>, IntrospectError> {
-    // `index_xinfo` (unlike `index_info`) reports the per-column sort order
-    // (`desc`) and marks auxiliary trailing columns (`key = 0`, e.g. the
-    // appended rowid) so they can be filtered out.
-    let sql = format!("PRAGMA index_xinfo({quoted_index})");
-    with_query_timeout("PRAGMA index_xinfo", async {
-        sqlx::query_as::<_, SqliteIndexInfoRow>(sqlx::AssertSqlSafe(sql))
-            .fetch_all(pool)
-            .await
-            .map_err(|e| IntrospectError::query_with_source("PRAGMA index_xinfo failed", e))
-    })
-    .await
+    Ok(collect_indexes(&rows))
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct SqliteTableInfoRow {
+struct SqliteTableRow {
+    name: String,
+    sql: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SqliteColumnRow {
+    table_name: String,
     cid: i64,
     name: String,
-    #[sqlx(rename = "type")]
     col_type: String,
     notnull: i64,
     dflt_value: Option<String>,
@@ -422,59 +433,51 @@ struct SqliteTableInfoRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct SqliteFkRow {
+    from_table: String,
     id: i64,
     seq: i64,
-    table: String,
-    #[sqlx(rename = "from")]
+    to_table: String,
     from_col: String,
-    to: String,
+    to_col: String,
     on_update: String,
     on_delete: String,
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct SqliteIndexListRow {
-    #[allow(dead_code)]
-    seq: i64,
-    name: String,
-    #[sqlx(rename = "unique")]
+struct SqliteIndexRow {
+    table_name: String,
+    index_name: String,
     is_unique_flag: i64,
     origin: String,
     partial: i64,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct SqliteIndexInfoRow {
-    seqno: i64,
-    #[allow(dead_code)]
-    cid: i64,
-    name: Option<String>,
+    index_sql: Option<String>,
+    column_name: Option<String>,
     // `1` when the column is sorted descending, `0` ascending.
-    #[sqlx(rename = "desc")]
     descending: i64,
     // `1` for an actual key column, `0` for an auxiliary trailing column.
-    #[sqlx(rename = "key")]
     is_key: i64,
 }
 
-fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignKey> {
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy)]
-    struct Gk {
-        id: i64,
-    }
-
-    let mut groups: BTreeMap<Gk, Vec<SqliteFkRow>> = BTreeMap::new();
+/// Groups `pragma_foreign_key_list` rows into one constraint per (table, id).
+///
+/// The [`BTreeMap`] key orders constraints by table name then declaration id,
+/// matching the order the catalog queries return rows in.
+fn group_sqlite_fks(rows: Vec<SqliteFkRow>) -> Vec<RawForeignKey> {
+    let mut groups: BTreeMap<(String, i64), Vec<SqliteFkRow>> = BTreeMap::new();
     for row in rows {
-        groups.entry(Gk { id: row.id }).or_default().push(row);
+        groups
+            .entry((row.from_table.clone(), row.id))
+            .or_default()
+            .push(row);
     }
 
     let mut out = Vec::new();
-    for (gk, mut cols) in groups {
+    for ((from_table, id), mut cols) in groups {
         cols.sort_by_key(|r| r.seq);
-        let to_table = cols.first().map(|r| r.table.clone()).unwrap_or_default();
+        let to_table = cols.first().map(|r| r.to_table.clone()).unwrap_or_default();
         let from_columns: Vec<String> = cols.iter().map(|r| r.from_col.clone()).collect();
-        let to_columns: Vec<String> = cols.iter().map(|r| r.to.clone()).collect();
-        let constraint_name = format!("fk_{from_table}_{}", gk.id);
+        let to_columns: Vec<String> = cols.iter().map(|r| r.to_col.clone()).collect();
+        let constraint_name = format!("fk_{from_table}_{id}");
         let on_delete = cols
             .first()
             .map(|r| parse_referential_action(&r.on_delete))
@@ -486,7 +489,7 @@ fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignK
         out.push(RawForeignKey {
             constraint_name,
             schema_name: MAIN_SCHEMA.to_string(),
-            from_table: from_table.to_string(),
+            from_table,
             from_columns,
             to_schema: None,
             to_table,
@@ -498,94 +501,75 @@ fn group_sqlite_fks(from_table: &str, rows: Vec<SqliteFkRow>) -> Vec<RawForeignK
     out
 }
 
-async fn collect_table_indexes(
-    pool: &SqlitePool,
-    table_name: &str,
-    list_rows: Vec<SqliteIndexListRow>,
-) -> Result<Vec<RawIndex>, IntrospectError> {
-    let mut out = Vec::new();
-    for entry in list_rows {
-        if entry.origin == "pk" {
-            continue;
-        }
-        let index_name = entry.name;
-        if index_name.starts_with("sqlite_autoindex_") {
-            continue;
-        }
-        let quoted_idx = quote_ident(&index_name)?;
-        let mut info = pragma_index_xinfo(pool, &quoted_idx).await?;
-        // Keep only declared key columns; `index_xinfo` also lists auxiliary
-        // trailing columns (`key = 0`) that are not part of the index key.
-        info.retain(|r| r.is_key != 0);
-        info.sort_by_key(|r| r.seqno);
-
-        // PRAGMA index_info reports NULL column names for expression key parts
-        // and exposes no predicate. Recover both from the CREATE INDEX text so
-        // expression indexes are neither dropped nor mistaken for plain-column
-        // indexes.
-        let def_sql = fetch_index_sql(pool, &index_name).await?;
-        let (key_defs, predicate) = def_sql
-            .as_deref()
-            .map(split_sqlite_index_def)
-            .unwrap_or_default();
-
-        let key_parts: Vec<RawIndexKeyPart> = info
-            .iter()
-            .enumerate()
-            .map(|(pos, r)| match &r.name {
-                Some(name) => RawIndexKeyPart::Column {
-                    name: name.clone(),
-                    order: Some(if r.descending != 0 {
-                        relune_core::SortOrder::Desc
-                    } else {
-                        relune_core::SortOrder::Asc
-                    }),
-                    // SQLite index columns carry no explicit NULLS ordering.
-                    nulls: None,
-                    prefix_length: None,
-                },
-                None => RawIndexKeyPart::Expression(
-                    key_defs
-                        .get(pos)
-                        .cloned()
-                        .unwrap_or_else(|| "(expression)".to_string()),
-                ),
-            })
-            .collect();
-        if key_parts.is_empty() {
-            continue;
-        }
-        out.push(RawIndex {
-            index_name: index_name.clone(),
-            schema_name: MAIN_SCHEMA.to_string(),
-            table_name: table_name.to_string(),
-            key_parts,
-            is_unique: entry.is_unique_flag != 0,
-            is_primary: false,
-            predicate: if entry.partial != 0 { predicate } else { None },
-            included_columns: Vec::new(),
-            method: None,
-        });
-    }
-    Ok(out)
+/// Assembles [`RawIndex`] values from index rows ordered by table, index and
+/// key position, so each index's rows arrive as one consecutive run.
+fn collect_indexes(rows: &[SqliteIndexRow]) -> Vec<RawIndex> {
+    rows.chunk_by(|a, b| a.table_name == b.table_name && a.index_name == b.index_name)
+        .filter_map(build_index)
+        .collect()
 }
 
-/// Fetch the `CREATE INDEX` text for a named index from `sqlite_master`.
-async fn fetch_index_sql(
-    pool: &SqlitePool,
-    index_name: &str,
-) -> Result<Option<String>, IntrospectError> {
-    with_query_timeout("sqlite_master index sql", async {
-        sqlx::query_scalar::<_, Option<String>>(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1",
-        )
-        .bind(index_name)
-        .fetch_optional(pool)
-        .await
-        .map(Option::flatten)
-        .map_err(|e| IntrospectError::query_with_source("Failed to read index definition", e))
+/// Builds one [`RawIndex`] from the rows of a single index, or `None` when the
+/// index is implicit (a primary key or an auto-created uniqueness index) or has
+/// no declared key columns.
+fn build_index(chunk: &[SqliteIndexRow]) -> Option<RawIndex> {
+    let head = chunk.first()?;
+    if head.origin == "pk" || head.index_name.starts_with("sqlite_autoindex_") {
+        return None;
+    }
+
+    // PRAGMA index_info reports NULL column names for expression key parts
+    // and exposes no predicate. Recover both from the CREATE INDEX text so
+    // expression indexes are neither dropped nor mistaken for plain-column
+    // indexes.
+    let (key_defs, predicate) = head
+        .index_sql
+        .as_deref()
+        .map(split_sqlite_index_def)
+        .unwrap_or_default();
+
+    // Keep only declared key columns; `index_xinfo` also lists auxiliary
+    // trailing columns (`key = 0`, e.g. the appended rowid).
+    let key_parts: Vec<RawIndexKeyPart> = chunk
+        .iter()
+        .filter(|row| row.is_key != 0)
+        .enumerate()
+        .map(|(pos, row)| match &row.column_name {
+            Some(name) => RawIndexKeyPart::Column {
+                name: name.clone(),
+                order: Some(if row.descending != 0 {
+                    relune_core::SortOrder::Desc
+                } else {
+                    relune_core::SortOrder::Asc
+                }),
+                // SQLite index columns carry no explicit NULLS ordering.
+                nulls: None,
+                prefix_length: None,
+            },
+            None => RawIndexKeyPart::Expression(
+                key_defs
+                    .get(pos)
+                    .cloned()
+                    .unwrap_or_else(|| "(expression)".to_string()),
+            ),
+        })
+        .collect();
+
+    if key_parts.is_empty() {
+        return None;
+    }
+
+    Some(RawIndex {
+        index_name: head.index_name.clone(),
+        schema_name: MAIN_SCHEMA.to_string(),
+        table_name: head.table_name.clone(),
+        key_parts,
+        is_unique: head.is_unique_flag != 0,
+        is_primary: false,
+        predicate: if head.partial != 0 { predicate } else { None },
+        included_columns: Vec::new(),
+        method: None,
     })
-    .await
 }
 
 /// Split a `CREATE INDEX ... ON t (<key list>) [WHERE <predicate>]` definition
@@ -731,19 +715,6 @@ const fn is_ident_byte(b: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rejects_null_bytes_in_identifiers() {
-        let err = quote_ident("bad\0name").expect_err("NUL bytes must be rejected");
-        assert!(matches!(err, IntrospectError::MetadataMapping(_)));
-        assert!(err.to_string().contains("NUL byte"));
-    }
-
-    #[test]
-    fn quotes_identifiers_with_double_quotes() {
-        let quoted = quote_ident(r#"na"me"#).expect("identifier should be quoted");
-        assert_eq!(quoted, r#""na""me""#);
-    }
 
     #[test]
     fn split_index_def_handles_quoted_name_with_paren() {

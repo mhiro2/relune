@@ -27,6 +27,13 @@ pub(crate) const fn raw_schema(
     }
 }
 
+/// Number of catalog sections [`ParallelCatalogReader::fetch_all`] fetches concurrently.
+///
+/// Dialect pools size themselves from this so every section holds its own
+/// connection and none of them queues on acquisition. Keep it equal to the
+/// number of futures in the `try_join!` below.
+pub(crate) const PARALLEL_CATALOG_QUERIES: u32 = 7;
+
 /// Fetches shared catalog sections in parallel for dialects with global queries per section.
 pub(crate) trait ParallelCatalogReader {
     /// Fetches all user tables.
