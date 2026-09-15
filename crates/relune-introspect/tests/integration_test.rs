@@ -519,6 +519,112 @@ async fn test_introspect_sqlite_column_defaults_and_checks() {
 }
 
 #[tokio::test]
+async fn test_introspect_sqlite_index_shapes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("app.db");
+    let pool = sqlx::sqlite::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true),
+    )
+    .await
+    .expect("connect sqlite");
+    sqlx::raw_sql(
+        r"
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            active INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_lower_email ON users (lower(email));
+        CREATE INDEX idx_active_created ON users (active, created_at DESC);
+        CREATE UNIQUE INDEX idx_active_email ON users (email) WHERE active = 1;
+        ",
+    )
+    .execute(&pool)
+    .await
+    .expect("ddl");
+    pool.close().await;
+
+    let abs = db_path.canonicalize().expect("canonicalize db path");
+    let url = format!("sqlite://{}", abs.display());
+    let schema = introspect_sqlite(&url).await.expect("introspect sqlite");
+
+    let users = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "users")
+        .expect("users table");
+
+    // The implicit index backing `email UNIQUE` is an internal artefact and
+    // must not surface as a user index.
+    assert!(
+        users
+            .indexes
+            .iter()
+            .all(|i| !i.name.as_deref().unwrap_or_default().starts_with("sqlite_")),
+        "internal indexes leaked: {:?}",
+        users.indexes.iter().map(|i| &i.name).collect::<Vec<_>>()
+    );
+
+    // The expression index must be recovered as an expression key part, not
+    // dropped and not mistaken for a plain-column index.
+    let expr_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_lower_email"))
+        .expect("expression index present");
+    assert!(expr_idx.has_expression(), "expected an expression key part");
+    assert!(expr_idx.column_names().is_empty());
+
+    // Multi-column keys keep their declared order and per-column sort order.
+    let composite_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_active_created"))
+        .expect("composite index present");
+    assert_eq!(composite_idx.column_names(), vec!["active", "created_at"]);
+    assert_eq!(
+        composite_idx.key_parts.len(),
+        2,
+        "auxiliary rowid key parts must be filtered out"
+    );
+    let orders: Vec<_> = composite_idx
+        .key_parts
+        .iter()
+        .map(|part| match part {
+            relune_core::IndexKey::Column(column) => column.order,
+            relune_core::IndexKey::Expression(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        orders,
+        vec![
+            Some(relune_core::SortOrder::Asc),
+            Some(relune_core::SortOrder::Desc)
+        ]
+    );
+
+    // Uniqueness and the partial-index predicate must both be captured.
+    let partial_idx = users
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some("idx_active_email"))
+        .expect("partial index present");
+    assert!(partial_idx.is_unique);
+    assert!(
+        partial_idx
+            .predicate
+            .as_deref()
+            .unwrap_or_default()
+            .contains("active"),
+        "expected a partial-index predicate, got {:?}",
+        partial_idx.predicate
+    );
+}
+
+#[tokio::test]
 async fn test_introspect_postgres_expression_and_partial_indexes() {
     let sql = r"
         CREATE TABLE users (
