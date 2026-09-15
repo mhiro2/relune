@@ -6,15 +6,13 @@ use sqlx::MySqlPool;
 use thiserror::Error;
 use tracing::warn;
 
-use crate::catalog::ParallelCatalogReader;
+use crate::catalog::{PARALLEL_CATALOG_QUERIES, ParallelCatalogReader};
 use crate::common::{
     RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
     RawTable, RawView, parse_referential_action,
 };
 use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
-
-const PARALLEL_CATALOG_QUERIES: u32 = 6;
 
 /// Fetches all catalog metadata from a `MySQL` database.
 pub async fn fetch_catalog_metadata(pool: &MySqlPool) -> Result<RawSchema, IntrospectError> {

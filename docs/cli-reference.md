@@ -38,7 +38,7 @@ For SQL files and schema JSON files, Relune currently rejects inputs larger than
 > `--db-url`. An explicit `--sql`/`--schema-json`/`--db-url` flag always takes
 > precedence over `DATABASE_URL`.
 
-`--db-url` introspection runs catalog queries through a small connection pool. Set `RELUNE_DB_POOL_MAX_CONNECTIONS` to a positive integer to override the default cap (PostgreSQL/MySQL fan out to 6 connections, SQLite uses 1). Non-positive or non-numeric values are ignored and the default applies.
+`--db-url` introspection runs catalog queries through a small connection pool. Set `RELUNE_DB_POOL_MAX_CONNECTIONS` to a positive integer to override the default cap (PostgreSQL/MySQL fan out to 7 connections, SQLite uses 1). Non-positive or non-numeric values are ignored and the default applies.
 
 Beyond the 30s per-statement deadline, the whole catalog fetch is bounded by an overall deadline (default 600s) so backends without an enforceable statement timeout (SQLite, or servers that cannot set a session timeout) cannot run unbounded. Set `RELUNE_DB_INTROSPECTION_TIMEOUT_SECS` to a positive integer to raise or lower it; invalid values are ignored.
 

@@ -6,7 +6,7 @@
 
 use sqlx::PgPool;
 
-use crate::catalog::ParallelCatalogReader;
+use crate::catalog::{PARALLEL_CATALOG_QUERIES, ParallelCatalogReader};
 use crate::common::{
     RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
     RawTable, RawView, parse_referential_action,
@@ -21,7 +21,6 @@ pub struct PostgresCatalog {
     pool: PgPool,
 }
 
-const PARALLEL_CATALOG_QUERIES: u32 = 6;
 const FETCH_COLUMNS_QUERY: &str = r"
             SELECT
                 t.relname AS table_name,
