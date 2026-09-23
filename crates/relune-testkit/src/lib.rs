@@ -453,8 +453,8 @@ impl TableBuilder {
     #[must_use]
     pub fn schema(mut self, schema_name: &str) -> Self {
         self.table.schema_name = Some(schema_name.to_string());
-        let qualified = format!("{}.{}", schema_name, self.table.name);
-        self.table.stable_id = qualified;
+        self.table.stable_id =
+            relune_core::qualified_identifier(Some(schema_name), &self.table.name);
         self
     }
 

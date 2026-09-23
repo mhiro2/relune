@@ -176,11 +176,7 @@ fn write_enums(out: &mut String, schema: &Schema) {
 }
 
 fn format_fk_target(fk: &relune_core::ForeignKey) -> String {
-    let target_table = if let Some(ref schema) = fk.to_schema {
-        format!("{}.{}", schema, fk.to_table)
-    } else {
-        fk.to_table.clone()
-    };
+    let target_table = relune_core::qualified_identifier(fk.to_schema.as_deref(), &fk.to_table);
     let to_cols = fk.to_columns.join(", ");
     format!("{target_table}({to_cols})")
 }

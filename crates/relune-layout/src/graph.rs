@@ -9,6 +9,7 @@ use relune_core::{
     Diagnostic, DiagnosticCode, EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, NodeKind, Schema, Table, View, collect_sql_relations,
     diagnostic::codes::parse_unsupported, layout::Cardinality, pattern::matches_table_pattern,
+    qualified_identifier,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -157,8 +158,10 @@ impl EnumIndex {
             .push((schema_name.clone(), enum_type.id.clone()));
 
         if let Some(schema_name) = schema_name {
-            self.exact
-                .insert(format!("{schema_name}.{name}"), enum_type.id.clone());
+            self.exact.insert(
+                qualified_identifier(Some(&schema_name), &name),
+                enum_type.id.clone(),
+            );
         }
     }
 
@@ -1578,6 +1581,56 @@ mod tests {
                 .iter()
                 .all(|edge| edge.kind != EdgeKind::EnumReference)
         );
+    }
+
+    #[test]
+    fn test_dotted_enum_names_resolve_to_distinct_enums() {
+        let column = |id, name: &str, data_type: &str| Column {
+            id: ColumnId(id),
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            nullable: false,
+            is_primary_key: false,
+            comment: None,
+            enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
+        };
+        let enum_type = |schema: &str, name: &str| Enum {
+            id: qualified_identifier(Some(schema), name),
+            schema_name: Some(schema.to_string()),
+            name: name.to_string(),
+            values: vec!["x".to_string()],
+        };
+        let schema = Schema {
+            tables: vec![Table {
+                id: TableId(1),
+                stable_id: "accounts".to_string(),
+                schema_name: None,
+                name: "accounts".to_string(),
+                columns: vec![
+                    column(1, "first", r#""a.b".c"#),
+                    column(2, "second", r#"a."b.c""#),
+                ],
+                foreign_keys: vec![],
+                indexes: vec![],
+                primary_key_name: None,
+                check_constraints: Vec::new(),
+                comment: None,
+            }],
+            views: vec![],
+            enums: vec![enum_type("a.b", "c"), enum_type("a", "b.c")],
+        };
+
+        let graph = LayoutGraphBuilder::new().build(&schema);
+
+        let mut targets: Vec<&str> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::EnumReference)
+            .map(|edge| edge.to.as_str())
+            .collect();
+        targets.sort_unstable();
+        assert_eq!(targets, vec![r#""a.b".c"#, r#"a."b.c""#]);
     }
 
     #[test]
