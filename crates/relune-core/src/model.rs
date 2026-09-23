@@ -187,12 +187,21 @@ impl Schema {
         for table in &self.tables {
             let schema = table.schema_name.as_deref().map(str::to_lowercase);
             let name = table.name.to_lowercase();
-            if !seen_names.insert((schema, name)) {
+            let duplicate_name = !seen_names.insert((schema, name));
+            if duplicate_name {
                 errors.push(ValidationError::identity(
                     Some(table.qualified_name()),
                     "duplicate table name",
                 ));
-            } else if !seen_stable_ids.insert(&table.stable_id) {
+            }
+            // Always record the ID so later tables are checked against it, but
+            // skip the report when the duplicate name already implies the clash.
+            if table.stable_id.is_empty() {
+                errors.push(ValidationError::identity(
+                    Some(table.qualified_name()),
+                    "table has empty stable_id",
+                ));
+            } else if !seen_stable_ids.insert(&table.stable_id) && !duplicate_name {
                 errors.push(ValidationError::identity(
                     Some(table.qualified_name()),
                     format!("duplicate table stable_id '{}'", table.stable_id),
@@ -1355,6 +1364,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn validate_detects_empty_table_stable_id() {
+        let mut table = make_table("users", None, &["id"], vec![]);
+        table.stable_id = String::new();
+        let schema = Schema {
+            tables: vec![table],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].kind, ValidationErrorKind::Identity);
+        assert!(errs[0].message.contains("empty stable_id"));
     }
 
     #[test]
