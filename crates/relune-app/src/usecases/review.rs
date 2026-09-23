@@ -11,6 +11,7 @@ use relune_core::{
 };
 
 use crate::error::AppError;
+use crate::markdown;
 use crate::request::ReviewRequest;
 use crate::result::ReviewResult;
 use crate::schema_input::schema_from_input_with_dialect;
@@ -320,13 +321,13 @@ fn write_markdown_finding(output: &mut String, finding: &RiskFinding) {
     let target = format_target(finding);
     let _ = writeln!(
         output,
-        "- **`{}`** — `{}`",
-        finding.rule_id.as_str(),
-        target
+        "- **{}** — {}",
+        markdown::code(finding.rule_id.as_str()),
+        markdown::code(&target)
     );
-    let _ = writeln!(output, "  {}", finding.message);
+    let _ = writeln!(output, "  {}", markdown::text(&finding.message));
     if let Some(mitigation) = &finding.mitigation {
-        let _ = writeln!(output, "  _mitigation: {mitigation}_");
+        let _ = writeln!(output, "  _mitigation: {}_", markdown::text(mitigation));
     }
 }
 
@@ -905,5 +906,32 @@ mod tests {
         let md = format_review_markdown(&result);
         assert!(md.contains("## Schema review"));
         assert!(md.contains("- **`risk/fk-without-index`**"));
+    }
+
+    #[test]
+    fn format_markdown_escapes_finding_fields() {
+        let before = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (id INT PRIMARY KEY);
+        ";
+        let after = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
+        ";
+        let mut result = run(ReviewRequest::from_sql(before, after));
+        let finding = &mut result.review.findings[0];
+        finding.table_name = Some("or`ders".to_string());
+        finding.column_name = None;
+        finding.fk_name = None;
+        finding.message = "fine\n### Breaking\n- **fake**".to_string();
+        finding.mitigation = Some("_x_ <b>".to_string());
+
+        let md = format_review_markdown(&result);
+        assert!(md.contains(" — ``or`ders``\n"), "{md}");
+        assert!(
+            md.contains("  fine \\#\\#\\# Breaking - \\*\\*fake\\*\\*\n"),
+            "{md}"
+        );
+        assert!(md.contains("  _mitigation: \\_x\\_ \\<b\\>_\n"), "{md}");
     }
 }

@@ -8,6 +8,7 @@ use relune_core::{ChangeKind, Enum as SchemaEnum, Schema, Table, View, diff_sche
 use relune_layout::{Annotation, DiagramOverlay, OverlaySeverity};
 
 use crate::error::AppError;
+use crate::markdown;
 use crate::request::DiffRequest;
 use crate::result::DiffResult;
 use crate::schema_input::schema_from_input;
@@ -366,11 +367,6 @@ pub fn format_diff_text(result: &DiffResult) -> String {
     output
 }
 
-/// Escape a string for use inside raw HTML (e.g. `<code>` in `<summary>`).
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;")
-}
-
 /// Format diff result as GitHub-flavored Markdown.
 #[must_use]
 #[allow(clippy::too_many_lines)]
@@ -415,7 +411,7 @@ pub fn format_diff_markdown(result: &DiffResult) -> String {
     if !result.diff.added_tables.is_empty() {
         out.push_str("\n### Added tables\n\n");
         for table in &result.diff.added_tables {
-            let _ = writeln!(out, "- <code>{}</code>", escape_html(table));
+            let _ = writeln!(out, "- {}", markdown::code(table));
         }
     }
 
@@ -423,7 +419,7 @@ pub fn format_diff_markdown(result: &DiffResult) -> String {
     if !result.diff.removed_tables.is_empty() {
         out.push_str("\n### Removed tables\n\n");
         for table in &result.diff.removed_tables {
-            let _ = writeln!(out, "- <code>{}</code>", escape_html(table));
+            let _ = writeln!(out, "- {}", markdown::code(table));
         }
     }
 
@@ -439,14 +435,14 @@ pub fn format_diff_markdown(result: &DiffResult) -> String {
     if !result.diff.added_views.is_empty() {
         out.push_str("\n### Added views\n\n");
         for view in &result.diff.added_views {
-            let _ = writeln!(out, "- <code>{}</code>", escape_html(view));
+            let _ = writeln!(out, "- {}", markdown::code(view));
         }
     }
 
     if !result.diff.removed_views.is_empty() {
         out.push_str("\n### Removed views\n\n");
         for view in &result.diff.removed_views {
-            let _ = writeln!(out, "- <code>{}</code>", escape_html(view));
+            let _ = writeln!(out, "- {}", markdown::code(view));
         }
     }
 
@@ -461,14 +457,14 @@ pub fn format_diff_markdown(result: &DiffResult) -> String {
     if !result.diff.added_enums.is_empty() {
         out.push_str("\n### Added enums\n\n");
         for enum_name in &result.diff.added_enums {
-            let _ = writeln!(out, "- <code>{}</code>", escape_html(enum_name));
+            let _ = writeln!(out, "- {}", markdown::code(enum_name));
         }
     }
 
     if !result.diff.removed_enums.is_empty() {
         out.push_str("\n### Removed enums\n\n");
         for enum_name in &result.diff.removed_enums {
-            let _ = writeln!(out, "- <code>{}</code>", escape_html(enum_name));
+            let _ = writeln!(out, "- {}", markdown::code(enum_name));
         }
     }
 
@@ -484,7 +480,7 @@ pub fn format_diff_markdown(result: &DiffResult) -> String {
 
 fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
     let change_count = table_diff.change_count();
-    let name = escape_html(&table_diff.table_name);
+    let name = markdown::html(&table_diff.table_name);
     let _ = writeln!(
         out,
         "<details>\n<summary><code>{name}</code> ({change_count} changes)</summary>\n"
@@ -494,8 +490,8 @@ fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
         out.push_str("**Columns:**\n\n");
         for col_diff in &table_diff.column_diffs {
             let indicator = change_indicator(col_diff.change_kind);
-            let col_name = escape_html(&col_diff.column_name);
-            let _ = writeln!(out, "- <code>{indicator}</code> <code>{col_name}</code>");
+            let col_name = markdown::code(&col_diff.column_name);
+            let _ = writeln!(out, "- `{indicator}` {col_name}");
         }
         out.push('\n');
     }
@@ -504,8 +500,8 @@ fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
         out.push_str("**Foreign keys:**\n\n");
         for fk_diff in &table_diff.fk_diffs {
             let indicator = change_indicator(fk_diff.change_kind);
-            let fk_name = escape_html(fk_diff.name.as_deref().unwrap_or("unnamed"));
-            let _ = writeln!(out, "- <code>{indicator}</code> <code>{fk_name}</code>");
+            let fk_name = markdown::code(fk_diff.name.as_deref().unwrap_or("unnamed"));
+            let _ = writeln!(out, "- `{indicator}` {fk_name}");
         }
         out.push('\n');
     }
@@ -514,8 +510,8 @@ fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
         out.push_str("**Indexes:**\n\n");
         for index_diff in &table_diff.index_diffs {
             let indicator = change_indicator(index_diff.change_kind);
-            let index_name = escape_html(index_diff.name.as_deref().unwrap_or("unnamed"));
-            let _ = writeln!(out, "- <code>{indicator}</code> <code>{index_name}</code>");
+            let index_name = markdown::code(index_diff.name.as_deref().unwrap_or("unnamed"));
+            let _ = writeln!(out, "- `{indicator}` {index_name}");
         }
         out.push('\n');
     }
@@ -524,8 +520,8 @@ fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
         out.push_str("**Checks:**\n\n");
         for check_diff in &table_diff.check_diffs {
             let indicator = change_indicator(check_diff.change_kind);
-            let check_name = escape_html(check_diff.name.as_deref().unwrap_or("unnamed"));
-            let _ = writeln!(out, "- <code>{indicator}</code> <code>{check_name}</code>");
+            let check_name = markdown::code(check_diff.name.as_deref().unwrap_or("unnamed"));
+            let _ = writeln!(out, "- `{indicator}` {check_name}");
         }
         out.push('\n');
     }
@@ -535,7 +531,7 @@ fn write_table_diff_markdown(out: &mut String, table_diff: &TableDiff) {
 
 fn write_view_diff_markdown(out: &mut String, view_diff: &ViewDiff) {
     let change_count = view_diff.column_diffs.len() + usize::from(view_diff.definition_changed());
-    let name = escape_html(&view_diff.view_name);
+    let name = markdown::html(&view_diff.view_name);
     let _ = writeln!(
         out,
         "<details>\n<summary><code>{name}</code> ({change_count} changes)</summary>\n"
@@ -545,8 +541,8 @@ fn write_view_diff_markdown(out: &mut String, view_diff: &ViewDiff) {
         out.push_str("**Columns:**\n\n");
         for col_diff in &view_diff.column_diffs {
             let indicator = change_indicator(col_diff.change_kind);
-            let col_name = escape_html(&col_diff.column_name);
-            let _ = writeln!(out, "- <code>{indicator}</code> <code>{col_name}</code>");
+            let col_name = markdown::code(&col_diff.column_name);
+            let _ = writeln!(out, "- `{indicator}` {col_name}");
         }
         out.push('\n');
     }
@@ -559,7 +555,7 @@ fn write_view_diff_markdown(out: &mut String, view_diff: &ViewDiff) {
 }
 
 fn write_enum_diff_markdown(out: &mut String, enum_diff: &EnumDiff) {
-    let name = escape_html(&enum_diff.enum_name);
+    let name = markdown::html(&enum_diff.enum_name);
     let _ = writeln!(
         out,
         "<details>\n<summary><code>{name}</code> ({} changes)</summary>\n",
@@ -569,17 +565,14 @@ fn write_enum_diff_markdown(out: &mut String, enum_diff: &EnumDiff) {
     out.push_str("**Values:**\n\n");
     for value_diff in &enum_diff.value_diffs {
         let indicator = change_indicator(value_diff.change_kind);
-        let value = escape_html(&value_diff.value);
+        let value = markdown::code(&value_diff.value);
         let detail = match (value_diff.old_position, value_diff.new_position) {
             (Some(old), Some(new)) => format!(" (position {} → {})", old + 1, new + 1),
             (Some(old), None) => format!(" (position {})", old + 1),
             (None, Some(new)) => format!(" (position {})", new + 1),
             (None, None) => String::new(),
         };
-        let _ = writeln!(
-            out,
-            "- <code>{indicator}</code> <code>{value}</code>{detail}"
-        );
+        let _ = writeln!(out, "- `{indicator}` {value}{detail}");
     }
     out.push('\n');
 
@@ -2204,11 +2197,11 @@ mod tests {
         assert!(md.contains("| Tables |"));
         // Added table
         assert!(md.contains("### Added tables"));
-        assert!(md.contains("<code>posts</code>"));
+        assert!(md.contains("- `posts`"));
         // Modified table with details
         assert!(md.contains("<details>"));
         assert!(md.contains("<code>users</code>"));
-        assert!(md.contains("<code>+</code> <code>name</code>"));
+        assert!(md.contains("- `+` `name`\n"));
     }
 
     #[test]
@@ -2270,20 +2263,20 @@ mod tests {
 
         let md = format_diff_markdown(&result);
 
-        // Added table in bullet list: HTML-escaped inside <code>
+        // Added table in bullet list: rendered as a code span, no HTML escaping
         assert!(
-            md.contains("<code>table|with&lt;pipe&amp;amp</code>"),
-            "added table name should be HTML-escaped in <code> tag"
+            md.contains("- `table|with<pipe&amp`"),
+            "added table name should be rendered as a code span"
         );
         // Table name in <summary><code>: HTML-escaped
         assert!(
             md.contains("<code>t&lt;able</code>"),
             "<code> in <summary> requires HTML escaping"
         );
-        // Column name inside <details> body: HTML-escaped in <code>
+        // Column name inside <details> body: rendered as a code span
         assert!(
-            md.contains("<code>col|name</code>"),
-            "column name in <details> body should be HTML-escaped in <code> tag"
+            md.contains("- `+` `col|name`\n"),
+            "column name in <details> body should be rendered as a code span"
         );
     }
 }
