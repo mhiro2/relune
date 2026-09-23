@@ -321,7 +321,8 @@ async fn setup_mysql_with_sql(
         .await?;
     admin.close().await;
 
-    // Avoid the `mysql` system schema: introspection excludes it from user tables.
+    // Introspection reads only the database named in the URL, so point it at a
+    // dedicated database instead of the `mysql` system schema.
     let database_url = format!("mysql://root@{host}:{port}/relune_introspect_itest");
 
     let pool = sqlx::mysql::MySqlPoolOptions::new()
@@ -364,6 +365,66 @@ async fn test_introspect_mysql_minimal() {
         .find(|t| t.name == "posts")
         .expect("posts");
     assert_eq!(posts.foreign_keys.len(), 1);
+}
+
+#[tokio::test]
+async fn test_introspect_mysql_scopes_to_dsn_database() {
+    let sql = r"
+        CREATE TABLE users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            status ENUM('active', 'inactive') NOT NULL
+        );
+        CREATE VIEW active_users AS SELECT id FROM users;
+        CREATE DATABASE relune_introspect_other;
+        CREATE TABLE relune_introspect_other.users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            kind ENUM('x', 'y') NOT NULL
+        );
+        CREATE TABLE relune_introspect_other.orders (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            CONSTRAINT fk_orders_user FOREIGN KEY (user_id)
+                REFERENCES relune_introspect_other.users(id)
+        );
+        CREATE VIEW relune_introspect_other.all_orders AS
+            SELECT id FROM relune_introspect_other.orders;
+    ";
+
+    let (database_url, _container) = setup_mysql_with_sql(sql).await.expect("mysql setup");
+
+    let schema = introspect_database(&database_url)
+        .await
+        .expect("introspect mysql");
+
+    let tables: Vec<_> = schema
+        .tables
+        .iter()
+        .map(|t| (t.schema_name.as_deref(), t.name.as_str()))
+        .collect();
+    assert_eq!(tables, vec![(Some("relune_introspect_itest"), "users")]);
+    assert_eq!(schema.tables[0].columns.len(), 2);
+    let views: Vec<_> = schema.views.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(views, vec!["active_users"]);
+    assert!(
+        schema
+            .enums
+            .iter()
+            .all(|e| e.schema_name.as_deref() == Some("relune_introspect_itest")),
+        "enums leaked from another database: {:?}",
+        schema.enums
+    );
+
+    let (server_url, _) = database_url.rsplit_once('/').expect("database path");
+    let err = introspect_database(server_url)
+        .await
+        .expect_err("a URL without a database must be rejected");
+    assert!(
+        matches!(
+            err,
+            relune_introspect::IntrospectError::InvalidDatabaseUrl(_)
+        ),
+        "unexpected error: {err:?}"
+    );
 }
 
 // Note: cyclic_fk.sql contains forward references (e.g., cycle_a references cycle_c before cycle_c is created)

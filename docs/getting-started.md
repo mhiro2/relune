@@ -60,6 +60,8 @@ Remote TCP connections also default to verifying TLS (`sslmode=verify-full` for 
 
 The connection URL is **fully trusted** — Relune connects to exactly the host you name with no destination filtering — so never point it at an untrusted DSN. Introspection needs read-only access: PostgreSQL reads its system catalogs (`pg_catalog` / `information_schema`); MySQL/MariaDB needs `SELECT` on `information_schema` plus the `SHOW VIEW` privilege to read view definitions (without it, views appear with no definition and a warning is logged); SQLite needs to read the database file.
 
+For MySQL/MariaDB the URL must include a database (`mysql://user:pass@localhost:3306/dbname`); only that database is introspected.
+
 ## Next steps
 
 - [CLI reference](cli-reference.md) — all commands and flags

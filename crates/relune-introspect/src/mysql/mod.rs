@@ -22,7 +22,8 @@ const MARIADB_SCHEME_PREFIX: &str = "mariadb://";
 /// # Arguments
 ///
 /// * `database_url` - A `MySQL` connection URL string in the format:
-///   `mysql://[user[:password]@][host][:port][/database][?param1=val1&...]`
+///   `mysql://[user[:password]@][host][:port]/database[?param1=val1&...]`.
+///   The database path is required; only that database is introspected.
 #[instrument(skip_all, fields(database_url = %crate::url::mask_credentials(database_url)))]
 pub async fn introspect_mysql(database_url: &str) -> Result<Schema, IntrospectError> {
     info!("Starting MySQL introspection");
