@@ -118,7 +118,7 @@ Introspection and filesystem access stay on the **native** side; WASM uses in-me
 
 Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
-**`Schema`** — Top-level container: `tables`, `views`, `enums`. Supports `validate()` for structural consistency (duplicate names, FK column references, etc.).
+**`Schema`** — Top-level container: `tables`, `views`, `enums`. Supports `validate()` for structural consistency. Each `ValidationError` has a kind: `Identity` (empty or duplicate table, view, enum, column, enum value, or `stable_id`) or `Consistency` (FK / index references to missing tables or columns, arity mismatches, empty data types). `diff` and `review` key objects by name and `stable_id`, so they fail with `AppError::InvalidSchema` on identity errors unless `allow_invalid_schema` is set; consistency errors are always reported as `SCHEMA004` warnings, since review rules analyze dangling references. Other commands report every validation error as a warning.
 
 **`Table`** — `TableId`, `stable_id`, optional `schema_name`, `name`, `columns`, `foreign_keys`, `indexes`, optional `comment`.
 
@@ -131,6 +131,8 @@ Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 **`Enum`** — PostgreSQL uses named enum types (`CREATE TYPE ... AS ENUM`). MySQL has no schema-level enum type; SQL parsing stores inline `ENUM(...)` / `SET(...)` definitions on `Column.enum_values` rather than synthesizing schema-level enum entries (recovered regardless of the resolved dialect, so a misclassified dump keeps its values). Live MySQL introspection currently still lifts inline enum/set column types into `Schema.enums`. SQLite does not contribute enum metadata.
 
 **Identifier normalization** — All schema, table, and column identifiers are normalized to lowercase on input (`normalize_identifier`), and downstream matching (diff, foreign-key resolution, graph construction) is case-insensitive throughout. This is a deliberate simplification, not full SQL quoting semantics: quoted identifiers do not retain their original case, so `"User"` and `"user"` collapse to the same name and only one survives. Treat identifier casing as non-significant when feeding schemas into Relune.
+
+**Qualified names and stable IDs** — `stable_id` and `qualified_name()` are both produced by `qualified_identifier`, which joins `schema.name` and double-quotes any component containing `.` or `"` (doubling embedded quotes). Every distinct `(schema, name)` pair therefore maps to a distinct string: the unqualified table `"a.b"` gets `"a.b"` while table `b` in schema `a` gets `a.b`. `Schema::validate()` additionally reports duplicate `stable_id`s.
 
 **Derived artifacts** flow through the pipeline:
 

@@ -42,6 +42,21 @@ pub enum AppError {
         message: String,
     },
 
+    /// Input schema has objects that cannot be identified uniquely (empty or
+    /// duplicate names or stable IDs) in a command that matches objects
+    /// between schemas (diff, review).
+    #[error(
+        "Invalid schema ({input}): {} identity error(s): {}",
+        errors.len(),
+        errors.join("; ")
+    )]
+    InvalidSchema {
+        /// Which input failed validation, such as `before` or `after`.
+        input: String,
+        /// Validation error messages from `Schema::validate`.
+        errors: Vec<String>,
+    },
+
     /// Schema not found.
     #[error("Schema not found: {schema}")]
     SchemaNotFound {
@@ -92,6 +107,7 @@ impl AppError {
             Self::Io(_) => Some("IO_ERROR"),
             Self::Json(_) => Some("JSON_ERROR"),
             Self::Input { .. } => Some("INPUT_ERROR"),
+            Self::InvalidSchema { .. } => Some("INVALID_SCHEMA"),
             Self::SchemaNotFound { .. } => Some("SCHEMA_NOT_FOUND"),
             Self::TableNotFound { .. } => Some("TABLE_NOT_FOUND"),
             Self::Unsupported { .. } => Some("UNSUPPORTED"),

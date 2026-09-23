@@ -357,10 +357,7 @@ fn format_table_details(table: &TableDetails) -> String {
         output.push_str("\nForeign Keys:\n");
         for fk in &table.foreign_keys {
             let name = fk.name.as_deref().unwrap_or("(unnamed)");
-            let target = match &fk.to_schema {
-                Some(schema) => format!("{}.{}", schema, fk.to_table),
-                None => fk.to_table.clone(),
-            };
+            let target = relune_core::qualified_identifier(fk.to_schema.as_deref(), &fk.to_table);
             let _ = writeln!(
                 output,
                 "  {name} -> {target} ({})",

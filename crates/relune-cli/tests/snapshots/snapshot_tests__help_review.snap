@@ -90,6 +90,10 @@ Options:
       --exit-code
           Exit with code 10 if any findings are emitted
 
+      --allow-invalid-schema
+          Continue even when an input has empty or duplicate table, column, view, or enum names; the
+          validation errors are reported as warnings
+
       --list-rules
           List all review rules (with default severity and description) and exit.
           

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::input::DiffInputSelection;
 use crate::cli::{ColorWhen, ReviewArgs, ReviewFormat, ReviewSeverityArg};
 use crate::config::ReluneConfig;
-use crate::error::{CliError, CliResult};
+use crate::error::{CliError, CliResult, schema_comparison_error};
 use crate::output::{check_diagnostics, print_success, write_output};
 use relune_app::{
     ReviewFormat as AppReviewFormat, ReviewRequest, ReviewResult, format_review_json,
@@ -56,10 +56,11 @@ pub fn run_review(
         deny,
         severity_overrides: merged.severity_overrides,
         dialect,
+        allow_invalid_schema: merged.allow_invalid_schema,
     };
 
     let result = review(request)
-        .map_err(|error| CliError::general(anyhow::anyhow!("Failed to review schema: {error}")))?;
+        .map_err(|error| schema_comparison_error("Failed to review schema", &error))?;
 
     check_diagnostics(&result.diagnostics, color, false, quiet)?;
 

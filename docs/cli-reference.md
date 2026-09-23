@@ -253,6 +253,9 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 | `--dialect` | For SQL parsing on both sides |
 | `--fail-on-warning` | Return exit code `3` when diagnostics include warnings |
 | `--exit-code` | Return exit code `10` when schema changes are detected (like `git diff --exit-code`) |
+| `--allow-invalid-schema` | Compare inputs that fail identity validation instead of exiting `1` (see below) |
+
+`diff` and `review` match objects between the two schemas by name, so they refuse an input with empty or duplicate table, column, view, or enum names (or empty / duplicate table `stable_id`s) and exit `1` before comparing anything. `--allow-invalid-schema` downgrades those errors to `SCHEMA004` warnings; duplicate objects may then be merged in the output. Two cases are handled earlier and are not affected by the flag: the SQL parser keeps the first of several `CREATE TABLE` statements for the same table and reports the rest as parse warnings, and schema JSON import always rejects empty or duplicate `id`s. Other validation problems, such as foreign keys or indexes that reference missing tables or columns, are always reported as `SCHEMA004` warnings, because review rules such as `risk/drop-table-referenced` analyze exactly those states. `render`, `inspect`, `export`, `doc`, and `lint` always report validation errors as warnings.
 
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql
@@ -286,6 +289,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--exit-code` | Exit `10` when any findings are emitted (regardless of severity) |
 | `--list-rules` | List every review rule (with default severity and description) and exit; honors `--format text\|json` only |
 | `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` short-circuits with rc=10 |
+| `--allow-invalid-schema` | Review inputs that fail identity validation instead of exiting `1` (same rules as [`diff`](#diff)) |
 
 Rule IDs are kebab-case under the `risk/` namespace. The catalog covers twelve rules:
 

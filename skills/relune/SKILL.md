@@ -275,8 +275,11 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
 | `--exit-code` | Exit with code 10 if schema changes are detected (like `git diff --exit-code`) | off |
 | `--fail-on-warning` | Non-zero exit on warnings | -- |
+| `--allow-invalid-schema` | Compare inputs with empty or duplicate table/column/view/enum names instead of failing (errors become `SCHEMA004` warnings) | off |
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
+
+`diff` and `review` refuse inputs whose objects cannot be matched unambiguously (empty or duplicate table, column, view, or enum names) and exit `1`; pass `--allow-invalid-schema` to compare them anyway. Other validation problems, such as foreign keys to missing tables, stay `SCHEMA004` warnings.
 
 ### review
 
@@ -312,6 +315,7 @@ relune review --list-rules --format json         # JSON catalog (for CI / docs)
 | `--exit-code` | Exit `10` when any findings are emitted | off |
 | `--list-rules` | List every rule (with default severity and description) and exit; honors `--format text\|json` only | off |
 | `--emit-summary <PATH>` | Always write the full review JSON to `PATH`, even when `--deny` short-circuits with rc=10 | off |
+| `--allow-invalid-schema` | Review inputs with empty or duplicate table/column/view/enum names instead of failing (errors become `SCHEMA004` warnings) | off |
 
 Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. The catalog has twelve rules; the four lock-risk caution rules (`risk/add-index-on-large-table`, `risk/add-fk-on-existing`, `risk/alter-column-type`, and `risk/rewrite-table` on MySQL) fire when the effective dialect resolves to `postgres` or `mysql`. `--dialect auto` (the default) promotes to a concrete dialect when both SQL inputs parse to the same one, so SQL-only flows usually pick up lock-risk automatically; pin `--dialect` explicitly for schema-JSON inputs (no parser-side dialect signal) or to override the parser. When the two sides resolve to different dialects, lock-risk stays inactive and a `REVIEW002` warning surfaces the mismatch. `--list-rules` is the canonical source of every rule for CI / docs automation. `--emit-summary` is intended for CI jobs that need the structured report in a single pass (PR comment generation that still wants `--deny` to gate the build); reusing the `--out` path is rejected as a usage error.
 
@@ -416,7 +420,7 @@ A composite action is available at `mhiro2/relune/action` (Linux and macOS runne
   run: exit 1
 ```
 
-Common inputs: `version`, `mode` (`diff` | `review`), `before`, `after`, `format`, `output-path`, `dialect`, `binary-path`.
+Common inputs: `version`, `mode` (`diff` | `review`), `before`, `after`, `format`, `output-path`, `dialect`, `allow-invalid-schema`, `binary-path`.
 
 Review-only inputs: `deny` (`info` | `warning` | `caution` | `breaking`), `rules`, `except-rules`, `except-tables` (newline-separated lists), `fail-on-blocking` (`"true"` | `"false"`).
 

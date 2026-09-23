@@ -54,6 +54,34 @@ pub fn normalize_identifier(name: &str) -> String {
     name.to_lowercase()
 }
 
+/// Formats an optionally schema-qualified object name as `schema.name`.
+///
+/// A component containing `.` or `"` is wrapped in double quotes with any
+/// embedded `"` doubled, so every distinct `(schema, name)` pair yields a
+/// distinct string: the unqualified table `"a.b"` becomes `"a.b"` while
+/// table `b` in schema `a` becomes `a.b`. Plain components are left
+/// untouched to keep the common case readable.
+#[must_use]
+pub fn qualified_identifier(schema_name: Option<&str>, name: &str) -> String {
+    fn push_component(out: &mut String, component: &str) {
+        if component.contains(['.', '"']) {
+            out.push('"');
+            out.push_str(&component.replace('"', "\"\""));
+            out.push('"');
+        } else {
+            out.push_str(component);
+        }
+    }
+
+    let mut out = String::with_capacity(name.len() + schema_name.map_or(0, |s| s.len() + 1));
+    if let Some(schema_name) = schema_name {
+        push_component(&mut out, schema_name);
+        out.push('.');
+    }
+    push_component(&mut out, name);
+    out
+}
+
 /// Unique identifier for a table within a schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TableId(pub u64);
@@ -85,13 +113,47 @@ pub struct Schema {
     pub enums: Vec<Enum>,
 }
 
+/// Category of a [`ValidationError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValidationErrorKind {
+    /// An object cannot be identified uniquely (empty or duplicate table,
+    /// view, enum, column, enum value, or `stable_id`). Anything that keys
+    /// objects by name or `stable_id`, such as diff, would silently merge or
+    /// drop entries.
+    Identity,
+    /// The schema is identifiable but internally inconsistent, e.g. a
+    /// foreign key or index refers to a missing table or column. Review
+    /// rules such as `risk/drop-column-referenced` rely on seeing these.
+    Consistency,
+}
+
 /// A validation error found in a schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
+    /// Category of the error.
+    pub kind: ValidationErrorKind,
     /// The table where the error was found, if applicable.
     pub table: Option<String>,
     /// Description of the validation error.
     pub message: String,
+}
+
+impl ValidationError {
+    fn identity(table: Option<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: ValidationErrorKind::Identity,
+            table,
+            message: message.into(),
+        }
+    }
+
+    fn consistency(table: Option<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: ValidationErrorKind::Consistency,
+            table,
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for ValidationError {
@@ -107,7 +169,7 @@ impl Schema {
     /// Validates the schema for structural consistency.
     ///
     /// Checks for:
-    /// - Duplicate table names (schema-qualified)
+    /// - Duplicate table names (schema-qualified) and duplicate table `stable_id`s
     /// - Empty table or column names
     /// - Empty column data types
     /// - FK `from_columns` referencing nonexistent columns in the source table
@@ -121,14 +183,29 @@ impl Schema {
 
         // Check for duplicate table names using an optional schema key.
         let mut seen_names: HashSet<(Option<String>, String)> = HashSet::new();
+        let mut seen_stable_ids: HashSet<&str> = HashSet::new();
         for table in &self.tables {
             let schema = table.schema_name.as_deref().map(str::to_lowercase);
             let name = table.name.to_lowercase();
-            if !seen_names.insert((schema, name)) {
-                errors.push(ValidationError {
-                    table: Some(table.qualified_name()),
-                    message: "duplicate table name".to_string(),
-                });
+            let duplicate_name = !seen_names.insert((schema, name));
+            if duplicate_name {
+                errors.push(ValidationError::identity(
+                    Some(table.qualified_name()),
+                    "duplicate table name",
+                ));
+            }
+            // Always record the ID so later tables are checked against it, but
+            // skip the report when the duplicate name already implies the clash.
+            if table.stable_id.is_empty() {
+                errors.push(ValidationError::identity(
+                    Some(table.qualified_name()),
+                    "table has empty stable_id",
+                ));
+            } else if !seen_stable_ids.insert(&table.stable_id) && !duplicate_name {
+                errors.push(ValidationError::identity(
+                    Some(table.qualified_name()),
+                    format!("duplicate table stable_id '{}'", table.stable_id),
+                ));
             }
         }
 
@@ -137,80 +214,74 @@ impl Schema {
         }
 
         // --- View validation ---
-        let mut seen_view_names: HashSet<String> = HashSet::new();
+        let mut seen_view_names: HashSet<(Option<String>, String)> = HashSet::new();
         for view in &self.views {
             if view.name.trim().is_empty() {
-                errors.push(ValidationError {
-                    table: None,
-                    message: "view has empty name".to_string(),
-                });
+                errors.push(ValidationError::identity(None, "view has empty name"));
                 continue;
             }
 
-            let key = {
-                let schema = view.schema_name.as_deref().unwrap_or("");
-                format!("{}.{}", schema.to_lowercase(), view.name.to_lowercase())
-            };
+            let key = (
+                view.schema_name.as_deref().map(str::to_lowercase),
+                view.name.to_lowercase(),
+            );
             if !seen_view_names.insert(key) {
-                errors.push(ValidationError {
-                    table: Some(view.qualified_name()),
-                    message: "duplicate view name".to_string(),
-                });
+                errors.push(ValidationError::identity(
+                    Some(view.qualified_name()),
+                    "duplicate view name",
+                ));
             }
 
             let mut seen_col_names: HashSet<String> = HashSet::new();
             for col in &view.columns {
                 if col.name.trim().is_empty() {
-                    errors.push(ValidationError {
-                        table: Some(view.name.clone()),
-                        message: "column has empty name".to_string(),
-                    });
+                    errors.push(ValidationError::identity(
+                        Some(view.name.clone()),
+                        "column has empty name",
+                    ));
                     continue;
                 }
                 if !seen_col_names.insert(col.name.to_lowercase()) {
-                    errors.push(ValidationError {
-                        table: Some(view.qualified_name()),
-                        message: format!("duplicate column name '{}'", col.name),
-                    });
+                    errors.push(ValidationError::identity(
+                        Some(view.qualified_name()),
+                        format!("duplicate column name '{}'", col.name),
+                    ));
                 }
                 if col.data_type.trim().is_empty() {
-                    errors.push(ValidationError {
-                        table: Some(view.name.clone()),
-                        message: format!("column '{}' has empty data_type", col.name),
-                    });
+                    errors.push(ValidationError::consistency(
+                        Some(view.name.clone()),
+                        format!("column '{}' has empty data_type", col.name),
+                    ));
                 }
             }
         }
 
         // --- Enum validation ---
-        let mut seen_enum_names: HashSet<String> = HashSet::new();
+        let mut seen_enum_names: HashSet<(Option<String>, String)> = HashSet::new();
         for enum_ in &self.enums {
             if enum_.name.trim().is_empty() {
-                errors.push(ValidationError {
-                    table: None,
-                    message: "enum has empty name".to_string(),
-                });
+                errors.push(ValidationError::identity(None, "enum has empty name"));
                 continue;
             }
 
-            let key = {
-                let schema = enum_.schema_name.as_deref().unwrap_or("");
-                format!("{}.{}", schema.to_lowercase(), enum_.name.to_lowercase())
-            };
+            let key = (
+                enum_.schema_name.as_deref().map(str::to_lowercase),
+                enum_.name.to_lowercase(),
+            );
             if !seen_enum_names.insert(key) {
-                errors.push(ValidationError {
-                    table: Some(enum_.qualified_name()),
-                    message: "duplicate enum name".to_string(),
-                });
+                errors.push(ValidationError::identity(
+                    Some(enum_.qualified_name()),
+                    "duplicate enum name",
+                ));
             }
 
             let mut seen_values: HashSet<&str> = HashSet::new();
             for val in &enum_.values {
                 if !seen_values.insert(val.as_str()) {
-                    errors.push(ValidationError {
-                        table: Some(enum_.qualified_name()),
-                        message: format!("duplicate enum value '{val}'"),
-                    });
+                    errors.push(ValidationError::identity(
+                        Some(enum_.qualified_name()),
+                        format!("duplicate enum value '{val}'"),
+                    ));
                 }
             }
         }
@@ -220,36 +291,33 @@ impl Schema {
 
     fn validate_table(table: &Table, schema: &Self, errors: &mut Vec<ValidationError>) {
         if table.name.trim().is_empty() {
-            errors.push(ValidationError {
-                table: None,
-                message: "table has empty name".to_string(),
-            });
+            errors.push(ValidationError::identity(None, "table has empty name"));
         }
 
         let mut col_name_set: HashSet<String> = HashSet::new();
         for col in &table.columns {
             let lower = col.name.to_lowercase();
             if !col_name_set.insert(lower.clone()) {
-                errors.push(ValidationError {
-                    table: Some(table.name.clone()),
-                    message: format!("duplicate column name '{}'", col.name),
-                });
+                errors.push(ValidationError::identity(
+                    Some(table.name.clone()),
+                    format!("duplicate column name '{}'", col.name),
+                ));
             }
         }
         let col_names = col_name_set;
 
         for col in &table.columns {
             if col.name.trim().is_empty() {
-                errors.push(ValidationError {
-                    table: Some(table.name.clone()),
-                    message: "column has empty name".to_string(),
-                });
+                errors.push(ValidationError::identity(
+                    Some(table.name.clone()),
+                    "column has empty name",
+                ));
             }
             if col.data_type.trim().is_empty() {
-                errors.push(ValidationError {
-                    table: Some(table.name.clone()),
-                    message: format!("column '{}' has empty data_type", col.name),
-                });
+                errors.push(ValidationError::consistency(
+                    Some(table.name.clone()),
+                    format!("column '{}' has empty data_type", col.name),
+                ));
             }
         }
 
@@ -269,13 +337,13 @@ impl Schema {
         errors: &mut Vec<ValidationError>,
     ) {
         if index.key_parts.is_empty() {
-            errors.push(ValidationError {
-                table: Some(table.name.clone()),
-                message: match index.name.as_deref() {
+            errors.push(ValidationError::consistency(
+                Some(table.name.clone()),
+                match index.name.as_deref() {
                     Some(name) => format!("index '{name}' has no columns"),
                     None => "index has no columns".to_string(),
                 },
-            });
+            ));
             return;
         }
 
@@ -284,15 +352,15 @@ impl Schema {
         // not checked here.
         for col in index.column_names() {
             if !col_names.contains(&col.to_lowercase()) {
-                errors.push(ValidationError {
-                    table: Some(table.name.clone()),
-                    message: match index.name.as_deref() {
+                errors.push(ValidationError::consistency(
+                    Some(table.name.clone()),
+                    match index.name.as_deref() {
                         Some(name) => {
                             format!("index '{name}' references unknown column '{col}'")
                         }
                         None => format!("index references unknown column '{col}'"),
                     },
-                });
+                ));
             }
         }
     }
@@ -309,14 +377,14 @@ impl Schema {
             || fk.to_columns.is_empty()
             || fk.from_columns.len() != fk.to_columns.len()
         {
-            errors.push(ValidationError {
-                table: Some(table.name.clone()),
-                message: format!(
+            errors.push(ValidationError::consistency(
+                Some(table.name.clone()),
+                format!(
                     "FK columns must be non-empty and have the same length: {} from_columns vs {} to_columns",
                     fk.from_columns.len(),
                     fk.to_columns.len()
                 ),
-            });
+            ));
         }
 
         // from_columns must not contain internal duplicates (case-insensitive)
@@ -324,10 +392,10 @@ impl Schema {
             let mut seen: HashSet<String> = HashSet::new();
             for col in &fk.from_columns {
                 if !seen.insert(col.to_lowercase()) {
-                    errors.push(ValidationError {
-                        table: Some(table.name.clone()),
-                        message: format!("FK from_columns contains duplicate '{col}'"),
-                    });
+                    errors.push(ValidationError::consistency(
+                        Some(table.name.clone()),
+                        format!("FK from_columns contains duplicate '{col}'"),
+                    ));
                 }
             }
         }
@@ -337,10 +405,10 @@ impl Schema {
             let mut seen: HashSet<String> = HashSet::new();
             for col in &fk.to_columns {
                 if !seen.insert(col.to_lowercase()) {
-                    errors.push(ValidationError {
-                        table: Some(table.name.clone()),
-                        message: format!("FK to_columns contains duplicate '{col}'"),
-                    });
+                    errors.push(ValidationError::consistency(
+                        Some(table.name.clone()),
+                        format!("FK to_columns contains duplicate '{col}'"),
+                    ));
                 }
             }
         }
@@ -348,28 +416,28 @@ impl Schema {
         // from_columns reference existing columns in source table
         for col in &fk.from_columns {
             if !col_names.contains(&col.to_lowercase()) {
-                errors.push(ValidationError {
-                    table: Some(table.name.clone()),
-                    message: format!("FK from_column '{col}' does not exist in table"),
-                });
+                errors.push(ValidationError::consistency(
+                    Some(table.name.clone()),
+                    format!("FK from_column '{col}' does not exist in table"),
+                ));
             }
         }
 
         match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
             ForeignKeyTargetResolution::Missing => {
-                errors.push(ValidationError {
-                    table: Some(table.name.clone()),
-                    message: format!("FK references unknown table '{}'", fk.to_table),
-                });
+                errors.push(ValidationError::consistency(
+                    Some(table.name.clone()),
+                    format!("FK references unknown table '{}'", fk.to_table),
+                ));
             }
             ForeignKeyTargetResolution::Ambiguous => {
-                errors.push(ValidationError {
-                    table: Some(table.qualified_name()),
-                    message: format!(
+                errors.push(ValidationError::consistency(
+                    Some(table.qualified_name()),
+                    format!(
                         "FK references ambiguous table '{}'; specify a schema name",
                         fk.to_table
                     ),
-                });
+                ));
             }
             ForeignKeyTargetResolution::Found(ref_table) => {
                 // to_columns reference existing columns in the target table (case-insensitive)
@@ -379,13 +447,13 @@ impl Schema {
                         .iter()
                         .any(|candidate| candidate.name.eq_ignore_ascii_case(col))
                     {
-                        errors.push(ValidationError {
-                            table: Some(table.name.clone()),
-                            message: format!(
+                        errors.push(ValidationError::consistency(
+                            Some(table.name.clone()),
+                            format!(
                                 "FK to_column '{col}' does not exist in table '{}'",
                                 fk.to_table
                             ),
-                        });
+                        ));
                     }
                 }
             }
@@ -555,10 +623,7 @@ impl Table {
     /// Returns the qualified name (schema.table) or just the name.
     #[must_use]
     pub fn qualified_name(&self) -> String {
-        match &self.schema_name {
-            Some(schema_name) => format!("{}.{}", schema_name, self.name),
-            None => self.name.clone(),
-        }
+        qualified_identifier(self.schema_name.as_deref(), &self.name)
     }
 }
 
@@ -934,10 +999,7 @@ impl View {
     /// Returns the qualified name (schema.view) or just the name.
     #[must_use]
     pub fn qualified_name(&self) -> String {
-        match &self.schema_name {
-            Some(schema_name) => format!("{}.{}", schema_name, self.name),
-            None => self.name.clone(),
-        }
+        qualified_identifier(self.schema_name.as_deref(), &self.name)
     }
 }
 
@@ -958,10 +1020,7 @@ impl Enum {
     /// Returns the qualified name (schema.enum) or just the name.
     #[must_use]
     pub fn qualified_name(&self) -> String {
-        match &self.schema_name {
-            Some(schema_name) => format!("{}.{}", schema_name, self.name),
-            None => self.name.clone(),
-        }
+        qualified_identifier(self.schema_name.as_deref(), &self.name)
     }
 }
 
@@ -972,7 +1031,7 @@ mod tests {
     fn make_table(name: &str, schema: Option<&str>, cols: &[&str], fks: Vec<ForeignKey>) -> Table {
         Table {
             id: TableId(0),
-            stable_id: name.to_string(),
+            stable_id: qualified_identifier(schema, name),
             schema_name: schema.map(ToString::to_string),
             name: name.to_string(),
             columns: cols
@@ -1269,6 +1328,78 @@ mod tests {
     }
 
     // --- Duplicate column name within a table ---
+
+    #[test]
+    fn qualified_identifier_quotes_only_ambiguous_components() {
+        assert_eq!(qualified_identifier(None, "users"), "users");
+        assert_eq!(
+            qualified_identifier(Some("public"), "users"),
+            "public.users"
+        );
+        assert_eq!(qualified_identifier(None, "a.b"), r#""a.b""#);
+        assert_eq!(qualified_identifier(Some("a"), "b"), "a.b");
+        assert_eq!(qualified_identifier(Some("a.b"), "c"), r#""a.b".c"#);
+        assert_eq!(qualified_identifier(Some("a"), "b.c"), r#"a."b.c""#);
+        assert_eq!(qualified_identifier(None, r#"q"t"#), r#""q""t""#);
+    }
+
+    #[test]
+    fn qualified_identifier_is_injective_for_tricky_components() {
+        let schemas = [
+            None,
+            Some(""),
+            Some("a"),
+            Some("a.b"),
+            Some(r#"a""#),
+            Some(r#"a"."b"#),
+        ];
+        let names = ["", "b", "a.b", "b.c", r#"b""#, r#""a.b""#, r#"a"."b"#];
+        let mut seen = HashSet::new();
+        for schema in schemas {
+            for name in names {
+                let encoded = qualified_identifier(schema, name);
+                assert!(
+                    seen.insert(encoded.clone()),
+                    "collision for ({schema:?}, {name:?}): {encoded}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validate_detects_empty_table_stable_id() {
+        let mut table = make_table("users", None, &["id"], vec![]);
+        table.stable_id = String::new();
+        let schema = Schema {
+            tables: vec![table],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].kind, ValidationErrorKind::Identity);
+        assert!(errs[0].message.contains("empty stable_id"));
+    }
+
+    #[test]
+    fn validate_detects_duplicate_table_stable_id() {
+        let mut first = make_table("a", None, &["id"], vec![]);
+        first.stable_id = "shared".to_string();
+        let mut second = make_table("b", None, &["id"], vec![]);
+        second.stable_id = "shared".to_string();
+        let schema = Schema {
+            tables: vec![first, second],
+            views: vec![],
+            enums: vec![],
+        };
+        let errs = schema.validate();
+        assert_eq!(errs.len(), 1);
+        assert!(
+            errs[0]
+                .message
+                .contains("duplicate table stable_id 'shared'")
+        );
+    }
 
     #[test]
     fn validate_table_duplicate_column_name_is_detected() {

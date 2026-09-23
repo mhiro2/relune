@@ -245,6 +245,8 @@ pub fn lint_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 /// - `theme`: Render theme for visual diff output
 /// - `showLegend`: Whether to include the legend in visual diff output
 /// - `showStats`: Whether to include stats in visual diff output
+/// - `allowInvalidSchema`: Compare inputs with empty or duplicate object names
+///   instead of failing with `INVALID_SCHEMA` (default: false)
 ///
 /// Returns a JSON result object with:
 /// - `diff`: Structured schema diff
@@ -313,6 +315,8 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 ///   to different concrete dialects, and stays `auto` silently when one
 ///   or both sides carry no parser-side dialect signal (e.g. schema-JSON
 ///   inputs).
+/// - `allowInvalidSchema`: Compare inputs with empty or duplicate object names
+///   instead of failing with `INVALID_SCHEMA` (default: false)
 ///
 /// Returns a JSON result object with:
 /// - `review`: Structured review payload (`findings`, `suppressed`,
@@ -511,6 +515,7 @@ mod wasm_bindgen_tests {
             theme: None,
             show_legend: None,
             show_stats: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize diff request");
 
@@ -547,6 +552,7 @@ mod wasm_bindgen_tests {
             theme: None,
             show_legend: None,
             show_stats: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize diff request");
 
@@ -585,6 +591,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -611,6 +618,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -673,6 +681,7 @@ mod wasm_bindgen_tests {
             deny: Some(ReviewSeverity::Breaking),
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -743,6 +752,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -782,6 +792,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: Some(relune_core::SqlDialect::Postgres),
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -832,6 +843,7 @@ mod wasm_bindgen_tests {
                 deny: None,
                 severity_overrides: vec![],
                 dialect: None,
+                allow_invalid_schema: false,
             })
             .expect("serialize review request");
 

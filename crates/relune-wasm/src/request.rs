@@ -397,6 +397,10 @@ pub struct WasmDiffRequest {
     /// Whether to show render statistics in rendered outputs.
     #[serde(default)]
     pub show_stats: Option<bool>,
+    /// Continue when an input has empty or duplicate object names, reporting
+    /// the validation errors as warnings instead of failing.
+    #[serde(default)]
+    pub allow_invalid_schema: bool,
 }
 
 impl WasmDiffRequest {
@@ -437,6 +441,7 @@ impl WasmDiffRequest {
                 compaction: LayoutCompactionSpec::default(),
                 ..Default::default()
             },
+            allow_invalid_schema: self.allow_invalid_schema,
         })
     }
 }
@@ -521,6 +526,10 @@ pub struct WasmReviewRequest {
     /// is still honored.
     #[serde(default)]
     pub dialect: Option<SqlDialect>,
+    /// Continue when an input has empty or duplicate object names, reporting
+    /// the validation errors as warnings instead of failing.
+    #[serde(default)]
+    pub allow_invalid_schema: bool,
 }
 
 impl WasmReviewRequest {
@@ -548,6 +557,7 @@ impl WasmReviewRequest {
             deny: self.deny,
             severity_overrides: self.severity_overrides.clone(),
             dialect: self.dialect.unwrap_or_default(),
+            allow_invalid_schema: self.allow_invalid_schema,
         })
     }
 }
@@ -789,6 +799,7 @@ mod tests {
             theme: Some(RenderTheme::Light),
             show_legend: Some(false),
             show_stats: Some(false),
+            allow_invalid_schema: false,
         };
 
         let diff_req = req.to_diff_request().unwrap();
@@ -819,6 +830,7 @@ mod tests {
             deny: Some(ReviewSeverity::Warning),
             severity_overrides: vec![],
             dialect: Some(SqlDialect::Postgres),
+            allow_invalid_schema: false,
         };
 
         let review_req = req.to_review_request().unwrap();
@@ -851,6 +863,7 @@ mod tests {
             deny: None,
             severity_overrides: vec![],
             dialect: Some(SqlDialect::Postgres),
+            allow_invalid_schema: false,
         };
         let review_req = req.to_review_request().unwrap();
         assert_eq!(review_req.dialect, SqlDialect::Postgres);
@@ -896,6 +909,7 @@ mod tests {
                 severity: ReviewSeverity::Info,
             }],
             dialect: None,
+            allow_invalid_schema: false,
         };
 
         // Round-trip the request through serde to make sure JS callers can
@@ -932,6 +946,7 @@ mod tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         };
 
         let err = req

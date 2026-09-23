@@ -8,6 +8,7 @@
 #   FORMAT        — Output format: text|markdown|json|svg|html (required).
 #   OUTPUT_PATH   — Output file path (optional; derived from FORMAT when empty).
 #   DIALECT       — SQL dialect: auto|postgres|mysql|sqlite (optional).
+#   ALLOW_INVALID_SCHEMA — "true" to pass --allow-invalid-schema (optional).
 #   GITHUB_OUTPUT — Set by GitHub Actions runtime.
 
 set -euo pipefail
@@ -41,6 +42,10 @@ args=(diff
 
 if [[ -n "${DIALECT:-}" && "${DIALECT}" != "auto" ]]; then
   args+=(--dialect "${DIALECT}")
+fi
+
+if [[ "${ALLOW_INVALID_SCHEMA:-}" == "true" ]]; then
+  args+=(--allow-invalid-schema)
 fi
 
 # Run diff with --exit-code to detect changes

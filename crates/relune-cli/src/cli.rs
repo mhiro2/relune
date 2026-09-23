@@ -716,6 +716,7 @@ pub enum LintSeverity {
             .multiple(false)
     )
 )]
+#[allow(clippy::struct_excessive_bools)] // independent CLI switches, not a state enum
 pub struct DiffArgs {
     // -------------------------------------------------------------------------
     // Before input options (at least one required)
@@ -773,6 +774,10 @@ pub struct DiffArgs {
     /// Exit with code 10 if schema changes are detected (like `git diff --exit-code`).
     #[arg(long = "exit-code")]
     pub exit_code: bool,
+    /// Continue even when an input has empty or duplicate table, column,
+    /// view, or enum names; the validation errors are reported as warnings.
+    #[arg(long = "allow-invalid-schema")]
+    pub allow_invalid_schema: bool,
 }
 
 /// Output format for diff command.
@@ -875,6 +880,11 @@ pub struct ReviewArgs {
     /// Exit with code 10 if any findings are emitted.
     #[arg(long = "exit-code")]
     pub exit_code: bool,
+
+    /// Continue even when an input has empty or duplicate table, column,
+    /// view, or enum names; the validation errors are reported as warnings.
+    #[arg(long = "allow-invalid-schema")]
+    pub allow_invalid_schema: bool,
 
     /// List all review rules (with default severity and description) and exit.
     ///

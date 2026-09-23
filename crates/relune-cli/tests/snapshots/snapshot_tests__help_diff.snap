@@ -75,5 +75,9 @@ Options:
       --exit-code
           Exit with code 10 if schema changes are detected (like `git diff --exit-code`)
 
+      --allow-invalid-schema
+          Continue even when an input has empty or duplicate table, column, view, or enum names; the
+          validation errors are reported as warnings
+
   -h, --help
           Print help (see a summary with '-h')

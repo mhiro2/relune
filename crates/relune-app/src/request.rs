@@ -455,6 +455,10 @@ pub struct DiffRequest {
     /// Layout specification (used when format is Svg or Html).
     #[serde(default)]
     pub layout: LayoutSpec,
+    /// Continue when an input fails `Schema::validate`, reporting the errors
+    /// as warnings instead of failing with `AppError::InvalidSchema`.
+    #[serde(default)]
+    pub allow_invalid_schema: bool,
 }
 
 impl DiffRequest {
@@ -587,6 +591,10 @@ pub struct ReviewRequest {
     /// Defaults to `SqlDialect::Auto`.
     #[serde(default)]
     pub dialect: SqlDialect,
+    /// Continue when an input fails `Schema::validate`, reporting the errors
+    /// as warnings instead of failing with `AppError::InvalidSchema`.
+    #[serde(default)]
+    pub allow_invalid_schema: bool,
 }
 
 impl ReviewRequest {

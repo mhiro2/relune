@@ -3,30 +3,13 @@
 use crate::context::{LineOffsets, ParseContext, span_from_spanned};
 use relune_core::{
     Diagnostic, ForeignKey, ReferentialAction, diagnostic::codes, normalize_identifier,
+    qualified_identifier,
 };
 use sqlparser::ast::{ObjectName, ObjectNamePart};
 
 pub(crate) fn normalized_stable_id(schema_name: Option<&str>, name: &str) -> String {
-    let norm_name = normalize_identifier(name);
-    match schema_name {
-        Some(schema_name) => {
-            let norm_schema = normalize_identifier(schema_name);
-            // Quote components that contain '.' so that ("a.b", "c") produces
-            // "a.b".c instead of the ambiguous a.b.c.
-            let s = if norm_schema.contains('.') {
-                format!("\"{norm_schema}\"")
-            } else {
-                norm_schema
-            };
-            let n = if norm_name.contains('.') {
-                format!("\"{norm_name}\"")
-            } else {
-                norm_name
-            };
-            format!("{s}.{n}")
-        }
-        None => norm_name,
-    }
+    let norm_schema = schema_name.map(normalize_identifier);
+    qualified_identifier(norm_schema.as_deref(), &normalize_identifier(name))
 }
 
 pub(crate) fn split_object_name_parts(name: &ObjectName) -> Vec<String> {

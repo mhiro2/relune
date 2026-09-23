@@ -201,8 +201,9 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `format` | `text`, `json`, `markdown`, `svg`, `html` |
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
+| `allow_invalid_schema` | Boolean; compare inputs with empty or duplicate object names instead of failing |
 
-`diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, and `--fail-on-warning`, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
+`diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--fail-on-warning`, and `--allow-invalid-schema`, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
 
 ---
 
@@ -216,8 +217,9 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `except_rules` | Array of rule IDs to remove from the active set |
 | `except_tables` | Array of table glob patterns whose findings move into `suppressed` (see [Table patterns](cli-reference.md#table-patterns)) |
 | `deny` | `info`, `warning`, `caution`, `breaking` — minimum severity that causes a non-zero exit when not overridden by `--deny` |
+| `allow_invalid_schema` | Boolean; review inputs with empty or duplicate object names instead of failing |
 
-`review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, and `--deny`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
+`review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, `--deny`, and `--allow-invalid-schema`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
 
 `dialect` is consumed twice: by the SQL parser when reading `before` / `after`, and by the review rule dispatcher. Setting `dialect = "postgres"` or `"mysql"` activates the lock-risk caution rules (`risk/add-index-on-large-table`, `risk/add-fk-on-existing`, `risk/alter-column-type`, and on MySQL `risk/rewrite-table`); `"sqlite"` skips them. `dialect = "auto"` (the default) is promoted to the parser-resolved dialect whenever both `before` and `after` parse to the same one — so SQL inputs that both look like Postgres run lock-risk under `Postgres` automatically. When the two sides resolve to different dialects, the dispatcher stays inactive and emits a `REVIEW002` warning so the skip is visible. Schema-JSON inputs carry no parser-side dialect signal, so they keep the historical `auto`-skip behavior unless `dialect` is set explicitly. The setting works whether the dialect comes from this TOML key or from the CLI `--dialect` flag, so `relune review` can run lock-risk-aware in CI with config alone.
 
