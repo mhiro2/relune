@@ -46,6 +46,22 @@ The DSN is **fully trusted** — Relune connects to exactly the host it names wi
 
 ---
 
+## Table patterns
+
+`render --include`/`--exclude`, `lint --except-table`, and `review --except-table` (plus the matching `include`/`exclude`/`except_tables` config keys) accept glob patterns. A pattern matches when it covers either the schema-qualified name (`public.users`) or the bare table name (`users`).
+
+| Syntax | Matches |
+|--------|---------|
+| `*` | Any run of characters, including none (`audit_*`, `*_log`, `audit_*_log`) |
+| `?` | Exactly one character (`log_202?`) |
+| `[abc]`, `[a-z]` | One character from the set or range |
+| `[!abc]`, `[^abc]` | One character not in the set |
+| `\` | Escapes the next character (`a\*b` matches the literal `a*b`) |
+
+Matching is case-sensitive, and `*` also spans the `.` schema separator. Quote patterns in the shell so it does not expand them against local files.
+
+---
+
 ## Exit codes
 
 | Code | Meaning |
@@ -76,8 +92,8 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 | `--focus <TABLE>` | Center on a table |
 | `--depth <N>` | Neighbor depth for focus (default `1`) |
 | `--group-by none\|schema\|prefix` | Group tables |
-| `--include <TABLE>` | Repeatable allowlist |
-| `--exclude <TABLE>` | Repeatable denylist |
+| `--include <PATTERN>` | Repeatable allowlist (see [Table patterns](#table-patterns)) |
+| `--exclude <PATTERN>` | Repeatable denylist (see [Table patterns](#table-patterns)) |
 | `--theme light\|dark` | Visual theme |
 | `--layout hierarchical\|force-directed` | Layout algorithm |
 | `--direction top-to-bottom\|left-to-right\|right-to-left\|bottom-to-top` | Primary flow direction |
@@ -88,9 +104,9 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 `render` validates focus/filter combinations before running:
 
 - `--depth` requires `--focus`
-- the focused table cannot also be excluded
-- if `--include` is set, it must contain the focused table
-- the same table cannot appear in both `--include` and `--exclude`
+- the same pattern cannot appear in both `--include` and `--exclude`
+
+If the include/exclude filters remove the focused table, `render` fails with `focus target table not found after applying include/exclude filters`.
 
 ```bash
 relune render --sql schema.sql -o erd.svg
@@ -197,7 +213,7 @@ Run built-in rules on the schema. Inputs: **`--sql`**, **`--schema-json`**, or *
 | `--rules <RULE>` | Repeatable; run only these rules |
 | `--exclude-rules <RULE>` | Repeatable; remove rules from the active set |
 | `--rule-category <CATEGORY>` | Repeatable; keep only `structure`, `relationships`, `naming`, `documentation` |
-| `--except-table <PATTERN>` | Repeatable; suppress issues for matching tables |
+| `--except-table <PATTERN>` | Repeatable; suppress issues for matching tables (see [Table patterns](#table-patterns)) |
 | `--deny error\|warning\|info\|hint` | Minimum severity for non-zero exit |
 | `--fail-on-warning` | Shortcut for treating warning diagnostics as failures |
 
@@ -208,7 +224,7 @@ relune lint --sql schema.sql --format json -o lint.json
 relune lint --sql schema.sql --profile strict --rule-category documentation
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
-relune lint --sql schema.sql --exclude-rules missing-table-comment --except-table audit_*
+relune lint --sql schema.sql --exclude-rules missing-table-comment --except-table 'audit_*'
 ```
 
 Rule IDs are **kebab-case** (for example `missing-foreign-key-index`, `missing-table-comment`, `circular-foreign-key`). `default` is the everyday schema review profile; `strict` additionally enforces column comment coverage. Categories are `structure`, `relationships`, `naming`, and `documentation`.
@@ -263,7 +279,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--dialect` | Drives both SQL parsing and review rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree, and stays inactive (with a `REVIEW002` warning) when they disagree. |
 | `--rules <RULE>` | Repeatable; run only these rules (accepts `risk/<id>` or bare `<id>`) |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set |
-| `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (supports `*` glob) |
+| `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (see [Table patterns](#table-patterns)) |
 | `--deny info\|warning\|caution\|breaking` | Exit non-zero when findings reach this severity |
 | `--exit-code` | Exit `10` when any findings are emitted (regardless of severity) |
 | `--list-rules` | List every review rule (with default severity and description) and exit; honors `--format text\|json` only |
@@ -300,7 +316,7 @@ relune review --before old.sql --after new.sql --format markdown -o review.md
 relune review --before old.sql --after new.sql --format json -o review.json
 relune review --before old.sql --after new.sql --deny breaking
 relune review --before old.sql --after new.sql --except-rule fk-without-index
-relune review --before old.sql --after new.sql --except-table audit_*
+relune review --before old.sql --after new.sql --except-table 'audit_*'
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
 relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
 relune review --before old.sql --after new.sql --dialect postgres --deny caution

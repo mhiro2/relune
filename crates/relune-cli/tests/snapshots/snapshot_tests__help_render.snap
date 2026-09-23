@@ -81,11 +81,11 @@ Options:
           - schema: Group by schema name
           - prefix: Group by table name prefix
 
-      --include <TABLE>
-          Explicitly include only these tables
+      --include <PATTERN>
+          Explicitly include only tables matching these glob patterns
 
-      --exclude <TABLE>
-          Exclude tables from output
+      --exclude <PATTERN>
+          Exclude tables matching these glob patterns from output
 
       --theme <THEME>
           Visual theme. Defaults to `light` after config merge

@@ -9,6 +9,7 @@ use crate::result::{LintResult, LintReview};
 use crate::schema_input::schema_from_input_with_context;
 use relune_core::{
     LintIssue, LintRuleCategory, LintRuleId, LintRuleMetadata, Severity, lint_schema,
+    pattern::matches_table_pattern,
 };
 
 /// Execute a lint request.
@@ -286,25 +287,7 @@ fn matches_except_table(patterns: &[String], issue: &LintIssue) -> bool {
         return false;
     };
     let short_name = table_name.rsplit('.').next().unwrap_or(table_name);
-    patterns
-        .iter()
-        .any(|pattern| matches_pattern(pattern, table_name) || matches_pattern(pattern, short_name))
-}
-
-fn matches_pattern(pattern: &str, value: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 2 {
-        return value.contains(&pattern[1..pattern.len() - 1]);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return value.ends_with(suffix);
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return value.starts_with(prefix);
-    }
-    value == pattern
+    matches_table_pattern(patterns, table_name, short_name)
 }
 
 /// Format severity for text output.
@@ -551,6 +534,27 @@ mod tests {
             lint(LintRequest::from_sql(sql).with_except_tables(vec!["audit_*".to_string()]))
                 .unwrap();
         assert!(result.issues.is_empty());
+        assert!(result.review.suppressed_issue_count > 0);
+    }
+
+    #[test]
+    fn test_lint_except_tables_supports_inner_wildcards() {
+        let sql = r"
+            CREATE TABLE audit_2024_log (event_name TEXT);
+            CREATE TABLE audit_2024_data (event_name TEXT);
+        ";
+
+        let result = lint(
+            LintRequest::from_sql(sql).with_except_tables(vec!["audit_20[0-9]?_*g".to_string()]),
+        )
+        .unwrap();
+        assert!(!result.issues.is_empty());
+        assert!(
+            result
+                .issues
+                .iter()
+                .all(|issue| issue.table_name.as_deref() == Some("audit_2024_data"))
+        );
         assert!(result.review.suppressed_issue_count > 0);
     }
 

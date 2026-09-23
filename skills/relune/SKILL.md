@@ -93,6 +93,10 @@ Logging honors `RUST_LOG`: when set to a non-empty value it takes precedence and
 
 `lint --deny`, `review --deny`, and `diff`/`review --exit-code` share exit code `10` so CI can tell a policy gate apart from a general failure (`1`) or usage mistake (`2`).
 
+## Table patterns
+
+`--include`, `--exclude`, and `--except-table` (and their config keys) take globs matched against both the schema-qualified and bare table name: `*` (any run), `?` (one character), `[abc]` / `[a-z]` / `[!abc]` (character sets), `\` (escape). Matching is case-sensitive; quote patterns in the shell.
+
 ## Commands
 
 ### render
@@ -122,16 +126,15 @@ relune render --db-url 'postgres://user:pass@localhost:5432/mydb' -o erd.svg
 | `--focus` | Table name to center on | -- |
 | `--depth` | Neighbor depth (requires `--focus`) | `1` |
 | `--group-by` | `none`, `schema`, `prefix` | `none` |
-| `--include` | Repeatable allowlist | -- |
-| `--exclude` | Repeatable denylist | -- |
+| `--include` | Repeatable allowlist (table glob) | -- |
+| `--exclude` | Repeatable denylist (table glob) | -- |
 | `--stats` | Print statistics to stderr | -- |
 | `--fail-on-warning` | Non-zero exit on warnings | -- |
 
 Validation rules:
 - `--depth` requires `--focus`
-- The focused table cannot be excluded
-- If `--include` is set, it must contain the focused table
-- The same table cannot appear in both `--include` and `--exclude`
+- The same pattern cannot appear in both `--include` and `--exclude`
+- The focused table must survive the include/exclude filters (checked at render time)
 
 Named viewpoints are applied before explicit CLI view flags. Effective precedence is: CLI flags > selected viewpoint > command defaults from `[render]`.
 
@@ -224,7 +227,7 @@ relune lint --sql schema.sql --format json -o lint.json
 relune lint --sql schema.sql --profile strict --rule-category documentation
 relune lint --sql schema.sql --deny warning
 relune lint --sql schema.sql --rules no-primary-key --rules missing-foreign-key-index
-relune lint --sql schema.sql --exclude-rules missing-table-comment --except-table audit_*
+relune lint --sql schema.sql --exclude-rules missing-table-comment --except-table 'audit_*'
 relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 ```
 
@@ -236,7 +239,7 @@ relune lint --db-url 'postgres://user:pass@localhost:5432/mydb'
 | `--rules` | Repeatable; run only these rules (kebab-case IDs) | all rules |
 | `--exclude-rules` | Repeatable; remove rules from the active set | -- |
 | `--rule-category` | Repeatable; keep `structure`, `relationships`, `naming`, `documentation` | all categories |
-| `--except-table` | Repeatable table pattern suppression | -- |
+| `--except-table` | Repeatable table glob suppression | -- |
 | `--deny` | `error`, `warning`, `info`, `hint` -- min severity for non-zero exit | -- |
 | `--fail-on-warning` | Non-zero exit on warning diagnostics | -- |
 
@@ -285,7 +288,7 @@ relune review --before old.sql --after new.sql --format markdown -o review.md
 relune review --before old.sql --after new.sql --format json -o review.json
 relune review --before old.sql --after new.sql --deny breaking
 relune review --before old.sql --after new.sql --except-rule fk-without-index
-relune review --before old.sql --after new.sql --except-table audit_*
+relune review --before old.sql --after new.sql --except-table 'audit_*'
 relune review --before old.sql --after new.sql --exit-code
 relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
 relune review --list-rules                       # text catalog of every rule
@@ -304,7 +307,7 @@ relune review --list-rules --format json         # JSON catalog (for CI / docs)
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` -- `postgres` / `mysql` activate the lock-risk caution rules; `auto` is promoted to the parser-resolved dialect when `before` / `after` agree, and emits a `REVIEW002` warning when they disagree | `auto` |
 | `--rules <RULE>` | Repeatable; run only these rules (`risk/<id>` or bare `<id>`) | all rules |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set | -- |
-| `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (`*` glob) | -- |
+| `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (table glob) | -- |
 | `--deny` | `info`, `warning`, `caution`, `breaking` -- min severity for non-zero exit | -- |
 | `--exit-code` | Exit `10` when any findings are emitted | off |
 | `--list-rules` | List every rule (with default severity and description) and exit; honors `--format text\|json` only | off |

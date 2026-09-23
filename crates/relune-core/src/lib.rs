@@ -43,6 +43,8 @@ pub mod layout;
 pub mod lint;
 /// Core data model types.
 pub mod model;
+/// Glob matching for table-name patterns.
+pub mod pattern;
 /// Migration risk review engine.
 pub mod review;
 
