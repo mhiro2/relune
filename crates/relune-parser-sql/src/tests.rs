@@ -2110,6 +2110,57 @@ fn alter_table_rename_table_allows_reusing_old_name() {
 }
 
 #[test]
+fn alter_table_rename_table_rejects_existing_target_name() {
+    let sql = r"
+    CREATE TABLE a (id INT);
+    CREATE TABLE b (id INT, note TEXT);
+    ALTER TABLE b RENAME TO a;
+    ALTER TABLE a ADD COLUMN extra INT;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    assert!(output.has_errors());
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|d| d.code == codes::schema_duplicate_table())
+        .expect("rename collision should be reported");
+    assert_eq!(diagnostic.severity, Severity::Error);
+    assert!(diagnostic.message.contains("`b`"));
+    assert!(diagnostic.message.contains("`a`"));
+
+    let schema = output.schema.expect("partial schema");
+    let stable_ids: Vec<&str> = schema.tables.iter().map(|t| t.stable_id.as_str()).collect();
+    assert_eq!(stable_ids, vec!["a", "b"]);
+
+    let a = schema.tables.iter().find(|t| t.stable_id == "a").unwrap();
+    let a_columns: Vec<&str> = a.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        a_columns,
+        vec!["id", "extra"],
+        "later ALTER TABLE a must still target the original table"
+    );
+    let b = schema.tables.iter().find(|t| t.stable_id == "b").unwrap();
+    assert_eq!(
+        b.columns.len(),
+        2,
+        "rejected rename must leave `b` untouched"
+    );
+}
+
+#[test]
+fn alter_table_rename_table_to_same_name_is_not_a_collision() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY);
+    ALTER TABLE users RENAME TO users;
+    ";
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    assert_eq!(schema.tables.len(), 1);
+    assert_eq!(schema.tables[0].stable_id, "users");
+}
+
+#[test]
 fn alter_table_drop_constraint_removes_fk() {
     let sql = r"
     CREATE TABLE orgs (id BIGINT PRIMARY KEY);

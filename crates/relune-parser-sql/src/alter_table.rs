@@ -396,6 +396,24 @@ fn apply_single_alter_operation(
                 .or_else(|| old_schema.clone());
             let new_name = normalize_identifier(&new_name_raw);
             let renamed_stable_id = normalized_stable_id(new_schema.as_deref(), &new_name);
+            if renamed_stable_id != old_stable && table_map.contains_key(&renamed_stable_id) {
+                ctx.diagnostics.push(
+                    Diagnostic::error(
+                        codes::schema_duplicate_table(),
+                        format!(
+                            "ALTER TABLE RENAME TO: cannot rename `{old_stable}` to \
+                             `{renamed_stable_id}` because that table already exists. \
+                             The rename was not applied."
+                        ),
+                    )
+                    .with_span_opt(span_from_spanned(
+                        input,
+                        offsets,
+                        renamed_target,
+                    )),
+                );
+                return;
+            }
             let table = &mut tables[idx];
             table.schema_name.clone_from(&new_schema);
             table.name.clone_from(&new_name);

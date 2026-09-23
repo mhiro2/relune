@@ -268,6 +268,9 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
             }
             _ => {}
         }
+
+        #[cfg(debug_assertions)]
+        assert_table_index_consistent(&tables, &table_map, &ctx.seen_tables);
     }
 
     // Report unsupported statements
@@ -349,6 +352,40 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
         dialect: resolved_dialect,
         schema,
         diagnostics: ctx.diagnostics,
+    }
+}
+
+/// Check that the stable-ID lookup used while applying statements still
+/// describes `tables` exactly: one entry per table, every index in range and
+/// pointing at the table with that stable ID, and no duplicate stable IDs.
+#[cfg(debug_assertions)]
+fn assert_table_index_consistent(
+    tables: &[relune_core::Table],
+    table_map: &HashMap<String, usize>,
+    seen_tables: &std::collections::HashSet<String>,
+) {
+    assert_eq!(
+        table_map.len(),
+        tables.len(),
+        "table_map and tables must have the same number of entries"
+    );
+    assert_eq!(
+        seen_tables.len(),
+        tables.len(),
+        "seen_tables and tables must have the same number of entries"
+    );
+    for (stable_id, &idx) in table_map {
+        let table = tables
+            .get(idx)
+            .unwrap_or_else(|| panic!("table_map entry `{stable_id}` points past the table list"));
+        assert_eq!(
+            &table.stable_id, stable_id,
+            "table_map key must match the stable ID of the table it points at"
+        );
+        assert!(
+            seen_tables.contains(stable_id),
+            "seen_tables must contain every live table `{stable_id}`"
+        );
     }
 }
 
