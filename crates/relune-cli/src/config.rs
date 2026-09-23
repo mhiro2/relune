@@ -343,6 +343,9 @@ pub struct DiffConfig {
     /// Exit with non-zero code if warnings are emitted.
     #[serde(default)]
     pub fail_on_warning: Option<bool>,
+    /// Continue when an input has empty or duplicate object names.
+    #[serde(default)]
+    pub allow_invalid_schema: Option<bool>,
 }
 
 /// Configuration for the review command.
@@ -374,6 +377,9 @@ pub struct ReviewConfig {
     /// rejected as a usage error during merge.
     #[serde(default)]
     pub severity_overrides: BTreeMap<String, ReviewRuleOverrideConfig>,
+    /// Continue when an input has empty or duplicate object names.
+    #[serde(default)]
+    pub allow_invalid_schema: Option<bool>,
 }
 
 /// TOML representation of a single per-rule severity override.
@@ -775,6 +781,8 @@ impl ReluneConfig {
             show_legend: self.diff.show_legend.unwrap_or(false),
             show_stats: self.diff.show_stats.unwrap_or(false),
             fail_on_warning: args.fail_on_warning || self.diff.fail_on_warning.unwrap_or(false),
+            allow_invalid_schema: args.allow_invalid_schema
+                || self.diff.allow_invalid_schema.unwrap_or(false),
         })
     }
 
@@ -800,6 +808,8 @@ impl ReluneConfig {
             except_tables: merge_string_values(&args.except_tables, &self.review.except_tables),
             deny: args.deny.or_else(|| self.review.deny.map(Into::into)),
             severity_overrides,
+            allow_invalid_schema: args.allow_invalid_schema
+                || self.review.allow_invalid_schema.unwrap_or(false),
         })
     }
 
@@ -1010,6 +1020,7 @@ pub struct MergedLintConfig {
 
 /// Merged diff configuration.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // independent CLI switches, not a state enum
 pub struct MergedDiffConfig {
     pub format: DiffFormat,
     pub dialect: DialectArg,
@@ -1025,6 +1036,7 @@ pub struct MergedDiffConfig {
     pub show_legend: bool,
     pub show_stats: bool,
     pub fail_on_warning: bool,
+    pub allow_invalid_schema: bool,
 }
 
 impl MergedDiffConfig {
@@ -1053,6 +1065,7 @@ pub struct MergedReviewConfig {
     /// Order is stable (TOML key ascending) so wasm/CLI consumers see a
     /// deterministic vector.
     pub severity_overrides: Vec<ReviewSeverityOverride>,
+    pub allow_invalid_schema: bool,
 }
 
 impl MergedRenderConfig {
@@ -1751,6 +1764,7 @@ mod tests {
             stdout: false,
             fail_on_warning: false,
             exit_code: false,
+            allow_invalid_schema: false,
         };
 
         let merged = config.merge_diff_args(&args).expect("merge should succeed");
@@ -1778,6 +1792,7 @@ mod tests {
             stdout: false,
             fail_on_warning: false,
             exit_code: false,
+            allow_invalid_schema: false,
         };
 
         let merged = config.merge_diff_args(&args).expect("merge should succeed");
@@ -1814,6 +1829,7 @@ mod tests {
             stdout: false,
             fail_on_warning: false,
             exit_code: false,
+            allow_invalid_schema: false,
         };
 
         let merged = config.merge_diff_args(&args).expect("merge should succeed");
@@ -1863,6 +1879,7 @@ mod tests {
             stdout: false,
             fail_on_warning: false,
             exit_code: false,
+            allow_invalid_schema: false,
         };
 
         let merged = config.merge_diff_args(&args).expect("merge should succeed");
@@ -2265,6 +2282,7 @@ direction = "left-to-right"
             exit_code: false,
             list_rules: false,
             emit_summary: None,
+            allow_invalid_schema: false,
         }
     }
 

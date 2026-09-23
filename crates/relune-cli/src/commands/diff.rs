@@ -7,7 +7,7 @@ use anyhow::Context;
 use super::input::DiffInputSelection;
 use crate::cli::{ColorWhen, DiffArgs, DiffFormat, GroupByMode};
 use crate::config::ReluneConfig;
-use crate::error::{CliError, CliResult};
+use crate::error::{CliError, CliResult, schema_comparison_error};
 use crate::output::{check_diagnostics, print_success, validate_markup_stdout_usage, write_output};
 use relune_app::{
     DiffRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, RenderOptions,
@@ -84,10 +84,12 @@ pub fn run_diff(
         focus,
         grouping,
         layout,
+        allow_invalid_schema: merged.allow_invalid_schema,
     };
 
     // Execute diff
-    let mut result = diff(request).context("Failed to compute schema diff")?;
+    let mut result = diff(request)
+        .map_err(|error| schema_comparison_error("Failed to compute schema diff", &error))?;
 
     // Format output. Treat an empty rendered string the same as None —
     // both indicate the visual pipeline produced no output, and writing

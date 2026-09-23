@@ -43,6 +43,13 @@ inputs:
       Applied to both diff and review modes; "auto" lets the CLI infer.
     required: false
     default: auto
+  allow-invalid-schema:
+    description: >
+      When "true", pass `--allow-invalid-schema` so inputs with empty or
+      duplicate table, column, view, or enum names are compared anyway
+      (the validation errors become warnings). Applied to both modes.
+    required: false
+    default: "false"
   deny:
     description: >
       review mode only. Minimum severity that counts as blocking:
@@ -137,6 +144,7 @@ runs:
         FORMAT: ${{ inputs.format }}
         OUTPUT_PATH: ${{ inputs.output-path }}
         DIALECT: ${{ inputs.dialect }}
+        ALLOW_INVALID_SCHEMA: ${{ inputs.allow-invalid-schema }}
         DENY: ${{ inputs.deny }}
         RULES: ${{ inputs.rules }}
         EXCEPT_RULES: ${{ inputs.except-rules }}

@@ -1,0 +1,7 @@
+---
+source: crates/relune-cli/tests/integration_tests.rs
+expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
+---
+exit_code: 1
+stderr:
+Error: Failed to review schema: Invalid schema (after): 1 identity error(s): table 't': duplicate column name 'id' (pass --allow-invalid-schema to continue anyway)

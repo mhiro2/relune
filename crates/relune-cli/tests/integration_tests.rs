@@ -1702,6 +1702,38 @@ mod diff_tests {
     }
 
     #[test]
+    fn diff_rejects_schema_with_duplicate_columns() {
+        let output = relune()
+            .arg("diff")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE t (id INT, id INT);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .output()
+            .expect("command should run");
+
+        failure_snapshot("diff_rejects_schema_with_duplicate_columns", &output);
+    }
+
+    #[test]
+    fn diff_allow_invalid_schema_reports_validation_warning() {
+        let output = relune()
+            .arg("diff")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE t (id INT, id INT);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .arg("--allow-invalid-schema")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("SCHEMA004"));
+        assert!(stderr.contains("duplicate column name 'id'"));
+    }
+
+    #[test]
     fn diff_rejects_oversized_input_before_reading_contents() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");
         let before_path = temp.path().join("oversized.sql");
@@ -2192,6 +2224,20 @@ mod review_tests {
             user_email TEXT REFERENCES users(email)
         );
     ";
+
+    #[test]
+    fn review_rejects_schema_with_duplicate_columns() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE t (id INT);")
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE t (id INT, id INT);")
+            .output()
+            .expect("command should run");
+
+        failure_snapshot("review_rejects_schema_with_duplicate_columns", &output);
+    }
 
     #[test]
     fn review_no_changes_reports_no_findings() {

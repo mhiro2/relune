@@ -11,7 +11,7 @@ use crate::error::AppError;
 use crate::markdown;
 use crate::request::DiffRequest;
 use crate::result::DiffResult;
-use crate::schema_input::schema_from_input;
+use crate::schema_input::{SchemaValidation, schema_from_input_checked};
 
 /// Execute a diff request.
 #[allow(clippy::needless_pass_by_value)]
@@ -19,8 +19,14 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     use crate::request::DiffFormat;
 
     // Step 1: Resolve schemas
-    let (before_schema, mut diagnostics) = schema_from_input(&request.before)?;
-    let (after_schema, after_diagnostics) = schema_from_input(&request.after)?;
+    let (before_schema, mut diagnostics, _) = schema_from_input_checked(
+        &request.before,
+        SchemaValidation::for_comparison("before", request.allow_invalid_schema),
+    )?;
+    let (after_schema, after_diagnostics, _) = schema_from_input_checked(
+        &request.after,
+        SchemaValidation::for_comparison("after", request.allow_invalid_schema),
+    )?;
     diagnostics.extend(after_diagnostics);
 
     // Step 2: Compute diff
@@ -1224,6 +1230,49 @@ fn resolve_fk_target_stable_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema_input::schema_from_input;
+
+    #[test]
+    fn test_diff_rejects_identity_errors_unless_allowed() {
+        let before = "CREATE TABLE t (id INT, id INT);";
+        let after = "CREATE TABLE t (id INT);";
+
+        let error = diff(DiffRequest::from_sql(before, after))
+            .expect_err("duplicate columns should be rejected");
+        assert!(
+            matches!(&error, AppError::InvalidSchema { input, .. } if input == "before"),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(error.category_code(), Some("INVALID_SCHEMA"));
+
+        let result = diff(DiffRequest {
+            allow_invalid_schema: true,
+            ..DiffRequest::from_sql(before, after)
+        })
+        .expect("allow_invalid_schema should continue");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("duplicate column name 'id'"))
+        );
+    }
+
+    #[test]
+    fn test_diff_keeps_dangling_foreign_keys_as_warnings() {
+        let before = "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));";
+        let after =
+            "CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id INT REFERENCES users(id));";
+
+        let result = diff(DiffRequest::from_sql(before, after)).expect("diff should succeed");
+        assert!(result.has_changes());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("FK references unknown table 'users'"))
+        );
+    }
 
     #[test]
     fn test_diff_no_changes() {

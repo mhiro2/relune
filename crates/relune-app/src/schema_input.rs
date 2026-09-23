@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use relune_core::{Diagnostic, Schema, SqlDialect};
+use relune_core::{Diagnostic, Schema, SqlDialect, ValidationErrorKind};
 use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
 use tracing::info;
 
@@ -32,50 +32,79 @@ pub(crate) struct SchemaInputContext {
     pub resolved_dialect: Option<SqlDialect>,
 }
 
-/// Load a schema from the given input source.
+/// How structural errors from [`Schema::validate`] are handled after loading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SchemaValidation {
+    /// Report every validation error as a warning diagnostic and keep going.
+    Warn,
+    /// Fail with [`AppError::InvalidSchema`] on identity errors (empty or
+    /// duplicate names and stable IDs), naming the input by `label`.
+    /// Consistency errors such as dangling foreign keys are still reported
+    /// as warnings, because review rules analyze exactly those states.
+    Strict {
+        /// Input name used in the error, such as `before` or `after`.
+        label: &'static str,
+    },
+}
+
+impl SchemaValidation {
+    /// Validation mode for inputs that are compared against each other
+    /// (diff, review): strict unless the caller explicitly allows invalid
+    /// schemas.
+    pub(crate) const fn for_comparison(label: &'static str, allow_invalid: bool) -> Self {
+        if allow_invalid {
+            Self::Warn
+        } else {
+            Self::Strict { label }
+        }
+    }
+}
+
+/// Load a schema from the given input source, reporting validation errors
+/// as warnings.
 pub(crate) fn schema_from_input(
     input: &InputSource,
 ) -> Result<(Schema, Vec<Diagnostic>), AppError> {
-    let (schema, diagnostics, _context) = schema_from_input_with_context(input)?;
+    let (schema, diagnostics, _context) = schema_from_input_checked(input, SchemaValidation::Warn)?;
     Ok((schema, diagnostics))
 }
 
-/// Load a schema together with the resolved parser dialect.
-///
-/// Returns the same `(schema, diagnostics)` pair as
-/// [`schema_from_input`], plus the concrete `SqlDialect` resolved by the
-/// SQL parser (or derived from a DB URL scheme). Returns `None` for
-/// schema-JSON inputs, which carry no parser dialect signal.
-pub(crate) fn schema_from_input_with_dialect(
-    input: &InputSource,
-) -> Result<(Schema, Vec<Diagnostic>, Option<SqlDialect>), AppError> {
-    let (schema, diagnostics, context) = schema_from_input_with_context(input)?;
-    Ok((schema, diagnostics, context.resolved_dialect))
-}
-
-/// Load a schema plus resolved input capabilities.
+/// Load a schema plus resolved input capabilities, reporting validation
+/// errors as warnings.
 pub(crate) fn schema_from_input_with_context(
     input: &InputSource,
 ) -> Result<(Schema, Vec<Diagnostic>, SchemaInputContext), AppError> {
-    let (schema, mut diagnostics, context) = load_schema(input)?;
-    diagnostics.extend(schema_validation_diagnostics(&schema));
-    Ok((schema, diagnostics, context))
+    schema_from_input_checked(input, SchemaValidation::Warn)
 }
 
-/// Convert structural validation errors from [`Schema::validate`] into
-/// warning diagnostics so downstream consumers (CLI, WASM, action) can
-/// surface them alongside parse-time issues.
-fn schema_validation_diagnostics(schema: &Schema) -> Vec<Diagnostic> {
-    schema
-        .validate()
-        .into_iter()
-        .map(|error| {
-            Diagnostic::warning(
-                relune_core::diagnostic::codes::schema_validation(),
-                error.to_string(),
-            )
-        })
-        .collect()
+/// Load a schema plus resolved input capabilities, handling structural
+/// validation errors according to `validation`.
+pub(crate) fn schema_from_input_checked(
+    input: &InputSource,
+    validation: SchemaValidation,
+) -> Result<(Schema, Vec<Diagnostic>, SchemaInputContext), AppError> {
+    let (schema, mut diagnostics, context) = load_schema(input)?;
+    let errors = schema.validate();
+    if let SchemaValidation::Strict { label } = validation {
+        let identity_errors: Vec<String> = errors
+            .iter()
+            .filter(|error| error.kind == ValidationErrorKind::Identity)
+            .map(ToString::to_string)
+            .collect();
+        if !identity_errors.is_empty() {
+            return Err(AppError::InvalidSchema {
+                input: label.to_string(),
+                errors: identity_errors,
+            });
+        }
+    }
+    diagnostics.extend(errors.into_iter().map(|error| {
+        Diagnostic::warning(
+            relune_core::diagnostic::codes::schema_validation(),
+            error.to_string(),
+        )
+    }));
+    Ok((schema, diagnostics, context))
 }
 
 fn load_schema(

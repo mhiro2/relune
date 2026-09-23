@@ -15,6 +15,7 @@
 #   OUTPUT_PATH       — Output file path (optional; derived from FORMAT).
 #   DIALECT           — auto|postgres|mysql|sqlite (optional). Drives both
 #                       the SQL parser and the lock-risk rule evaluation.
+#   ALLOW_INVALID_SCHEMA — "true" to pass --allow-invalid-schema (optional).
 #   DENY              — info|warning|caution|breaking (optional).
 #   RULES             — Newline-separated rule ids (optional).
 #   EXCEPT_RULES      — Newline-separated rule ids to exclude (optional).
@@ -65,6 +66,10 @@ args=(
 
 if [[ -n "${DIALECT:-}" && "${DIALECT}" != "auto" ]]; then
   args+=(--dialect "${DIALECT}")
+fi
+
+if [[ "${ALLOW_INVALID_SCHEMA:-}" == "true" ]]; then
+  args+=(--allow-invalid-schema)
 fi
 
 # Strip a trailing CR so workflow YAMLs authored with CRLF line endings do

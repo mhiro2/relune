@@ -76,6 +76,17 @@ impl Display for CliError {
 
 impl StdError for CliError {}
 
+/// Convert an app error from a command that compares two schemas, pointing
+/// at `--allow-invalid-schema` when strict schema validation rejected an input.
+pub(crate) fn schema_comparison_error(context: &str, error: &relune_app::AppError) -> CliError {
+    let hint = if matches!(error, relune_app::AppError::InvalidSchema { .. }) {
+        " (pass --allow-invalid-schema to continue anyway)"
+    } else {
+        ""
+    };
+    CliError::general(anyhow::anyhow!("{context}: {error}{hint}"))
+}
+
 impl From<anyhow::Error> for CliError {
     fn from(error: anyhow::Error) -> Self {
         Self::general(error)

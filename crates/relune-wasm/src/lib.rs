@@ -511,6 +511,7 @@ mod wasm_bindgen_tests {
             theme: None,
             show_legend: None,
             show_stats: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize diff request");
 
@@ -547,6 +548,7 @@ mod wasm_bindgen_tests {
             theme: None,
             show_legend: None,
             show_stats: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize diff request");
 
@@ -585,6 +587,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -611,6 +614,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -673,6 +677,7 @@ mod wasm_bindgen_tests {
             deny: Some(ReviewSeverity::Breaking),
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -743,6 +748,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: None,
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -782,6 +788,7 @@ mod wasm_bindgen_tests {
             deny: None,
             severity_overrides: vec![],
             dialect: Some(relune_core::SqlDialect::Postgres),
+            allow_invalid_schema: false,
         })
         .expect("serialize review request");
 
@@ -832,6 +839,7 @@ mod wasm_bindgen_tests {
                 deny: None,
                 severity_overrides: vec![],
                 dialect: None,
+                allow_invalid_schema: false,
             })
             .expect("serialize review request");
 

@@ -118,7 +118,7 @@ Introspection and filesystem access stay on the **native** side; WASM uses in-me
 
 Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
-**`Schema`** — Top-level container: `tables`, `views`, `enums`. Supports `validate()` for structural consistency (duplicate names, FK column references, etc.).
+**`Schema`** — Top-level container: `tables`, `views`, `enums`. Supports `validate()` for structural consistency. Each `ValidationError` has a kind: `Identity` (empty or duplicate table, view, enum, column, enum value, or `stable_id`) or `Consistency` (FK / index references to missing tables or columns, arity mismatches, empty data types). `diff` and `review` key objects by name and `stable_id`, so they fail with `AppError::InvalidSchema` on identity errors unless `allow_invalid_schema` is set; consistency errors are always reported as `SCHEMA004` warnings, since review rules analyze dangling references. Other commands report every validation error as a warning.
 
 **`Table`** — `TableId`, `stable_id`, optional `schema_name`, `name`, `columns`, `foreign_keys`, `indexes`, optional `comment`.
 

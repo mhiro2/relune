@@ -64,6 +64,7 @@ instead.
 | `format` | no | `markdown` | Output format. Mode-specific accepted values: see below. |
 | `output-path` | no | auto | Path for the generated file. Defaults are derived from `mode` and `format` (see [Output paths](#output-paths)). |
 | `dialect` | no | `auto` | SQL dialect: `auto`, `postgres`, `mysql`, or `sqlite`. Applied to **both** `diff` and `review`. `auto` lets the CLI infer the dialect from the file contents. In `review` mode, `auto` also promotes to a concrete dialect when both `before` and `after` parse to the same one (so SQL-only workflows usually pick up lock-risk caution rules without setting `dialect`); pin `dialect: postgres` or `dialect: mysql` to force it. See [Lock-risk findings](#lock-risk-findings). |
+| `allow-invalid-schema` | no | `"false"` | `"true"` passes `--allow-invalid-schema`, so inputs with empty or duplicate table, column, view, or enum names are compared anyway instead of failing. Applied to both modes. |
 | `binary-path` | no | `""` | Path to a pre-built `relune` binary. Skips the install step — useful for testing unreleased builds in CI. |
 
 `format` accepted values:

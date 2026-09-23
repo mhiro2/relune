@@ -14,16 +14,22 @@ use crate::error::AppError;
 use crate::markdown;
 use crate::request::ReviewRequest;
 use crate::result::ReviewResult;
-use crate::schema_input::schema_from_input_with_dialect;
+use crate::schema_input::{SchemaValidation, schema_from_input_checked};
 
 /// Execute a review request.
 #[allow(clippy::needless_pass_by_value)]
 pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
-    let (before_schema, mut diagnostics, before_dialect) =
-        schema_from_input_with_dialect(&request.before)?;
-    let (after_schema, after_diagnostics, after_dialect) =
-        schema_from_input_with_dialect(&request.after)?;
+    let (before_schema, mut diagnostics, before_context) = schema_from_input_checked(
+        &request.before,
+        SchemaValidation::for_comparison("before", request.allow_invalid_schema),
+    )?;
+    let (after_schema, after_diagnostics, after_context) = schema_from_input_checked(
+        &request.after,
+        SchemaValidation::for_comparison("after", request.allow_invalid_schema),
+    )?;
     diagnostics.extend(after_diagnostics);
+    let before_dialect = before_context.resolved_dialect;
+    let after_dialect = after_context.resolved_dialect;
 
     let schema_diff = diff_schemas(&before_schema, &after_schema);
 
@@ -426,6 +432,55 @@ mod tests {
 
     fn run(request: ReviewRequest) -> ReviewResult {
         review(request).expect("review should succeed")
+    }
+
+    #[test]
+    fn review_rejects_identity_errors_unless_allowed() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY, id TEXT);";
+
+        let error = review(ReviewRequest::from_sql(before, after))
+            .expect_err("duplicate columns should be rejected");
+        assert!(
+            matches!(&error, AppError::InvalidSchema { input, errors }
+                if input == "after" && errors[0].contains("duplicate column name 'id'")),
+            "unexpected error: {error:?}"
+        );
+
+        let result = run(ReviewRequest {
+            allow_invalid_schema: true,
+            ..ReviewRequest::from_sql(before, after)
+        });
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("duplicate column name 'id'"))
+        );
+    }
+
+    #[test]
+    fn review_keeps_dangling_foreign_keys_as_warnings() {
+        let before = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
+        ";
+        let after = "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));";
+
+        let result = run(ReviewRequest::from_sql(before, after));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("FK references unknown table 'users'"))
+        );
+        assert!(
+            result
+                .review
+                .findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropTableReferenced)
+        );
     }
 
     #[test]
