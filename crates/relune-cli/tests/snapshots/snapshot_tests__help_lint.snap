@@ -78,7 +78,7 @@ Options:
           - documentation: Table and column comment coverage rules
 
       --except-table <PATTERN>
-          Suppress issues for matching tables (can be repeated, supports `*`)
+          Suppress issues for tables matching a glob pattern (can be repeated)
 
       --deny <SEVERITY>
           Minimum severity that causes non-zero exit

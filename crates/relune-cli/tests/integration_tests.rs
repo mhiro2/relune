@@ -1499,7 +1499,9 @@ mod config_validation_tests {
         );
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("render.focus 'users' must be included"));
+        assert!(stderr.contains(
+            "focus target table not found after applying include/exclude filters: users"
+        ));
     }
 
     #[test]

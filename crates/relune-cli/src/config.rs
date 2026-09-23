@@ -939,18 +939,8 @@ fn validate_focus_filters(
         )));
     }
 
-    if !include.is_empty() && !include.iter().any(|table| table == focus) {
-        return Err(ConfigError::InvalidValue(format!(
-            "{command}.focus '{focus}' must be included when {command}.include is set"
-        )));
-    }
-
-    if exclude.iter().any(|table| table == focus) {
-        return Err(ConfigError::InvalidValue(format!(
-            "{command}.focus '{focus}' cannot be excluded"
-        )));
-    }
-
+    // Whether include/exclude patterns keep the focus table depends on the
+    // schema (qualified vs bare names), so that check happens at render time.
     Ok(())
 }
 
@@ -1628,35 +1618,6 @@ mod tests {
             error
                 .to_string()
                 .contains("render.include and render.exclude cannot both contain 'posts'")
-        );
-    }
-
-    #[test]
-    fn test_validate_render_semantics_rejects_focus_not_in_include() {
-        let config = MergedRenderConfig {
-            format: RenderFormat::Svg,
-            dialect: DialectArg::Auto,
-            theme: Theme::Light,
-            layout: LayoutAlgorithmArg::Hierarchical,
-            edge_style: EdgeStyleArg::Straight,
-            direction: DirectionArg::default(),
-            group_by: None,
-            focus: Some("users".to_string()),
-            depth: 1,
-            include: vec!["posts".to_string()],
-            exclude: Vec::new(),
-            show_legend: false,
-            show_stats: false,
-            fail_on_warning: false,
-        };
-
-        let error = config
-            .validate_semantics()
-            .expect_err("focus outside the include list should be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("render.focus 'users' must be included")
         );
     }
 

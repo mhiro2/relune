@@ -153,12 +153,12 @@ pub struct RenderArgs {
     #[arg(long = "group-by", value_enum)]
     pub group_by: Option<GroupByMode>,
 
-    /// Explicitly include only these tables.
-    #[arg(long = "include", value_name = "TABLE")]
+    /// Explicitly include only tables matching these glob patterns.
+    #[arg(long = "include", value_name = "PATTERN")]
     pub include: Vec<String>,
 
-    /// Exclude tables from output.
-    #[arg(long = "exclude", value_name = "TABLE")]
+    /// Exclude tables matching these glob patterns from output.
+    #[arg(long = "exclude", value_name = "PATTERN")]
     pub exclude: Vec<String>,
 
     /// Visual theme. Defaults to `light` after config merge.
@@ -471,12 +471,12 @@ pub struct ExportArgs {
     #[arg(long = "group-by", value_enum)]
     pub group_by: Option<GroupByMode>,
 
-    /// Explicitly include only these tables.
-    #[arg(long = "include", value_name = "TABLE")]
+    /// Explicitly include only tables matching these glob patterns.
+    #[arg(long = "include", value_name = "PATTERN")]
     pub include: Vec<String>,
 
-    /// Exclude tables from output.
-    #[arg(long = "exclude", value_name = "TABLE")]
+    /// Exclude tables matching these glob patterns from output.
+    #[arg(long = "exclude", value_name = "PATTERN")]
     pub exclude: Vec<String>,
 
     /// Layout algorithm for positioned output.
@@ -633,7 +633,7 @@ pub struct LintArgs {
     #[arg(long = "rule-category", value_name = "CATEGORY", value_enum)]
     pub rule_categories: Vec<LintRuleCategoryArg>,
 
-    /// Suppress issues for matching tables (can be repeated, supports `*`).
+    /// Suppress issues for tables matching a glob pattern (can be repeated).
     #[arg(long = "except-table", value_name = "PATTERN")]
     pub except_tables: Vec<String>,
 
@@ -864,7 +864,7 @@ pub struct ReviewArgs {
     #[arg(long = "except-rule", value_name = "RULE")]
     pub except_rules: Vec<String>,
 
-    /// Suppress findings for matching tables (can be repeated, supports `*`).
+    /// Suppress findings for tables matching a glob pattern (can be repeated).
     #[arg(long = "except-table", value_name = "PATTERN")]
     pub except_tables: Vec<String>,
 

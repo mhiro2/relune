@@ -13,7 +13,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum FocusError {
     /// The specified focus target table was not found in the graph.
-    #[error("focus target table not found: {table}")]
+    #[error("focus target table not found after applying include/exclude filters: {table}")]
     TargetNotFound {
         /// Requested focus table.
         table: String,

@@ -76,7 +76,7 @@ Options:
           Remove specific rules from the active rule set (can be repeated)
 
       --except-table <PATTERN>
-          Suppress findings for matching tables (can be repeated, supports `*`)
+          Suppress findings for tables matching a glob pattern (can be repeated)
 
       --deny <SEVERITY>
           Minimum severity that causes non-zero exit
