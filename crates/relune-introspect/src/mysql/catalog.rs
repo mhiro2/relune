@@ -14,12 +14,15 @@ use crate::common::{
 use crate::connect::pool_max_connections_with_default;
 use crate::error::IntrospectError;
 
-/// Fetches all catalog metadata from a `MySQL` database.
+/// Fetches all catalog metadata from the database selected by the connection
+/// URL. Other databases visible to the same user are never read.
 pub async fn fetch_catalog_metadata(pool: &MySqlPool) -> Result<RawSchema, IntrospectError> {
     let flavor = detect_flavor(pool).await?;
+    let database = current_database(pool).await?;
     let catalog = MySqlCatalog {
         pool: pool.clone(),
         flavor,
+        database,
     };
     catalog.fetch_all().await
 }
@@ -51,9 +54,31 @@ async fn detect_flavor(pool: &MySqlPool) -> Result<MySqlFlavor, IntrospectError>
     })
 }
 
+/// Resolves the database selected by the connection URL via `DATABASE()`.
+///
+/// Every catalog query is scoped to this single database; a URL without a
+/// database path is rejected rather than falling back to all databases the
+/// user can see.
+async fn current_database(pool: &MySqlPool) -> Result<String, IntrospectError> {
+    let database: Option<String> = sqlx::query_scalar("SELECT CONVERT(DATABASE() USING utf8mb4)")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            IntrospectError::query_with_source("Failed to resolve the current MySQL database", e)
+        })?;
+    database.filter(|name| !name.is_empty()).ok_or_else(|| {
+        IntrospectError::invalid_url(
+            "MySQL URL must name a database (e.g. mysql://user@host:3306/dbname)",
+        )
+    })
+}
+
 struct MySqlCatalog {
     pool: MySqlPool,
     flavor: MySqlFlavor,
+    /// Database selected by the connection URL; all catalog queries are
+    /// filtered to it.
+    database: String,
 }
 
 impl ParallelCatalogReader for MySqlCatalog {
@@ -66,13 +91,11 @@ impl ParallelCatalogReader for MySqlCatalog {
                 NULLIF(CONVERT(TABLE_COMMENT USING utf8mb4), '') AS table_comment
             FROM information_schema.TABLES
             WHERE TABLE_TYPE = 'BASE TABLE'
-              AND TABLE_SCHEMA NOT IN (
-                  'information_schema', 'mysql', 'performance_schema', 'sys',
-                  'mysql_innodb_cluster_metadata'
-              )
+              AND TABLE_SCHEMA = ?
             ORDER BY TABLE_SCHEMA, TABLE_NAME
             ",
         )
+        .bind(&self.database)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch tables", e))?;
@@ -105,13 +128,11 @@ impl ParallelCatalogReader for MySqlCatalog {
                 CONVERT(CHARACTER_SET_NAME USING utf8mb4) AS character_set,
                 CONVERT(COLLATION_NAME USING utf8mb4) AS collation
             FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA NOT IN (
-                'information_schema', 'mysql', 'performance_schema', 'sys',
-                'mysql_innodb_cluster_metadata'
-            )
+            WHERE TABLE_SCHEMA = ?
             ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
             ",
         )
+        .bind(&self.database)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch columns", e))?;
@@ -180,13 +201,11 @@ impl ParallelCatalogReader for MySqlCatalog {
             INNER JOIN information_schema.TABLE_CONSTRAINTS tc
                 ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
                 AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
-            WHERE tc.TABLE_SCHEMA NOT IN (
-                'information_schema', 'mysql', 'performance_schema', 'sys',
-                'mysql_innodb_cluster_metadata'
-            )
+            WHERE tc.TABLE_SCHEMA = ?
             ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, cc.CONSTRAINT_NAME
             ",
         )
+        .bind(&self.database)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch check constraints", e))?;
@@ -221,13 +240,11 @@ impl ParallelCatalogReader for MySqlCatalog {
                 CONVERT(VIEW_DEFINITION USING utf8mb4) AS definition,
                 NULL AS view_comment
             FROM information_schema.VIEWS
-            WHERE TABLE_SCHEMA NOT IN (
-                'information_schema', 'mysql', 'performance_schema', 'sys',
-                'mysql_innodb_cluster_metadata'
-              )
+            WHERE TABLE_SCHEMA = ?
             ORDER BY TABLE_SCHEMA, TABLE_NAME
             ",
         )
+        .bind(&self.database)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch views", e))?;
@@ -243,13 +260,11 @@ impl ParallelCatalogReader for MySqlCatalog {
                 CONVERT(COLUMN_TYPE USING utf8mb4) AS column_type
             FROM information_schema.COLUMNS
             WHERE DATA_TYPE IN ('enum', 'set')
-              AND TABLE_SCHEMA NOT IN (
-                  'information_schema', 'mysql', 'performance_schema', 'sys',
-                  'mysql_innodb_cluster_metadata'
-              )
+              AND TABLE_SCHEMA = ?
             ORDER BY TABLE_SCHEMA, COLUMN_TYPE
             ",
         )
+        .bind(&self.database)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch enums", e))?;
@@ -298,10 +313,7 @@ impl MySqlCatalog {
                 ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
                 AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
             WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
-              AND kcu.TABLE_SCHEMA NOT IN (
-                  'information_schema', 'mysql', 'performance_schema', 'sys',
-                  'mysql_innodb_cluster_metadata'
-              )
+              AND kcu.TABLE_SCHEMA = ?
             ORDER BY
                 kcu.TABLE_SCHEMA,
                 kcu.TABLE_NAME,
@@ -309,6 +321,7 @@ impl MySqlCatalog {
                 kcu.ORDINAL_POSITION
             ",
         )
+        .bind(&self.database)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| IntrospectError::query_with_source("Failed to fetch foreign keys", e))?;
@@ -321,6 +334,7 @@ impl MySqlCatalog {
         // fragment with no external input, so asserting SQL safety is sound.
         let rows: Vec<IndexColumnRow> =
             sqlx::query_as(sqlx::AssertSqlSafe(index_rows_query(self.flavor)))
+                .bind(&self.database)
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|e| IntrospectError::query_with_source("Failed to fetch indexes", e))?;
@@ -460,10 +474,7 @@ fn index_rows_query(flavor: MySqlFlavor) -> String {
             NON_UNIQUE AS non_unique,
             IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
         FROM information_schema.STATISTICS
-        WHERE TABLE_SCHEMA NOT IN (
-            'information_schema', 'mysql', 'performance_schema', 'sys',
-            'mysql_innodb_cluster_metadata'
-          )
+        WHERE TABLE_SCHEMA = ?
         ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
         "
     )

@@ -44,6 +44,8 @@ Beyond the 30s per-statement deadline, the whole catalog fetch is bounded by an 
 
 The DSN is **fully trusted** — Relune connects to exactly the host it names with no destination allow/deny-listing — so do not pass an untrusted URL. Introspection is read-only and needs catalog read access: PostgreSQL reads `pg_catalog` / `information_schema`; MySQL/MariaDB needs `SELECT` on `information_schema` plus `SHOW VIEW` to read view definitions (missing it yields empty definitions with a logged warning); SQLite reads the database file.
 
+MySQL/MariaDB URLs must name a database (`mysql://user@host:3306/dbname`); introspection reads only that database, never other databases the same user can see. A URL without a database path is rejected.
+
 ---
 
 ## Table patterns
