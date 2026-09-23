@@ -1725,6 +1725,31 @@ mod diff_tests {
         assert!(stderr.contains("8388608"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn diff_rejects_fifo_input_without_blocking() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let before_path = temp.path().join("before.sql");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&before_path)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success());
+
+        let output = relune()
+            .arg("diff")
+            .arg("--before")
+            .arg(&before_path)
+            .arg("--after")
+            .arg(simple_blog_fixture())
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("not a regular file"), "stderr: {stderr}");
+    }
+
     #[test]
     fn diff_no_changes() {
         let mut cmd = relune();

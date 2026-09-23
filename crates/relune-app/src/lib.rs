@@ -53,9 +53,9 @@ pub use result::{
 pub use error::AppError;
 
 // Re-export use case functions
-pub use schema_input::MAX_INPUT_FILE_SIZE_BYTES;
 #[cfg(feature = "introspect")]
 pub use schema_input::schema_from_db_url_async;
+pub use schema_input::{MAX_INPUT_FILE_SIZE_BYTES, read_input_file};
 pub use usecases::{diff, doc, export, inspect, lint, render, review};
 
 // Re-export from usecases for convenience

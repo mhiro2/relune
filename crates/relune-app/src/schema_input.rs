@@ -1,5 +1,9 @@
 //! Resolve [`relune_core::Schema`] from [`crate::request::InputSource`].
 
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
 use relune_core::{Diagnostic, Schema, SqlDialect};
 use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
 use tracing::info;
@@ -104,8 +108,7 @@ fn load_schema(
             }
         }
         InputSource::SqlFile { path, dialect } => {
-            ensure_file_size_within_limit(path)?;
-            let sql = std::fs::read_to_string(path)?;
+            let sql = read_input_file(path)?;
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, *dialect);
             info!(
                 path = %path.display(),
@@ -145,8 +148,7 @@ fn load_schema(
             ))
         }
         InputSource::SchemaJsonFile { path } => {
-            ensure_file_size_within_limit(path)?;
-            let json = std::fs::read_to_string(path)?;
+            let json = read_input_file(path)?;
             let export: relune_core::export::SchemaExport = serde_json::from_str(&json)?;
             let schema = relune_core::export::import_schema(&export)
                 .map_err(|e| AppError::input_with_type("schema_json_file", e.to_string()))?;
@@ -210,21 +212,70 @@ fn ensure_text_size_within_limit(size: usize, input_type: &str) -> Result<(), Ap
     Ok(())
 }
 
-fn ensure_file_size_within_limit(path: &std::path::Path) -> Result<(), AppError> {
-    let size = std::fs::metadata(path)?.len();
-    if size > MAX_INPUT_FILE_SIZE_BYTES {
+/// Read a SQL or schema JSON input file as UTF-8, enforcing
+/// [`MAX_INPUT_FILE_SIZE_BYTES`] on the bytes actually read.
+///
+/// The file is opened once and its metadata is taken from the open handle,
+/// so the checks apply to the same file that is read. Anything other than a
+/// regular file (FIFOs, device files, directories) is rejected, and the read
+/// itself is capped so a file that grows after the size check still cannot
+/// exceed the limit.
+pub fn read_input_file(path: &Path) -> Result<String, AppError> {
+    let file = open_input_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(AppError::input_with_type(
             "file",
-            format!(
-                "Input file '{}' is too large: {} bytes exceeds the {} byte limit",
-                path.display(),
-                size,
-                MAX_INPUT_FILE_SIZE_BYTES
-            ),
+            format!("Input file '{}' is not a regular file", path.display()),
         ));
     }
+    if metadata.len() > MAX_INPUT_FILE_SIZE_BYTES {
+        return Err(file_too_large_error(path, metadata.len()));
+    }
 
-    Ok(())
+    let mut bytes = Vec::new();
+    file.take(MAX_INPUT_FILE_SIZE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    let read = bytes.len() as u64;
+    if read > MAX_INPUT_FILE_SIZE_BYTES {
+        return Err(file_too_large_error(path, read));
+    }
+
+    String::from_utf8(bytes).map_err(|_| {
+        AppError::input_with_type(
+            "file",
+            format!("Input file '{}' is not valid UTF-8", path.display()),
+        )
+    })
+}
+
+/// Open without blocking on FIFOs so they can be rejected by the
+/// regular-file check instead of hanging until a writer appears.
+#[cfg(unix)]
+fn open_input_file(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_input_file(path: &Path) -> std::io::Result<File> {
+    File::open(path)
+}
+
+fn file_too_large_error(path: &Path, size: u64) -> AppError {
+    AppError::input_with_type(
+        "file",
+        format!(
+            "Input file '{}' is too large: {} bytes exceeds the {} byte limit",
+            path.display(),
+            size,
+            MAX_INPUT_FILE_SIZE_BYTES
+        ),
+    )
 }
 
 #[cfg(feature = "introspect")]
@@ -330,9 +381,62 @@ mod tests {
             .set_len(MAX_INPUT_FILE_SIZE_BYTES + 1)
             .expect("sparse temp file");
 
-        let err =
-            ensure_file_size_within_limit(temp.path()).expect_err("file size should be rejected");
+        let err = read_input_file(temp.path()).expect_err("file size should be rejected");
         assert!(matches!(err, AppError::Input { .. }));
+        assert!(err.to_string().contains("too large"));
+    }
+
+    #[test]
+    fn reads_input_file_at_the_size_limit() {
+        let temp = tempfile::NamedTempFile::new().expect("create temp file");
+        temp.as_file()
+            .set_len(MAX_INPUT_FILE_SIZE_BYTES)
+            .expect("sparse temp file");
+
+        let content = read_input_file(temp.path()).expect("file at the limit should be read");
+        assert_eq!(content.len() as u64, MAX_INPUT_FILE_SIZE_BYTES);
+    }
+
+    #[test]
+    fn sql_file_input_is_read_through_the_bounded_reader() {
+        let temp = tempfile::NamedTempFile::new().expect("create temp file");
+        std::fs::write(temp.path(), "CREATE TABLE t (id INT PRIMARY KEY);").expect("write SQL");
+
+        let input = InputSource::sql_file(temp.path());
+        let (schema, _diagnostics) = schema_from_input(&input).expect("schema");
+        assert_eq!(schema.tables.len(), 1);
+    }
+
+    #[test]
+    fn rejects_non_utf8_input_files() {
+        let temp = tempfile::NamedTempFile::new().expect("create temp file");
+        std::fs::write(temp.path(), [0xff, 0xfe, 0x00]).expect("write bytes");
+
+        let err = read_input_file(temp.path()).expect_err("invalid UTF-8 should be rejected");
+        assert!(err.to_string().contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn rejects_directories_as_input_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+
+        let err = read_input_file(dir.path()).expect_err("directory should be rejected");
+        assert!(err.to_string().contains("not a regular file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_fifo_input_files_without_blocking() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let fifo = dir.path().join("input.sql");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success());
+
+        let err = read_input_file(&fifo).expect_err("FIFO should be rejected");
+        assert!(err.to_string().contains("not a regular file"));
     }
 
     #[cfg(feature = "introspect")]
