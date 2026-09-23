@@ -132,6 +132,8 @@ Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
 **Identifier normalization** — All schema, table, and column identifiers are normalized to lowercase on input (`normalize_identifier`), and downstream matching (diff, foreign-key resolution, graph construction) is case-insensitive throughout. This is a deliberate simplification, not full SQL quoting semantics: quoted identifiers do not retain their original case, so `"User"` and `"user"` collapse to the same name and only one survives. Treat identifier casing as non-significant when feeding schemas into Relune.
 
+**Qualified names and stable IDs** — `stable_id` and `qualified_name()` are both produced by `qualified_identifier`, which joins `schema.name` and double-quotes any component containing `.` or `"` (doubling embedded quotes). Every distinct `(schema, name)` pair therefore maps to a distinct string: the unqualified table `"a.b"` gets `"a.b"` while table `b` in schema `a` gets `a.b`. `Schema::validate()` additionally reports duplicate `stable_id`s.
+
 **Derived artifacts** flow through the pipeline:
 
 - **Graph** — nodes and edges with stable identities (input to layout)

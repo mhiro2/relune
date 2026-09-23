@@ -1205,11 +1205,10 @@ fn resolve_fk_target_stable_id(
 ) -> Option<String> {
     if let Some(schema_name) = to_schema {
         // Prefer exact schema + table match for multi-schema correctness
-        let qualified = format!("{schema_name}.{to_table}");
         if let Some(t) = schema
             .tables
             .iter()
-            .find(|t| t.qualified_name() == qualified)
+            .find(|t| t.schema_name.as_deref() == Some(schema_name) && t.name == to_table)
         {
             return Some(t.stable_id.clone());
         }

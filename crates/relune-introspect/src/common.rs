@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use relune_core::{
     Column, ColumnId, Enum, ForeignKey, Index, ReferentialAction, Schema, Table, TableId, View,
+    qualified_identifier,
 };
 
 use crate::error::IntrospectError;
@@ -286,22 +287,8 @@ fn generate_stable_id(input: &str) -> u64 {
 }
 
 /// Builds a human-readable stable identifier from schema and object name.
-///
-/// Components that contain `.` are quoted so that `("a.b", "c")` produces
-/// `"a.b".c` instead of the ambiguous `a.b.c`.
 fn qualified_stable_id(schema_name: &str, object_name: &str) -> String {
-    fn quote_if_needed(s: &str) -> std::borrow::Cow<'_, str> {
-        if s.contains('.') {
-            std::borrow::Cow::Owned(format!("\"{s}\""))
-        } else {
-            std::borrow::Cow::Borrowed(s)
-        }
-    }
-    format!(
-        "{}.{}",
-        quote_if_needed(schema_name),
-        quote_if_needed(object_name)
-    )
+    qualified_identifier(Some(schema_name), object_name)
 }
 
 /// Generates a `TableId` from schema name and table name.

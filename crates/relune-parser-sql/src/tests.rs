@@ -415,6 +415,33 @@ fn normalizes_stable_ids_for_lookups() {
 }
 
 #[test]
+fn dotted_quoted_table_does_not_collide_with_schema_qualified_table() {
+    let sql = r#"
+    CREATE TABLE "a.b" (id BIGINT PRIMARY KEY);
+    CREATE TABLE a.b (id BIGINT PRIMARY KEY);
+    CREATE TABLE "x.y"."z" (id BIGINT PRIMARY KEY);
+    CREATE TABLE x."y.z" (id BIGINT PRIMARY KEY);
+    CREATE TABLE "q""t" (id BIGINT PRIMARY KEY);
+    COMMENT ON TABLE "a.b" IS 'dotted';
+    "#;
+
+    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
+    let stable_ids: Vec<&str> = schema
+        .tables
+        .iter()
+        .map(|table| table.stable_id.as_str())
+        .collect();
+
+    assert_eq!(
+        stable_ids,
+        vec![r#""a.b""#, "a.b", r#""x.y".z"#, r#"x."y.z""#, r#""q""t""#]
+    );
+    assert_eq!(schema.tables[0].comment.as_deref(), Some("dotted"));
+    assert_eq!(schema.tables[1].comment, None);
+    assert!(schema.validate().is_empty());
+}
+
+#[test]
 fn handles_table_level_primary_key() {
     let sql = r"
     CREATE TABLE order_items (
