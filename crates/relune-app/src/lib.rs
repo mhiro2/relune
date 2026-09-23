@@ -30,6 +30,7 @@
 //! ```
 
 pub mod error;
+mod markdown;
 pub mod request;
 pub mod result;
 mod schema_input;
