@@ -63,7 +63,7 @@ inputs:
     default: ""
   except-tables:
     description: >
-      review mode only. Newline-separated list of table patterns (glob ok)
+      review mode only. Newline-separated list of table glob patterns (`*`, `?`, `[...]`)
       to suppress; each line is passed to the CLI as `--except-table
       <pattern>` (repeatable).
     required: false

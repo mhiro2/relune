@@ -82,7 +82,7 @@ These inputs are read only when `mode: review`. They are ignored in `diff` mode.
 | `deny` | `""` | Minimum severity that counts as blocking: `info`, `warning`, `caution`, or `breaking`. Empty means `--deny` is not passed and the CLI never returns `rc=10`. |
 | `rules` | `""` | Newline-separated rule ids. Each non-empty line becomes `--rules <id>` (repeatable). Both `risk/<id>` and the bare short form are accepted. |
 | `except-rules` | `""` | Newline-separated rule ids to suppress. Each line becomes `--except-rule <id>` (the action input is plural for YAML readability; the CLI flag is singular and repeatable). |
-| `except-tables` | `""` | Newline-separated table patterns to suppress (glob `*` supported). Each line becomes `--except-table <pattern>`. |
+| `except-tables` | `""` | Newline-separated table glob patterns to suppress (`*`, `?`, `[...]`). Each line becomes `--except-table <pattern>`. |
 | `fail-on-blocking` | `"false"` | When `"true"`, the action exits non-zero whenever blocking findings are detected. Default keeps the workflow running so a follow-up step can post a PR comment first. |
 
 ### Output paths

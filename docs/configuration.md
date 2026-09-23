@@ -99,7 +99,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `group_by` | `none`, `schema`, `prefix` |
 | `focus` | Table name |
 | `depth` | Unsigned integer |
-| `include` / `exclude` | String arrays |
+| `include` / `exclude` | Arrays of table glob patterns (see [Table patterns](cli-reference.md#table-patterns)) |
 | `show_legend`, `show_stats` | Booleans; `--stats` on the CLI forces `show_stats` only |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
@@ -109,10 +109,9 @@ Semantic validation is also applied after merge:
 
 - `depth` must be at least `1`
 - `depth` can only be set when `focus` is present
-- table names in `focus`, `include`, and `exclude` must be non-empty and must not have surrounding whitespace
-- the same table cannot appear in both `include` and `exclude`
-- if `include` is non-empty, it must contain the focused table
-- the focused table cannot also appear in `exclude`
+- `focus` and the `include`/`exclude` patterns must be non-empty and must not have surrounding whitespace
+- the same pattern cannot appear in both `include` and `exclude`
+- the focused table must survive the `include`/`exclude` filters; this is checked against the schema at render time
 
 If `viewpoint` is set, Relune applies the selected named preset before CLI flags. The precedence for view-related settings is:
 
@@ -162,7 +161,7 @@ Named viewpoints let you reuse the same focus, filter, and grouping rules across
 | `group_by` | `none`, `schema`, `prefix` |
 | `focus` | Table name |
 | `depth` | Unsigned integer |
-| `include` / `exclude` | String arrays |
+| `include` / `exclude` | Arrays of table glob patterns (see [Table patterns](cli-reference.md#table-patterns)) |
 
 Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint <NAME>`, or `relune export --viewpoint <NAME>`.
 
@@ -187,7 +186,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `rules` | Array of kebab-case rule IDs to run instead of the profile defaults |
 | `exclude_rules` | Array of kebab-case rule IDs to remove from the active set |
 | `categories` | Array of `structure`, `relationships`, `naming`, `documentation` |
-| `except_tables` | Array of table patterns to suppress from the report |
+| `except_tables` | Array of table glob patterns to suppress from the report (see [Table patterns](cli-reference.md#table-patterns)) |
 | `deny` | `error`, `warning`, `info`, `hint` — minimum severity for a non-zero exit when not overridden by `--deny` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures when `deny` is unset |
 
@@ -215,7 +214,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `rules` | Array of rule IDs (`risk/<id>` or bare `<id>`); empty means "all rules" |
 | `except_rules` | Array of rule IDs to remove from the active set |
-| `except_tables` | Array of table patterns (`*` glob) whose findings move into `suppressed` |
+| `except_tables` | Array of table glob patterns whose findings move into `suppressed` (see [Table patterns](cli-reference.md#table-patterns)) |
 | `deny` | `info`, `warning`, `caution`, `breaking` — minimum severity that causes a non-zero exit when not overridden by `--deny` |
 
 `review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, and `--deny`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
