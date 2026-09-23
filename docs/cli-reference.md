@@ -27,7 +27,7 @@ Every command requires **at least one input**. Typical inputs:
 
 Output path: **`-o` / `--out`** writes a file. `render` and `diff` still print to stdout when piped, but for interactive terminals they require **`--stdout`** before emitting raw SVG/HTML directly. If the `--out` parent directory does not exist, Relune reports it as a usage error (exit `2`) and names the missing directory.
 
-For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**.
+For SQL files and schema JSON files, Relune currently rejects inputs larger than **8 MiB**. The limit applies to the bytes actually read, and input paths must be regular files (FIFOs, device files, and directories are rejected).
 
 > [!WARNING]
 > **Avoid passing a live-DB DSN on the command line.** A `--db-url` value is

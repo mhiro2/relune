@@ -495,7 +495,7 @@ When rendering or diffing as SVG or HTML without `-o`, interactive terminals req
 
 ### Input too large
 
-Relune rejects SQL files and schema JSON files larger than 8 MiB before loading them into memory.
+Relune rejects SQL files and schema JSON files larger than 8 MiB; reads are capped at that size, so a file that grows mid-read is also rejected. Input paths must be regular files — FIFOs, device files, and directories are rejected.
 
 ### Dialect detection issues
 
