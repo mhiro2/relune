@@ -7,6 +7,7 @@ use relune_core::{
     Diagnostic, EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId,
     ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding,
     SqlDialect, diagnostic::codes, diff_schemas, lock_risk_skip_diagnostic,
+    pattern::matches_table_pattern,
 };
 
 use crate::error::AppError;
@@ -415,25 +416,7 @@ fn matches_except_table(patterns: &[String], finding: &RiskFinding) -> bool {
         return false;
     };
     let short = name.rsplit('.').next().unwrap_or(name);
-    patterns
-        .iter()
-        .any(|pattern| matches_pattern(pattern, name) || matches_pattern(pattern, short))
-}
-
-fn matches_pattern(pattern: &str, value: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 2 {
-        return value.contains(&pattern[1..pattern.len() - 1]);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return value.ends_with(suffix);
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return value.starts_with(prefix);
-    }
-    value == pattern
+    matches_table_pattern(patterns, name, short)
 }
 
 #[cfg(test)]

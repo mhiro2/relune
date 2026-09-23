@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use relune_core::{
     Diagnostic, DiagnosticCode, EdgeKind, Enum, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, NodeKind, Schema, Table, View, collect_sql_relations,
-    diagnostic::codes::parse_unsupported, layout::Cardinality,
+    diagnostic::codes::parse_unsupported, layout::Cardinality, pattern::matches_table_pattern,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -478,16 +478,12 @@ impl LayoutGraphBuilder {
         let include_patterns = &self.request.filter.include;
         let exclude_patterns = &self.request.filter.exclude;
 
-        if exclude_patterns.iter().any(|pattern| {
-            matches_pattern(pattern, qualified_name) || matches_pattern(pattern, short_name)
-        }) {
+        if matches_table_pattern(exclude_patterns, qualified_name, short_name) {
             return false;
         }
 
         include_patterns.is_empty()
-            || include_patterns.iter().any(|pattern| {
-                matches_pattern(pattern, qualified_name) || matches_pattern(pattern, short_name)
-            })
+            || matches_table_pattern(include_patterns, qualified_name, short_name)
     }
 
     /// Build nodes and edges from filtered schema objects.
@@ -1002,24 +998,6 @@ impl LayoutGraphBuilder {
     }
 }
 
-/// Check if a string matches a glob pattern (simple implementation).
-fn matches_pattern(pattern: &str, value: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.starts_with('*') && pattern.ends_with('*') {
-        let middle = &pattern[1..pattern.len() - 1];
-        return value.contains(middle);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return value.ends_with(suffix);
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return value.starts_with(prefix);
-    }
-    value == pattern
-}
-
 fn build_prefix_groups(names: &[&str]) -> Vec<(String, Vec<usize>)> {
     if names.len() < 2 {
         return Vec::new();
@@ -1203,16 +1181,6 @@ fn is_meaningful_group_prefix(prefix: &str) -> bool {
 mod tests {
     use super::*;
     use relune_core::{Column, ColumnId, ForeignKey, Index, ReferentialAction, TableId};
-
-    #[test]
-    fn test_matches_pattern() {
-        assert!(matches_pattern("*", "anything"));
-        assert!(matches_pattern("*_test", "my_test"));
-        assert!(matches_pattern("test_*", "test_value"));
-        assert!(matches_pattern("*user*", "my_user_table"));
-        assert!(matches_pattern("exact", "exact"));
-        assert!(!matches_pattern("exact", "not_exact"));
-    }
 
     #[test]
     fn test_shared_group_prefix() {
