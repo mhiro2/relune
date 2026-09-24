@@ -249,6 +249,8 @@ pub enum ReviewRuleId {
     DropColumn,
     /// Dropping an existing table; its rows are lost.
     DropTable,
+    /// Removing a value from an enum used by an existing column.
+    DropEnumValue,
     /// Dropping a column referenced by an existing FK.
     DropColumnReferenced,
     /// Dropping a table referenced by an existing FK.
@@ -306,6 +308,7 @@ impl ReviewRuleId {
         &[
             Self::DropColumn,
             Self::DropTable,
+            Self::DropEnumValue,
             Self::DropColumnReferenced,
             Self::DropTableReferenced,
             Self::AddNotNullOnExisting,
@@ -329,6 +332,7 @@ impl ReviewRuleId {
         match self {
             Self::DropColumn => "risk/drop-column",
             Self::DropTable => "risk/drop-table",
+            Self::DropEnumValue => "risk/drop-enum-value",
             Self::DropColumnReferenced => "risk/drop-column-referenced",
             Self::DropTableReferenced => "risk/drop-table-referenced",
             Self::AddNotNullOnExisting => "risk/add-not-null-on-existing",
@@ -350,6 +354,9 @@ impl ReviewRuleId {
         match self {
             Self::DropColumn => "Column is being dropped; its data is permanently lost",
             Self::DropTable => "Table is being dropped; its rows are permanently lost",
+            Self::DropEnumValue => {
+                "Enum value is being removed; existing rows holding it fail or lose the value"
+            }
             Self::DropColumnReferenced => {
                 "Column being dropped is still referenced by a foreign key"
             }
@@ -390,6 +397,7 @@ impl ReviewRuleId {
         match self {
             Self::DropColumn
             | Self::DropTable
+            | Self::DropEnumValue
             | Self::DropColumnReferenced
             | Self::DropTableReferenced
             | Self::TypeNarrow => ReviewSeverity::Breaking,
@@ -420,6 +428,7 @@ impl ReviewRuleId {
         match self {
             Self::DropColumn
             | Self::DropTable
+            | Self::DropEnumValue
             | Self::DropColumnReferenced
             | Self::DropTableReferenced
             | Self::AddNotNullOnExisting
@@ -843,6 +852,7 @@ mod tests {
         for rule in [
             ReviewRuleId::DropColumn,
             ReviewRuleId::DropTable,
+            ReviewRuleId::DropEnumValue,
             ReviewRuleId::DropColumnReferenced,
             ReviewRuleId::DropTableReferenced,
             ReviewRuleId::AddNotNullOnExisting,

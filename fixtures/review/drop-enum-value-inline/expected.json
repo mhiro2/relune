@@ -1,0 +1,20 @@
+[
+  {
+    "column_name": "status",
+    "message": "Column orders.status drops enum value(s) 'cancelled'. Existing rows holding them will fail the migration or lose their value.",
+    "mitigation": "Rewrite rows holding the removed value(s) to a surviving value before removing them from the enum.",
+    "rule_id": "risk/drop-enum-value",
+    "severity": "breaking",
+    "table_id": "orders",
+    "table_name": "orders"
+  },
+  {
+    "column_name": "status",
+    "message": "Column orders.status changed type from enum('pending','paid','cancelled','shipped') to enum('pending','paid','shipped') (mysql). Many type changes fall back to ALGORITHM=COPY and rewrite the entire table.",
+    "mitigation": "Verify ALGORITHM=INPLACE, LOCK=NONE applies for this transition (5.6+); otherwise stage with a new-column / backfill / swap.",
+    "rule_id": "risk/alter-column-type",
+    "severity": "caution",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

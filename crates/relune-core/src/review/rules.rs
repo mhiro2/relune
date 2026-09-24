@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use super::{DialectScope, EffectiveDialect, ReviewRuleId, ReviewSeverity, RiskFinding};
 use crate::SqlDialect;
 use crate::diff::{ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff};
-use crate::model::{ForeignKey, Schema, Table};
+use crate::model::{Column, Enum, ForeignKey, Schema, Table};
 
 /// Runs every rule in `applied_rules` against the diff.
 ///
@@ -45,6 +45,9 @@ pub fn run_rules(
         for column_diff in &table_diff.column_diffs {
             if context.rule_active(ReviewRuleId::DropColumn, &selected) {
                 check_drop_column(column_diff, after_table, &mut findings);
+            }
+            if context.rule_active(ReviewRuleId::DropEnumValue, &selected) {
+                check_drop_inline_enum_value(column_diff, after_table, &mut findings);
             }
             if context.rule_active(ReviewRuleId::DropColumnReferenced, &selected) {
                 check_drop_column_referenced(
@@ -154,6 +157,9 @@ pub fn run_rules(
 
     if context.rule_active(ReviewRuleId::DropTable, &selected) {
         check_drop_table(diff, &context, &mut findings);
+    }
+    if context.rule_active(ReviewRuleId::DropEnumValue, &selected) {
+        check_drop_named_enum_value(diff, &context, &mut findings);
     }
     if context.rule_active(ReviewRuleId::DropTableReferenced, &selected) {
         check_drop_table_referenced(diff, &context, &mut findings);
@@ -362,6 +368,16 @@ impl<'a> RuleContext<'a> {
         self.before_by_qname
             .get(&qualified_name.to_ascii_lowercase())
             .copied()
+    }
+
+    /// Finds the `before` counterpart of an `after` table the same way
+    /// the diff pairs them: by `stable_id` first, then by name.
+    fn find_before_table_of(&self, after_table: &Table) -> Option<&'a Table> {
+        self.before
+            .tables
+            .iter()
+            .find(|t| t.stable_id == after_table.stable_id)
+            .or_else(|| self.find_before_table(&after_table.qualified_name()))
     }
 
     fn find_after_table(&self, qualified_name: &str) -> Option<&'a Table> {
@@ -608,6 +624,207 @@ fn check_drop_table(diff: &SchemaDiff, context: &RuleContext<'_>, findings: &mut
                 "Back up or migrate the data first, and ship application code that no longer reads the table before dropping it.",
             ),
         );
+    }
+}
+
+const DROP_ENUM_VALUE_MITIGATION: &str = "Rewrite rows holding the removed value(s) to a surviving value before removing them from the enum.";
+
+fn quoted_list(values: &[&str]) -> String {
+    values
+        .iter()
+        .map(|value| format!("'{value}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `risk/drop-enum-value` for inline enums (`MySQL` `ENUM(...)` /
+/// `SET(...)`): a value present before is missing after. A column that
+/// stops being an enum altogether keeps its data as text and is left to
+/// the type-change rules.
+fn check_drop_inline_enum_value(
+    column_diff: &ColumnDiff,
+    after_table: &Table,
+    findings: &mut Vec<RiskFinding>,
+) {
+    if column_diff.change_kind != ChangeKind::Modified {
+        return;
+    }
+    let (Some(old_values), Some(new_values)) = (
+        column_diff
+            .old_value
+            .as_ref()
+            .and_then(|c| c.enum_values.as_ref()),
+        column_diff
+            .new_value
+            .as_ref()
+            .and_then(|c| c.enum_values.as_ref()),
+    ) else {
+        return;
+    };
+    let removed: Vec<&str> = old_values
+        .iter()
+        .filter(|value| !new_values.contains(value))
+        .map(String::as_str)
+        .collect();
+    if removed.is_empty() {
+        return;
+    }
+    let qname = after_table.qualified_name();
+    findings.push(
+        RiskFinding::new(
+            ReviewRuleId::DropEnumValue,
+            ReviewSeverity::Breaking,
+            format!(
+                "Column {}.{} drops enum value(s) {}. Existing rows holding them will fail the migration or lose their value.",
+                qname,
+                column_diff.column_name,
+                quoted_list(&removed),
+            ),
+        )
+        .with_table(&after_table.stable_id, &qname)
+        .with_column(&column_diff.column_name)
+        .with_mitigation(DROP_ENUM_VALUE_MITIGATION),
+    );
+}
+
+/// `risk/drop-enum-value` for named enum types: one finding per
+/// pre-existing column that still uses the enum after the migration.
+/// An enum no existing column uses holds no data, so removing its
+/// values is not reported.
+fn check_drop_named_enum_value(
+    diff: &SchemaDiff,
+    context: &RuleContext<'_>,
+    findings: &mut Vec<RiskFinding>,
+) {
+    for enum_diff in &diff.modified_enums {
+        let mut removed: Vec<(usize, &str)> = enum_diff
+            .value_diffs
+            .iter()
+            .filter(|value| value.change_kind == ChangeKind::Removed)
+            .map(|value| {
+                (
+                    value.old_position.unwrap_or(usize::MAX),
+                    value.value.as_str(),
+                )
+            })
+            .collect();
+        if removed.is_empty() {
+            continue;
+        }
+        removed.sort_unstable();
+        let removed: Vec<&str> = removed.into_iter().map(|(_, value)| value).collect();
+        let Some(enum_type) = context.after.enums.iter().find(|e| {
+            e.qualified_name()
+                .eq_ignore_ascii_case(&enum_diff.enum_name)
+        }) else {
+            continue;
+        };
+        let Some(before_enum) = context
+            .before
+            .enums
+            .iter()
+            .find(|e| same_enum_identity(e, enum_type))
+        else {
+            continue;
+        };
+        let enum_qname = enum_type.qualified_name();
+
+        for after_table in &context.after.tables {
+            let Some(before_table) = context.find_before_table_of(after_table) else {
+                continue;
+            };
+            for column in &after_table.columns {
+                // Only columns that held this enum before the migration
+                // carry rows with the removed values.
+                let held_enum = before_table.columns.iter().any(|c| {
+                    c.name.eq_ignore_ascii_case(&column.name)
+                        && column_uses_enum(c, before_table, before_enum)
+                });
+                if !held_enum || !column_uses_enum(column, after_table, enum_type) {
+                    continue;
+                }
+                let qname = after_table.qualified_name();
+                findings.push(
+                    RiskFinding::new(
+                        ReviewRuleId::DropEnumValue,
+                        ReviewSeverity::Breaking,
+                        format!(
+                            "Enum {} drops value(s) {} used by column {}.{}. Existing rows holding them will fail the migration or lose their value.",
+                            enum_qname,
+                            quoted_list(&removed),
+                            qname,
+                            column.name,
+                        ),
+                    )
+                    .with_table(&after_table.stable_id, &qname)
+                    .with_column(&column.name)
+                    .with_mitigation(DROP_ENUM_VALUE_MITIGATION),
+                );
+            }
+        }
+    }
+}
+
+/// Mirrors the case-insensitive `(schema, name)` identity the diff uses
+/// to pair enums across the two schemas.
+fn same_enum_identity(a: &Enum, b: &Enum) -> bool {
+    a.name.eq_ignore_ascii_case(&b.name)
+        && match (a.schema_name.as_deref(), b.schema_name.as_deref()) {
+            (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+            (None, None) => true,
+            _ => false,
+        }
+}
+
+/// Splits a column type such as `auth."OrderStatus"[]` into its
+/// unquoted name parts (`["auth", "OrderStatus"]`), dropping array
+/// suffixes (`[]`, `[][]`, `[5]`). Returns `None` for unbalanced quotes.
+fn type_name_parts(data_type: &str) -> Option<Vec<String>> {
+    let mut data_type = data_type.trim();
+    while let Some(element) = data_type
+        .strip_suffix(']')
+        .and_then(|rest| rest.rsplit_once('['))
+        .map(|(element, _)| element.trim_end())
+    {
+        data_type = element;
+    }
+    let mut parts = vec![String::new()];
+    let mut chars = data_type.chars().peekable();
+    let mut quoted = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                chars.next();
+                parts.last_mut()?.push('"');
+            }
+            '"' => quoted = !quoted,
+            '.' if !quoted => parts.push(String::new()),
+            _ => parts.last_mut()?.push(ch),
+        }
+    }
+    (!quoted).then_some(parts)
+}
+
+/// Returns true when `column`'s type names `enum_type` (optionally as
+/// an array, with or without quoted identifiers). A bare type name
+/// matches an enum in the table's schema, or any enum when either side
+/// is unqualified.
+fn column_uses_enum(column: &Column, table: &Table, enum_type: &Enum) -> bool {
+    let Some(parts) = type_name_parts(&column.data_type) else {
+        return false;
+    };
+    let (type_schema, type_name) = match parts.as_slice() {
+        [name] => (None, name),
+        [schema, name] => (Some(schema.as_str()), name),
+        _ => return false,
+    };
+    if !type_name.eq_ignore_ascii_case(&enum_type.name) {
+        return false;
+    }
+    let scope = type_schema.or(table.schema_name.as_deref());
+    match (enum_type.schema_name.as_deref(), scope) {
+        (Some(enum_schema), Some(scope)) => enum_schema.eq_ignore_ascii_case(scope),
+        _ => true,
     }
 }
 
@@ -2975,6 +3192,291 @@ mod tests {
                 .all(|f| f.rule_id != ReviewRuleId::DropColumn),
             "generated column drop loses no stored data, got: {findings:?}"
         );
+    }
+
+    fn named_enum(name: &str, values: &[&str]) -> Enum {
+        Enum {
+            id: name.into(),
+            schema_name: None,
+            name: name.into(),
+            values: values.iter().map(|v| (*v).to_string()).collect(),
+        }
+    }
+
+    fn inline_enum_col(name: &str, values: &[&str]) -> Column {
+        let mut column = col(
+            name,
+            &format!("enum({})", quoted_list(values).replace(", ", ",")),
+            true,
+            false,
+        );
+        column.enum_values = Some(values.iter().map(|v| (*v).to_string()).collect());
+        column
+    }
+
+    #[test]
+    fn drop_named_enum_value_breaking_per_using_column() {
+        let columns = vec![
+            col("id", "BIGINT", false, true),
+            col("status", "status", true, false),
+            col("history", "status[]", true, false),
+            col("note", "TEXT", true, false),
+        ];
+        let before = Schema {
+            tables: vec![table("orders", columns.clone(), vec![], vec![])],
+            enums: vec![named_enum("status", &["new", "paid", "void", "done"])],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table("orders", columns, vec![], vec![])],
+            enums: vec![named_enum("status", &["new", "done"])],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        let columns: Vec<_> = findings
+            .iter()
+            .filter(|f| f.rule_id == ReviewRuleId::DropEnumValue)
+            .map(|f| f.column_name.as_deref().unwrap_or_default())
+            .collect();
+        assert_eq!(columns, ["status", "history"], "got: {findings:?}");
+        let finding = &findings[0];
+        assert_eq!(finding.severity, ReviewSeverity::Breaking);
+        assert_eq!(finding.table_id.as_deref(), Some("orders"));
+        assert!(
+            finding.message.contains("'paid', 'void'"),
+            "removed values follow the original order: {}",
+            finding.message
+        );
+    }
+
+    #[test]
+    fn drop_named_enum_value_ignores_unused_enum_and_new_tables() {
+        let before = Schema {
+            enums: vec![named_enum("status", &["new", "paid"])],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("status", "status", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            enums: vec![named_enum("status", &["new"])],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropEnumValue),
+            "no existing column holds the enum, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_named_enum_value_ignores_added_and_reordered_values() {
+        let columns = vec![
+            col("id", "BIGINT", false, true),
+            col("status", "status", true, false),
+        ];
+        let before = Schema {
+            tables: vec![table("orders", columns.clone(), vec![], vec![])],
+            enums: vec![named_enum("status", &["new", "paid"])],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table("orders", columns, vec![], vec![])],
+            enums: vec![named_enum("status", &["paid", "new", "void"])],
+            ..Default::default()
+        };
+        assert!(run_all(&before, &after).is_empty());
+    }
+
+    #[test]
+    fn drop_inline_enum_value_breaking() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    inline_enum_col("status", &["new", "paid", "done"]),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    inline_enum_col("status", &["new", "done", "void"]),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings: Vec<_> = run_all(&before, &after)
+            .into_iter()
+            .filter(|f| f.rule_id == ReviewRuleId::DropEnumValue)
+            .collect();
+        assert_eq!(findings.len(), 1, "got: {findings:?}");
+        assert_eq!(findings[0].severity, ReviewSeverity::Breaking);
+        assert_eq!(findings[0].column_name.as_deref(), Some("status"));
+        assert!(findings[0].message.contains("'paid'"));
+        assert!(!findings[0].message.contains("'void'"));
+    }
+
+    #[test]
+    fn drop_inline_enum_value_skips_conversion_to_text() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    inline_enum_col("status", &["new", "paid"]),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("status", "VARCHAR(255)", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        assert!(
+            run_all(&before, &after)
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropEnumValue)
+        );
+    }
+
+    #[test]
+    fn drop_named_enum_value_ignores_column_that_just_switched_to_enum() {
+        let before = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("status", "TEXT", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            enums: vec![named_enum("status", &["new", "paid"])],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("status", "status", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            enums: vec![named_enum("status", &["new"])],
+            ..Default::default()
+        };
+        assert!(
+            run_all(&before, &after)
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropEnumValue),
+            "the column held text before, not the enum"
+        );
+    }
+
+    #[test]
+    fn drop_rules_follow_tables_renamed_under_a_stable_id() {
+        let columns = |extra: bool| {
+            let mut columns = vec![
+                col("id", "BIGINT", false, true),
+                col("status", "status", true, false),
+            ];
+            if extra {
+                columns.push(col("legacy", "TEXT", true, false));
+            }
+            columns
+        };
+        let mut before_table = table("orders", columns(true), vec![], vec![]);
+        before_table.stable_id = "tbl_orders".into();
+        let mut after_table = table("purchase_orders", columns(false), vec![], vec![]);
+        after_table.stable_id = "tbl_orders".into();
+        let before = Schema {
+            tables: vec![before_table],
+            enums: vec![named_enum("status", &["new", "paid"])],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![after_table],
+            enums: vec![named_enum("status", &["new"])],
+            ..Default::default()
+        };
+        let mut rules: Vec<_> = run_all(&before, &after)
+            .into_iter()
+            .map(|f| (f.rule_id, f.column_name))
+            .collect();
+        rules.sort();
+        assert_eq!(
+            rules,
+            [
+                (ReviewRuleId::DropColumn, Some("legacy".to_string())),
+                (ReviewRuleId::DropEnumValue, Some("status".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn type_name_parts_unquotes_identifiers() {
+        assert_eq!(
+            type_name_parts(r#"auth."Order.Status"[]"#),
+            Some(vec!["auth".to_string(), "Order.Status".to_string()])
+        );
+        assert_eq!(
+            type_name_parts(r#""a""b""#),
+            Some(vec![r#"a"b"#.to_string()])
+        );
+        assert_eq!(type_name_parts(r#""open"#), None);
+        assert_eq!(
+            type_name_parts("status[][3]"),
+            Some(vec!["status".to_string()])
+        );
+    }
+
+    #[test]
+    fn column_uses_enum_respects_schema_qualification() {
+        let mut auth_status = named_enum("status", &["a"]);
+        auth_status.schema_name = Some("auth".into());
+        let public_table = table_in("public", "orders", vec![], vec![], vec![]);
+        let auth_table = table_in("auth", "users", vec![], vec![], vec![]);
+        let bare = col("s", "status", true, false);
+        let qualified = col("s", "AUTH.status", true, false);
+        let quoted = col("s", r#""auth"."STATUS""#, true, false);
+        assert!(column_uses_enum(&bare, &auth_table, &auth_status));
+        assert!(column_uses_enum(&quoted, &public_table, &auth_status));
+        assert!(!column_uses_enum(&bare, &public_table, &auth_status));
+        assert!(column_uses_enum(&qualified, &public_table, &auth_status));
+        assert!(!column_uses_enum(
+            &col("s", "other.status", true, false),
+            &auth_table,
+            &auth_status
+        ));
     }
 
     #[test]

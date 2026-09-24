@@ -271,7 +271,7 @@ relune --config relune.toml diff --before old.sql --after new.sql
 
 ## `review`
 
-Compare a `before` schema with an `after` schema and emit migration risk findings: dropped tables and columns, dropped references, narrowing type changes, NOT NULL on existing data, missing FK indexes, etc. Findings are grouped into four severity buckets — `info < warning < caution < breaking` — so `--deny` can gate CI on the level of risk you are willing to ship.
+Compare a `before` schema with an `after` schema and emit migration risk findings: dropped tables, columns, and enum values, dropped references, narrowing type changes, NOT NULL on existing data, missing FK indexes, etc. Findings are grouped into four severity buckets — `info < warning < caution < breaking` — so `--deny` can gate CI on the level of risk you are willing to ship.
 
 **Before:** `--before <FILE>`, `--before-sql-text '<DDL>'`, or `--before-schema-json <FILE>`.
 
@@ -291,12 +291,13 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` short-circuits with rc=10 |
 | `--allow-invalid-schema` | Review inputs that fail identity validation instead of exiting `1` (same rules as [`diff`](#diff)) |
 
-Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fourteen rules:
+Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen rules:
 
 | Rule ID | Default severity | Dialect |
 |---------|------------------|---------|
 | `risk/drop-column` | breaking | any |
 | `risk/drop-table` | breaking | any |
+| `risk/drop-enum-value` | breaking | any |
 | `risk/drop-column-referenced` | breaking | any |
 | `risk/drop-table-referenced` | breaking | any |
 | `risk/add-not-null-on-existing` | warning | any |
@@ -310,11 +311,11 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fourteen
 | `risk/alter-column-type` | caution | postgres / mysql |
 | `risk/rewrite-table` | caution | mysql |
 
-`risk/drop-table` and `risk/drop-column` flag every dropped table and every dropped stored column (generated columns are skipped) because their data is permanently lost, whether or not anything references them. When a foreign key still references the dropped object, `risk/drop-table-referenced` / `risk/drop-column-referenced` additionally report that the migration itself will fail. Review compares schema states, so a rename of a table or column shows up as a drop plus an add and is reported by these rules too; exclude them with `--except-rule` / `--except-table` for intentional renames and cleanups.
+`risk/drop-table` and `risk/drop-column` flag every dropped table and every dropped stored column (generated columns are skipped) because their data is permanently lost, whether or not anything references them. When a foreign key still references the dropped object, `risk/drop-table-referenced` / `risk/drop-column-referenced` additionally report that the migration itself will fail. `risk/drop-enum-value` flags values removed from a named enum type (once per pre-existing column that still uses it) or from an inline `ENUM(...)` / `SET(...)` column, because rows holding the removed value fail the migration or lose it. Review compares schema states, so a rename of a table, column, or enum value shows up as a drop plus an add and is reported by these rules too; exclude them with `--except-rule` / `--except-table` for intentional renames and cleanups.
 
 `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
 
-`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all fourteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
+`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all fifteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
 
 > [!NOTE]
 > **Lock-risk caution rules read schema state, not migration SQL.**
@@ -330,7 +331,7 @@ relune review --before old.sql --after new.sql --except-table 'audit_*'
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
 relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
 relune review --before old.sql --after new.sql --dialect postgres --deny caution
-relune review --list-rules                       # text listing of all 14 rules
+relune review --list-rules                       # text listing of all 15 rules
 relune review --list-rules --format json | jq '.[0]'
 relune --config relune.toml review --before old.sql --after new.sql
 ```

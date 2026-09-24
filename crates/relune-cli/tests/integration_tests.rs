@@ -2622,6 +2622,7 @@ mod review_tests {
         for rule in [
             "risk/drop-column",
             "risk/drop-table",
+            "risk/drop-enum-value",
             "risk/drop-column-referenced",
             "risk/drop-table-referenced",
             "risk/add-not-null-on-existing",
@@ -2665,7 +2666,7 @@ mod review_tests {
         let entries = parsed
             .as_array()
             .expect("--list-rules JSON should be an array");
-        assert_eq!(entries.len(), 14, "expected metadata for every review rule");
+        assert_eq!(entries.len(), 15, "expected metadata for every review rule");
         let first = &entries[0];
         assert_eq!(first["rule_id"], "risk/drop-column");
         assert_eq!(first["default_severity"], "breaking");
