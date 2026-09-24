@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use relune_core::{
     Diagnostic, EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId,
-    ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding,
+    ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding, Schema,
     SqlDialect, diagnostic::codes, diff_schemas, lock_risk_skip_diagnostic,
     pattern::matches_table_pattern,
 };
@@ -13,7 +13,7 @@ use relune_core::{
 use crate::error::AppError;
 use crate::markdown;
 use crate::request::ReviewRequest;
-use crate::result::ReviewResult;
+use crate::result::{ReviewInputCoverage, ReviewInputs, ReviewResult};
 use crate::schema_input::{SchemaValidation, schema_from_input_checked};
 
 /// Execute a review request.
@@ -27,6 +27,10 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         &request.after,
         SchemaValidation::for_comparison("after", request.allow_invalid_schema),
     )?;
+    let inputs = ReviewInputs {
+        before: input_coverage(&before_schema, &diagnostics),
+        after: input_coverage(&after_schema, &after_diagnostics),
+    };
     diagnostics.extend(after_diagnostics);
     let before_dialect = before_context.resolved_dialect;
     let after_dialect = after_context.resolved_dialect;
@@ -73,7 +77,19 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         denied,
         requested_dialect: request.dialect,
         effective_dialect: effective.into(),
+        inputs,
     })
+}
+
+fn input_coverage(schema: &Schema, diagnostics: &[Diagnostic]) -> ReviewInputCoverage {
+    let unsupported_code = codes::parse_unsupported();
+    ReviewInputCoverage {
+        empty: schema.tables.is_empty() && schema.views.is_empty() && schema.enums.is_empty(),
+        unsupported_constructs: diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == unsupported_code)
+            .count(),
+    }
 }
 
 /// Resolve the effective review dialect from the requested dialect and
@@ -165,6 +181,15 @@ pub fn format_review_text_with(result: &ReviewResult, quiet: bool) -> String {
     }
     output.push('\n');
 
+    let coverage_notes = input_coverage_notes(&result.inputs);
+    if !coverage_notes.is_empty() {
+        let _ = writeln!(output, "  {INCOMPLETE_COVERAGE_HEADING}");
+        for note in &coverage_notes {
+            let _ = writeln!(output, "    - {note}");
+        }
+        output.push('\n');
+    }
+
     if quiet {
         return output;
     }
@@ -226,6 +251,16 @@ pub fn format_review_markdown_with(result: &ReviewResult, quiet: bool) -> String
         let _ = writeln!(output, "_{line}_");
     }
     output.push('\n');
+
+    let coverage_notes = input_coverage_notes(&result.inputs);
+    if !coverage_notes.is_empty() {
+        let _ = writeln!(output, "> [!WARNING]");
+        let _ = writeln!(output, "> {INCOMPLETE_COVERAGE_HEADING}");
+        for note in &coverage_notes {
+            let _ = writeln!(output, "> - {note}");
+        }
+        output.push('\n');
+    }
 
     if quiet {
         return output;
@@ -304,6 +339,42 @@ fn effective_dialect_text(result: &ReviewResult) -> Option<String> {
         )),
         _ => None,
     }
+}
+
+const INCOMPLETE_COVERAGE_HEADING: &str =
+    "Review coverage is incomplete; missing findings do not mean the migration is safe:";
+
+/// Describe why the review may have missed changes, one note per issue.
+fn input_coverage_notes(inputs: &ReviewInputs) -> Vec<String> {
+    let mut notes = Vec::new();
+    for (label, coverage, empty_effect) in [
+        (
+            "before",
+            &inputs.before,
+            "every object in the after input is treated as newly added",
+        ),
+        (
+            "after",
+            &inputs.after,
+            "every object in the before input is treated as dropped",
+        ),
+    ] {
+        if coverage.empty {
+            notes.push(format!(
+                "The {label} input produced no schema objects; {empty_effect}."
+            ));
+        }
+        match coverage.unsupported_constructs {
+            0 => {}
+            1 => notes.push(format!(
+                "1 unsupported SQL construct in the {label} input was skipped; changes it contains are not reviewed."
+            )),
+            count => notes.push(format!(
+                "{count} unsupported SQL constructs in the {label} input were skipped; changes they contain are not reviewed."
+            )),
+        }
+    }
+    notes
 }
 
 fn write_summary_line(output: &mut String, summary: &ReviewSummary) {
@@ -945,6 +1016,73 @@ mod tests {
             .with_except_rules(vec!["risk/add-index-on-large-table".to_string()]);
         let result = run(request);
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn complete_inputs_report_full_coverage_without_notes() {
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let result = run(ReviewRequest::from_sql(sql, sql));
+        assert!(result.inputs.is_complete());
+        assert!(!format_review_text(&result).contains("coverage is incomplete"));
+        assert!(!format_review_markdown(&result).contains("[!WARNING]"));
+    }
+
+    #[test]
+    fn unsupported_constructs_are_counted_per_input() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let after = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE SEQUENCE order_seq;
+            CREATE SEQUENCE invoice_seq;
+        ";
+        let result = run(ReviewRequest::from_sql(before, after));
+        assert_eq!(result.inputs.before, ReviewInputCoverage::default());
+        assert_eq!(
+            result.inputs.after,
+            ReviewInputCoverage {
+                empty: false,
+                unsupported_constructs: 2,
+            }
+        );
+        assert!(result.review.findings.is_empty());
+
+        let text = format_review_text(&result);
+        assert!(text.contains("Review coverage is incomplete"), "{text}");
+        assert!(
+            text.contains("2 unsupported SQL constructs in the after input were skipped"),
+            "{text}"
+        );
+
+        let md = format_review_markdown(&result);
+        assert!(md.contains("> [!WARNING]\n"), "{md}");
+        assert!(
+            md.contains("> - 2 unsupported SQL constructs in the after input were skipped"),
+            "{md}"
+        );
+
+        let json: serde_json::Value =
+            serde_json::from_str(&format_review_json(&result).expect("json")).expect("parse");
+        assert_eq!(json["inputs"]["after"]["unsupported_constructs"], 2);
+        assert_eq!(json["inputs"]["before"]["empty"], false);
+    }
+
+    #[test]
+    fn empty_before_input_is_reported_in_quiet_output() {
+        let after = "CREATE TABLE users (id INT PRIMARY KEY);";
+        let result = run(ReviewRequest::from_sql("-- nothing yet", after));
+        assert!(result.inputs.before.empty);
+        assert!(!result.inputs.after.empty);
+
+        let text = format_review_text_with(&result, true);
+        assert!(
+            text.contains("The before input produced no schema objects"),
+            "{text}"
+        );
+        let md = format_review_markdown_with(&result, true);
+        assert!(
+            md.contains("> - The before input produced no schema objects"),
+            "{md}"
+        );
     }
 
     #[test]

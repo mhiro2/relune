@@ -1351,6 +1351,16 @@ details[open] > .ctrl-section__title::before {
   line-height: 1.5;
 }
 
+.review-coverage-note {
+  margin: 0;
+  padding: 8px 14px;
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--warning-border);
+  color: var(--warning);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .finding-list {
   margin: 0;
   padding: 0;

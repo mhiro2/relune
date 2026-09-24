@@ -441,6 +441,46 @@ pub struct ReviewResult {
     /// Lock-risk rules only fire when this is `Postgres` or `Mysql`.
     #[serde(default)]
     pub effective_dialect: SqlDialect,
+    /// How completely each input was modeled. A review over an empty or
+    /// partially parsed input can miss changes, so callers should surface
+    /// this next to the findings rather than only in the diagnostics.
+    #[serde(default)]
+    pub inputs: ReviewInputs,
+}
+
+/// Parse coverage of the before/after review inputs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewInputs {
+    /// Coverage of the baseline input.
+    pub before: ReviewInputCoverage,
+    /// Coverage of the updated input.
+    pub after: ReviewInputCoverage,
+}
+
+impl ReviewInputs {
+    /// Returns `true` when neither input is empty or partially parsed.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.before.is_complete() && self.after.is_complete()
+    }
+}
+
+/// Parse coverage of a single review input.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewInputCoverage {
+    /// Whether the input produced no tables, views, or enums.
+    pub empty: bool,
+    /// Number of SQL constructs the parser could not model and skipped
+    /// (`PARSE002` diagnostics). Changes inside them are not reviewed.
+    pub unsupported_constructs: usize,
+}
+
+impl ReviewInputCoverage {
+    /// Returns `true` when the input is non-empty and fully parsed.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        !self.empty && self.unsupported_constructs == 0
+    }
 }
 
 impl ReviewResult {

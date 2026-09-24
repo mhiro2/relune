@@ -54,6 +54,7 @@ struct WasmReviewResponse {
     applied_rule_details: Vec<relune_core::ReviewRuleMetadata>,
     requested_dialect: relune_core::SqlDialect,
     effective_dialect: relune_core::SqlDialect,
+    inputs: relune_app::ReviewInputs,
 }
 
 /// Set the panic hook for better error messages in the browser.
@@ -327,6 +328,10 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 ///   `"auto"` if unset)
 /// - `effective_dialect`: The dialect actually used for review
 ///   evaluation, after auto-promotion
+/// - `inputs`: Parse coverage per side (`before` / `after`, each with
+///   `empty` and `unsupported_constructs`); anything other than
+///   `empty = false, unsupported_constructs = 0` means the review may
+///   have missed changes
 /// - `content`: CLI-equivalent rendering for the requested `format`
 ///   (the `format = "json"` payload matches `relune review --format json`)
 /// - `applied_rule_details`: Metadata snapshots for each applied rule,
@@ -357,6 +362,7 @@ pub fn review_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
         applied_rule_details,
         requested_dialect: result.requested_dialect,
         effective_dialect: result.effective_dialect,
+        inputs: result.inputs,
     };
 
     Ok(serde_wasm_bindgen::to_value(&response).map_err(WasmError::from)?)

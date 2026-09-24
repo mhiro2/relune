@@ -317,6 +317,8 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen 
 
 `--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all fifteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
 
+Review only sees what the parser modeled. When an input produced no schema objects (`PARSE004`), or the parser skipped constructs it does not support (`PARSE002`, e.g. an unsupported `ALTER TABLE` form), the text and markdown reports print a "Review coverage is incomplete" warning above the findings, and the JSON report records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`). A run with no findings is then not evidence that the migration is safe.
+
 > [!NOTE]
 > **Lock-risk caution rules read schema state, not migration SQL.**
 > Lock-risk caution rules are based on **schema state-change diff**, not on the migration SQL itself. They flag a state change that — if executed naively — would acquire a problematic lock; they **do not** read your migration script and cannot detect that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder.

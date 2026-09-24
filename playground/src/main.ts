@@ -235,6 +235,11 @@ type ReviewRuleMetadata = {
   description: string;
 };
 
+type ReviewInputCoverage = {
+  empty: boolean;
+  unsupported_constructs: number;
+};
+
 type WasmReviewResult = {
   review: {
     findings: ReviewFinding[];
@@ -248,6 +253,10 @@ type WasmReviewResult = {
   applied_rule_details: ReviewRuleMetadata[];
   requested_dialect: ReviewDialect;
   effective_dialect: ReviewDialect;
+  inputs: {
+    before: ReviewInputCoverage;
+    after: ReviewInputCoverage;
+  };
 };
 
 type WasmErrorShape = {
@@ -546,6 +555,7 @@ const compareObjectList = getElement<HTMLUListElement>('compare-object-list');
 const reviewPanel = getElement<HTMLElement>('review-panel');
 const reviewSummaryBadges = getElement<HTMLElement>('review-summary-badges');
 const reviewDialectNote = getElement<HTMLElement>('review-dialect-note');
+const reviewCoverageNote = getElement<HTMLElement>('review-coverage-note');
 const reviewFindingList = getElement<HTMLUListElement>('review-finding-list');
 const reviewSuppressedPanel = getElement<HTMLDetailsElement>('review-suppressed-panel');
 const reviewSuppressedList = getElement<HTMLUListElement>('review-suppressed-list');
@@ -1537,6 +1547,10 @@ function renderReviewPanel(result: WasmReviewResult): void {
     reviewDialectNote.hidden = true;
   }
 
+  const coverageText = inputCoverageNote(result.inputs);
+  reviewCoverageNote.textContent = coverageText ?? '';
+  reviewCoverageNote.hidden = coverageText === null;
+
   const sortedFindings = result.review.findings.toSorted(
     (left, right) => severityRank(left.severity) - severityRank(right.severity),
   );
@@ -1565,6 +1579,28 @@ function effectiveDialectNote(requested: ReviewDialect, effective: ReviewDialect
     return 'auto resolved to sqlite; lock-risk rules are inactive on this dialect.';
   }
   return 'Auto could not infer a single dialect; lock-risk rules are inactive.';
+}
+
+function inputCoverageNote(inputs: WasmReviewResult['inputs']): string | null {
+  const notes: string[] = [];
+  for (const [label, coverage] of [
+    ['before', inputs.before],
+    ['after', inputs.after],
+  ] as const) {
+    if (coverage.empty) {
+      notes.push(`the ${label} input produced no schema objects`);
+    }
+    const count = coverage.unsupported_constructs;
+    if (count > 0) {
+      notes.push(
+        `${count} unsupported SQL construct${count === 1 ? '' : 's'} in the ${label} input ${count === 1 ? 'was' : 'were'} skipped`,
+      );
+    }
+  }
+  if (notes.length === 0) {
+    return null;
+  }
+  return `Review coverage is incomplete: ${notes.join('; ')}. Missing findings do not mean the migration is safe.`;
 }
 
 function severityRank(severity: ReviewSeverity): number {
@@ -2084,6 +2120,8 @@ function resetOutputPanels(): void {
   reviewSummaryBadges.textContent = '';
   reviewDialectNote.hidden = true;
   reviewDialectNote.textContent = '';
+  reviewCoverageNote.hidden = true;
+  reviewCoverageNote.textContent = '';
   reviewFindingList.innerHTML = '';
   reviewSuppressedList.innerHTML = '';
   resetActions();
