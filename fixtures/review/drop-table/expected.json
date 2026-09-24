@@ -1,10 +1,10 @@
 [
   {
-    "message": "Table legacy_users is dropped. All of its rows will be permanently lost.",
+    "message": "Table audit_log is dropped. All of its rows will be permanently lost.",
     "mitigation": "Back up or migrate the data first, and ship application code that no longer reads the table before dropping it.",
     "rule_id": "risk/drop-table",
     "severity": "breaking",
-    "table_id": "legacy_users",
-    "table_name": "legacy_users"
+    "table_id": "audit_log",
+    "table_name": "audit_log"
   }
 ]

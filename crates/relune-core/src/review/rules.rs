@@ -43,6 +43,9 @@ pub fn run_rules(
         let before_table = context.find_before_table(&table_diff.table_name);
 
         for column_diff in &table_diff.column_diffs {
+            if context.rule_active(ReviewRuleId::DropColumn, &selected) {
+                check_drop_column(column_diff, after_table, &mut findings);
+            }
             if context.rule_active(ReviewRuleId::DropColumnReferenced, &selected) {
                 check_drop_column_referenced(
                     table_diff,
@@ -149,6 +152,9 @@ pub fn run_rules(
         }
     }
 
+    if context.rule_active(ReviewRuleId::DropTable, &selected) {
+        check_drop_table(diff, &context, &mut findings);
+    }
     if context.rule_active(ReviewRuleId::DropTableReferenced, &selected) {
         check_drop_table_referenced(diff, &context, &mut findings);
     }
@@ -544,6 +550,65 @@ fn fk_label_short(fk: &ForeignKey) -> String {
     fk.name
         .clone()
         .unwrap_or_else(|| format!("{}({})", fk.to_table, fk.from_columns.join(",")))
+}
+
+/// `risk/drop-column` — column dropped from an existing table. The
+/// stored values are gone once the migration runs, regardless of
+/// whether anything references the column. Generated columns are
+/// skipped because their values are derived from other columns.
+fn check_drop_column(
+    column_diff: &ColumnDiff,
+    after_table: &Table,
+    findings: &mut Vec<RiskFinding>,
+) {
+    if column_diff.change_kind != ChangeKind::Removed {
+        return;
+    }
+    if column_diff
+        .old_value
+        .as_ref()
+        .is_some_and(|column| column.semantics.generated.is_some())
+    {
+        return;
+    }
+    let qname = after_table.qualified_name();
+    findings.push(
+        RiskFinding::new(
+            ReviewRuleId::DropColumn,
+            ReviewSeverity::Breaking,
+            format!(
+                "Column {}.{} is dropped. Its stored data will be permanently lost.",
+                qname, column_diff.column_name,
+            ),
+        )
+        .with_table(&after_table.stable_id, &qname)
+        .with_column(&column_diff.column_name)
+        .with_mitigation(
+            "Back up or migrate the data first, and ship application code that no longer reads the column before dropping it.",
+        ),
+    );
+}
+
+/// `risk/drop-table` — existing table dropped. Every row is lost,
+/// independent of whether any FK references the table.
+fn check_drop_table(diff: &SchemaDiff, context: &RuleContext<'_>, findings: &mut Vec<RiskFinding>) {
+    for removed in &diff.removed_tables {
+        let Some(removed_table) = context.find_before_table(removed) else {
+            continue;
+        };
+        let removed_qname = removed_table.qualified_name();
+        findings.push(
+            RiskFinding::new(
+                ReviewRuleId::DropTable,
+                ReviewSeverity::Breaking,
+                format!("Table {removed_qname} is dropped. All of its rows will be permanently lost."),
+            )
+            .with_table(&removed_table.stable_id, &removed_qname)
+            .with_mitigation(
+                "Back up or migrate the data first, and ship application code that no longer reads the table before dropping it.",
+            ),
+        );
+    }
 }
 
 /// `risk/drop-column-referenced` — column being dropped is still
@@ -2774,6 +2839,142 @@ mod tests {
             .expect("expected DropTableReferenced finding");
         assert_eq!(drop.severity, ReviewSeverity::Breaking);
         assert_eq!(drop.table_name.as_deref(), Some("users"));
+    }
+
+    #[test]
+    fn drop_table_breaking_without_references() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let audit = table(
+            "audit_log",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users.clone(), audit],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert_eq!(findings.len(), 1, "got: {findings:?}");
+        let drop = &findings[0];
+        assert_eq!(drop.rule_id, ReviewRuleId::DropTable);
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.table_id.as_deref(), Some("audit_log"));
+        assert_eq!(drop.table_name.as_deref(), Some("audit_log"));
+    }
+
+    #[test]
+    fn drop_table_fires_alongside_drop_table_referenced() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, orders.clone()],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![orders],
+            ..Default::default()
+        };
+        let rules: Vec<_> = run_all(&before, &after)
+            .into_iter()
+            .map(|f| f.rule_id)
+            .collect();
+        assert!(rules.contains(&ReviewRuleId::DropTable), "got: {rules:?}");
+        assert!(
+            rules.contains(&ReviewRuleId::DropTableReferenced),
+            "got: {rules:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_breaking_without_references() {
+        let before = Schema {
+            tables: vec![table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("nickname", "TEXT", true, false),
+                ],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table(
+                "users",
+                vec![col("id", "BIGINT", false, true)],
+                vec![],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert_eq!(findings.len(), 1, "got: {findings:?}");
+        let drop = &findings[0];
+        assert_eq!(drop.rule_id, ReviewRuleId::DropColumn);
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.table_id.as_deref(), Some("users"));
+        assert_eq!(drop.column_name.as_deref(), Some("nickname"));
+    }
+
+    #[test]
+    fn drop_column_skips_generated_column() {
+        let mut full_name = col("full_name", "TEXT", true, false);
+        full_name.semantics.generated = Some(crate::model::GeneratedColumn {
+            expression: "first_name || last_name".into(),
+            stored: true,
+        });
+        let base = vec![
+            col("id", "BIGINT", false, true),
+            col("first_name", "TEXT", true, false),
+            col("last_name", "TEXT", true, false),
+        ];
+        let mut before_columns = base.clone();
+        before_columns.push(full_name);
+        let before = Schema {
+            tables: vec![table("users", before_columns, vec![], vec![])],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![table("users", base, vec![], vec![])],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropColumn),
+            "generated column drop loses no stored data, got: {findings:?}"
+        );
     }
 
     #[test]

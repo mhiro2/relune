@@ -245,6 +245,10 @@ impl FromStr for ReviewSeverity {
 /// even though `/` is not friendly to `serde(rename_all)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ReviewRuleId {
+    /// Dropping a column from an existing table; its data is lost.
+    DropColumn,
+    /// Dropping an existing table; its rows are lost.
+    DropTable,
     /// Dropping a column referenced by an existing FK.
     DropColumnReferenced,
     /// Dropping a table referenced by an existing FK.
@@ -300,6 +304,8 @@ impl ReviewRuleId {
     #[must_use]
     pub const fn all_rules() -> &'static [Self] {
         &[
+            Self::DropColumn,
+            Self::DropTable,
             Self::DropColumnReferenced,
             Self::DropTableReferenced,
             Self::AddNotNullOnExisting,
@@ -321,6 +327,8 @@ impl ReviewRuleId {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
+            Self::DropColumn => "risk/drop-column",
+            Self::DropTable => "risk/drop-table",
             Self::DropColumnReferenced => "risk/drop-column-referenced",
             Self::DropTableReferenced => "risk/drop-table-referenced",
             Self::AddNotNullOnExisting => "risk/add-not-null-on-existing",
@@ -340,6 +348,8 @@ impl ReviewRuleId {
     #[must_use]
     pub const fn description(&self) -> &'static str {
         match self {
+            Self::DropColumn => "Column is being dropped; its data is permanently lost",
+            Self::DropTable => "Table is being dropped; its rows are permanently lost",
             Self::DropColumnReferenced => {
                 "Column being dropped is still referenced by a foreign key"
             }
@@ -378,9 +388,11 @@ impl ReviewRuleId {
     #[must_use]
     pub const fn default_severity(&self) -> ReviewSeverity {
         match self {
-            Self::DropColumnReferenced | Self::DropTableReferenced | Self::TypeNarrow => {
-                ReviewSeverity::Breaking
-            }
+            Self::DropColumn
+            | Self::DropTable
+            | Self::DropColumnReferenced
+            | Self::DropTableReferenced
+            | Self::TypeNarrow => ReviewSeverity::Breaking,
             Self::AddNotNullOnExisting
             | Self::AddUniqueOnExisting
             | Self::AddCascadeDelete
@@ -406,7 +418,9 @@ impl ReviewRuleId {
     #[allow(clippy::trivially_copy_pass_by_ref)]
     pub(crate) const fn dialect_scope(&self) -> DialectScope {
         match self {
-            Self::DropColumnReferenced
+            Self::DropColumn
+            | Self::DropTable
+            | Self::DropColumnReferenced
             | Self::DropTableReferenced
             | Self::AddNotNullOnExisting
             | Self::TypeNarrow
@@ -827,6 +841,8 @@ mod tests {
     #[test]
     fn dialect_scope_is_any_for_dialect_agnostic_rules() {
         for rule in [
+            ReviewRuleId::DropColumn,
+            ReviewRuleId::DropTable,
             ReviewRuleId::DropColumnReferenced,
             ReviewRuleId::DropTableReferenced,
             ReviewRuleId::AddNotNullOnExisting,

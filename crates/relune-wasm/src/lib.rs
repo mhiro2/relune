@@ -690,7 +690,8 @@ mod wasm_bindgen_tests {
             serde_wasm_bindgen::from_value(result).expect("deserialize review result");
 
         assert_eq!(value["denied"], true);
-        assert_eq!(value["review"]["summary"]["breaking"], 1);
+        // The dropped column loses data and breaks the surviving FK.
+        assert_eq!(value["review"]["summary"]["breaking"], 2);
         let applied_details = value["applied_rule_details"]
             .as_array()
             .expect("applied_rule_details array");
@@ -707,7 +708,7 @@ mod wasm_bindgen_tests {
             .expect("content should be populated for format=json");
         let parsed: relune_app::ReviewResult =
             serde_json::from_str(content).expect("CLI JSON should deserialize as ReviewResult");
-        assert_eq!(parsed.review.summary.breaking, 1);
+        assert_eq!(parsed.review.summary.breaking, 2);
         assert!(parsed.denied);
     }
 
