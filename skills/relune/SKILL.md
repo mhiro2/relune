@@ -313,11 +313,12 @@ relune review --list-rules --format json         # JSON catalog (for CI / docs)
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (table glob) | -- |
 | `--deny` | `info`, `warning`, `caution`, `breaking` -- min severity for non-zero exit | -- |
 | `--exit-code` | Exit `10` when any findings are emitted | off |
+| `--fail-on-warning` | Exit `3` on warning diagnostics (unsupported SQL skipped, empty input); report and `--emit-summary` are still written | off |
 | `--list-rules` | List every rule (with default severity and description) and exit; honors `--format text\|json` only | off |
-| `--emit-summary <PATH>` | Always write the full review JSON to `PATH`, even when `--deny` short-circuits with rc=10 | off |
+| `--emit-summary <PATH>` | Always write the full review JSON to `PATH`, even when `--deny` or `--fail-on-warning` short-circuits (rc=10 / rc=3) | off |
 | `--allow-invalid-schema` | Review inputs with empty or duplicate table/column/view/enum names instead of failing (errors become `SCHEMA004` warnings) | off |
 
-Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. The catalog has fifteen rules; `risk/drop-table`, `risk/drop-column`, and `risk/drop-enum-value` flag every dropped table, stored column, and in-use enum value as `breaking` (data loss) even when nothing references them; the four lock-risk caution rules (`risk/add-index-on-large-table`, `risk/add-fk-on-existing`, `risk/alter-column-type`, and `risk/rewrite-table` on MySQL) fire when the effective dialect resolves to `postgres` or `mysql`. `--dialect auto` (the default) promotes to a concrete dialect when both SQL inputs parse to the same one, so SQL-only flows usually pick up lock-risk automatically; pin `--dialect` explicitly for schema-JSON inputs (no parser-side dialect signal) or to override the parser. When the two sides resolve to different dialects, lock-risk stays inactive and a `REVIEW002` warning surfaces the mismatch. `--list-rules` is the canonical source of every rule for CI / docs automation. `--emit-summary` is intended for CI jobs that need the structured report in a single pass (PR comment generation that still wants `--deny` to gate the build); reusing the `--out` path is rejected as a usage error. When an input is empty or the parser skipped unsupported constructs, the report prints a "Review coverage is incomplete" warning and the JSON records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`); treat such a run as unverified rather than risk-free.
+Rule IDs are kebab-case under the `risk/` namespace; for example `risk/drop-column-referenced`, `risk/add-not-null-on-existing`, `risk/fk-without-index`. The catalog has fifteen rules; `risk/drop-table`, `risk/drop-column`, and `risk/drop-enum-value` flag every dropped table, stored column, and in-use enum value as `breaking` (data loss) even when nothing references them; the four lock-risk caution rules (`risk/add-index-on-large-table`, `risk/add-fk-on-existing`, `risk/alter-column-type`, and `risk/rewrite-table` on MySQL) fire when the effective dialect resolves to `postgres` or `mysql`. `--dialect auto` (the default) promotes to a concrete dialect when both SQL inputs parse to the same one, so SQL-only flows usually pick up lock-risk automatically; pin `--dialect` explicitly for schema-JSON inputs (no parser-side dialect signal) or to override the parser. When the two sides resolve to different dialects, lock-risk stays inactive and a `REVIEW002` warning surfaces the mismatch. `--list-rules` is the canonical source of every rule for CI / docs automation. `--emit-summary` is intended for CI jobs that need the structured report in a single pass (PR comment generation that still wants `--deny` to gate the build); reusing the `--out` path is rejected as a usage error. When an input is empty or the parser skipped unsupported constructs, the report prints a "Review coverage is incomplete" warning and the JSON records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`); treat such a run as unverified rather than risk-free. `--deny` only gates findings; add `--fail-on-warning` to fail CI on these warnings as well.
 
 Lock-risk caution rules are based on schema state-change diff, not on the migration SQL itself. They flag a state change that, if executed naively, would acquire a problematic lock; they do not read your migration script and cannot detect that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder.
 
@@ -346,6 +347,7 @@ relune diff --before old.sql --after new.sql --format html -o d.html  # visual d
 relune diff --before old.sql --after new.sql --exit-code              # exit 10 if changes
 relune review --before old.sql --after new.sql                        # migration risk findings
 relune review --before old.sql --after new.sql --deny breaking        # gate CI on breaking risks
+relune review --before old.sql --after new.sql --deny breaking --fail-on-warning  # also fail on skipped SQL
 relune review --before old.sql --after new.sql --dialect postgres --deny caution  # also gate on lock-risk caution rules
 relune review --list-rules                                            # catalog of every review rule
 relune lint --sql new.sql                                             # lint new schema
@@ -479,6 +481,7 @@ fail_on_warning = false
 format = "text"
 dialect = "postgres"
 deny = "breaking"
+fail_on_warning = true
 except_rules = ["fk-without-index"]
 except_tables = ["audit_*"]
 

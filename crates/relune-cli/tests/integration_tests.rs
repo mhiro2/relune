@@ -2787,6 +2787,120 @@ mod review_tests {
         assert!(parsed["applied_rules"].is_array());
     }
 
+    const UNSUPPORTED_AFTER: &str = "
+        CREATE TABLE users (id INT PRIMARY KEY);
+        CREATE SEQUENCE order_seq;
+    ";
+
+    #[test]
+    fn review_skipped_constructs_pass_without_fail_on_warning() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg(UNSUPPORTED_AFTER)
+            .arg("--deny")
+            .arg("breaking")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(0));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Review coverage is incomplete"), "{stdout}");
+        assert!(
+            stdout.contains("1 unsupported SQL construct in the after input was skipped"),
+            "{stdout}"
+        );
+    }
+
+    #[test]
+    fn review_fail_on_warning_rejects_skipped_constructs_after_writing_reports() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let summary_path = temp.path().join("review-summary.json");
+        let main_out_path = temp.path().join("review-main.md");
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--after-sql-text")
+            .arg(UNSUPPORTED_AFTER)
+            .arg("--format")
+            .arg("markdown")
+            .arg("--fail-on-warning")
+            .arg("--emit-summary")
+            .arg(&summary_path)
+            .arg("--out")
+            .arg(&main_out_path)
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let report = fs::read_to_string(&main_out_path).expect("report should be written");
+        assert!(report.contains("> [!WARNING]"), "{report}");
+        let summary: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&summary_path).expect("summary should be written"),
+        )
+        .expect("summary should be JSON");
+        assert_eq!(summary["inputs"]["after"]["unsupported_constructs"], 1);
+    }
+
+    #[test]
+    fn review_fail_on_warning_from_config_rejects_empty_before() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let config_path = temp.path().join("relune.toml");
+        fs::write(&config_path, "[review]\nfail_on_warning = true\n").unwrap();
+        let before_path = temp.path().join("before.sql");
+        fs::write(&before_path, "-- no tables yet\n").unwrap();
+
+        let output = relune()
+            .arg("--config")
+            .arg(&config_path)
+            .arg("review")
+            .arg("--before")
+            .arg(&before_path)
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("The before input produced no schema objects"),
+            "{stdout}"
+        );
+    }
+
+    #[test]
+    fn review_fail_on_warning_rejects_empty_schema_json_input() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let before_path = temp.path().join("before.json");
+        fs::write(
+            &before_path,
+            r#"{"version":"2.0.0","tables":[],"views":[],"enums":[]}"#,
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-schema-json")
+            .arg(&before_path)
+            .arg("--after-sql-text")
+            .arg("CREATE TABLE users (id INT PRIMARY KEY);")
+            .arg("--fail-on-warning")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(3));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("The before input produced no schema objects"),
+            "{stdout}"
+        );
+    }
+
     #[test]
     fn review_emit_summary_rejects_path_collision_with_out() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");

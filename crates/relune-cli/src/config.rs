@@ -377,6 +377,9 @@ pub struct ReviewConfig {
     /// rejected as a usage error during merge.
     #[serde(default)]
     pub severity_overrides: BTreeMap<String, ReviewRuleOverrideConfig>,
+    /// Exit with non-zero code if warnings are emitted.
+    #[serde(default)]
+    pub fail_on_warning: Option<bool>,
     /// Continue when an input has empty or duplicate object names.
     #[serde(default)]
     pub allow_invalid_schema: Option<bool>,
@@ -808,6 +811,7 @@ impl ReluneConfig {
             except_tables: merge_string_values(&args.except_tables, &self.review.except_tables),
             deny: args.deny.or_else(|| self.review.deny.map(Into::into)),
             severity_overrides,
+            fail_on_warning: args.fail_on_warning || self.review.fail_on_warning.unwrap_or(false),
             allow_invalid_schema: args.allow_invalid_schema
                 || self.review.allow_invalid_schema.unwrap_or(false),
         })
@@ -1065,6 +1069,7 @@ pub struct MergedReviewConfig {
     /// Order is stable (TOML key ascending) so wasm/CLI consumers see a
     /// deterministic vector.
     pub severity_overrides: Vec<ReviewSeverityOverride>,
+    pub fail_on_warning: bool,
     pub allow_invalid_schema: bool,
 }
 
@@ -2280,10 +2285,28 @@ direction = "left-to-right"
             except_tables: vec![],
             deny: None,
             exit_code: false,
+            fail_on_warning: false,
             list_rules: false,
             emit_summary: None,
             allow_invalid_schema: false,
         }
+    }
+
+    #[test]
+    fn test_merge_review_args_fail_on_warning_from_config_or_cli() {
+        let mut config = ReluneConfig::default();
+        let args = default_review_args();
+        assert!(!config.merge_review_args(&args).unwrap().fail_on_warning);
+
+        config.review.fail_on_warning = Some(true);
+        assert!(config.merge_review_args(&args).unwrap().fail_on_warning);
+
+        config.review.fail_on_warning = Some(false);
+        let args = crate::cli::ReviewArgs {
+            fail_on_warning: true,
+            ..default_review_args()
+        };
+        assert!(config.merge_review_args(&args).unwrap().fail_on_warning);
     }
 
     #[test]

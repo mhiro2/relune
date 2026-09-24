@@ -255,7 +255,17 @@ pub fn check_diagnostics_at_or_above(
 ) -> crate::error::CliResult<()> {
     let printer = DiagnosticPrinter::new(color);
     printer.print_all(diagnostics, quiet);
+    fail_on_diagnostics_at_or_above(diagnostics, minimum_severity)
+}
 
+/// Fail when any diagnostic meets the threshold, without printing anything.
+///
+/// Lets a command print diagnostics up front and defer the warning gate
+/// until after its report has been written.
+pub fn fail_on_diagnostics_at_or_above(
+    diagnostics: &[Diagnostic],
+    minimum_severity: Severity,
+) -> crate::error::CliResult<()> {
     let highest = diagnostics
         .iter()
         .map(|diagnostic| diagnostic.severity)

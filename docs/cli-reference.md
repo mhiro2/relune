@@ -287,8 +287,9 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (see [Table patterns](#table-patterns)) |
 | `--deny info\|warning\|caution\|breaking` | Exit non-zero when findings reach this severity |
 | `--exit-code` | Exit `10` when any findings are emitted (regardless of severity) |
+| `--fail-on-warning` | Exit `3` when diagnostics include warnings or input coverage is incomplete, such as SQL the parser skipped as unsupported or an input (SQL or schema JSON) with no schema objects; the report and `--emit-summary` file are still written |
 | `--list-rules` | List every review rule (with default severity and description) and exit; honors `--format text\|json` only |
-| `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` short-circuits with rc=10 |
+| `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` or `--fail-on-warning` short-circuits (rc=10 / rc=3) |
 | `--allow-invalid-schema` | Review inputs that fail identity validation instead of exiting `1` (same rules as [`diff`](#diff)) |
 
 Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen rules:
@@ -315,9 +316,9 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen 
 
 `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
 
-`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all fifteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
+`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all fifteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 or rc=3 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
 
-Review only sees what the parser modeled. When an input produced no schema objects (`PARSE004`), or the parser skipped constructs it does not support (`PARSE002`, e.g. an unsupported `ALTER TABLE` form), the text and markdown reports print a "Review coverage is incomplete" warning above the findings, and the JSON report records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`). A run with no findings is then not evidence that the migration is safe.
+Review only sees what the parser modeled. When an input produced no schema objects (`PARSE004`), or the parser skipped constructs it does not support (`PARSE002`, e.g. an unsupported `ALTER TABLE` form), the text and markdown reports print a "Review coverage is incomplete" warning above the findings, and the JSON report records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`). A run with no findings is then not evidence that the migration is safe. `--deny` only looks at findings, so add `--fail-on-warning` (or `[review] fail_on_warning = true`) to make CI fail on these warnings too. When both apply, `--deny` takes precedence (exit `10`).
 
 > [!NOTE]
 > **Lock-risk caution rules read schema state, not migration SQL.**
@@ -328,6 +329,7 @@ relune review --before old.sql --after new.sql
 relune review --before old.sql --after new.sql --format markdown -o review.md
 relune review --before old.sql --after new.sql --format json -o review.json
 relune review --before old.sql --after new.sql --deny breaking
+relune review --before old.sql --after new.sql --deny breaking --fail-on-warning  # also fail on skipped SQL
 relune review --before old.sql --after new.sql --except-rule fk-without-index
 relune review --before old.sql --after new.sql --except-table 'audit_*'
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
