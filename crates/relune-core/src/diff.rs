@@ -271,6 +271,7 @@ fn columns_differ(a: &Column, b: &Column) -> bool {
     a.data_type != b.data_type
         || a.nullable != b.nullable
         || a.is_primary_key != b.is_primary_key
+        || a.enum_values != b.enum_values
         || a.semantics != b.semantics
 }
 
@@ -1325,6 +1326,25 @@ mod tests {
         assert!(diff.added_tables.is_empty());
         assert!(diff.removed_tables.is_empty());
         assert!(diff.modified_tables.is_empty());
+    }
+
+    #[test]
+    fn inline_enum_value_change_is_modified_even_with_same_data_type() {
+        let with_values = |values: &[&str]| {
+            let mut table =
+                create_test_table("orders", vec![("status", "enum", true, false)], vec![]);
+            table.columns[0].enum_values = Some(values.iter().map(ToString::to_string).collect());
+            Schema {
+                tables: vec![table],
+                ..Default::default()
+            }
+        };
+
+        let diff = diff_schemas(&with_values(&["new", "paid"]), &with_values(&["new"]));
+
+        let column_diffs = &diff.modified_tables[0].column_diffs;
+        assert_eq!(column_diffs.len(), 1);
+        assert_eq!(column_diffs[0].change_kind, ChangeKind::Modified);
     }
 
     #[test]
