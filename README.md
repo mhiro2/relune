@@ -31,9 +31,10 @@
 
 ## Why Relune
 
-Relune is a schema review tool for the moments that hurt — dropped references,
-narrowing types, `NOT NULL` on existing rows, indexes lost in a rewrite — and
-still gives you a diagram, a diff, and a lint pass when you need them.
+Relune is a schema review tool for the moments that hurt — dropped tables,
+columns, and enum values, broken references, narrowing types, `NOT NULL` on
+existing rows, indexes lost in a rewrite — and still gives you a diagram, a
+diff, and a lint pass when you need them.
 
 It supports schema work across the full lifecycle, with **review** at the centre:
 

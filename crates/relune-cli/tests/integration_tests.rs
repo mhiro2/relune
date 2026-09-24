@@ -2319,7 +2319,8 @@ mod review_tests {
             finding["rule_id"]
                 == serde_json::Value::String("risk/drop-column-referenced".to_string())
         }));
-        assert_eq!(parsed["summary"]["breaking"], serde_json::Value::from(1));
+        // The dropped column loses data and breaks the surviving FK.
+        assert_eq!(parsed["summary"]["breaking"], serde_json::Value::from(2));
         assert_eq!(parsed["denied"], serde_json::Value::from(false));
     }
 
@@ -2619,6 +2620,9 @@ mod review_tests {
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         for rule in [
+            "risk/drop-column",
+            "risk/drop-table",
+            "risk/drop-enum-value",
             "risk/drop-column-referenced",
             "risk/drop-table-referenced",
             "risk/add-not-null-on-existing",
@@ -2662,9 +2666,9 @@ mod review_tests {
         let entries = parsed
             .as_array()
             .expect("--list-rules JSON should be an array");
-        assert_eq!(entries.len(), 12, "expected metadata for every review rule");
+        assert_eq!(entries.len(), 15, "expected metadata for every review rule");
         let first = &entries[0];
-        assert_eq!(first["rule_id"], "risk/drop-column-referenced");
+        assert_eq!(first["rule_id"], "risk/drop-column");
         assert_eq!(first["default_severity"], "breaking");
         assert!(
             first["description"].as_str().is_some_and(|d| !d.is_empty()),
@@ -2778,7 +2782,7 @@ mod review_tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&summary).expect("emit-summary file should contain valid JSON");
         assert_eq!(parsed["denied"], true);
-        assert_eq!(parsed["summary"]["breaking"], 1);
+        assert_eq!(parsed["summary"]["breaking"], 2);
         assert!(parsed["findings"].is_array());
         assert!(parsed["applied_rules"].is_array());
     }

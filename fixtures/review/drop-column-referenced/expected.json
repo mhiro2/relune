@@ -1,6 +1,15 @@
 [
   {
     "column_name": "legacy_email",
+    "message": "Column users.legacy_email is dropped. Its stored data will be permanently lost.",
+    "mitigation": "Back up or migrate the data first, and ship application code that no longer reads the column before dropping it.",
+    "rule_id": "risk/drop-column",
+    "severity": "breaking",
+    "table_id": "users",
+    "table_name": "users"
+  },
+  {
+    "column_name": "legacy_email",
     "fk_name": "orders_user_legacy_email_fkey",
     "message": "Column users.legacy_email is referenced by FK orders_user_legacy_email_fkey on orders. Dropping it will fail.",
     "mitigation": "Drop or update the referencing FK in the same migration.",

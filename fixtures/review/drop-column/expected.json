@@ -1,7 +1,7 @@
 [
   {
-    "column_name": "legacy_email",
-    "message": "Column users.legacy_email is dropped. Its stored data will be permanently lost.",
+    "column_name": "nickname",
+    "message": "Column users.nickname is dropped. Its stored data will be permanently lost.",
     "mitigation": "Back up or migrate the data first, and ship application code that no longer reads the column before dropping it.",
     "rule_id": "risk/drop-column",
     "severity": "breaking",

@@ -1,0 +1,11 @@
+[
+  {
+    "column_name": "status",
+    "message": "Enum order_status drops value(s) 'cancelled' used by column orders.status. Existing rows holding them will fail the migration or lose their value.",
+    "mitigation": "Rewrite rows holding the removed value(s) to a surviving value before removing them from the enum.",
+    "rule_id": "risk/drop-enum-value",
+    "severity": "breaking",
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]
