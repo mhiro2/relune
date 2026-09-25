@@ -90,6 +90,11 @@ Options:
       --exit-code
           Exit with code 10 if any findings are emitted
 
+      --fail-on-warning
+          Exit with code 3 if warning diagnostics are emitted or input coverage is incomplete, such
+          as SQL the parser skipped as unsupported or an input with no schema objects. The report
+          and `--emit-summary` file are still written
+
       --allow-invalid-schema
           Continue even when an input has empty or duplicate table, column, view, or enum names; the
           validation errors are reported as warnings
@@ -102,8 +107,8 @@ Options:
 
       --emit-summary <PATH>
           Write the full review JSON (same shape as `--format json`) to PATH in addition to the
-          user-visible output. The file is always written, even when `--deny` short-circuits the
-          user-visible run with rc=10
+          user-visible output. The file is always written, even when `--deny` or `--fail-on-warning`
+          short-circuits the user-visible run with rc=10 or rc=3
 
   -h, --help
           Print help (see a summary with '-h')

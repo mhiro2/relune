@@ -211,6 +211,8 @@ Lock-risk rules are dialect-scoped: `run_rules` reads `EffectiveDialect` and ski
 
 When the caller leaves `--dialect` at its default `auto`, the review use case promotes it to a concrete `EffectiveDialect` whenever the SQL parser resolved both the before and after inputs to the same dialect (e.g. both look like Postgres → `Postgres`). DB-URL inputs use the URL scheme as the parser-side signal; schema-JSON inputs carry no parser dialect and stay `Auto`. If the two sides resolve to different dialects, `EffectiveDialect` stays `Auto` and a single warning diagnostic (`REVIEW002`) is emitted so the user can tell that lock-risk evaluation was skipped because of the mismatch rather than silently. The originally requested dialect and the resolved effective dialect are surfaced in `relune-app::ReviewResult` (`requested_dialect` / `effective_dialect`), in the WASM response, and inline in the CLI text/markdown reports.
 
+Rules can only evaluate what the parser modeled, so `relune-app::ReviewResult.inputs` records per-side parse coverage: whether the input produced no tables, views, or enums (`empty`), and how many `PARSE002` unsupported constructs were skipped (`unsupported_constructs`). The text/markdown formatters print a "coverage is incomplete" warning whenever either side is not fully covered, and the WASM response carries the same `inputs` payload for the playground, so a clean review over a partially parsed migration is never presented as risk-free.
+
 ---
 
 ## 10. Layout

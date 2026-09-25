@@ -6,12 +6,14 @@ use super::input::DiffInputSelection;
 use crate::cli::{ColorWhen, ReviewArgs, ReviewFormat, ReviewSeverityArg};
 use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult, schema_comparison_error};
-use crate::output::{check_diagnostics, print_success, write_output};
+use crate::output::{
+    check_diagnostics, fail_on_diagnostics_at_or_above, print_success, write_output,
+};
 use relune_app::{
     ReviewFormat as AppReviewFormat, ReviewRequest, ReviewResult, format_review_json,
     format_review_markdown_with, format_review_text_with, review,
 };
-use relune_core::{ReviewRuleId, ReviewRuleMetadata, ReviewSeverity};
+use relune_core::{ReviewRuleId, ReviewRuleMetadata, ReviewSeverity, Severity};
 
 /// Run the review command.
 pub fn run_review(
@@ -62,10 +64,14 @@ pub fn run_review(
     let result = review(request)
         .map_err(|error| schema_comparison_error("Failed to review schema", &error))?;
 
+    // Errors abort before any report is written. The warning gate is
+    // deferred so the report and summary still explain why the run failed
+    // (for example, which constructs the parser skipped).
     check_diagnostics(&result.diagnostics, color, false, quiet)?;
 
-    // Emit the structured summary file before any deny short-circuit so CI
-    // can rely on `--emit-summary` being written even when rc=10.
+    // Emit the structured summary file before any deny or warning
+    // short-circuit so CI can rely on `--emit-summary` being written even
+    // when rc=10 or rc=3.
     if let Some(emit_path) = args.emit_summary.as_deref() {
         write_emit_summary(&result, emit_path, color)?;
     }
@@ -100,6 +106,17 @@ pub fn run_review(
         return Err(CliError::deny_threshold_reached(anyhow::anyhow!(
             "Review findings reached the configured --deny threshold"
         )));
+    }
+
+    if merged.fail_on_warning {
+        fail_on_diagnostics_at_or_above(&result.diagnostics, Severity::Warning)?;
+        // Schema JSON inputs carry no parser diagnostics, so an empty one
+        // is only visible through the coverage report.
+        if !result.inputs.is_complete() {
+            return Err(CliError::warning(anyhow::anyhow!(
+                "Review coverage is incomplete"
+            )));
+        }
     }
 
     if args.exit_code && !result.review.findings.is_empty() {

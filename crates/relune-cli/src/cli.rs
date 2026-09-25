@@ -817,6 +817,7 @@ pub enum DiffFormat {
             .multiple(false)
     )
 )]
+#[allow(clippy::struct_excessive_bools)] // independent CLI switches, not a state enum
 pub struct ReviewArgs {
     /// Baseline SQL or schema JSON file.
     #[arg(long = "before", value_name = "FILE")]
@@ -881,6 +882,13 @@ pub struct ReviewArgs {
     #[arg(long = "exit-code")]
     pub exit_code: bool,
 
+    /// Exit with code 3 if warning diagnostics are emitted or input coverage
+    /// is incomplete, such as SQL the parser skipped as unsupported or an
+    /// input with no schema objects.
+    /// The report and `--emit-summary` file are still written.
+    #[arg(long = "fail-on-warning")]
+    pub fail_on_warning: bool,
+
     /// Continue even when an input has empty or duplicate table, column,
     /// view, or enum names; the validation errors are reported as warnings.
     #[arg(long = "allow-invalid-schema")]
@@ -895,7 +903,8 @@ pub struct ReviewArgs {
 
     /// Write the full review JSON (same shape as `--format json`) to PATH in
     /// addition to the user-visible output. The file is always written, even
-    /// when `--deny` short-circuits the user-visible run with rc=10.
+    /// when `--deny` or `--fail-on-warning` short-circuits the user-visible
+    /// run with rc=10 or rc=3.
     #[arg(long = "emit-summary", value_name = "PATH")]
     pub emit_summary: Option<PathBuf>,
 }
