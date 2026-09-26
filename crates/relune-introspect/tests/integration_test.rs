@@ -250,6 +250,13 @@ async fn test_introspect_sqlite_file_minimal() {
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
         CREATE INDEX idx_posts_user ON posts(user_id);
+        CREATE TABLE tags (slug TEXT PRIMARY KEY);
+        CREATE TABLE events (seq INTEGER PRIMARY KEY DESC);
+        CREATE TABLE post_tags (
+            post_id INTEGER,
+            tag TEXT,
+            PRIMARY KEY (post_id, tag)
+        );
         ",
     )
     .execute(&pool)
@@ -260,13 +267,34 @@ async fn test_introspect_sqlite_file_minimal() {
     let abs = db_path.canonicalize().expect("canonicalize db path");
     let url = format!("sqlite://{}", abs.display());
     let schema = introspect_sqlite(&url).await.expect("introspect sqlite");
-    assert_eq!(schema.tables.len(), 2);
+    assert_eq!(schema.tables.len(), 5);
     let posts = schema
         .tables
         .iter()
         .find(|t| t.name == "posts")
         .expect("posts table");
     assert_eq!(posts.foreign_keys.len(), 1);
+    let id = posts
+        .columns
+        .iter()
+        .find(|c| c.name == "id")
+        .expect("posts.id column");
+    assert!(id.is_primary_key);
+    assert!(!id.nullable, "a rowid alias can never be NULL");
+
+    // SQLite accepts NULL in other primary-key columns of rowid tables,
+    // including `INTEGER PRIMARY KEY DESC`, which is not a rowid alias.
+    for table_name in ["tags", "post_tags", "events"] {
+        let table = schema
+            .tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .expect("table");
+        assert!(
+            table.columns.iter().all(|c| c.is_primary_key && c.nullable),
+            "{table_name} primary-key columns should stay nullable"
+        );
+    }
 }
 
 #[tokio::test]
