@@ -4,7 +4,7 @@
 //! anti-patterns in database schemas.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -455,8 +455,8 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
         check_no_primary_key(table, &mut result);
         check_orphan_table(table, &incoming_fks, &outgoing_fks, &mut result);
         check_too_many_nullable(table, &mut result);
-        check_suspicious_join_table(table, &mut result);
-        check_duplicated_fk_pattern(table, &mut result);
+        check_suspicious_join_table(schema, table, &mut result);
+        check_duplicated_fk_pattern(schema, table, &mut result);
         check_non_snake_case_identifiers(table, &mut result);
         check_unresolved_foreign_keys(schema, table, &mut result);
         check_foreign_key_indexes_nullable_and_target(schema, table, &mut result);
@@ -476,6 +476,7 @@ pub fn lint_schema(schema: &Schema) -> LintResult {
             .then_with(|| a.table_id.cmp(&b.table_id))
             .then_with(|| a.column_name.cmp(&b.column_name))
             .then_with(|| a.rule_id.as_str().cmp(b.rule_id.as_str()))
+            .then_with(|| a.message.cmp(&b.message))
     });
 
     result
@@ -671,7 +672,7 @@ fn check_too_many_nullable(table: &Table, result: &mut LintResult) {
 }
 
 /// Check: Table name suggests join table but has FK pattern issues.
-fn check_suspicious_join_table(table: &Table, result: &mut LintResult) {
+fn check_suspicious_join_table(schema: &Schema, table: &Table, result: &mut LintResult) {
     let name_lower = table.name.to_lowercase();
 
     // Common join table naming patterns
@@ -720,10 +721,10 @@ fn check_suspicious_join_table(table: &Table, result: &mut LintResult) {
         );
     } else if fk_count > 2 {
         // Check if FKs go to different tables
-        let target_tables: HashSet<String> = table
+        let target_tables: HashSet<FkTargetKey> = table
             .foreign_keys
             .iter()
-            .map(|fk| fk.to_table.to_lowercase())
+            .map(|fk| fk_target_key(schema, table, fk))
             .collect();
 
         if target_tables.len() < fk_count {
@@ -760,21 +761,48 @@ fn looks_like_join_table_name(name: &str) -> bool {
     parts.iter().all(|p| p.len() >= 3)
 }
 
+/// Schema-aware identity of an FK target table: `(schema, table)`, both
+/// lowercased. Resolvable targets use the referenced table's own schema so
+/// `auth.users` and `public.users` stay distinct; unresolved targets fall back
+/// to the declared (or source-inherited) schema.
+type FkTargetKey = (Option<String>, String);
+
+fn fk_target_key(schema: &Schema, table: &Table, fk: &ForeignKey) -> FkTargetKey {
+    match resolve_referenced_table(schema, table, fk) {
+        Some(target) => (
+            target.schema_name.as_deref().map(str::to_lowercase),
+            target.name.to_lowercase(),
+        ),
+        None => (
+            fk.to_schema
+                .as_deref()
+                .or(table.schema_name.as_deref())
+                .map(str::to_lowercase),
+            fk.to_table.to_lowercase(),
+        ),
+    }
+}
+
 /// Check: Multiple FKs to the same target table.
-fn check_duplicated_fk_pattern(table: &Table, result: &mut LintResult) {
-    // Group FKs by target table (case-insensitive)
-    let mut fk_by_target: HashMap<String, Vec<&ForeignKey>> = HashMap::new();
+fn check_duplicated_fk_pattern(schema: &Schema, table: &Table, result: &mut LintResult) {
+    // Group FKs by resolved target table; a BTreeMap keeps the emission order
+    // stable across runs.
+    let mut fk_by_target: BTreeMap<FkTargetKey, Vec<&ForeignKey>> = BTreeMap::new();
 
     for fk in &table.foreign_keys {
         fk_by_target
-            .entry(fk.to_table.to_lowercase())
+            .entry(fk_target_key(schema, table, fk))
             .or_default()
             .push(fk);
     }
 
     // Find tables with multiple FKs to the same target
-    for (target_table, fks) in &fk_by_target {
+    for ((target_schema, target_table), fks) in &fk_by_target {
         if fks.len() > 1 {
+            let target_table = match target_schema {
+                Some(target_schema) => format!("{target_schema}.{target_table}"),
+                None => target_table.clone(),
+            };
             let fk_names: Vec<String> = fks
                 .iter()
                 .map(|fk| {
@@ -1525,10 +1553,133 @@ mod tests {
         );
 
         let mut result = LintResult::new();
-        check_duplicated_fk_pattern(&table, &mut result);
+        check_duplicated_fk_pattern(&Schema::default(), &table, &mut result);
 
         assert_eq!(result.issues.len(), 1);
         assert_eq!(result.issues[0].rule_id, LintRuleId::DuplicatedFkPattern);
+    }
+
+    #[test]
+    fn test_duplicated_fk_pattern_distinguishes_schemas() {
+        let fk_to = |to_schema: &str, column: &str| ForeignKey {
+            to_schema: Some(to_schema.to_string()),
+            ..create_fk("users", &[column])
+        };
+        let schema = Schema {
+            tables: vec![
+                create_test_table_with_schema(
+                    Some("public"),
+                    "orders",
+                    vec![create_column("id", false, true)],
+                    vec![
+                        fk_to("auth", "auth_user_id"),
+                        fk_to("public", "customer_id"),
+                        // Unqualified reference resolves to the source schema.
+                        create_fk("users", &["updated_by"]),
+                    ],
+                    vec![],
+                ),
+                create_test_table_with_schema(
+                    Some("auth"),
+                    "users",
+                    vec![create_column("id", false, true)],
+                    vec![],
+                    vec![],
+                ),
+                create_test_table_with_schema(
+                    Some("public"),
+                    "users",
+                    vec![create_column("id", false, true)],
+                    vec![],
+                    vec![],
+                ),
+            ],
+            ..Schema::default()
+        };
+
+        let mut result = LintResult::new();
+        check_duplicated_fk_pattern(&schema, &schema.tables[0], &mut result);
+
+        assert_eq!(result.issues.len(), 1);
+        assert_eq!(
+            result.issues[0].message,
+            "Table 'public.orders' has 2 foreign keys to table 'public.users'"
+        );
+    }
+
+    #[test]
+    fn test_duplicated_fk_pattern_orders_groups_deterministically() {
+        let table = create_test_table(
+            "audit",
+            vec![create_column("id", false, true)],
+            ["delta", "alpha", "charlie", "bravo"]
+                .iter()
+                .flat_map(|target| {
+                    [
+                        create_fk(target, &["created_by"]),
+                        create_fk(target, &["updated_by"]),
+                    ]
+                })
+                .collect(),
+            vec![],
+        );
+        let schema = Schema {
+            tables: vec![table],
+            ..Schema::default()
+        };
+
+        let messages = |result: &LintResult| -> Vec<String> {
+            result
+                .issues
+                .iter()
+                .filter(|issue| issue.rule_id == LintRuleId::DuplicatedFkPattern)
+                .map(|issue| issue.message.clone())
+                .collect()
+        };
+        let first = messages(&lint_schema(&schema));
+        assert_eq!(
+            first,
+            ["alpha", "bravo", "charlie", "delta"]
+                .iter()
+                .map(|target| format!("Table 'audit' has 2 foreign keys to table '{target}'"))
+                .collect::<Vec<_>>()
+        );
+        for _ in 0..16 {
+            assert_eq!(messages(&lint_schema(&schema)), first);
+        }
+    }
+
+    #[test]
+    fn test_suspicious_join_table_distinguishes_schemas() {
+        let fk_to = |to_schema: &str, column: &str| ForeignKey {
+            to_schema: Some(to_schema.to_string()),
+            ..create_fk("users", &[column])
+        };
+        let schema = Schema {
+            tables: vec![
+                create_test_table_with_schema(
+                    Some("public"),
+                    "user_links",
+                    vec![create_column("id", false, true)],
+                    vec![
+                        fk_to("auth", "auth_user_id"),
+                        fk_to("public", "user_id"),
+                        create_fk("roles", &["role_id"]),
+                    ],
+                    vec![],
+                ),
+                create_test_table_with_schema(Some("auth"), "users", vec![], vec![], vec![]),
+                create_test_table_with_schema(Some("public"), "users", vec![], vec![], vec![]),
+                create_test_table_with_schema(Some("public"), "roles", vec![], vec![], vec![]),
+            ],
+            ..Schema::default()
+        };
+
+        let mut result = LintResult::new();
+        check_suspicious_join_table(&schema, &schema.tables[0], &mut result);
+
+        // Three FKs to three distinct tables: nothing to report.
+        assert!(result.issues.is_empty());
     }
 
     #[test]
