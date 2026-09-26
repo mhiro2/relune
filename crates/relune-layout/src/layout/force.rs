@@ -4,7 +4,7 @@ use relune_core::LayoutDirection;
 
 use crate::graph::LayoutGraph;
 
-use super::hierarchical::assign_coordinates;
+use super::hierarchical::{HierarchicalPlacement, assign_coordinates};
 use super::spacing::{
     build_positioned_node, compute_graph_bounds, mirror_positioned_nodes_for_direction,
 };
@@ -185,13 +185,19 @@ fn compute_repulsion_with_grid(
 #[allow(clippy::imprecise_flops)]
 pub(super) fn apply_force_layout(
     graph: &LayoutGraph,
+    node_ranks: &[usize],
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
     ordered_nodes: &[Vec<usize>],
-) -> Result<(Vec<PositionedNode>, f32, f32), LayoutError> {
+) -> Result<HierarchicalPlacement, LayoutError> {
     let n = graph.nodes.len();
     if n == 0 {
-        return Ok((Vec::new(), config.origin_x * 2.0, config.origin_y * 2.0));
+        return Ok(HierarchicalPlacement {
+            nodes: Vec::new(),
+            width: config.origin_x * 2.0,
+            height: config.origin_y * 2.0,
+            node_rows: Vec::new(),
+        });
     }
 
     // Force parameters
@@ -203,7 +209,16 @@ pub(super) fn apply_force_layout(
     let min_distance = 1.0;
 
     let canonical_config = force_layout_canonical_config(config);
-    let seed_nodes = force_layout_seed_nodes(graph, ordered_nodes, &canonical_config, node_sizes)?;
+    // The seed rows stay valid for routing because the primary axis is
+    // restored to the seed coordinates after the simulation.
+    let seed = assign_coordinates(
+        graph,
+        node_ranks,
+        ordered_nodes,
+        &canonical_config,
+        node_sizes,
+    )?;
+    let seed_nodes = seed.nodes;
     let mut positions: Vec<(f32, f32)> = seed_nodes.iter().map(|node| (node.x, node.y)).collect();
     let primary_targets: Vec<f32> = seed_nodes.iter().map(|node| node.y).collect();
     let (center_x, center_y) = force_layout_seed_center(&positions, node_sizes);
@@ -386,7 +401,12 @@ pub(super) fn apply_force_layout(
     mirror_positioned_nodes_for_direction(&mut positioned_nodes, graph_bounds, config.direction);
     let (width, height) = compute_graph_bounds(&positioned_nodes, config);
 
-    Ok((positioned_nodes, width, height))
+    Ok(HierarchicalPlacement {
+        nodes: positioned_nodes,
+        width,
+        height,
+        node_rows: seed.node_rows,
+    })
 }
 
 pub(super) fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConfig {
@@ -402,16 +422,6 @@ pub(super) fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConf
         );
     }
     canonical
-}
-
-fn force_layout_seed_nodes(
-    graph: &LayoutGraph,
-    ordered_nodes: &[Vec<usize>],
-    config: &LayoutConfig,
-    node_sizes: &[NodeSize],
-) -> Result<Vec<PositionedNode>, LayoutError> {
-    let (positioned_nodes, _, _) = assign_coordinates(graph, ordered_nodes, config, node_sizes)?;
-    Ok(positioned_nodes)
 }
 
 fn force_layout_seed_center(positions: &[(f32, f32)], node_sizes: &[NodeSize]) -> (f32, f32) {

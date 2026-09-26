@@ -6,16 +6,16 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   "fixture": "cyclic_fk.sql",
   "layout": {
     "edge_count": 12,
-    "height": 758.0,
+    "height": 1230.0,
     "node_count": 12,
-    "width": 3640.199951171875
+    "width": 1503.4000244140625
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 0,
+      "count_over_1_8x": 2,
       "worst_examples": [
-        "cycle_a[cycle_c_id] -> cycle_c[id] (1.40x)",
-        "users[default_team_id] -> teams[id] (1.23x)",
+        "users[default_team_id] -> teams[id] (1.94x)",
+        "cycle_a[cycle_c_id] -> cycle_c[id] (1.90x)",
         "cycle_b[cycle_a_id] -> cycle_a[id] (1.00x)"
       ]
     },
@@ -43,23 +43,23 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 2,
+      "count_under_24px": 0,
       "worst_examples": [
-        "cycle_b[cycle_a_id] -> cycle_a[id] (16.0px)",
-        "organizations_ref[owner_user_id] -> users[id] (16.0px)",
-        "cycle_a[cycle_c_id] -> cycle_c[id] (24.0px)"
+        "cycle_a[cycle_c_id] -> cycle_c[id] (24.0px)",
+        "users[default_team_id] -> teams[id] (24.0px)",
+        "cycle_c[cycle_b_id] -> cycle_b[id] (202.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 456900,
+      "bytes": 458261,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 88795,
+      "bytes": 90156,
       "edge_groups": 96,
       "node_groups": 12
     }

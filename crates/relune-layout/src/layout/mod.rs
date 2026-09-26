@@ -28,7 +28,7 @@ mod spacing;
 use edge_routing::route_edges_with_diagnostics;
 use force::apply_force_layout;
 use groups::position_groups;
-use hierarchical::assign_coordinates;
+use hierarchical::{HierarchicalPlacement, assign_coordinates};
 use spacing::{expand_bounds_for_edges, measure_node_sizes};
 
 /// Default number of iterations for force-directed layout.
@@ -650,37 +650,40 @@ pub fn build_layout_from_graph_with_config(
 
     // Step 3: Assign coordinates based on layout mode
     let node_sizes = measure_node_sizes(graph, &effective_config);
-    let (positioned_nodes, width, height, node_ranks) = match effective_config.mode {
-        LayoutAlgorithm::Hierarchical => {
-            // Hierarchical layout: assign ranks and order
-            let ranks = assign_ranks(graph);
-            debug!("Assigned {} ranks", ranks.num_ranks);
-            let ordered_nodes = order_nodes_within_layers(graph, &ranks);
-            let node_ranks = ranks.node_rank;
-            let (positioned_nodes, width, height) =
-                assign_coordinates(graph, &ordered_nodes, &effective_config, &node_sizes)?;
-            (positioned_nodes, width, height, Some(node_ranks))
-        }
-        LayoutAlgorithm::ForceDirected => {
-            let ranks = assign_ranks(graph);
-            debug!(
-                "Assigned {} ranks for force-directed directional guidance",
-                ranks.num_ranks
-            );
-            let ordered_nodes = order_nodes_within_layers(graph, &ranks);
-            let node_ranks = ranks.node_rank;
-            let (positioned_nodes, width, height) =
-                apply_force_layout(graph, &effective_config, &node_sizes, &ordered_nodes)?;
-            (positioned_nodes, width, height, Some(node_ranks))
-        }
+    let ranks = assign_ranks(graph);
+    debug!("Assigned {} ranks", ranks.num_ranks);
+    let ordered_nodes = order_nodes_within_layers(graph, &ranks);
+    let placement = match effective_config.mode {
+        LayoutAlgorithm::Hierarchical => assign_coordinates(
+            graph,
+            &ranks.node_rank,
+            &ordered_nodes,
+            &effective_config,
+            &node_sizes,
+        )?,
+        // Force-directed mode seeds the simulation from the hierarchical
+        // placement for directional guidance.
+        LayoutAlgorithm::ForceDirected => apply_force_layout(
+            graph,
+            &ranks.node_rank,
+            &effective_config,
+            &node_sizes,
+            &ordered_nodes,
+        )?,
     };
+    let HierarchicalPlacement {
+        nodes: positioned_nodes,
+        width,
+        height,
+        node_rows,
+    } = placement;
 
     // Step 4: Route edges
     let (positioned_edges, routing_diagnostics) = route_edges_with_diagnostics(
         graph,
         &positioned_nodes,
         &effective_config,
-        node_ranks.as_deref(),
+        Some(&node_rows),
     )?;
 
     // Step 5: Position groups

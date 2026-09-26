@@ -1,4 +1,11 @@
-//! Hierarchical (rank-based) coordinate assignment and swimlane planning.
+//! Hierarchical (rank-based) coordinate assignment and component packing.
+//!
+//! Nodes are split into weakly connected components, and each component keeps
+//! its own rank rows. Components (and group containers built from them) are
+//! then packed into "shelves" along the secondary axis, wrapping to a new shelf
+//! once a target extent derived from the total area is reached. This keeps
+//! schemas with many unrelated tables (or no foreign keys at all) close to a
+//! screen-friendly aspect ratio instead of one unbounded row.
 
 use std::collections::BTreeMap;
 
@@ -9,86 +16,73 @@ use crate::graph::LayoutGraph;
 use super::spacing::{
     build_positioned_node, compute_graph_bounds, mirror_positioned_nodes_for_direction,
 };
-use super::{LayoutConfig, LayoutError, NodeSize, PositionedNode};
+use super::{
+    GROUP_PADDING, GROUP_TOP_PADDING, LayoutConfig, LayoutError, NodeSize, PositionedNode,
+};
+
+/// Preferred on-screen width / height ratio of a packed layout.
+const TARGET_SCREEN_ASPECT: f32 = 1.6;
+
+/// Positioned nodes plus the row structure that produced them.
+#[derive(Debug, Clone)]
+pub(super) struct HierarchicalPlacement {
+    pub(super) nodes: Vec<PositionedNode>,
+    pub(super) width: f32,
+    pub(super) height: f32,
+    /// Global row index of every node. Rows are disjoint bands along the
+    /// primary axis, so routing can treat them as ranks.
+    pub(super) node_rows: Vec<usize>,
+}
 
 /// Assign coordinates to nodes based on their ranks and order.
-#[allow(clippy::cast_precision_loss)]
-#[allow(clippy::suboptimal_flops)]
 pub(super) fn assign_coordinates(
     graph: &LayoutGraph,
+    node_ranks: &[usize],
     ordered_nodes: &[Vec<usize>],
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
-) -> Result<(Vec<PositionedNode>, f32, f32), LayoutError> {
+) -> Result<HierarchicalPlacement, LayoutError> {
+    let axes = Axes::new(config);
+    let packer = Packer {
+        node_sizes,
+        axes,
+        target_ratio: axes.target_secondary_to_primary_ratio(),
+    };
+    let layout = packer.pack_graph(graph, node_ranks, ordered_nodes);
+
     let n = graph.nodes.len();
-    // Index by graph node index so that positioned_nodes[node_idx] correctly
-    // addresses the corresponding node (needed by resolve_rank_collisions).
     let mut positioned_slots: Vec<Option<PositionedNode>> = vec![None; n];
-
-    let is_horizontal = matches!(
-        config.direction,
-        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
-    );
-    let rank_primary_offsets = compute_rank_primary_offsets(ordered_nodes, node_sizes, config);
-
-    // Group-aware "swimlane" placement: each group occupies a contiguous range
-    // on the secondary axis across all ranks, so group bounding boxes never
-    // overlap. When the graph has no groups this collapses to the original
-    // single-lane behaviour.
-    let swimlanes = compute_swimlanes(graph, ordered_nodes, node_sizes, config, is_horizontal);
-
-    // Reorder nodes within each rank so members of the same lane are contiguous,
-    // while preserving the existing crossing-minimised order within each lane.
-    let ordered_nodes_owned: Vec<Vec<usize>> = ordered_nodes
+    let mut node_rows = vec![0usize; n];
+    let mut primary = axes.primary_origin;
+    for (row_idx, row) in layout
+        .rows
         .iter()
-        .map(|rank_nodes| {
-            let mut sorted: Vec<usize> = rank_nodes.clone();
-            sorted.sort_by_key(|&node_idx| {
-                swimlanes.lane_order_index_for_node(graph.nodes[node_idx].group_index)
-            });
-            sorted
-        })
-        .collect();
-    let ordered_nodes: &[Vec<usize>] = &ordered_nodes_owned;
-
-    for (rank_idx, rank_nodes) in ordered_nodes.iter().enumerate() {
-        // Per-rank cursor inside each lane.
-        let mut lane_cursor: BTreeMap<Option<usize>, f32> = BTreeMap::new();
-
-        for &node_idx in rank_nodes {
-            let node = &graph.nodes[node_idx];
-            let node_size = node_sizes[node_idx];
-            let primary = rank_primary_offsets[rank_idx];
-
-            let lane_start = swimlanes.lane_start(node.group_index);
-            let cursor = lane_cursor.entry(node.group_index).or_insert(lane_start);
-            let secondary = *cursor;
-            let advance = if is_horizontal {
-                node_size.height + config.vertical_spacing
-            } else {
-                node_size.width + config.horizontal_spacing
-            };
-            *cursor = secondary + advance;
-
-            let (node_x, node_y) = if is_horizontal {
-                (primary, secondary)
-            } else {
-                (secondary, primary)
-            };
-
+        .filter(|row| !row.cells.is_empty())
+        .enumerate()
+    {
+        if row_idx > 0 {
+            primary += row.extra_gap_before;
+        }
+        let mut row_extent = 0.0_f32;
+        for &(node_idx, secondary) in &row.cells {
+            let size = node_sizes[node_idx];
+            let (x, y) = axes.to_xy(primary, axes.secondary_origin + secondary);
             positioned_slots[node_idx] = Some(build_positioned_node(
-                node,
-                node_x,
-                node_y,
-                node_size.width,
-                node_size.height,
+                &graph.nodes[node_idx],
+                x,
+                y,
+                size.width,
+                size.height,
                 config.show_columns,
             ));
+            node_rows[node_idx] = row_idx;
+            row_extent = row_extent.max(axes.primary_extent(size));
         }
+        primary += row_extent + axes.primary_gap;
     }
 
     // Every graph node must have been assigned a position above.
-    let mut positioned_nodes = Vec::with_capacity(positioned_slots.len());
+    let mut positioned_nodes = Vec::with_capacity(n);
     for (node_idx, slot) in positioned_slots.into_iter().enumerate() {
         let Some(node) = slot else {
             let node_id = graph
@@ -101,233 +95,437 @@ pub(super) fn assign_coordinates(
         positioned_nodes.push(node);
     }
 
-    resolve_rank_collisions(
-        &mut positioned_nodes,
-        ordered_nodes,
-        graph,
-        config,
-        &swimlanes,
-        is_horizontal,
-    );
     let graph_bounds = compute_graph_bounds(&positioned_nodes, config);
     mirror_positioned_nodes_for_direction(&mut positioned_nodes, graph_bounds, config.direction);
 
     let (width, height) = compute_graph_bounds(&positioned_nodes, config);
-    Ok((positioned_nodes, width, height))
+    Ok(HierarchicalPlacement {
+        nodes: positioned_nodes,
+        width,
+        height,
+        node_rows,
+    })
 }
 
-fn compute_rank_primary_offsets(
-    ordered_nodes: &[Vec<usize>],
-    node_sizes: &[NodeSize],
-    config: &LayoutConfig,
-) -> Vec<f32> {
-    let is_horizontal = matches!(
-        config.direction,
-        LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
-    );
-    let mut offsets = Vec::with_capacity(ordered_nodes.len());
-    let mut primary = if is_horizontal {
-        config.origin_x
-    } else {
-        config.origin_y
-    };
-    let gap = if is_horizontal {
-        config.horizontal_spacing
-    } else {
-        config.vertical_spacing
-    };
+/// Axis mapping between the rank flow (primary) and the in-rank (secondary) axis.
+#[derive(Debug, Clone, Copy)]
+struct Axes {
+    is_horizontal: bool,
+    primary_origin: f32,
+    secondary_origin: f32,
+    /// Gap between consecutive rows.
+    primary_gap: f32,
+    /// Gap between neighbouring nodes or components inside a row.
+    secondary_gap: f32,
+}
 
-    for rank_nodes in ordered_nodes {
-        offsets.push(primary);
-        let extent = rank_nodes
+impl Axes {
+    const fn new(config: &LayoutConfig) -> Self {
+        let is_horizontal = matches!(
+            config.direction,
+            LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+        );
+        if is_horizontal {
+            Self {
+                is_horizontal,
+                primary_origin: config.origin_x,
+                secondary_origin: config.origin_y,
+                primary_gap: config.horizontal_spacing,
+                secondary_gap: config.vertical_spacing,
+            }
+        } else {
+            Self {
+                is_horizontal,
+                primary_origin: config.origin_y,
+                secondary_origin: config.origin_x,
+                primary_gap: config.vertical_spacing,
+                secondary_gap: config.horizontal_spacing,
+            }
+        }
+    }
+
+    const fn primary_extent(self, size: NodeSize) -> f32 {
+        if self.is_horizontal {
+            size.width
+        } else {
+            size.height
+        }
+    }
+
+    const fn secondary_extent(self, size: NodeSize) -> f32 {
+        if self.is_horizontal {
+            size.height
+        } else {
+            size.width
+        }
+    }
+
+    const fn to_xy(self, primary: f32, secondary: f32) -> (f32, f32) {
+        if self.is_horizontal {
+            (primary, secondary)
+        } else {
+            (secondary, primary)
+        }
+    }
+
+    const fn target_secondary_to_primary_ratio(self) -> f32 {
+        if self.is_horizontal {
+            TARGET_SCREEN_ASPECT.recip()
+        } else {
+            TARGET_SCREEN_ASPECT
+        }
+    }
+
+    /// Gap between two group containers placed next to each other.
+    fn group_gap(self) -> f32 {
+        self.secondary_gap * 1.5
+    }
+
+    /// Extra primary-axis gap between shelves that hold group containers, so
+    /// the bottom padding of one container and the label band of the next fit.
+    const fn group_shelf_extra_gap() -> f32 {
+        GROUP_TOP_PADDING + GROUP_PADDING
+    }
+}
+
+/// A rectangular arrangement of nodes in rows, positioned relative to its own
+/// secondary-axis origin.
+#[derive(Debug, Clone, Default)]
+struct Block {
+    rows: Vec<BlockRow>,
+    /// Extent along the secondary axis.
+    secondary_extent: f32,
+    /// Whether this block renders as a group container.
+    is_group: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BlockRow {
+    /// Additional primary-axis gap inserted before this row.
+    extra_gap_before: f32,
+    /// `(node index, secondary offset)` pairs in placement order.
+    cells: Vec<(usize, f32)>,
+}
+
+struct Packer<'a> {
+    node_sizes: &'a [NodeSize],
+    axes: Axes,
+    target_ratio: f32,
+}
+
+impl Packer<'_> {
+    fn pack_graph(
+        &self,
+        graph: &LayoutGraph,
+        node_ranks: &[usize],
+        ordered_nodes: &[Vec<usize>],
+    ) -> Block {
+        let n = graph.nodes.len();
+        let mut order_in_rank = vec![0usize; n];
+        for rank_nodes in ordered_nodes {
+            for (position, &node_idx) in rank_nodes.iter().enumerate() {
+                order_in_rank[node_idx] = position;
+            }
+        }
+        let mut is_isolated = vec![true; n];
+        for (from, to) in graph_edges(graph) {
+            is_isolated[from] = false;
+            is_isolated[to] = false;
+        }
+
+        let context = ClusterContext {
+            graph,
+            node_ranks,
+            order_in_rank: &order_in_rank,
+            is_isolated: &is_isolated,
+        };
+        let mut clusters: Vec<(usize, Block)> = clusters(graph)
+            .into_iter()
+            .map(|cluster| (cluster.len(), self.cluster_block(&context, &cluster)))
+            .collect();
+        // Largest clusters first; the stable sort keeps discovery order for ties.
+        clusters.sort_by_key(|(size, _)| std::cmp::Reverse(*size));
+        self.pack_shelves(clusters.into_iter().map(|(_, block)| block).collect(), 0.0)
+    }
+
+    /// Lays out one cluster as side-by-side lanes (one per group, ungrouped
+    /// nodes last) that share the cluster's rank rows, so edges between groups
+    /// keep flowing along the primary axis. Nodes without any edge are packed
+    /// into a grid below their lane's ranked rows.
+    fn cluster_block(&self, context: &ClusterContext<'_>, cluster: &[usize]) -> Block {
+        let mut ranks: Vec<usize> = cluster
             .iter()
-            .map(|&node_idx| {
-                if is_horizontal {
-                    node_sizes[node_idx].width
-                } else {
-                    node_sizes[node_idx].height
+            .filter(|&&idx| !context.is_isolated[idx])
+            .map(|&idx| context.node_ranks[idx])
+            .collect();
+        ranks.sort_unstable();
+        ranks.dedup();
+
+        // Lane key sorts groups by index and the ungrouped lane last.
+        let mut lanes: BTreeMap<(bool, usize), LaneNodes> = BTreeMap::new();
+        for &node_idx in cluster {
+            let group_index = context.graph.nodes[node_idx].group_index;
+            let key = (group_index.is_none(), group_index.unwrap_or(0));
+            let (ranked, isolated) = lanes
+                .entry(key)
+                .or_insert_with(|| (vec![Vec::new(); ranks.len()], Vec::new()));
+            if context.is_isolated[node_idx] {
+                isolated.push(node_idx);
+            } else {
+                let row = ranks
+                    .binary_search(&context.node_ranks[node_idx])
+                    .expect("rank collected from the same cluster");
+                ranked[row].push(node_idx);
+            }
+        }
+
+        let lanes: Vec<Block> = lanes
+            .into_iter()
+            .map(|((ungrouped, _), (ranked, isolated))| {
+                let mut lane = self.rows_block(ranked.into_iter().map(|mut row| {
+                    row.sort_by_key(|&idx| context.order_in_rank[idx]);
+                    row
+                }));
+                let grid = self.pack_shelves(
+                    isolated
+                        .into_iter()
+                        .map(|idx| self.rows_block(std::iter::once(vec![idx])))
+                        .collect(),
+                    lane.secondary_extent,
+                );
+                lane.secondary_extent = lane.secondary_extent.max(grid.secondary_extent);
+                lane.rows.extend(grid.rows);
+                lane.is_group = !ungrouped;
+                lane
+            })
+            .collect();
+
+        let is_group = lanes.iter().any(|lane| lane.is_group);
+        Block {
+            is_group,
+            ..self.pack_shelves(lanes, f32::INFINITY)
+        }
+    }
+
+    /// Places each row's nodes one after another along the secondary axis.
+    fn rows_block(&self, rows: impl IntoIterator<Item = Vec<usize>>) -> Block {
+        let mut secondary_extent = 0.0_f32;
+        let rows = rows
+            .into_iter()
+            .map(|row_nodes| {
+                let mut cursor = 0.0_f32;
+                let cells = row_nodes
+                    .into_iter()
+                    .map(|node_idx| {
+                        let offset = cursor;
+                        cursor += self.axes.secondary_extent(self.node_sizes[node_idx])
+                            + self.axes.secondary_gap;
+                        (node_idx, offset)
+                    })
+                    .collect::<Vec<_>>();
+                if !cells.is_empty() {
+                    secondary_extent = secondary_extent.max(cursor - self.axes.secondary_gap);
+                }
+                BlockRow {
+                    extra_gap_before: 0.0,
+                    cells,
                 }
             })
-            .fold(0.0, f32::max);
-        primary += extent + gap;
+            .collect();
+
+        Block {
+            rows,
+            secondary_extent,
+            is_group: false,
+        }
     }
 
-    offsets
-}
+    /// Packs blocks left-to-right into shelves stacked along the primary axis.
+    ///
+    /// The shelf extent targets a secondary/primary ratio matching
+    /// [`TARGET_SCREEN_ASPECT`] but never drops below the widest block or
+    /// `min_extent`, so a single cluster keeps its original placement and an
+    /// infinite `min_extent` lines every block up in one shelf.
+    fn pack_shelves(&self, blocks: Vec<Block>, min_extent: f32) -> Block {
+        if blocks.len() <= 1 {
+            return blocks.into_iter().next().unwrap_or_default();
+        }
 
-fn resolve_rank_collisions(
-    positioned_nodes: &mut [PositionedNode],
-    ordered_nodes: &[Vec<usize>],
-    graph: &LayoutGraph,
-    config: &LayoutConfig,
-    swimlanes: &Swimlanes,
-    is_horizontal: bool,
-) {
-    let spacing = if is_horizontal {
-        config.vertical_spacing
-    } else {
-        config.horizontal_spacing
-    };
-    let group_gap = swimlanes.group_gap;
+        let widest = blocks
+            .iter()
+            .map(|block| block.secondary_extent)
+            .fold(0.0_f32, f32::max);
+        let area: f32 = blocks
+            .iter()
+            .map(|block| {
+                (block.secondary_extent + self.axes.secondary_gap)
+                    * (self.primary_extent(block) + self.axes.primary_gap)
+            })
+            .sum();
+        let target = widest
+            .max(min_extent)
+            .max((area * self.target_ratio).sqrt());
 
-    for rank_nodes in ordered_nodes {
-        let mut previous_end: Option<f32> = None;
-        let mut previous_group: Option<Option<usize>> = None;
-        for &node_idx in rank_nodes {
-            let current_group = graph.nodes[node_idx].group_index;
-            let node = &mut positioned_nodes[node_idx];
-            let coordinate = if is_horizontal {
-                &mut node.y
-            } else {
-                &mut node.x
-            };
-            let extent = if is_horizontal {
-                node.height
-            } else {
-                node.width
-            };
-
-            if let Some(end) = previous_end {
-                let crossing_group_boundary =
-                    matches!(previous_group, Some(prev) if prev != current_group);
-                let gap = if crossing_group_boundary {
-                    spacing.max(group_gap)
-                } else {
-                    spacing
-                };
-                let required = end + gap;
-                if *coordinate < required {
-                    *coordinate = required;
+        let mut shelves: Vec<Vec<(f32, Block)>> = Vec::new();
+        let mut cursor = 0.0_f32;
+        let mut previous_is_group = false;
+        for block in blocks {
+            let gap = self.block_gap(previous_is_group, block.is_group);
+            match shelves.last_mut() {
+                Some(current) if cursor + gap + block.secondary_extent <= target => {
+                    cursor += gap;
+                    previous_is_group = block.is_group;
+                    current.push((cursor, block));
+                }
+                _ => {
+                    previous_is_group = block.is_group;
+                    shelves.push(vec![(0.0, block)]);
                 }
             }
-
-            previous_end = Some(*coordinate + extent);
-            previous_group = Some(current_group);
+            let (offset, block) = shelves
+                .last()
+                .and_then(|shelf| shelf.last())
+                .expect("block was just pushed");
+            cursor = offset + block.secondary_extent;
         }
-    }
-}
 
-/// Per-group "swimlane" placement plan along the secondary axis.
-///
-/// Groups are assigned disjoint ranges along the secondary axis (Y for
-/// horizontal layouts, X for vertical layouts) so that group bounding boxes
-/// never overlap. Ungrouped nodes are placed in a sentinel lane that always
-/// sorts last.
-#[derive(Debug, Clone)]
-struct Swimlanes {
-    /// Canonical lane order. Each entry identifies a `group_index` (`Some(idx)`)
-    /// or the ungrouped sentinel (`None`).
-    order: Vec<Option<usize>>,
-    /// Position on the secondary axis at which the lane begins.
-    starts: BTreeMap<Option<usize>, f32>,
-    /// Extra spacing inserted between adjacent lanes.
-    group_gap: f32,
-}
-
-impl Swimlanes {
-    fn lane_start(&self, group_index: Option<usize>) -> f32 {
-        self.starts.get(&group_index).copied().unwrap_or(0.0)
-    }
-
-    /// Sort key used to make nodes from the same lane contiguous within a rank.
-    /// Ungrouped nodes go to the back so they form a single trailing lane.
-    fn lane_order_index_for_node(&self, group_index: Option<usize>) -> usize {
-        self.order
-            .iter()
-            .position(|g| *g == group_index)
-            .unwrap_or(self.order.len())
-    }
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn compute_swimlanes(
-    graph: &LayoutGraph,
-    ordered_nodes: &[Vec<usize>],
-    node_sizes: &[NodeSize],
-    config: &LayoutConfig,
-    is_horizontal: bool,
-) -> Swimlanes {
-    let secondary_origin = if is_horizontal {
-        config.origin_y
-    } else {
-        config.origin_x
-    };
-    let spacing = if is_horizontal {
-        config.vertical_spacing
-    } else {
-        config.horizontal_spacing
-    };
-    let group_gap = spacing * 1.5;
-
-    // No groups: collapse to a single lane that begins at the secondary origin.
-    // The lane carries the ungrouped sentinel key.
-    if graph.groups.is_empty() {
-        let mut starts = BTreeMap::new();
-        starts.insert(None, secondary_origin);
-        return Swimlanes {
-            order: vec![None],
-            starts,
-            group_gap,
-        };
-    }
-
-    // Canonical lane order: groups in their build order, then the ungrouped
-    // sentinel last.
-    let mut order: Vec<Option<usize>> = (0..graph.groups.len()).map(Some).collect();
-    order.push(None);
-
-    // Per-rank secondary span for each lane.
-    // Span = sum of node extents + spacing * (count - 1) for nodes of that lane in that rank.
-    let mut lane_extent: BTreeMap<Option<usize>, f32> = BTreeMap::new();
-    for rank_nodes in ordered_nodes {
-        let mut per_rank: BTreeMap<Option<usize>, (f32, usize)> = BTreeMap::new();
-        for &node_idx in rank_nodes {
-            let group_index = graph.nodes[node_idx].group_index;
-            let extent = if is_horizontal {
-                node_sizes[node_idx].height
+        let mut packed = Block::default();
+        let mut previous_shelf_has_group = false;
+        for (shelf_idx, shelf) in shelves.into_iter().enumerate() {
+            let shelf_has_group = shelf.iter().any(|(_, block)| block.is_group);
+            let shelf_extra_gap = if shelf_idx > 0 && (shelf_has_group || previous_shelf_has_group)
+            {
+                Axes::group_shelf_extra_gap()
             } else {
-                node_sizes[node_idx].width
-            };
-            let entry = per_rank.entry(group_index).or_insert((0.0, 0));
-            entry.0 += extent;
-            entry.1 += 1;
-        }
-        for (group_index, (sum, count)) in per_rank {
-            let span = if count == 0 {
                 0.0
-            } else {
-                spacing.mul_add((count - 1) as f32, sum)
             };
-            let slot = lane_extent.entry(group_index).or_insert(0.0);
-            if span > *slot {
-                *slot = span;
+            previous_shelf_has_group = shelf_has_group;
+            let row_count = shelf
+                .iter()
+                .map(|(_, block)| block.rows.len())
+                .max()
+                .unwrap_or(0);
+            let first_row = packed.rows.len();
+            packed
+                .rows
+                .resize_with(first_row + row_count, BlockRow::default);
+            for (offset, block) in shelf {
+                packed.secondary_extent =
+                    packed.secondary_extent.max(offset + block.secondary_extent);
+                for (local_idx, row) in block.rows.into_iter().enumerate() {
+                    let target_row = &mut packed.rows[first_row + local_idx];
+                    target_row.extra_gap_before =
+                        target_row.extra_gap_before.max(row.extra_gap_before);
+                    target_row.cells.extend(
+                        row.cells
+                            .into_iter()
+                            .map(|(node_idx, secondary)| (node_idx, offset + secondary)),
+                    );
+                }
+            }
+            if let Some(row) = packed.rows.get_mut(first_row) {
+                row.extra_gap_before = row.extra_gap_before.max(shelf_extra_gap);
+            }
+        }
+        packed
+    }
+
+    fn block_gap(&self, left_is_group: bool, right_is_group: bool) -> f32 {
+        if left_is_group || right_is_group {
+            self.axes.group_gap()
+        } else {
+            self.axes.secondary_gap
+        }
+    }
+
+    /// Primary-axis extent of a block, including gaps between its rows.
+    fn primary_extent(&self, block: &Block) -> f32 {
+        let rows: f32 = block
+            .rows
+            .iter()
+            .map(|row| {
+                row.extra_gap_before
+                    + row
+                        .cells
+                        .iter()
+                        .map(|&(node_idx, _)| self.axes.primary_extent(self.node_sizes[node_idx]))
+                        .fold(0.0_f32, f32::max)
+            })
+            .sum();
+        #[allow(clippy::cast_precision_loss)] // Row counts are small layout values.
+        let gaps = block.rows.len().saturating_sub(1) as f32 * self.axes.primary_gap;
+        rows + gaps
+    }
+}
+
+/// Ranked rows and edge-less nodes of one lane, in that order.
+type LaneNodes = (Vec<Vec<usize>>, Vec<usize>);
+
+/// Shared per-node lookups used while building cluster blocks.
+struct ClusterContext<'a> {
+    graph: &'a LayoutGraph,
+    node_ranks: &'a [usize],
+    order_in_rank: &'a [usize],
+    is_isolated: &'a [bool],
+}
+
+/// Resolved `(from, to)` node indices of every non-self-loop edge.
+fn graph_edges(graph: &LayoutGraph) -> impl Iterator<Item = (usize, usize)> + '_ {
+    graph
+        .edges
+        .iter()
+        .filter(|edge| !edge.is_self_loop)
+        .filter_map(|edge| {
+            let from = *graph.node_index.get(&edge.from)?;
+            let to = *graph.node_index.get(&edge.to)?;
+            (from != to).then_some((from, to))
+        })
+}
+
+/// Splits nodes into clusters: weakly connected components where members of
+/// the same group are also treated as connected, so a group container never
+/// spans two clusters. Clusters are returned in order of their smallest node
+/// index, with members sorted ascending.
+fn clusters(graph: &LayoutGraph) -> Vec<Vec<usize>> {
+    fn find(parent: &mut [usize], mut node: usize) -> usize {
+        while parent[node] != node {
+            parent[node] = parent[parent[node]];
+            node = parent[node];
+        }
+        node
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let (root_a, root_b) = (find(parent, a), find(parent, b));
+        if root_a != root_b {
+            // Attach to the smaller root so cluster order stays index-based.
+            parent[root_a.max(root_b)] = root_a.min(root_b);
+        }
+    }
+
+    let n = graph.nodes.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    for (from, to) in graph_edges(graph) {
+        union(&mut parent, from, to);
+    }
+    for group in &graph.groups {
+        if let Some((&first, rest)) = group.node_indices.split_first() {
+            for &member in rest {
+                if first < n && member < n {
+                    union(&mut parent, first, member);
+                }
             }
         }
     }
 
-    // Lane starts: walk canonical order, accumulating extents and gaps.
-    let mut starts = BTreeMap::new();
-    let mut cursor = secondary_origin;
-    let mut emitted_any = false;
-    for lane in &order {
-        let extent = lane_extent.get(lane).copied().unwrap_or(0.0);
-        if extent <= 0.0 {
-            // No nodes in this lane: still record a start so lookups don't
-            // panic, but do not advance the cursor.
-            starts.insert(*lane, cursor);
-            continue;
-        }
-        if emitted_any {
-            cursor += group_gap;
-        }
-        starts.insert(*lane, cursor);
-        cursor += extent;
-        emitted_any = true;
+    let mut cluster_of_root: Vec<Option<usize>> = vec![None; n];
+    let mut clusters: Vec<Vec<usize>> = Vec::new();
+    for node_idx in 0..n {
+        let root = find(&mut parent, node_idx);
+        let cluster_idx = *cluster_of_root[root].get_or_insert_with(|| {
+            clusters.push(Vec::new());
+            clusters.len() - 1
+        });
+        clusters[cluster_idx].push(node_idx);
     }
-
-    Swimlanes {
-        order,
-        starts,
-        group_gap,
-    }
+    clusters
 }

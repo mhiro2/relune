@@ -584,49 +584,24 @@ fn make_prefix_grouping_schema() -> Schema {
     }
 }
 
-#[test]
-fn swimlane_layout_produces_disjoint_group_bboxes() {
-    use relune_core::{GroupingSpec, GroupingStrategy};
-
-    let schema = make_multi_schema_for_grouping();
-    let request = LayoutRequest {
-        grouping: GroupingSpec {
-            strategy: GroupingStrategy::BySchema,
-        },
-        ..LayoutRequest::default()
-    };
-    let config = LayoutConfig {
-        direction: LayoutDirection::LeftToRight,
-        ..LayoutConfig::default()
-    };
-    let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
-
-    assert!(
-        positioned.groups.len() >= 2,
-        "expected multiple groups, got {}",
-        positioned.groups.len()
-    );
-
-    // For a horizontal layout (LR) the lanes are stacked along Y, so all
-    // group Y-ranges must be pairwise disjoint.
-    for (i, a) in positioned.groups.iter().enumerate() {
-        for b in positioned.groups.iter().skip(i + 1) {
-            let a_top = a.y;
-            let a_bot = a.y + a.height;
-            let b_top = b.y;
-            let b_bot = b.y + b.height;
-            let overlap = a_top < b_bot && b_top < a_bot;
+fn assert_groups_disjoint(groups: &[PositionedGroup]) {
+    for (i, a) in groups.iter().enumerate() {
+        for b in groups.iter().skip(i + 1) {
+            let overlap = a.x < b.x + b.width
+                && b.x < a.x + a.width
+                && a.y < b.y + b.height
+                && b.y < a.y + a.height;
             assert!(
                 !overlap,
-                "groups {} and {} overlap on Y axis: [{:.1},{:.1}] vs [{:.1},{:.1}]",
-                a.id, b.id, a_top, a_bot, b_top, b_bot
+                "groups {} ({}, {}, {} x {}) and {} ({}, {}, {} x {}) overlap",
+                a.id, a.x, a.y, a.width, a.height, b.id, b.x, b.y, b.width, b.height
             );
         }
     }
 }
 
 #[test]
-fn swimlane_layout_vertical_disjoint_on_x() {
+fn grouped_hierarchical_layout_produces_disjoint_group_bboxes() {
     use relune_core::{GroupingSpec, GroupingStrategy};
 
     let schema = make_multi_schema_for_grouping();
@@ -636,26 +611,24 @@ fn swimlane_layout_vertical_disjoint_on_x() {
         },
         ..LayoutRequest::default()
     };
-    let config = LayoutConfig {
-        direction: LayoutDirection::TopToBottom,
-        ..LayoutConfig::default()
-    };
-    let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+    for direction in [
+        LayoutDirection::TopToBottom,
+        LayoutDirection::BottomToTop,
+        LayoutDirection::LeftToRight,
+        LayoutDirection::RightToLeft,
+    ] {
+        let config = LayoutConfig {
+            direction,
+            ..LayoutConfig::default()
+        };
+        let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
 
-    // For a vertical layout (TB) the lanes are stacked along X.
-    for (i, a) in positioned.groups.iter().enumerate() {
-        for b in positioned.groups.iter().skip(i + 1) {
-            let a_left = a.x;
-            let a_right = a.x + a.width;
-            let b_left = b.x;
-            let b_right = b.x + b.width;
-            let overlap = a_left < b_right && b_left < a_right;
-            assert!(
-                !overlap,
-                "groups {} and {} overlap on X axis: [{:.1},{:.1}] vs [{:.1},{:.1}]",
-                a.id, b.id, a_left, a_right, b_left, b_right
-            );
-        }
+        assert!(
+            positioned.groups.len() >= 2,
+            "expected multiple groups, got {}",
+            positioned.groups.len()
+        );
+        assert_groups_disjoint(&positioned.groups);
     }
 }
 
@@ -1050,18 +1023,15 @@ fn test_hierarchical_layout_avoids_overlap_with_variable_width_nodes() {
     let schema = make_variable_width_schema();
     let graph = build_layout(&schema).unwrap();
 
-    let mut nodes = graph.nodes;
-    nodes.sort_by(|left, right| left.x.total_cmp(&right.x));
-
-    for pair in nodes.windows(2) {
-        let current = &pair[0];
-        let next = &pair[1];
-        assert!(
-            current.x + current.width <= next.x,
-            "nodes {} and {} overlap on the same rank",
-            current.id,
-            next.id
-        );
+    for (i, current) in graph.nodes.iter().enumerate() {
+        for next in graph.nodes.iter().skip(i + 1) {
+            assert!(
+                !nodes_overlap(current, next),
+                "nodes {} and {} overlap",
+                current.id,
+                next.id
+            );
+        }
     }
 }
 
@@ -3080,6 +3050,118 @@ fn invariants_hold_for_hub_table_in_every_direction() {
         let result = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
         assert_layout_invariants(&result);
     }
+}
+
+fn assert_no_node_overlaps(graph: &PositionedGraph) {
+    for (i, a) in graph.nodes.iter().enumerate() {
+        for b in graph.nodes.iter().skip(i + 1) {
+            assert!(!nodes_overlap(a, b), "nodes {} and {} overlap", a.id, b.id);
+        }
+    }
+}
+
+#[test]
+fn hierarchical_layout_wraps_tables_without_foreign_keys() {
+    let schema = make_synthetic_schema(120, &[]);
+    for direction in [
+        LayoutDirection::TopToBottom,
+        LayoutDirection::BottomToTop,
+        LayoutDirection::LeftToRight,
+        LayoutDirection::RightToLeft,
+    ] {
+        let config = LayoutConfig {
+            direction,
+            ..LayoutConfig::default()
+        };
+        let result = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+
+        assert_layout_invariants(&result);
+        assert_no_node_overlaps(&result);
+        let aspect = result.width / result.height;
+        assert!(
+            (0.8..=3.0).contains(&aspect),
+            "{direction:?}: {} x {} (aspect {aspect}) should wrap into a grid",
+            result.width,
+            result.height
+        );
+    }
+}
+
+#[test]
+fn hierarchical_layout_packs_components_beside_each_other() {
+    // Forty small parent/child pairs: a single row of forty parents above a
+    // row of forty children would be ~24,000px wide.
+    let foreign_keys: Vec<(usize, usize)> = (0..40).map(|pair| (2 * pair + 1, 2 * pair)).collect();
+    let schema = make_synthetic_schema(80, &foreign_keys);
+    let result = build_layout(&schema).unwrap();
+
+    assert_layout_invariants(&result);
+    assert_no_node_overlaps(&result);
+    assert!(
+        result.width < 6000.0,
+        "components should wrap into shelves, got width {}",
+        result.width
+    );
+    let node_by_id: BTreeMap<&str, &PositionedNode> =
+        result.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    for &(child, parent) in &foreign_keys {
+        let child = node_by_id[format!("t{child:03}").as_str()];
+        let parent = node_by_id[format!("t{parent:03}").as_str()];
+        assert!(
+            parent.y + parent.height < child.y,
+            "parent {} must stay above child {}",
+            parent.id,
+            child.id
+        );
+    }
+}
+
+#[test]
+fn hierarchical_layout_keeps_chain_order_next_to_isolated_tables() {
+    // Packing isolated tables around a chain must keep the chain flowing
+    // downward, one rank per row, without overlapping any rectangle.
+    let foreign_keys = [(1, 0), (2, 1), (3, 2)];
+    let schema = make_synthetic_schema(30, &foreign_keys);
+    let result = build_layout(&schema).unwrap();
+
+    assert_layout_invariants(&result);
+    assert_no_node_overlaps(&result);
+    let chain: Vec<&PositionedNode> = ["t000", "t001", "t002", "t003"]
+        .iter()
+        .map(|id| result.nodes.iter().find(|n| n.id == *id).unwrap())
+        .collect();
+    assert!(chain.windows(2).all(|pair| pair[0].y < pair[1].y));
+}
+
+#[test]
+fn grouped_layout_wraps_prefix_groups_without_foreign_keys() {
+    use relune_core::{GroupingSpec, GroupingStrategy};
+
+    let mut schema = make_synthetic_schema(96, &[]);
+    for (index, table) in schema.tables.iter_mut().enumerate() {
+        let name = format!("mod{}_table{index:03}", index % 8);
+        table.stable_id.clone_from(&name);
+        table.name = name;
+    }
+    let request = LayoutRequest {
+        grouping: GroupingSpec {
+            strategy: GroupingStrategy::ByPrefix,
+        },
+        ..LayoutRequest::default()
+    };
+    let result = build_layout_with_config(&schema, &request, &LayoutConfig::default()).unwrap();
+
+    assert!(result.groups.len() >= 2, "expected prefix groups");
+    assert_layout_invariants(&result);
+    assert_no_node_overlaps(&result);
+    assert_groups_disjoint(&result.groups);
+    let aspect = result.width / result.height;
+    assert!(
+        (0.5..=4.0).contains(&aspect),
+        "{} x {} (aspect {aspect}) should wrap groups",
+        result.width,
+        result.height
+    );
 }
 
 #[test]
