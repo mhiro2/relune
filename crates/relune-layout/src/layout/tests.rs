@@ -11,7 +11,7 @@ use super::edge_routing::{
 };
 use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
-    resolve_force_overlaps,
+    resolve_force_overlaps, rows_from_primary_bands,
 };
 use super::spacing::{
     COLUMN_FONT_SIZE, build_positioned_node, estimate_node_height, estimate_text_width,
@@ -3231,6 +3231,31 @@ fn force_layout_without_groups_shares_columns_across_ranks() {
             result.height
         );
     }
+}
+
+#[test]
+fn force_rows_follow_final_primary_bands() {
+    let graph = LayoutGraphBuilder::new().build(&make_synthetic_schema(4, &[]));
+    let place = |index: usize, y: f32, height: f32| {
+        build_positioned_node(&graph.nodes[index], 0.0, y, 100.0, height, false)
+    };
+    // Nodes 0 and 1 overlap on Y and share a band, node 3 forms the middle
+    // band and node 2 the bottom one.
+    let nodes = vec![
+        place(0, 0.0, 50.0),
+        place(1, 40.0, 50.0),
+        place(2, 300.0, 50.0),
+        place(3, 150.0, 50.0),
+    ];
+
+    assert_eq!(
+        rows_from_primary_bands(&nodes, LayoutDirection::TopToBottom),
+        vec![0, 0, 2, 1]
+    );
+    assert_eq!(
+        rows_from_primary_bands(&nodes, LayoutDirection::BottomToTop),
+        vec![2, 2, 0, 1]
+    );
 }
 
 #[test]

@@ -401,12 +401,65 @@ pub(super) fn apply_force_layout(
     mirror_positioned_nodes_for_direction(&mut positioned_nodes, graph_bounds, config.direction);
     let (width, height) = compute_graph_bounds(&positioned_nodes, config);
 
+    let node_rows = rows_from_primary_bands(&positioned_nodes, config.direction);
     Ok(HierarchicalPlacement {
         nodes: positioned_nodes,
         width,
         height,
-        node_rows: seed.node_rows,
+        node_rows,
     })
+}
+
+/// Numbers groups of nodes whose primary-axis extents overlap, along the
+/// flow direction.
+///
+/// Overlap resolution and edge clearance may move nodes off their seed rank
+/// row, so routing gets rows recomputed from the final geometry; this keeps
+/// every row a disjoint band along the primary axis.
+pub(super) fn rows_from_primary_bands(
+    nodes: &[PositionedNode],
+    direction: LayoutDirection,
+) -> Vec<usize> {
+    let span = |node: &PositionedNode| {
+        let (start, end) = match direction {
+            LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
+                (node.y, node.y + node.height)
+            }
+            LayoutDirection::LeftToRight | LayoutDirection::RightToLeft => {
+                (node.x, node.x + node.width)
+            }
+        };
+        // Flip reversed directions so rows still increase along the flow.
+        match direction {
+            LayoutDirection::BottomToTop | LayoutDirection::RightToLeft => (-end, -start),
+            LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => (start, end),
+        }
+    };
+
+    let mut order: Vec<usize> = (0..nodes.len()).collect();
+    order.sort_by(|&a, &b| {
+        span(&nodes[a])
+            .0
+            .total_cmp(&span(&nodes[b]).0)
+            .then(a.cmp(&b))
+    });
+
+    let mut rows = vec![0usize; nodes.len()];
+    let mut row = 0usize;
+    let mut band_end: Option<f32> = None;
+    for node_idx in order {
+        let (start, end) = span(&nodes[node_idx]);
+        band_end = Some(match band_end {
+            Some(current_end) if start >= current_end => {
+                row += 1;
+                end
+            }
+            Some(current_end) => current_end.max(end),
+            None => end,
+        });
+        rows[node_idx] = row;
+    }
+    rows
 }
 
 pub(super) fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConfig {
