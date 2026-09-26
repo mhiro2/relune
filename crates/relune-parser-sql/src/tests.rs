@@ -484,6 +484,35 @@ fn returns_diagnostics_for_unsupported_constructs() {
 }
 
 #[test]
+fn warns_on_exclude_constraints() {
+    let sql = r"
+    CREATE TABLE bookings (
+      id BIGINT PRIMARY KEY,
+      room_id BIGINT NOT NULL,
+      during TSRANGE NOT NULL,
+      EXCLUDE USING gist (room_id WITH =, during WITH &&)
+    );
+    ALTER TABLE bookings ADD CONSTRAINT no_overlap EXCLUDE USING gist (during WITH &&);
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.expect("schema should exist");
+
+    assert_eq!(schema.tables.len(), 1);
+    assert_eq!(schema.tables[0].columns.len(), 3);
+    assert_eq!(
+        output
+            .diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == codes::parse_unsupported() && d.message.contains("EXCLUDE constraint")
+            })
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn truncates_unsupported_debug_output_on_utf8_boundaries() {
     let debug = "絵文字🙂".repeat(20);
     let truncated = truncate_unsupported_debug(&debug);

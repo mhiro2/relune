@@ -846,5 +846,11 @@ fn apply_add_table_constraint(
                 span_from_spanned(input, offsets, constraint),
             );
         }
+        TableConstraint::Exclude(_) => {
+            ctx.warn_unsupported(
+                "EXCLUDE constraint",
+                span_from_spanned(input, offsets, constraint),
+            );
+        }
     }
 }
