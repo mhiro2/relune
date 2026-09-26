@@ -17,7 +17,7 @@ tracing.workspace = true
 [dev-dependencies]
 relune-parser-sql = { path = "../relune-parser-sql" }
 testcontainers = "0.24"
-testcontainers-modules = { version = "0.12", features = ["postgres", "mysql"] }
+testcontainers-modules = { version = "0.12", features = ["postgres", "mysql", "mariadb"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 

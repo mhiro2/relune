@@ -883,6 +883,23 @@ impl Index {
             .collect()
     }
 
+    /// Ordered key slots like [`Index::key_slots`], but a prefix-indexed
+    /// column (e.g. `MySQL` `email(10)`) is also a `None` slot. Use for
+    /// leading-prefix coverage checks: a prefix index cannot serve lookups on
+    /// the whole column (`MySQL` rejects it as a foreign-key index).
+    #[must_use]
+    pub fn full_key_slots(&self) -> Vec<Option<&str>> {
+        self.key_parts
+            .iter()
+            .map(|part| match part {
+                IndexKey::Column(column) if column.prefix_length.is_none() => {
+                    Some(column.name.as_str())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// All key parts as plain column names, or `None` if any part is an
     /// expression. Use for exact set/uniqueness comparisons that must not treat
     /// an expression index as covering a plain-column set.

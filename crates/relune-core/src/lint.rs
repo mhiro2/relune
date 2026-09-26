@@ -889,15 +889,16 @@ fn fk_columns_are_indexed(table: &Table, fk_cols: &[String]) -> bool {
 }
 
 /// Returns whether the ordered index key parts start with `fk_cols`. An
-/// expression key part in a leading position never matches a plain FK column,
-/// so a functional index does not spuriously satisfy the coverage check.
+/// expression or prefix-indexed key part in a leading position never matches a
+/// plain FK column, so a functional or prefix index does not spuriously satisfy
+/// the coverage check.
 fn index_covers_prefix(idx: &Index, fk_cols: &[String]) -> bool {
     // A partial index only covers rows matching its predicate, so it cannot
     // satisfy the FK lookup for every referencing row.
     if idx.predicate.is_some() {
         return false;
     }
-    let slots = idx.key_slots();
+    let slots = idx.full_key_slots();
     if slots.len() < fk_cols.len() {
         return false;
     }
@@ -2177,6 +2178,52 @@ mod tests {
                 .iter()
                 .any(|i| i.rule_id == LintRuleId::MissingForeignKeyIndex),
             "a partial index must not count as FK index coverage"
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_prefix_index_does_not_cover_columns() {
+        // A prefix index (`MySQL` `user_ref(4)`) cannot serve whole-column FK
+        // lookups, so it must not satisfy the FK index-coverage check.
+        let prefix = Index {
+            name: Some("posts_user_ref_prefix".to_string()),
+            key_parts: vec![crate::model::IndexKey::Column(crate::model::IndexColumn {
+                name: "user_ref".to_string(),
+                order: None,
+                nulls: None,
+                prefix_length: Some(4),
+            })],
+            is_unique: false,
+            predicate: None,
+            included_columns: Vec::new(),
+            method: None,
+        };
+        let users = create_test_table(
+            "users",
+            vec![create_column("id", false, true)],
+            vec![],
+            vec![],
+        );
+        let posts = create_test_table(
+            "posts",
+            vec![
+                create_column("id", false, true),
+                create_column("user_ref", false, false),
+            ],
+            vec![create_fk("users", &["user_ref"])],
+            vec![prefix],
+        );
+        let schema = Schema {
+            tables: vec![users, posts],
+            ..Schema::default()
+        };
+        let result = lint_schema(&schema);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::MissingForeignKeyIndex),
+            "a prefix index must not count as FK index coverage"
         );
     }
 
