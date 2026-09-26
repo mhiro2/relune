@@ -467,11 +467,11 @@ fn index_rows_query(flavor: MySqlFlavor) -> String {
             CONVERT(INDEX_NAME USING utf8mb4) AS index_name,
             CONVERT(COLUMN_NAME USING utf8mb4) AS column_name,
             {expression} AS expression,
-            SUB_PART AS sub_part,
+            CAST(SUB_PART AS SIGNED) AS sub_part,
             CONVERT(COLLATION USING utf8mb4) AS collation,
             CONVERT(INDEX_TYPE USING utf8mb4) AS index_type,
-            SEQ_IN_INDEX AS seq_in_index,
-            NON_UNIQUE AS non_unique,
+            CAST(SEQ_IN_INDEX AS UNSIGNED) AS seq_in_index,
+            CAST(NON_UNIQUE AS SIGNED) AS non_unique,
             IF(INDEX_NAME = 'PRIMARY', TRUE, FALSE) AS is_primary
         FROM information_schema.STATISTICS
         WHERE TABLE_SCHEMA = ?
