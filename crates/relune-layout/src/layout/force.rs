@@ -4,7 +4,7 @@ use relune_core::LayoutDirection;
 
 use crate::graph::LayoutGraph;
 
-use super::hierarchical::assign_coordinates;
+use super::hierarchical::{HierarchicalPlacement, assign_coordinates};
 use super::spacing::{
     build_positioned_node, compute_graph_bounds, mirror_positioned_nodes_for_direction,
 };
@@ -185,13 +185,19 @@ fn compute_repulsion_with_grid(
 #[allow(clippy::imprecise_flops)]
 pub(super) fn apply_force_layout(
     graph: &LayoutGraph,
+    node_ranks: &[usize],
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
     ordered_nodes: &[Vec<usize>],
-) -> Result<(Vec<PositionedNode>, f32, f32), LayoutError> {
+) -> Result<HierarchicalPlacement, LayoutError> {
     let n = graph.nodes.len();
     if n == 0 {
-        return Ok((Vec::new(), config.origin_x * 2.0, config.origin_y * 2.0));
+        return Ok(HierarchicalPlacement {
+            nodes: Vec::new(),
+            width: config.origin_x * 2.0,
+            height: config.origin_y * 2.0,
+            node_rows: Vec::new(),
+        });
     }
 
     // Force parameters
@@ -203,7 +209,16 @@ pub(super) fn apply_force_layout(
     let min_distance = 1.0;
 
     let canonical_config = force_layout_canonical_config(config);
-    let seed_nodes = force_layout_seed_nodes(graph, ordered_nodes, &canonical_config, node_sizes)?;
+    // The seed rows stay valid for routing because the primary axis is
+    // restored to the seed coordinates after the simulation.
+    let seed = assign_coordinates(
+        graph,
+        node_ranks,
+        ordered_nodes,
+        &canonical_config,
+        node_sizes,
+    )?;
+    let seed_nodes = seed.nodes;
     let mut positions: Vec<(f32, f32)> = seed_nodes.iter().map(|node| (node.x, node.y)).collect();
     let primary_targets: Vec<f32> = seed_nodes.iter().map(|node| node.y).collect();
     let (center_x, center_y) = force_layout_seed_center(&positions, node_sizes);
@@ -332,13 +347,13 @@ pub(super) fn apply_force_layout(
     // Grouped force-directed layouts need an explicit packing pass so schema
     // containers do not overlap and cover each other's label bands. Packing
     // always advances simulation-X so a later LR/RL transpose maps it to screen Y.
-    separate_force_groups(graph, &mut positions, node_sizes, false);
+    separate_force_groups(graph, &mut positions, node_sizes, &primary_targets);
 
     // Group packing can tighten connected pairs again, especially in
     // left-to-right layouts where ungrouped nodes share the same column.
     enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
     resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
-    separate_force_groups(graph, &mut positions, node_sizes, false);
+    separate_force_groups(graph, &mut positions, node_sizes, &primary_targets);
 
     // Last group pack only moves along the secondary axis; restore FK corridor
     // gaps so edge backbones (especially first/last orthogonal legs) stay long
@@ -386,7 +401,65 @@ pub(super) fn apply_force_layout(
     mirror_positioned_nodes_for_direction(&mut positioned_nodes, graph_bounds, config.direction);
     let (width, height) = compute_graph_bounds(&positioned_nodes, config);
 
-    Ok((positioned_nodes, width, height))
+    let node_rows = rows_from_primary_bands(&positioned_nodes, config.direction);
+    Ok(HierarchicalPlacement {
+        nodes: positioned_nodes,
+        width,
+        height,
+        node_rows,
+    })
+}
+
+/// Numbers groups of nodes whose primary-axis extents overlap, along the
+/// flow direction.
+///
+/// Overlap resolution and edge clearance may move nodes off their seed rank
+/// row, so routing gets rows recomputed from the final geometry; this keeps
+/// every row a disjoint band along the primary axis.
+pub(super) fn rows_from_primary_bands(
+    nodes: &[PositionedNode],
+    direction: LayoutDirection,
+) -> Vec<usize> {
+    let span = |node: &PositionedNode| {
+        let (start, end) = match direction {
+            LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
+                (node.y, node.y + node.height)
+            }
+            LayoutDirection::LeftToRight | LayoutDirection::RightToLeft => {
+                (node.x, node.x + node.width)
+            }
+        };
+        // Flip reversed directions so rows still increase along the flow.
+        match direction {
+            LayoutDirection::BottomToTop | LayoutDirection::RightToLeft => (-end, -start),
+            LayoutDirection::TopToBottom | LayoutDirection::LeftToRight => (start, end),
+        }
+    };
+
+    let mut order: Vec<usize> = (0..nodes.len()).collect();
+    order.sort_by(|&a, &b| {
+        span(&nodes[a])
+            .0
+            .total_cmp(&span(&nodes[b]).0)
+            .then(a.cmp(&b))
+    });
+
+    let mut rows = vec![0usize; nodes.len()];
+    let mut row = 0usize;
+    let mut band_end: Option<f32> = None;
+    for node_idx in order {
+        let (start, end) = span(&nodes[node_idx]);
+        band_end = Some(match band_end {
+            Some(current_end) if start >= current_end => {
+                row += 1;
+                end
+            }
+            Some(current_end) => current_end.max(end),
+            None => end,
+        });
+        rows[node_idx] = row;
+    }
+    rows
 }
 
 pub(super) fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConfig {
@@ -402,16 +475,6 @@ pub(super) fn force_layout_canonical_config(config: &LayoutConfig) -> LayoutConf
         );
     }
     canonical
-}
-
-fn force_layout_seed_nodes(
-    graph: &LayoutGraph,
-    ordered_nodes: &[Vec<usize>],
-    config: &LayoutConfig,
-    node_sizes: &[NodeSize],
-) -> Result<Vec<PositionedNode>, LayoutError> {
-    let (positioned_nodes, _, _) = assign_coordinates(graph, ordered_nodes, config, node_sizes)?;
-    Ok(positioned_nodes)
 }
 
 fn force_layout_seed_center(positions: &[(f32, f32)], node_sizes: &[NodeSize]) -> (f32, f32) {
@@ -790,27 +853,37 @@ enum ForcePackItem {
     UngroupedNode(usize),
 }
 
+/// Packs force-directed items along simulation-X without letting them overlap.
+///
+/// Items are swept in order of their packing-axis start and only pushed past
+/// previously placed items whose cross-axis (rank) extent overlaps theirs, or
+/// ungrouped tables they are directly linked to, so unrelated nodes on
+/// different ranks may share a column. Cross-axis extents use the
+/// rank targets the simulation is restored to afterwards.
 #[allow(clippy::cast_precision_loss)]
 fn separate_force_groups(
     graph: &LayoutGraph,
     positions: &mut [(f32, f32)],
     node_sizes: &[NodeSize],
-    pack_along_sim_y: bool,
+    primary_targets: &[f32],
 ) {
     // With two or more logical groups (prefix clusters, multi-schema, …) pack
-    // group bounding boxes plus any truly-ungrouped nodes along the secondary axis.
-    //
-    // With **no** groups (`GroupingStrategy::None`) or a **single** schema bucket
-    // (`BySchema` on one schema), `packed_items` would otherwise contain at most
-    // one `Group` entry and this pass would become a no-op — tables then stay
-    // stacked on the secondary axis and FK edges stay too short for markers.
+    // group bounding boxes plus any truly-ungrouped nodes. With **no** groups
+    // or a **single** schema bucket, pack individual nodes instead so tables
+    // stacked by the simulation get pulled apart and FK edges stay long
+    // enough for markers.
+    let rank_positions: Vec<(f32, f32)> = positions
+        .iter()
+        .zip(primary_targets)
+        .map(|(&(x, _), &y)| (x, y))
+        .collect();
     let mut packed_items: Vec<(ForcePackItem, PackedBounds)> = if graph.groups.len() >= 2 {
         graph
             .groups
             .iter()
             .enumerate()
             .filter_map(|(group_idx, group)| {
-                force_group_bounds(group, positions, node_sizes)
+                force_group_bounds(group, &rank_positions, node_sizes)
                     .map(|bounds| (ForcePackItem::Group(group_idx), bounds))
             })
             .chain(
@@ -822,7 +895,7 @@ fn separate_force_groups(
                     .map(|(node_idx, _)| {
                         (
                             ForcePackItem::UngroupedNode(node_idx),
-                            force_node_bounds(node_idx, positions, node_sizes),
+                            force_node_bounds(node_idx, &rank_positions, node_sizes),
                         )
                     }),
             )
@@ -832,7 +905,7 @@ fn separate_force_groups(
             .map(|node_idx| {
                 (
                     ForcePackItem::UngroupedNode(node_idx),
-                    force_node_bounds(node_idx, positions, node_sizes),
+                    force_node_bounds(node_idx, &rank_positions, node_sizes),
                 )
             })
             .collect()
@@ -848,52 +921,142 @@ fn separate_force_groups(
     let connected = build_node_adjacency(graph);
 
     packed_items.sort_by(|(left_item, left_bounds), (right_item, right_bounds)| {
-        let left_min = if pack_along_sim_y {
-            left_bounds.min_y
-        } else {
-            left_bounds.min_x
-        };
-        let right_min = if pack_along_sim_y {
-            right_bounds.min_y
-        } else {
-            right_bounds.min_x
-        };
-        left_min.total_cmp(&right_min).then_with(|| {
-            force_pack_item_order(*left_item).cmp(&force_pack_item_order(*right_item))
-        })
+        left_bounds
+            .min_x
+            .total_cmp(&right_bounds.min_x)
+            .then_with(|| {
+                force_pack_item_order(*left_item).cmp(&force_pack_item_order(*right_item))
+            })
     });
 
-    let mut previous_item = packed_items[0].0;
-    let mut previous_end = if pack_along_sim_y {
-        packed_items[0].1.max_y
-    } else {
-        packed_items[0].1.max_x
-    };
-
-    for &(item, bounds) in packed_items.iter().skip(1) {
-        let current_min = if pack_along_sim_y {
-            bounds.min_y
-        } else {
-            bounds.min_x
-        };
-        let required_min = previous_end + force_pack_gap(graph, &connected, previous_item, item);
-        if current_min < required_min {
-            let delta = required_min - current_min;
-            shift_force_pack_item(graph, positions, item, delta, pack_along_sim_y);
-            previous_end = if pack_along_sim_y {
-                bounds.max_y + delta
-            } else {
-                bounds.max_x + delta
-            };
-        } else {
-            previous_end = if pack_along_sim_y {
-                bounds.max_y
-            } else {
-                bounds.max_x
-            };
+    let mut index = ForcePackIndex::new(graph, &connected);
+    for (item, bounds) in packed_items {
+        let delta = (index.required_min_x(item, bounds) - bounds.min_x).max(0.0);
+        if delta > 0.0 {
+            shift_force_pack_item(graph, positions, item, delta);
         }
-        previous_item = item;
+        index.insert(
+            item,
+            PackedBounds {
+                min_x: bounds.min_x + delta,
+                max_x: bounds.max_x + delta,
+                ..bounds
+            },
+        );
     }
+}
+
+/// Cross-axis bucket size used to find already placed nodes on the same rank.
+const FORCE_PACK_BUCKET: f32 = 16.0;
+
+/// Spatial index over items placed by [`separate_force_groups`].
+///
+/// Ungrouped nodes are recorded in cross-axis buckets holding the furthest
+/// packing-axis end (plus the gap they demand) seen so far, so finding the
+/// required start of a node costs O(extent / bucket) instead of a scan over
+/// every placed node. Group containers are few and checked exactly.
+struct ForcePackIndex<'a> {
+    graph: &'a LayoutGraph,
+    connected: &'a std::collections::HashSet<(usize, usize)>,
+    neighbours: Vec<Vec<usize>>,
+    buckets: std::collections::HashMap<i32, f32>,
+    placed_nodes: Vec<Option<PackedBounds>>,
+    placed_groups: Vec<(ForcePackItem, PackedBounds)>,
+}
+
+impl<'a> ForcePackIndex<'a> {
+    fn new(
+        graph: &'a LayoutGraph,
+        connected: &'a std::collections::HashSet<(usize, usize)>,
+    ) -> Self {
+        let mut neighbours = vec![Vec::new(); graph.nodes.len()];
+        for &(a, b) in connected {
+            neighbours[a].push(b);
+            neighbours[b].push(a);
+        }
+        Self {
+            graph,
+            connected,
+            neighbours,
+            buckets: std::collections::HashMap::new(),
+            placed_nodes: vec![None; graph.nodes.len()],
+            placed_groups: Vec::new(),
+        }
+    }
+
+    /// Smallest packing-axis start that keeps `item` clear of every placed
+    /// item on the same rank and of the tables it is directly linked to.
+    fn required_min_x(&self, item: ForcePackItem, bounds: PackedBounds) -> f32 {
+        let shares_rank = |other: &PackedBounds| {
+            bounds.min_y < other.max_y + FORCE_GROUP_GAP
+                && other.min_y < bounds.max_y + FORCE_GROUP_GAP
+        };
+        let exact_required = |other_item: ForcePackItem, other: &PackedBounds| {
+            shares_rank(other)
+                .then(|| other.max_x + force_pack_gap(self.graph, self.connected, other_item, item))
+        };
+
+        let groups = self
+            .placed_groups
+            .iter()
+            .filter_map(|(other_item, other)| exact_required(*other_item, other));
+        match item {
+            ForcePackItem::Group(_) => groups
+                .chain(
+                    self.placed_nodes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, other)| {
+                            exact_required(ForcePackItem::UngroupedNode(idx), other.as_ref()?)
+                        }),
+                )
+                .fold(f32::NEG_INFINITY, f32::max),
+            ForcePackItem::UngroupedNode(node_idx) => {
+                let same_rank = bucket_range(bounds.min_y, bounds.max_y)
+                    .filter_map(|bucket| self.buckets.get(&bucket).copied());
+                // Connected tables keep a corridor on both axes so orthogonal
+                // edge stubs stay long enough for their markers.
+                let linked = self.neighbours[node_idx].iter().filter_map(|&other_idx| {
+                    self.placed_nodes[other_idx]
+                        .map(|other| other.max_x + FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP))
+                });
+                groups
+                    .chain(same_rank)
+                    .chain(linked)
+                    .fold(f32::NEG_INFINITY, f32::max)
+            }
+        }
+    }
+
+    fn insert(&mut self, item: ForcePackItem, bounds: PackedBounds) {
+        match item {
+            ForcePackItem::Group(_) => self.placed_groups.push((item, bounds)),
+            ForcePackItem::UngroupedNode(node_idx) => {
+                // Self-loops are drawn on the east side, so a node that carries
+                // one needs the wider corridor towards its right-hand neighbour.
+                let gap = if self.graph.nodes[node_idx].has_self_loop {
+                    FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP)
+                } else {
+                    FORCE_GROUP_GAP
+                };
+                let end = bounds.max_x + gap;
+                for bucket in bucket_range(
+                    bounds.min_y - FORCE_GROUP_GAP,
+                    bounds.max_y + FORCE_GROUP_GAP,
+                ) {
+                    let slot = self.buckets.entry(bucket).or_insert(f32::NEG_INFINITY);
+                    *slot = slot.max(end);
+                }
+                self.placed_nodes[node_idx] = Some(bounds);
+            }
+        }
+    }
+}
+
+#[allow(clippy::cast_possible_truncation)] // Layout coordinates are far below i32 range.
+fn bucket_range(min: f32, max: f32) -> std::ops::RangeInclusive<i32> {
+    let bucket = |value: f32| (value / FORCE_PACK_BUCKET).floor() as i32;
+    bucket(min)..=bucket(max)
 }
 
 /// Builds the set of connected node-index pairs (normalized as `(min, max)`)
@@ -928,7 +1091,11 @@ fn force_pack_gap(
     left: ForcePackItem,
     right: ForcePackItem,
 ) -> f32 {
-    if force_pack_items_are_connected(graph, connected, left, right) {
+    // Self-loops are drawn on the east side, so a node that carries one needs
+    // the wider corridor towards its right-hand neighbour as well.
+    let left_has_self_loop =
+        matches!(left, ForcePackItem::UngroupedNode(idx) if graph.nodes[idx].has_self_loop);
+    if left_has_self_loop || force_pack_items_are_connected(graph, connected, left, right) {
         FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP)
     } else {
         FORCE_GROUP_GAP
@@ -1034,28 +1201,20 @@ fn shift_force_pack_item(
     positions: &mut [(f32, f32)],
     item: ForcePackItem,
     delta: f32,
-    pack_along_sim_y: bool,
 ) {
+    let mut shift = |node_idx: usize| {
+        if let Some((x, _)) = positions.get_mut(node_idx) {
+            *x += delta;
+        }
+    };
     match item {
         ForcePackItem::Group(group_idx) => {
-            for &node_idx in &graph.groups[group_idx].node_indices {
-                if let Some((x, y)) = positions.get_mut(node_idx) {
-                    if pack_along_sim_y {
-                        *y += delta;
-                    } else {
-                        *x += delta;
-                    }
-                }
-            }
+            graph.groups[group_idx]
+                .node_indices
+                .iter()
+                .copied()
+                .for_each(&mut shift);
         }
-        ForcePackItem::UngroupedNode(node_idx) => {
-            if let Some((x, y)) = positions.get_mut(node_idx) {
-                if pack_along_sim_y {
-                    *y += delta;
-                } else {
-                    *x += delta;
-                }
-            }
-        }
+        ForcePackItem::UngroupedNode(node_idx) => shift(node_idx),
     }
 }

@@ -215,7 +215,7 @@ fn ranked_edge_examples(
     bend_counts: &BTreeMap<String, usize>,
     predicate: impl Fn(usize, usize) -> bool,
 ) -> Vec<RankedEdgeSummary> {
-    let ranks = assign_ranks(graph, relune_layout::RankAssignmentStrategy::LongestPath).node_rank;
+    let ranks = assign_ranks(graph).node_rank;
 
     let mut edges = graph
         .edges

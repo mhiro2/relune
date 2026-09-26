@@ -20,7 +20,7 @@ use relune_core::layout::{EdgeRoute, RouteStyle};
 /// Outward offset (in pixels) applied to attachment points so that edge
 /// endpoints and markers sit slightly outside the node border rather than
 /// overlapping it.
-const BORDER_OUTSET: f32 = 2.0;
+pub(crate) const BORDER_OUTSET: f32 = 2.0;
 
 /// Default half-width of an edge label bounding box (in pixels).
 /// Used as a fallback when no label text is available.
