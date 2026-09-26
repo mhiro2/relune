@@ -633,6 +633,36 @@ fn grouped_hierarchical_layout_produces_disjoint_group_bboxes() {
 }
 
 #[test]
+fn grouped_hierarchical_layout_keeps_groups_apart_with_tiny_spacing() {
+    use relune_core::{GroupingSpec, GroupingStrategy};
+
+    let schema = make_multi_schema_for_grouping();
+    let request = LayoutRequest {
+        grouping: GroupingSpec {
+            strategy: GroupingStrategy::BySchema,
+        },
+        ..LayoutRequest::default()
+    };
+    for direction in [LayoutDirection::TopToBottom, LayoutDirection::LeftToRight] {
+        let config = LayoutConfig {
+            direction,
+            horizontal_spacing: 1.0,
+            vertical_spacing: 1.0,
+            auto_tune_spacing: false,
+            compaction: LayoutCompactionSpec {
+                min_horizontal_spacing: 1.0,
+                min_vertical_spacing: 1.0,
+                ..LayoutCompactionSpec::default()
+            },
+            ..LayoutConfig::default()
+        };
+        let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+
+        assert_groups_disjoint(&positioned.groups);
+    }
+}
+
+#[test]
 fn force_grouped_layout_produces_disjoint_group_bboxes_on_y() {
     use relune_core::{GroupingSpec, GroupingStrategy};
 

@@ -20,6 +20,8 @@ use super::{
     GROUP_PADDING, GROUP_TOP_PADDING, LayoutConfig, LayoutError, NodeSize, PositionedNode,
 };
 
+/// Minimum visible gap between two padded group containers.
+const MIN_GROUP_CLEARANCE: f32 = 16.0;
 /// Preferred on-screen width / height ratio of a packed layout.
 const TARGET_SCREEN_ASPECT: f32 = 1.6;
 
@@ -176,9 +178,15 @@ impl Axes {
         }
     }
 
-    /// Gap between two group containers placed next to each other.
+    /// Gap between two group containers placed next to each other. The floor
+    /// keeps the padded container boxes apart even with tiny node spacing.
     fn group_gap(self) -> f32 {
-        self.secondary_gap * 1.5
+        let padding = if self.is_horizontal {
+            GROUP_TOP_PADDING + GROUP_PADDING
+        } else {
+            2.0 * GROUP_PADDING
+        };
+        (self.secondary_gap * 1.5).max(padding + MIN_GROUP_CLEARANCE)
     }
 
     /// Extra primary-axis gap between shelves that hold group containers, so
