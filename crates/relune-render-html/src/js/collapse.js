@@ -208,7 +208,7 @@
   }
 
   // ts/collapse.ts
-  var STORAGE_KEY = "relune-collapsed-tables";
+  var STORAGE_KEY = `relune-collapsed-tables:${location.pathname}${location.search}`;
   {
     let loadState2 = function() {
       try {

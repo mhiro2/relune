@@ -8,7 +8,10 @@ import {
   reportSessionStorageError,
 } from './viewer_api';
 
-const STORAGE_KEY = 'relune-collapsed-tables';
+// Scope saved state to the document so different diagrams opened in the same
+// origin (e.g. several exports under one file:// or static host) do not share it.
+// The hash is excluded because it carries the viewer's own URL state.
+const STORAGE_KEY = `relune-collapsed-tables:${location.pathname}${location.search}`;
 
 {
   const metadata = parseReluneMetadata();
