@@ -580,6 +580,74 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
     );
 }
 
+#[tokio::test]
+async fn test_introspect_mysql_indexes_match_parsed_mysqldump_keys() {
+    type IndexShape = (Option<String>, bool, Vec<(String, Option<u32>)>);
+
+    // mysqldump emits secondary indexes as inline `KEY`/`UNIQUE KEY` clauses;
+    // parsing the DDL must yield the same index names and key parts
+    // (including prefix lengths) as introspecting the live database.
+    let sql = r"
+        CREATE TABLE `users` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `email` VARCHAR(255) NOT NULL,
+            `bio` TEXT,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_users_email` (`email`),
+            KEY `idx_users_bio` (`bio`(100))
+        ) ENGINE=InnoDB;
+        CREATE TABLE `posts` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `user_id` INT NOT NULL,
+            `title` VARCHAR(255) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `fk_posts_user` (`user_id`),
+            KEY `idx_posts_user_title` (`user_id`, `title`(32)),
+            CONSTRAINT `fk_posts_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ) ENGINE=InnoDB;
+        ALTER TABLE `posts` ADD INDEX `idx_posts_title` (`title`);
+    ";
+    let (database_url, _container) = setup_mysql_with_sql(sql).await.expect("mysql setup");
+    let introspected = introspect_database(&database_url)
+        .await
+        .expect("introspect mysql");
+    let parsed =
+        relune_parser_sql::parse_sql_to_schema_with_dialect(sql, relune_core::SqlDialect::Mysql)
+            .expect("parse mysqldump DDL");
+
+    let shapes = |schema: &relune_core::Schema, table: &str| -> Vec<IndexShape> {
+        let mut shapes: Vec<IndexShape> = schema
+            .tables
+            .iter()
+            .find(|t| t.name == table)
+            .unwrap_or_else(|| panic!("{table} table"))
+            .indexes
+            .iter()
+            .map(|ix| {
+                let parts = ix
+                    .key_parts
+                    .iter()
+                    .map(|part| match part {
+                        relune_core::IndexKey::Column(c) => (c.name.clone(), c.prefix_length),
+                        relune_core::IndexKey::Expression(e) => (e.clone(), None),
+                    })
+                    .collect();
+                (ix.name.clone(), ix.is_unique, parts)
+            })
+            .collect();
+        shapes.sort();
+        shapes
+    };
+
+    for table in ["users", "posts"] {
+        assert_eq!(
+            shapes(&parsed, table),
+            shapes(&introspected, table),
+            "index shapes for `{table}` differ between parsed DDL and introspection"
+        );
+    }
+}
+
 /// Sets up a `MariaDB` container and executes SQL in its `test` database.
 async fn setup_mariadb_with_sql(
     sql: &str,
