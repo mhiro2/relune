@@ -45,6 +45,8 @@ jobs:
         run: make fmt-check
       - name: Run lint
         run: make lint
+      - name: Test HTML viewer
+        run: make test-html-viewer
 
   test:
     runs-on: ubuntu-latest
