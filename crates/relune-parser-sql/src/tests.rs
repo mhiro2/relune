@@ -1568,6 +1568,195 @@ fn test_parse_mysql_foreign_keys() {
 }
 
 #[test]
+fn test_parse_mysql_inline_key_and_index_as_non_unique_indexes() {
+    use relune_core::IndexKey;
+
+    let sql = r"
+        CREATE TABLE `posts` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `user_id` BIGINT NOT NULL,
+            `title` VARCHAR(255) NOT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_posts_user` (`user_id`),
+            INDEX `idx_posts_title_created` USING HASH (`title`, `created_at` DESC),
+            KEY (`created_at`) USING BTREE
+        ) ENGINE=InnoDB;
+    ";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Mysql);
+    assert!(
+        !output.has_warnings(),
+        "inline KEY/INDEX must not be reported as unsupported: {:?}",
+        output.diagnostics
+    );
+    let schema = output.schema.expect("schema should exist");
+    let posts = &schema.tables[0];
+
+    assert_eq!(posts.indexes.len(), 3);
+    assert!(posts.indexes.iter().all(|ix| !ix.is_unique));
+
+    let by_user = &posts.indexes[0];
+    assert_eq!(by_user.name.as_deref(), Some("idx_posts_user"));
+    assert_eq!(by_user.column_names(), vec!["user_id"]);
+    assert_eq!(by_user.method, None);
+
+    let composite = &posts.indexes[1];
+    assert_eq!(composite.name.as_deref(), Some("idx_posts_title_created"));
+    assert_eq!(composite.column_names(), vec!["title", "created_at"]);
+    assert_eq!(composite.method.as_deref(), Some("hash"));
+    let IndexKey::Column(created_at) = &composite.key_parts[1] else {
+        panic!("expected a plain column key part");
+    };
+    assert_eq!(created_at.order, Some(relune_core::SortOrder::Desc));
+
+    let unnamed = &posts.indexes[2];
+    assert_eq!(unnamed.name, None);
+    assert_eq!(unnamed.column_names(), vec!["created_at"]);
+    assert_eq!(unnamed.method.as_deref(), Some("btree"));
+}
+
+#[test]
+fn test_parse_mysql_alter_table_add_index_and_key() {
+    let sql = r"
+        CREATE TABLE `posts` (
+            `id` BIGINT NOT NULL,
+            `user_id` BIGINT NOT NULL,
+            `slug` VARCHAR(255) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB;
+        ALTER TABLE `posts` ADD INDEX `idx_posts_user` (`user_id`);
+        ALTER TABLE `posts` ADD KEY `idx_posts_slug` (`slug`);
+        ALTER TABLE `posts` DROP INDEX `idx_posts_slug`;
+    ";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Mysql);
+    assert!(!output.has_warnings(), "{:?}", output.diagnostics);
+    let schema = output.schema.expect("schema should exist");
+    let posts = &schema.tables[0];
+
+    assert_eq!(posts.indexes.len(), 1);
+    assert_eq!(posts.indexes[0].name.as_deref(), Some("idx_posts_user"));
+    assert_eq!(posts.indexes[0].column_names(), vec!["user_id"]);
+    assert!(!posts.indexes[0].is_unique);
+}
+
+#[test]
+fn test_parse_mysql_inline_key_covers_foreign_key() {
+    let sql = r"
+        CREATE TABLE `users` (
+            `id` BIGINT NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB;
+        CREATE TABLE `posts` (
+            `id` BIGINT NOT NULL,
+            `user_id` BIGINT NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `fk_posts_user` (`user_id`),
+            CONSTRAINT `fk_posts_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ) ENGINE=InnoDB;
+    ";
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let posts = &schema.tables[1];
+    assert!(
+        posts
+            .indexes
+            .iter()
+            .any(|ix| ix.key_slots().first() == Some(&Some("user_id"))),
+        "the mysqldump-style KEY backing the FK must be modeled as an index"
+    );
+}
+
+#[test]
+fn test_parse_mysql_prefix_key_parts_record_prefix_length() {
+    use relune_core::IndexKey;
+
+    let sql = r"
+        CREATE TABLE `users` (
+            `id` BIGINT NOT NULL,
+            `email` VARCHAR(255) NOT NULL,
+            `bio` TEXT,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_users_email` (`email`(20)),
+            KEY `idx_users_bio` (`bio`(100), `id`)
+        ) ENGINE=InnoDB;
+        CREATE INDEX `idx_users_email_prefix` ON `users` (`email`(8));
+    ";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Mysql);
+    assert!(!output.has_warnings(), "{:?}", output.diagnostics);
+    let schema = output.schema.expect("schema should exist");
+    let users = &schema.tables[0];
+
+    let parts_of = |index: &relune_core::Index| -> Vec<(String, Option<u32>)> {
+        index
+            .key_parts
+            .iter()
+            .map(|part| match part {
+                IndexKey::Column(column) => (column.name.clone(), column.prefix_length),
+                IndexKey::Expression(expr) => panic!("unexpected expression part {expr}"),
+            })
+            .collect()
+    };
+    let named = |name: &str| {
+        users
+            .indexes
+            .iter()
+            .find(|ix| ix.name.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("index {name} should exist"))
+    };
+
+    // A prefix UNIQUE key only constrains the leading bytes, so it must be kept
+    // with its prefix length rather than treated as whole-column uniqueness.
+    let unique = users
+        .indexes
+        .iter()
+        .find(|ix| ix.is_unique)
+        .expect("prefix UNIQUE KEY should be recorded");
+    assert_eq!(parts_of(unique), vec![("email".to_string(), Some(20))]);
+    assert_eq!(unique.full_plain_columns(), None);
+
+    assert_eq!(
+        parts_of(named("idx_users_bio")),
+        vec![("bio".to_string(), Some(100)), ("id".to_string(), None)]
+    );
+    assert_eq!(
+        parts_of(named("idx_users_email_prefix")),
+        vec![("email".to_string(), Some(8))]
+    );
+}
+
+#[test]
+fn test_parse_mysql_functional_key_part_stays_expression() {
+    use relune_core::IndexKey;
+
+    let sql = r"
+        CREATE TABLE `users` (
+            `id` BIGINT NOT NULL,
+            `email` VARCHAR(255) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_users_email_lower` ((lower(`email`)))
+        ) ENGINE=InnoDB;
+    ";
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let index = &schema.tables[0].indexes[0];
+    assert!(matches!(index.key_parts[0], IndexKey::Expression(_)));
+}
+
+#[test]
+fn test_parse_postgres_single_argument_function_index_is_not_prefix() {
+    use relune_core::IndexKey;
+
+    let sql = r"
+        CREATE TABLE users (id BIGINT PRIMARY KEY, code TEXT NOT NULL);
+        CREATE INDEX idx_users_code_left ON users (left_pad(3));
+    ";
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres).expect("parse should succeed");
+    let index = &schema.tables[0].indexes[0];
+    assert!(matches!(index.key_parts[0], IndexKey::Expression(_)));
+}
+
+#[test]
 fn test_parse_mysql_enum_and_set_types_populate_column_enum_values() {
     let sql = r"
         CREATE TABLE `users` (

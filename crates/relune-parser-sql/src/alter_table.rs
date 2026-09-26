@@ -2,8 +2,9 @@
 
 use crate::context::{LineOffsets, ParseContext, span_from_ident, span_from_spanned};
 use crate::create_table::{
-    canonicalize_data_type, column_attributes_from_options, parsed_column_from_column_def,
-    plain_column_names, push_unique_index, warn_expression_key,
+    canonicalize_data_type, column_attributes_from_options, index_from_constraint,
+    parsed_column_from_column_def, plain_column_names, push_unique_index, unique_key_parts,
+    warn_expression_key,
 };
 use crate::diagnostics::truncate_unsupported_debug;
 use crate::names::{
@@ -11,7 +12,8 @@ use crate::names::{
     split_object_name_with_diagnostics,
 };
 use relune_core::{
-    Column, ColumnId, Diagnostic, ForeignKey, Table, diagnostic::codes, normalize_identifier,
+    Column, ColumnId, Diagnostic, ForeignKey, IndexKey, Table, diagnostic::codes,
+    normalize_identifier,
 };
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnOption, DataType, ObjectName, TableConstraint,
@@ -633,7 +635,11 @@ fn redefine_column_in_table(
     for option in options {
         match option {
             ColumnOption::Unique(_) => {
-                push_unique_index(&mut table.indexes, None, vec![col_name.to_owned()]);
+                push_unique_index(
+                    &mut table.indexes,
+                    None,
+                    vec![IndexKey::column(col_name.to_owned())],
+                );
             }
             ColumnOption::ForeignKey(constraint) => {
                 table.foreign_keys.push(build_foreign_key(
@@ -757,7 +763,11 @@ fn add_column_from_alter(
             }
             ColumnOption::Unique(_) => {
                 let constraint_name = option.name.as_ref().map(|n| normalize_identifier(&n.value));
-                push_unique_index(&mut table.indexes, constraint_name, vec![col_name.clone()]);
+                push_unique_index(
+                    &mut table.indexes,
+                    constraint_name,
+                    vec![IndexKey::column(col_name.clone())],
+                );
             }
             _ => {}
         }
@@ -793,12 +803,12 @@ fn apply_add_table_constraint(
             }
         }
         TableConstraint::Unique(unique) => {
-            if let Some(col_names) = plain_column_names(&unique.columns) {
+            if let Some(key_parts) = unique_key_parts(&unique.columns, ctx.dialect) {
                 let index_name = unique
                     .name
                     .as_ref()
                     .map(|ident| normalize_identifier(&ident.value));
-                push_unique_index(&mut table.indexes, index_name, col_names);
+                push_unique_index(&mut table.indexes, index_name, key_parts);
             } else {
                 warn_expression_key(
                     ctx,
@@ -833,7 +843,11 @@ fn apply_add_table_constraint(
                 expression: check.expr.to_string(),
             });
         }
-        TableConstraint::Index(_) => {}
+        TableConstraint::Index(index) => {
+            if let Some(index) = index_from_constraint(index, ctx.dialect) {
+                table.indexes.push(index);
+            }
+        }
         TableConstraint::FulltextOrSpatial(_) => {
             ctx.warn_unsupported(
                 "FULLTEXT/SPATIAL constraint",

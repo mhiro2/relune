@@ -42,7 +42,7 @@ pub(crate) fn parse_create_index(
     // Functional/expression key parts (e.g. `lower(email)`) are recorded as
     // explicit expression parts rather than dropped, so the index still counts
     // toward uniqueness/coverage decisions and is detected on removal.
-    let key_parts = index_key_parts(&create_index.columns);
+    let key_parts = index_key_parts(&create_index.columns, ctx.dialect);
     if key_parts.is_empty() {
         return;
     }
