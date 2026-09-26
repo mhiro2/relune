@@ -11,6 +11,7 @@ use relune_parser_sql::parse_sql_to_schema;
 use std::collections::HashSet;
 use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::mariadb::Mariadb;
 use testcontainers_modules::mysql::Mysql;
 use testcontainers_modules::postgres::Postgres;
 
@@ -521,6 +522,11 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
             amount INT NOT NULL,
             CONSTRAINT amount_positive CHECK (amount >= 0)
         );
+        CREATE TABLE ledger (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code INT NOT NULL,
+            UNIQUE KEY amount_positive (code)
+        );
     ";
     let (database_url, _container) = setup_mysql_with_sql(sql).await.expect("mysql setup");
     let schema = introspect_database(&database_url)
@@ -559,6 +565,90 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
 
     assert_eq!(accounts.check_constraints.len(), 1);
     assert!(accounts.check_constraints[0].expression.contains("amount"));
+
+    // A UNIQUE key sharing the check's name on another table must not pull the
+    // check onto that table.
+    let ledger = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "ledger")
+        .expect("ledger table");
+    assert!(
+        ledger.check_constraints.is_empty(),
+        "ledger must not inherit accounts' check: {:?}",
+        ledger.check_constraints
+    );
+}
+
+/// Sets up a `MariaDB` container and executes SQL in its `test` database.
+async fn setup_mariadb_with_sql(
+    sql: &str,
+) -> Result<(String, testcontainers::ContainerAsync<Mariadb>), Box<dyn std::error::Error>> {
+    let container = Mariadb::default().start().await?;
+    let host = container.get_host().await?;
+    let port = container.get_host_port_ipv4(3306).await?;
+    // The `MariaDB` module starts with a passwordless root and a `test` database.
+    let database_url = format!("mysql://root@{host}:{port}/test");
+
+    let pool = sqlx::mysql::MySqlPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok((database_url, container))
+}
+
+#[tokio::test]
+async fn test_introspect_mariadb_checks_stay_on_their_table() {
+    // MariaDB scopes CHECK constraint names to the table, so two tables can
+    // each own a check with the same name.
+    let sql = r"
+        CREATE TABLE accounts (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            amount INT NOT NULL,
+            CONSTRAINT chk_positive CHECK (amount >= 0)
+        );
+        CREATE TABLE payments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            total INT NOT NULL,
+            CONSTRAINT chk_positive CHECK (total > 0)
+        );
+        CREATE TABLE ledger (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code INT NOT NULL,
+            UNIQUE KEY chk_positive (code)
+        );
+    ";
+    let (database_url, _container) = setup_mariadb_with_sql(sql).await.expect("mariadb setup");
+    let schema = introspect_database(&database_url)
+        .await
+        .expect("introspect mariadb");
+
+    let checks_of = |name: &str| -> Vec<String> {
+        schema
+            .tables
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("{name} table"))
+            .check_constraints
+            .iter()
+            .map(|c| c.expression.clone())
+            .collect()
+    };
+
+    let accounts = checks_of("accounts");
+    assert_eq!(accounts.len(), 1, "accounts checks: {accounts:?}");
+    assert!(accounts[0].contains("amount"));
+
+    let payments = checks_of("payments");
+    assert_eq!(payments.len(), 1, "payments checks: {payments:?}");
+    assert!(payments[0].contains("total"));
+
+    assert!(checks_of("ledger").is_empty());
 }
 
 #[tokio::test]

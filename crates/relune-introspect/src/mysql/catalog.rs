@@ -186,29 +186,17 @@ impl ParallelCatalogReader for MySqlCatalog {
             .collect::<Result<Vec<RawColumn>, IntrospectError>>()
     }
 
-    /// Fetch table-level `CHECK` constraints (`MySQL` 8.0.16+). The
-    /// `CHECK_CLAUSE` is rendered as `(<expr>)`; the outer parentheses are
-    /// stripped to match the parser's representation.
+    /// Fetch table-level `CHECK` constraints (`MySQL` 8.0.16+ / `MariaDB`).
+    /// The `CHECK_CLAUSE` is rendered as `(<expr>)`; the outer parentheses
+    /// are stripped to match the parser's representation.
     async fn fetch_checks(&self) -> Result<Vec<RawCheckConstraint>, IntrospectError> {
-        let rows: Vec<RawCheckRow> = sqlx::query_as(
-            r"
-            SELECT
-                CONVERT(tc.TABLE_SCHEMA USING utf8mb4) AS schema_name,
-                CONVERT(tc.TABLE_NAME USING utf8mb4) AS table_name,
-                CONVERT(cc.CONSTRAINT_NAME USING utf8mb4) AS name,
-                CONVERT(cc.CHECK_CLAUSE USING utf8mb4) AS check_clause
-            FROM information_schema.CHECK_CONSTRAINTS cc
-            INNER JOIN information_schema.TABLE_CONSTRAINTS tc
-                ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
-                AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
-            WHERE tc.TABLE_SCHEMA = ?
-            ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, cc.CONSTRAINT_NAME
-            ",
-        )
-        .bind(&self.database)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| IntrospectError::query_with_source("Failed to fetch check constraints", e))?;
+        let rows: Vec<RawCheckRow> = sqlx::query_as(check_rows_query(self.flavor))
+            .bind(&self.database)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                IntrospectError::query_with_source("Failed to fetch check constraints", e)
+            })?;
 
         Ok(rows
             .into_iter()
@@ -446,6 +434,47 @@ struct FkColumnRow {
     ordinal_position: u64,
     delete_rule: String,
     update_rule: String,
+}
+
+/// Builds the `CHECK` constraint query for the connected server flavor.
+///
+/// `MySQL` check names are unique per schema, but `CHECK_CONSTRAINTS` has no
+/// table column, so the owning table comes from `TABLE_CONSTRAINTS`
+/// (restricted to `CHECK` rows so a same-named constraint of another type
+/// cannot match). `MariaDB` scopes check names to their table, so joining on
+/// the name alone would attach a check to every table reusing that name;
+/// its `CHECK_CONSTRAINTS` carries `TABLE_NAME` directly and is read alone.
+const fn check_rows_query(flavor: MySqlFlavor) -> &'static str {
+    match flavor {
+        MySqlFlavor::MySql => {
+            r"
+            SELECT
+                CONVERT(tc.TABLE_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(tc.TABLE_NAME USING utf8mb4) AS table_name,
+                CONVERT(cc.CONSTRAINT_NAME USING utf8mb4) AS name,
+                CONVERT(cc.CHECK_CLAUSE USING utf8mb4) AS check_clause
+            FROM information_schema.CHECK_CONSTRAINTS cc
+            INNER JOIN information_schema.TABLE_CONSTRAINTS tc
+                ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+                AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+                AND tc.CONSTRAINT_TYPE = 'CHECK'
+            WHERE tc.TABLE_SCHEMA = ?
+            ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, cc.CONSTRAINT_NAME
+            "
+        }
+        MySqlFlavor::MariaDb => {
+            r"
+            SELECT
+                CONVERT(CONSTRAINT_SCHEMA USING utf8mb4) AS schema_name,
+                CONVERT(TABLE_NAME USING utf8mb4) AS table_name,
+                CONVERT(CONSTRAINT_NAME USING utf8mb4) AS name,
+                CONVERT(CHECK_CLAUSE USING utf8mb4) AS check_clause
+            FROM information_schema.CHECK_CONSTRAINTS
+            WHERE CONSTRAINT_SCHEMA = ?
+            ORDER BY CONSTRAINT_SCHEMA, TABLE_NAME, CONSTRAINT_NAME
+            "
+        }
+    }
 }
 
 /// Builds the index-metadata query for the connected server flavor.
@@ -901,6 +930,18 @@ mod tests {
 
         let mysql = index_rows_query(MySqlFlavor::MySql);
         assert!(mysql.contains("CONVERT(EXPRESSION USING utf8mb4) AS expression"));
+    }
+
+    #[test]
+    fn check_query_scopes_each_check_to_its_table() {
+        let mysql = check_rows_query(MySqlFlavor::MySql);
+        assert!(mysql.contains("tc.CONSTRAINT_TYPE = 'CHECK'"));
+
+        // MariaDB check names are only unique per table, so the query must
+        // take the table from CHECK_CONSTRAINTS rather than join by name.
+        let mariadb = check_rows_query(MySqlFlavor::MariaDb);
+        assert!(!mariadb.contains("TABLE_CONSTRAINTS"));
+        assert!(mariadb.contains("CONVERT(TABLE_NAME USING utf8mb4) AS table_name"));
     }
 
     #[test]
