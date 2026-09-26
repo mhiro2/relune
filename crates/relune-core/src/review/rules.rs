@@ -1617,7 +1617,9 @@ fn evaluate_drop_pk_severity(
     (ReviewSeverity::Warning, None)
 }
 
-/// `risk/add-unique-on-existing` — UNIQUE index added to an existing table.
+/// `risk/add-unique-on-existing` — UNIQUE index added to an existing table,
+/// or an existing index modified so that its uniqueness becomes stricter
+/// (gaining the UNIQUE flag, narrowing its key, or dropping a predicate).
 fn check_add_unique_on_existing(
     table_diff: &TableDiff,
     index_diff: &IndexDiff,
@@ -1625,14 +1627,27 @@ fn check_add_unique_on_existing(
     after_table: &Table,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if index_diff.change_kind != ChangeKind::Added {
-        return;
-    }
     let Some(new) = index_diff.new_value.as_ref() else {
         return;
     };
     if !new.unique {
         return;
+    }
+    match index_diff.change_kind {
+        ChangeKind::Added => {}
+        ChangeKind::Modified => {
+            // An old UNIQUE whose key parts all survive in the new key under
+            // the same predicate already implies the new constraint (e.g. a
+            // widened key or a method-only change), so no row can newly fail.
+            if index_diff
+                .old_value
+                .as_ref()
+                .is_some_and(|old| unique_implies(old, new))
+            {
+                return;
+            }
+        }
+        ChangeKind::Removed => return,
     }
     let new_columns = new.column_names();
     // Suppress when uniqueness over the new index's raw whole-column key is
@@ -1659,16 +1674,52 @@ fn check_add_unique_on_existing(
         RiskFinding::new(
             ReviewRuleId::AddUniqueOnExisting,
             ReviewSeverity::Warning,
-            format!(
-                "UNIQUE index {} on ({}) is being added to existing table {}. Existing duplicate rows will fail the constraint.",
-                label,
-                new_columns.join(","),
-                table_diff.table_name,
-            ),
+            if index_diff.change_kind == ChangeKind::Modified {
+                format!(
+                    "Index {} on ({}) on existing table {} is being changed to a uniqueness constraint the old definition does not guarantee. Existing duplicate rows may fail the constraint.",
+                    label,
+                    new_columns.join(","),
+                    table_diff.table_name,
+                )
+            } else {
+                format!(
+                    "UNIQUE index {} on ({}) is being added to existing table {}. Existing duplicate rows will fail the constraint.",
+                    label,
+                    new_columns.join(","),
+                    table_diff.table_name,
+                )
+            },
         )
         .with_table(&after_table.stable_id, &table_diff.table_name)
         .with_mitigation("Verify no duplicates exist or deduplicate before applying."),
     );
+}
+
+/// Returns true when UNIQUE index `old` guarantees everything UNIQUE index
+/// `new` requires: same predicate, and every key part of `old` also appears
+/// in `new` (uniqueness on a subset implies uniqueness on a superset).
+fn unique_implies(old: &crate::export::IndexExport, new: &crate::export::IndexExport) -> bool {
+    fn part_identity(part: &crate::model::IndexKey) -> (bool, String, Option<u32>) {
+        match part {
+            crate::model::IndexKey::Column(column) => {
+                (true, column.name.to_lowercase(), column.prefix_length)
+            }
+            crate::model::IndexKey::Expression(expr) => (false, expr.to_lowercase(), None),
+        }
+    }
+
+    if !old.unique || old.key_parts.is_empty() {
+        return false;
+    }
+    // Compare predicates verbatim (modulo surrounding whitespace): lowercasing
+    // would conflate string literals such as `'A'` and `'a'`.
+    if old.predicate.as_deref().map(str::trim) != new.predicate.as_deref().map(str::trim) {
+        return false;
+    }
+    let new_parts: HashSet<_> = new.key_parts.iter().map(part_identity).collect();
+    old.key_parts
+        .iter()
+        .all(|part| new_parts.contains(&part_identity(part)))
 }
 
 /// Returns true when `columns` are already guaranteed unique in `table`
@@ -4082,6 +4133,104 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting)
             .expect("expected AddUniqueOnExisting finding");
         assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    fn modified_unique_findings(before_idx: ModelIndex, after_idx: ModelIndex) -> Vec<RiskFinding> {
+        let users = |idx: ModelIndex| {
+            table(
+                "users",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("tenant_id", "BIGINT", false, false),
+                    col("email", "TEXT", false, false),
+                ],
+                vec![],
+                vec![idx],
+            )
+        };
+        let before = Schema {
+            tables: vec![users(before_idx)],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users(after_idx)],
+            ..Default::default()
+        };
+        run_all(&before, &after)
+            .into_iter()
+            .filter(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting)
+            .collect()
+    }
+
+    #[test]
+    fn modified_index_becoming_unique_warns() {
+        let findings = modified_unique_findings(
+            index("users_email_idx", &["email"], false),
+            index("users_email_idx", &["email"], true),
+        );
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].severity, ReviewSeverity::Warning);
+        assert!(findings[0].message.contains("does not guarantee"));
+    }
+
+    #[test]
+    fn modified_unique_narrowing_key_warns() {
+        let findings = modified_unique_findings(
+            index("users_tenant_email_key", &["tenant_id", "email"], true),
+            index("users_tenant_email_key", &["email"], true),
+        );
+        assert_eq!(findings.len(), 1, "{findings:?}");
+    }
+
+    #[test]
+    fn modified_unique_dropping_predicate_warns() {
+        let mut partial = index("users_email_key", &["email"], true);
+        partial.predicate = Some("deleted_at IS NULL".to_string());
+        let findings =
+            modified_unique_findings(partial, index("users_email_key", &["email"], true));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+    }
+
+    #[test]
+    fn modified_unique_widening_key_is_suppressed() {
+        let findings = modified_unique_findings(
+            index("users_email_key", &["email"], true),
+            index("users_email_key", &["tenant_id", "email"], true),
+        );
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn modified_unique_method_only_change_is_suppressed() {
+        let mut partial = index("users_email_key", &["email"], true);
+        partial.predicate = Some("deleted_at IS NULL".to_string());
+        let mut hashed = partial.clone();
+        hashed.method = Some("hash".to_string());
+        let findings = modified_unique_findings(partial, hashed);
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn modified_unique_predicate_literal_case_change_warns() {
+        let with_predicate = |predicate: &str, columns: &[&str]| {
+            let mut idx = index("users_email_key", columns, true);
+            idx.predicate = Some(predicate.to_string());
+            idx
+        };
+        let findings = modified_unique_findings(
+            with_predicate("status = 'A'", &["email"]),
+            with_predicate("status = 'a'", &["tenant_id", "email"]),
+        );
+        assert_eq!(findings.len(), 1, "{findings:?}");
+    }
+
+    #[test]
+    fn modified_unique_already_covered_by_pk_is_suppressed() {
+        let findings = modified_unique_findings(
+            index("users_id_email_idx", &["id", "email"], false),
+            index("users_id_email_idx", &["id", "email"], true),
+        );
+        assert!(findings.is_empty(), "{findings:?}");
     }
 
     #[test]
