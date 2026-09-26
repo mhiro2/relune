@@ -20,8 +20,8 @@ use super::*;
 use crate::graph::{LayoutEdge, LayoutGraph};
 use crate::port::{RegularPortAssignment, column_y_offset_from_center};
 use crate::route::{
-    AttachmentSide, ChannelAxis, LABEL_HALF_H, Rect, estimate_label_half_width, point_along_route,
-    route_points,
+    AttachmentSide, BORDER_OUTSET, ChannelAxis, LABEL_HALF_H, Rect, estimate_label_half_width,
+    point_along_route, route_points,
 };
 use relune_core::layout::Cardinality;
 use relune_core::{
@@ -2947,6 +2947,28 @@ fn assert_layout_invariants(graph: &PositionedGraph) {
         graph.height
     );
 
+    let node_by_id: BTreeMap<&str, &PositionedNode> =
+        graph.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    for edge in graph.edges.iter().filter(|edge| !edge.is_self_loop) {
+        for (node_id, point) in [
+            (edge.from.as_str(), (edge.route.x1, edge.route.y1)),
+            (edge.to.as_str(), (edge.route.x2, edge.route.y2)),
+        ] {
+            let node = node_by_id[node_id];
+            assert!(
+                point_on_node_boundary(node, point),
+                "edge {} -> {} attaches at {point:?}, off the boundary of {node_id} \
+                 ({}, {}, {} x {})",
+                edge.from,
+                edge.to,
+                node.x,
+                node.y,
+                node.width,
+                node.height
+            );
+        }
+    }
+
     for edge in &graph.edges {
         let points = route_points(&edge.route);
         assert!(
@@ -2980,6 +3002,83 @@ fn assert_layout_invariants(graph: &PositionedGraph) {
             "edge endpoint {} not present in positioned nodes",
             edge.to
         );
+    }
+}
+
+fn point_on_node_boundary(node: &PositionedNode, (x, y): (f32, f32)) -> bool {
+    // Routes start just outside the border so markers do not overlap the stroke.
+    const EPS: f32 = BORDER_OUTSET + 0.5;
+    let (left, top) = (node.x, node.y);
+    let (right, bottom) = (node.x + node.width, node.y + node.height);
+    let within_x = (left - EPS..=right + EPS).contains(&x);
+    let within_y = (top - EPS..=bottom + EPS).contains(&y);
+    let on_vertical_side = within_y && ((x - left).abs() <= EPS || (x - right).abs() <= EPS);
+    let on_horizontal_side = within_x && ((y - top).abs() <= EPS || (y - bottom).abs() <= EPS);
+    on_vertical_side || on_horizontal_side
+}
+
+/// Builds a schema of `table_count` single-column tables named `t000`, `t001`, …
+/// with one foreign key per `(from, to)` index pair.
+fn make_synthetic_schema(table_count: usize, foreign_keys: &[(usize, usize)]) -> Schema {
+    let name = |index: usize| format!("t{index:03}");
+    let tables = (0..table_count)
+        .map(|index| Table {
+            id: TableId(u64::try_from(index + 1).unwrap()),
+            stable_id: name(index),
+            schema_name: None,
+            name: name(index),
+            columns: vec![Column {
+                id: ColumnId(u64::try_from(index + 1).unwrap()),
+                name: "id".to_string(),
+                data_type: "int".to_string(),
+                nullable: false,
+                is_primary_key: true,
+                comment: None,
+                enum_values: None,
+                semantics: relune_core::ColumnSemantics::default(),
+            }],
+            foreign_keys: foreign_keys
+                .iter()
+                .filter(|(from, _)| *from == index)
+                .map(|&(_, to)| ForeignKey {
+                    name: None,
+                    from_columns: vec!["id".to_string()],
+                    to_schema: None,
+                    to_table: name(to),
+                    to_columns: vec!["id".to_string()],
+                    on_delete: ReferentialAction::NoAction,
+                    on_update: ReferentialAction::NoAction,
+                })
+                .collect(),
+            indexes: vec![],
+            primary_key_name: None,
+            check_constraints: Vec::new(),
+            comment: None,
+        })
+        .collect();
+    Schema {
+        tables,
+        views: vec![],
+        enums: vec![],
+    }
+}
+
+#[test]
+fn invariants_hold_for_hub_table_in_every_direction() {
+    let foreign_keys: Vec<(usize, usize)> = (1..=30).map(|child| (child, 0)).collect();
+    let schema = make_synthetic_schema(31, &foreign_keys);
+    for direction in [
+        LayoutDirection::TopToBottom,
+        LayoutDirection::BottomToTop,
+        LayoutDirection::LeftToRight,
+        LayoutDirection::RightToLeft,
+    ] {
+        let config = LayoutConfig {
+            direction,
+            ..LayoutConfig::default()
+        };
+        let result = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+        assert_layout_invariants(&result);
     }
 }
 

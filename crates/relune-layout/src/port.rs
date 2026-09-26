@@ -18,6 +18,8 @@ const MIN_SLOT_GAP: f32 = 10.0;
 const MAX_SLOT_GAP: f32 = 20.0;
 /// Additional distance treated as a near-neighbor case on the primary flow axis.
 const NEAR_NODE_PADDING: f32 = 24.0;
+/// Distance kept between the outermost port and the corner of its node side.
+const PORT_CORNER_INSET: f32 = 4.0;
 
 #[derive(Debug, Clone)]
 pub(crate) enum EdgePortAssignment {
@@ -167,6 +169,13 @@ pub(crate) fn assign_edge_ports(
 
         let slot_total = candidates.len();
 
+        // Ports must stay on the node side, so the slot gap shrinks when the
+        // side is too short to host every endpoint at the preferred spacing.
+        let max_offset = node_by_id
+            .get(node_id.as_str())
+            .map_or(f32::INFINITY, |node| side_max_offset(node, *side));
+        let effective_gap = capped_slot_gap(slot_total, max_offset);
+
         // For horizontal sides (East/West), `row_offset` is also added to the
         // port Y in `apply_endpoint_offsets`, so slot and row offsets are in
         // the same axis and may cancel each other out. We solve a constrained
@@ -175,60 +184,36 @@ pub(crate) fn assign_edge_ports(
         // self-crossings) while pulling each port toward its column row.
         //
         // For vertical sides (North/South) the column offset does not affect
-        // the port X, so the naive centered distribution stays correct.
-        if side.is_horizontal() && slot_total >= 2 {
-            let max_offset = node_by_id
-                .get(node_id.as_str())
-                .map_or(f32::INFINITY, |node| (node.height / 2.0 - 4.0).max(0.0));
-            let policy = centered_slot_gap(slot_total);
-            #[allow(clippy::cast_precision_loss)]
-            let span_cap = if max_offset.is_finite() {
-                (2.0 * max_offset) / (slot_total - 1) as f32
-            } else {
-                f32::INFINITY
-            };
-            let effective_gap = policy.min(span_cap).max(0.0);
-
+        // the port X, so an evenly centered distribution stays correct.
+        let assigned: Vec<f32> = if side.is_horizontal() && slot_total >= 2 {
             let desired: Vec<f32> = candidates.iter().map(|c| c.row_order).collect();
-            let assigned = pav_pack_with_min_gap(&desired, effective_gap, -max_offset, max_offset);
-
-            for (slot_index, candidate) in candidates.iter().enumerate() {
-                let effective_offset = assigned[slot_index];
-                let Some(Some(EdgePortAssignment::Regular(assignment))) =
-                    assignments.get_mut(candidate.edge_index)
-                else {
-                    continue;
-                };
+            pav_pack_with_min_gap(&desired, effective_gap, -max_offset, max_offset)
+                .into_iter()
+                .zip(candidates.iter())
                 // The renderer computes port_y = center + slot_offset + row_offset;
                 // choose slot_offset so the sum equals the packed effective offset.
-                let slot_offset = effective_offset - candidate.row_order;
-                if candidate.is_source {
-                    assignment.source_slot_offset = slot_offset;
-                    assignment.source_slot_index = slot_index;
-                    assignment.source_slot_count = slot_total;
-                } else {
-                    assignment.target_slot_offset = slot_offset;
-                    assignment.target_slot_index = slot_index;
-                    assignment.target_slot_count = slot_total;
-                }
-            }
+                .map(|(effective_offset, candidate)| effective_offset - candidate.row_order)
+                .collect()
         } else {
-            for (slot_index, candidate) in candidates.iter().enumerate() {
-                let slot_offset = centered_slot_offset(slot_index, slot_total);
-                let Some(Some(EdgePortAssignment::Regular(assignment))) =
-                    assignments.get_mut(candidate.edge_index)
-                else {
-                    continue;
-                };
-                if candidate.is_source {
-                    assignment.source_slot_offset = slot_offset;
-                    assignment.source_slot_index = slot_index;
-                    assignment.source_slot_count = slot_total;
-                } else {
-                    assignment.target_slot_offset = slot_offset;
-                    assignment.target_slot_index = slot_index;
-                    assignment.target_slot_count = slot_total;
-                }
+            (0..slot_total)
+                .map(|slot_index| centered_offset_with_gap(slot_index, slot_total, effective_gap))
+                .collect()
+        };
+
+        for (slot_index, (candidate, slot_offset)) in candidates.iter().zip(assigned).enumerate() {
+            let Some(Some(EdgePortAssignment::Regular(assignment))) =
+                assignments.get_mut(candidate.edge_index)
+            else {
+                continue;
+            };
+            if candidate.is_source {
+                assignment.source_slot_offset = slot_offset;
+                assignment.source_slot_index = slot_index;
+                assignment.source_slot_count = slot_total;
+            } else {
+                assignment.target_slot_offset = slot_offset;
+                assignment.target_slot_index = slot_index;
+                assignment.target_slot_count = slot_total;
             }
         }
     }
@@ -386,11 +371,36 @@ fn centered_slot_gap(slot_total: usize) -> f32 {
     }
 }
 
-#[allow(clippy::cast_precision_loss)]
+#[cfg(test)]
 fn centered_slot_offset(slot_index: usize, slot_total: usize) -> f32 {
-    let gap = centered_slot_gap(slot_total);
+    centered_offset_with_gap(slot_index, slot_total, centered_slot_gap(slot_total))
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn centered_offset_with_gap(slot_index: usize, slot_total: usize, gap: f32) -> f32 {
     let center = (slot_total.saturating_sub(1)) as f32 * 0.5;
     (slot_index as f32 - center) * gap
+}
+
+/// Largest distance a port may sit from the center of `side` while staying on it.
+fn side_max_offset(node: &PositionedNode, side: AttachmentSide) -> f32 {
+    let extent = if side.is_horizontal() {
+        node.height
+    } else {
+        node.width
+    };
+    (extent / 2.0 - PORT_CORNER_INSET).max(0.0)
+}
+
+/// Preferred slot gap, reduced so `slot_total` ports span at most `2 * max_offset`.
+#[allow(clippy::cast_precision_loss)]
+fn capped_slot_gap(slot_total: usize, max_offset: f32) -> f32 {
+    let policy = centered_slot_gap(slot_total);
+    if slot_total < 2 || !max_offset.is_finite() {
+        return policy;
+    }
+    let span_cap = (2.0 * max_offset) / (slot_total - 1) as f32;
+    policy.min(span_cap).max(0.0)
 }
 
 /// Constrained isotonic regression: pick values `assigned[i]` minimizing
@@ -723,6 +733,60 @@ mod tests {
 
         assert!(gap_six < gap_two);
         assert!(gap_six >= 10.0);
+    }
+
+    #[test]
+    fn test_assign_edge_ports_keeps_hub_fan_out_within_vertical_side() {
+        // Thirty children below a narrow hub would need ~290px at the minimum
+        // policy gap; every port must still land on the hub's 120px South side.
+        let hub = node("hub", 0.0, 0.0);
+        let children: Vec<PositionedNode> = (0..30u8)
+            .map(|index| {
+                node(
+                    &format!("child_{index:02}"),
+                    f32::from(index) * 160.0,
+                    600.0,
+                )
+            })
+            .collect();
+        let graph = LayoutGraph {
+            nodes: Vec::new(),
+            edges: children
+                .iter()
+                .map(|child| edge(&child.id, "hub", &[], &[]))
+                .collect(),
+            groups: Vec::new(),
+            node_index: BTreeMap::new(),
+            reverse_index: BTreeMap::new(),
+        };
+        let mut positioned_nodes = vec![hub.clone()];
+        positioned_nodes.extend(children);
+        let config = LayoutConfig {
+            direction: LayoutDirection::TopToBottom,
+            ..Default::default()
+        };
+
+        let assignments = assign_edge_ports(&graph, &positioned_nodes, &config, None);
+
+        let mut offsets: Vec<f32> = assignments
+            .iter()
+            .map(
+                |assignment| match assignment.as_ref().expect("assignment") {
+                    EdgePortAssignment::Regular(assignment) => {
+                        assert_eq!(assignment.target_side, AttachmentSide::South);
+                        assignment.target_slot_offset
+                    }
+                    EdgePortAssignment::SelfLoop(_) => panic!("expected regular assignment"),
+                },
+            )
+            .collect();
+        offsets.sort_by(f32::total_cmp);
+        let half_width = hub.width / 2.0;
+        assert!(offsets.iter().all(|offset| offset.abs() <= half_width));
+        assert!(
+            offsets.windows(2).all(|pair| pair[1] - pair[0] > 0.0),
+            "ports must stay distinct: {offsets:?}"
+        );
     }
 
     fn node_with_fk_columns(
