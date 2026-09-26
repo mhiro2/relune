@@ -5,7 +5,7 @@
 //! first broken with a greedy feedback arc set so the remaining graph is a DAG,
 //! then every node is assigned the length of the longest parent chain above it.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use crate::graph::LayoutGraph;
 use tracing::{debug, warn};
@@ -128,56 +128,54 @@ impl RankingGraph {
     /// feedback arc set. Ties break on the lowest node index for determinism.
     fn greedy_acyclic_order(&self) -> Vec<usize> {
         let n = self.lowers.len();
+        let out_degree: Vec<usize> = self.lowers.iter().map(Vec::len).collect();
+        let in_degree: Vec<usize> = self.uppers.iter().map(Vec::len).collect();
+        let sinks = (0..n).filter(|&v| out_degree[v] == 0).collect();
+        let sources = (0..n)
+            .filter(|&v| in_degree[v] == 0 && out_degree[v] > 0)
+            .collect();
+        let candidates = (0..n)
+            .map(|v| surplus_key(out_degree[v], in_degree[v], v))
+            .collect();
         let mut state = PeelState {
             graph: self,
-            out_degree: self.lowers.iter().map(Vec::len).collect(),
-            in_degree: self.uppers.iter().map(Vec::len).collect(),
+            out_degree,
+            in_degree,
             removed: vec![false; n],
-            sinks: VecDeque::new(),
-            sources: VecDeque::new(),
+            sinks,
+            sources,
+            candidates,
         };
-        state.sinks = (0..n).filter(|&v| state.out_degree[v] == 0).collect();
-        state.sources = (0..n)
-            .filter(|&v| state.in_degree[v] == 0 && state.out_degree[v] > 0)
-            .collect();
 
         let mut front = Vec::with_capacity(n);
         let mut back = Vec::new();
-        let mut remaining = n;
-        while remaining > 0 {
+        while let Some(&(_, fallback)) = state.candidates.first() {
             if let Some(v) = state.sinks.pop_front() {
                 if state.remove(v) {
                     back.push(v);
-                    remaining -= 1;
                 }
-                continue;
-            }
-            if let Some(v) = state.sources.pop_front() {
+            } else if let Some(v) = state.sources.pop_front() {
                 if state.remove(v) {
                     front.push(v);
-                    remaining -= 1;
                 }
-                continue;
+            } else {
+                // Only cycles remain: move the node with the largest
+                // `out - in` surplus to the front so it breaks as few edges
+                // as possible.
+                state.remove(fallback);
+                front.push(fallback);
             }
-
-            // Only cycles remain: move the node with the most outgoing surplus
-            // to the front so it breaks as few edges as possible.
-            let pick = (0..n)
-                .filter(|&v| !state.removed[v])
-                .max_by_key(|&v| {
-                    let delta =
-                        state.out_degree[v].cast_signed() - state.in_degree[v].cast_signed();
-                    (delta, std::cmp::Reverse(v))
-                })
-                .expect("remaining > 0 implies an unremoved node");
-            state.remove(pick);
-            front.push(pick);
-            remaining -= 1;
         }
 
         front.extend(back.into_iter().rev());
         front
     }
+}
+
+/// Ordering key for cycle-breaking picks: largest `out - in` surplus first,
+/// then the lowest node index.
+const fn surplus_key(out_degree: usize, in_degree: usize, node: usize) -> (isize, usize) {
+    (in_degree.cast_signed() - out_degree.cast_signed(), node)
 }
 
 /// Mutable bookkeeping for [`RankingGraph::greedy_acyclic_order`].
@@ -188,6 +186,8 @@ struct PeelState<'a> {
     removed: Vec<bool>,
     sinks: VecDeque<usize>,
     sources: VecDeque<usize>,
+    /// Unremoved nodes keyed by [`surplus_key`].
+    candidates: BTreeSet<(isize, usize)>,
 }
 
 impl PeelState<'_> {
@@ -198,9 +198,11 @@ impl PeelState<'_> {
             return false;
         }
         self.removed[v] = true;
+        self.candidates
+            .remove(&surplus_key(self.out_degree[v], self.in_degree[v], v));
         for &lower in &self.graph.lowers[v] {
             if !self.removed[lower] {
-                self.in_degree[lower] -= 1;
+                self.update_degrees(lower, |_, in_degree| *in_degree -= 1);
                 if self.in_degree[lower] == 0 {
                     self.sources.push_back(lower);
                 }
@@ -208,13 +210,27 @@ impl PeelState<'_> {
         }
         for &upper in &self.graph.uppers[v] {
             if !self.removed[upper] {
-                self.out_degree[upper] -= 1;
+                self.update_degrees(upper, |out_degree, _| *out_degree -= 1);
                 if self.out_degree[upper] == 0 {
                     self.sinks.push_back(upper);
                 }
             }
         }
         true
+    }
+
+    fn update_degrees(&mut self, node: usize, update: impl FnOnce(&mut usize, &mut usize)) {
+        self.candidates.remove(&surplus_key(
+            self.out_degree[node],
+            self.in_degree[node],
+            node,
+        ));
+        update(&mut self.out_degree[node], &mut self.in_degree[node]);
+        self.candidates.insert(surplus_key(
+            self.out_degree[node],
+            self.in_degree[node],
+            node,
+        ));
     }
 }
 
@@ -344,6 +360,25 @@ mod tests {
         assert_eq!(num_ranks, 2);
         let hub_rank = ranks["hub"];
         assert!(spokes.iter().all(|spoke| ranks[*spoke] != hub_rank));
+    }
+
+    #[test]
+    fn test_assign_ranks_breaks_many_small_cycles() {
+        let names: Vec<String> = (0..400).map(|index| format!("t{index:03}")).collect();
+        let references: Vec<[&str; 1]> =
+            (0..400).map(|index| [names[index ^ 1].as_str()]).collect();
+        let tables: Vec<(&str, &[&str])> = names
+            .iter()
+            .zip(&references)
+            .map(|(name, refs)| (name.as_str(), refs.as_slice()))
+            .collect();
+
+        let (ranks, num_ranks) = ranks_by_id(&tables);
+
+        assert_eq!(num_ranks, 2);
+        for pair in names.chunks(2) {
+            assert_ne!(ranks[&pair[0]], ranks[&pair[1]]);
+        }
     }
 
     #[test]
