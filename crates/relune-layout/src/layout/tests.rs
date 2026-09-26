@@ -3149,19 +3149,58 @@ fn grouped_layout_wraps_prefix_groups_without_foreign_keys() {
         },
         ..LayoutRequest::default()
     };
-    let result = build_layout_with_config(&schema, &request, &LayoutConfig::default()).unwrap();
+    for mode in [
+        LayoutAlgorithm::Hierarchical,
+        LayoutAlgorithm::ForceDirected,
+    ] {
+        let config = LayoutConfig {
+            mode,
+            ..LayoutConfig::default()
+        };
+        let result = build_layout_with_config(&schema, &request, &config).unwrap();
 
-    assert!(result.groups.len() >= 2, "expected prefix groups");
-    assert_layout_invariants(&result);
-    assert_no_node_overlaps(&result);
-    assert_groups_disjoint(&result.groups);
-    let aspect = result.width / result.height;
-    assert!(
-        (0.5..=4.0).contains(&aspect),
-        "{} x {} (aspect {aspect}) should wrap groups",
-        result.width,
-        result.height
-    );
+        assert!(result.groups.len() >= 2, "expected prefix groups");
+        assert_layout_invariants(&result);
+        assert_no_node_overlaps(&result);
+        assert_groups_disjoint(&result.groups);
+        let aspect = result.width / result.height;
+        assert!(
+            (0.5..=4.0).contains(&aspect),
+            "{mode:?}: {} x {} (aspect {aspect}) should wrap groups",
+            result.width,
+            result.height
+        );
+    }
+}
+
+#[test]
+fn force_layout_without_groups_shares_columns_across_ranks() {
+    // 150 parent/child pairs: giving every table its own column would make
+    // the diagram tens of thousands of pixels wide.
+    let foreign_keys: Vec<(usize, usize)> = (0..150).map(|pair| (2 * pair + 1, 2 * pair)).collect();
+    let schema = make_synthetic_schema(300, &foreign_keys);
+    for direction in [LayoutDirection::TopToBottom, LayoutDirection::LeftToRight] {
+        let config = LayoutConfig {
+            mode: LayoutAlgorithm::ForceDirected,
+            direction,
+            ..LayoutConfig::default()
+        };
+        let result = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+
+        assert_layout_invariants(&result);
+        assert_no_node_overlaps(&result);
+        let (secondary, primary) = if direction == LayoutDirection::TopToBottom {
+            (result.width, result.height)
+        } else {
+            (result.height, result.width)
+        };
+        assert!(
+            secondary < 15_000.0 && secondary / primary < 4.0,
+            "{direction:?}: {} x {} should not give every table its own column",
+            result.width,
+            result.height
+        );
+    }
 }
 
 #[test]
