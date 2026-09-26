@@ -9,7 +9,7 @@ use relune_core::{
     SourceSpan, Table, diagnostic::codes, normalize_identifier,
 };
 use sqlparser::ast::{
-    ColumnOption, DataType, GeneratedAs, GeneratedExpressionMode, Ident, IndexColumn,
+    ColumnOption, DataType, GeneratedAs, GeneratedExpressionMode, Ident, IndexColumn, OrderBySort,
     TableConstraint,
 };
 use sqlparser::tokenizer::Token;
@@ -173,6 +173,12 @@ pub(crate) fn parse_create_table(
                     span_from_spanned(input, offsets, constraint),
                 );
             }
+            TableConstraint::Exclude(_) => {
+                ctx.warn_unsupported(
+                    "EXCLUDE constraint",
+                    span_from_spanned(input, offsets, constraint),
+                );
+            }
         }
     }
 
@@ -277,10 +283,11 @@ pub(crate) fn index_key_parts(columns: &[IndexColumn]) -> Vec<relune_core::Index
             match name {
                 Some(name) => IndexKey::Column(ModelIndexColumn {
                     name,
-                    order: order_by
-                        .options
-                        .asc
-                        .map(|asc| if asc { SortOrder::Asc } else { SortOrder::Desc }),
+                    order: match order_by.options.sort {
+                        Some(OrderBySort::Asc) => Some(SortOrder::Asc),
+                        Some(OrderBySort::Desc) => Some(SortOrder::Desc),
+                        Some(OrderBySort::Using(_)) | None => None,
+                    },
                     nulls: order_by.options.nulls_first.map(|first| {
                         if first {
                             NullsOrder::First
