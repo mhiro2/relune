@@ -1,22 +1,14 @@
 //! Rank/layer assignment for hierarchical layout
 //!
-//! This module implements algorithms for assigning nodes to layers (ranks)
-//! in a hierarchical graph layout.
+//! Foreign keys point from a child table to the parent it references, and the
+//! layout places parents above (before) their children. Cyclic references are
+//! first broken with a greedy feedback arc set so the remaining graph is a DAG,
+//! then every node is assigned the length of the longest parent chain above it.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use crate::graph::LayoutGraph;
-use tracing::warn;
-
-/// Strategy for rank assignment.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum RankAssignmentStrategy {
-    /// Simple topological sort based ranking.
-    #[default]
-    Topological,
-    /// Longest path ranking (minimizes height).
-    LongestPath,
-}
+use tracing::{debug, warn};
 
 /// Result of rank assignment.
 #[derive(Debug, Clone)]
@@ -31,278 +23,202 @@ pub struct RankAssignment {
 
 /// Assign ranks to nodes in the graph.
 ///
-/// This uses a longest-path algorithm to assign nodes to layers,
-/// ensuring that edges generally point downward (or in the layout direction).
+/// Referenced tables get lower ranks than the tables referencing them. Edges
+/// that close a cycle are reversed (for ranking only) using the Eades–Lin–Smyth
+/// greedy feedback arc set heuristic, so a strongly connected component spreads
+/// over as few layers as its acyclic skeleton needs instead of one per node.
 #[must_use]
-pub fn assign_ranks(graph: &LayoutGraph, strategy: RankAssignmentStrategy) -> RankAssignment {
-    warn_if_cycles(graph);
+pub fn assign_ranks(graph: &LayoutGraph) -> RankAssignment {
+    let n = graph.nodes.len();
+    let ranking_graph = RankingGraph::from_layout_graph(graph);
+    let order = ranking_graph.greedy_acyclic_order();
 
-    match strategy {
-        RankAssignmentStrategy::Topological => assign_ranks_topological(graph),
-        RankAssignmentStrategy::LongestPath => assign_ranks_longest_path(graph),
+    let mut position = vec![0usize; n];
+    for (pos, &node_idx) in order.iter().enumerate() {
+        position[node_idx] = pos;
     }
+
+    // Orient every edge forward along `order`; edges pointing backward form
+    // the feedback arc set and are reversed for ranking purposes.
+    let mut forward = vec![Vec::new(); n];
+    let mut reversed = Vec::new();
+    for (upper, lowers) in ranking_graph.lowers.iter().enumerate() {
+        for &lower in lowers {
+            if position[upper] < position[lower] {
+                forward[upper].push(lower);
+            } else {
+                forward[lower].push(upper);
+                reversed.push((upper, lower));
+            }
+        }
+    }
+    warn_if_cycles(graph, &reversed);
+
+    // `order` is a topological order of the oriented graph, so a single
+    // forward sweep yields longest-path ranks.
+    let mut node_rank = vec![0usize; n];
+    for &node_idx in &order {
+        let next_rank = node_rank[node_idx] + 1;
+        for &lower in &forward[node_idx] {
+            node_rank[lower] = node_rank[lower].max(next_rank);
+        }
+    }
+
+    build_rank_assignment(node_rank)
 }
 
-fn warn_if_cycles(graph: &LayoutGraph) {
-    let cycle_nodes = detect_cycle_nodes(graph);
-    if cycle_nodes.is_empty() {
+fn warn_if_cycles(graph: &LayoutGraph, reversed: &[(usize, usize)]) {
+    if reversed.is_empty() {
         return;
     }
 
     warn!(
-        count = cycle_nodes.len(),
-        nodes = ?cycle_nodes,
-        "Cycle detected; rank assignment will keep remaining nodes in a fallback order"
+        reversed_edges = reversed.len(),
+        "Foreign-key cycle detected; reversing edges that close cycles for rank assignment"
     );
+    for &(upper, lower) in reversed {
+        debug!(
+            parent = %graph.nodes[upper].id,
+            child = %graph.nodes[lower].id,
+            "Reversed cyclic edge for rank assignment"
+        );
+    }
 }
 
-fn detect_cycle_nodes(graph: &LayoutGraph) -> Vec<String> {
-    let n = graph.nodes.len();
-    let mut in_degree = vec![0usize; n];
-    let mut adjacency = vec![Vec::new(); n];
+/// Deduplicated parent → child adjacency used for ranking.
+struct RankingGraph {
+    /// `lowers[parent]` lists the children that must be ranked below `parent`.
+    lowers: Vec<Vec<usize>>,
+    /// `uppers[child]` lists the parents that must be ranked above `child`.
+    uppers: Vec<Vec<usize>>,
+}
 
-    for edge in &graph.edges {
-        if edge.is_self_loop {
-            continue;
-        }
-        if let (Some(&from_idx), Some(&to_idx)) = (
-            graph.node_index.get(&edge.from),
-            graph.node_index.get(&edge.to),
-        ) {
-            adjacency[from_idx].push(to_idx);
-            in_degree[to_idx] += 1;
-        }
-    }
+impl RankingGraph {
+    fn from_layout_graph(graph: &LayoutGraph) -> Self {
+        let n = graph.nodes.len();
+        let mut lowers = vec![Vec::new(); n];
+        let mut uppers = vec![Vec::new(); n];
 
-    let mut queue = VecDeque::new();
-    for (idx, &degree) in in_degree.iter().enumerate() {
-        if degree == 0 {
-            queue.push_back(idx);
-        }
-    }
-
-    let mut processed = 0usize;
-    while let Some(idx) = queue.pop_front() {
-        processed += 1;
-        for &neighbor in &adjacency[idx] {
-            in_degree[neighbor] -= 1;
-            if in_degree[neighbor] == 0 {
-                queue.push_back(neighbor);
+        for edge in &graph.edges {
+            if edge.is_self_loop {
+                continue;
+            }
+            if let (Some(&child), Some(&parent)) = (
+                graph.node_index.get(&edge.from),
+                graph.node_index.get(&edge.to),
+            ) && child != parent
+            {
+                lowers[parent].push(child);
+                uppers[child].push(parent);
             }
         }
+        for list in lowers.iter_mut().chain(uppers.iter_mut()) {
+            list.sort_unstable();
+            list.dedup();
+        }
+
+        Self { lowers, uppers }
     }
 
-    if processed == n {
-        return Vec::new();
-    }
-
-    (0..n)
-        .filter(|&idx| in_degree[idx] > 0)
-        .map(|idx| graph.nodes[idx].id.clone())
-        .collect()
-}
-
-fn assign_ranks_topological(graph: &LayoutGraph) -> RankAssignment {
-    assign_ranks_via_components(graph)
-}
-
-fn assign_ranks_longest_path(graph: &LayoutGraph) -> RankAssignment {
-    let n = graph.nodes.len();
-    if n == 0 {
-        return RankAssignment {
-            node_rank: Vec::new(),
-            num_ranks: 0,
-            nodes_by_rank: Vec::new(),
+    /// Eades–Lin–Smyth greedy ordering.
+    ///
+    /// Sinks are peeled off to the end and sources to the front; when neither
+    /// exists, the node with the largest `out - in` degree is moved to the
+    /// front. Edges pointing backward in the resulting order form a small
+    /// feedback arc set. Ties break on the lowest node index for determinism.
+    fn greedy_acyclic_order(&self) -> Vec<usize> {
+        let n = self.lowers.len();
+        let mut state = PeelState {
+            graph: self,
+            out_degree: self.lowers.iter().map(Vec::len).collect(),
+            in_degree: self.uppers.iter().map(Vec::len).collect(),
+            removed: vec![false; n],
+            sinks: VecDeque::new(),
+            sources: VecDeque::new(),
         };
-    }
+        state.sinks = (0..n).filter(|&v| state.out_degree[v] == 0).collect();
+        state.sources = (0..n)
+            .filter(|&v| state.in_degree[v] == 0 && state.out_degree[v] > 0)
+            .collect();
 
-    assign_ranks_via_components(graph)
-}
-
-#[derive(Debug)]
-struct StronglyConnectedComponents {
-    component_of: Vec<usize>,
-    components: Vec<Vec<usize>>,
-}
-
-fn assign_ranks_via_components(graph: &LayoutGraph) -> RankAssignment {
-    let n = graph.nodes.len();
-    if n == 0 {
-        return RankAssignment {
-            node_rank: Vec::new(),
-            num_ranks: 0,
-            nodes_by_rank: Vec::new(),
-        };
-    }
-
-    let scc = strongly_connected_components(graph);
-    let component_count = scc.components.len();
-    let mut adjacency = vec![Vec::new(); component_count];
-    let mut in_degree = vec![0usize; component_count];
-    let mut seen_edges: HashSet<(usize, usize)> = HashSet::new();
-
-    for edge in &graph.edges {
-        if edge.is_self_loop {
-            continue;
-        }
-        if let (Some(&from_idx), Some(&to_idx)) = (
-            graph.node_index.get(&edge.from),
-            graph.node_index.get(&edge.to),
-        ) {
-            let from_component = scc.component_of[from_idx];
-            let to_component = scc.component_of[to_idx];
-            if from_component != to_component && seen_edges.insert((to_component, from_component)) {
-                adjacency[to_component].push(from_component);
-                in_degree[from_component] += 1;
-            }
-        }
-    }
-
-    let component_height: Vec<usize> = scc
-        .components
-        .iter()
-        .map(|component| component.len().max(1))
-        .collect();
-    let mut base_rank = vec![0usize; component_count];
-    let mut queue = VecDeque::new();
-
-    for (component_idx, &degree) in in_degree.iter().enumerate() {
-        if degree == 0 {
-            queue.push_back(component_idx);
-        }
-    }
-
-    while let Some(component_idx) = queue.pop_front() {
-        let next_rank = base_rank[component_idx] + component_height[component_idx];
-        for &neighbor in &adjacency[component_idx] {
-            base_rank[neighbor] = base_rank[neighbor].max(next_rank);
-            in_degree[neighbor] -= 1;
-            if in_degree[neighbor] == 0 {
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    let mut node_rank = vec![0usize; n];
-    for (component_idx, component_nodes) in scc.components.iter().enumerate() {
-        let mut ordered_nodes = component_nodes.clone();
-        ordered_nodes.sort_unstable();
-        for (offset, node_idx) in ordered_nodes.into_iter().enumerate() {
-            node_rank[node_idx] = base_rank[component_idx] + offset;
-        }
-    }
-
-    build_rank_assignment(graph, node_rank)
-}
-
-/// Iterative Tarjan's SCC algorithm.
-///
-/// Uses an explicit work stack instead of recursion so that large or
-/// long-chain graphs (especially under WASM's ~1 MB stack) cannot
-/// overflow.
-fn strongly_connected_components(graph: &LayoutGraph) -> StronglyConnectedComponents {
-    let n = graph.nodes.len();
-    let mut adjacency = vec![Vec::new(); n];
-    for edge in &graph.edges {
-        if edge.is_self_loop {
-            continue;
-        }
-        if let (Some(&from_idx), Some(&to_idx)) = (
-            graph.node_index.get(&edge.from),
-            graph.node_index.get(&edge.to),
-        ) {
-            adjacency[from_idx].push(to_idx);
-        }
-    }
-
-    let mut index: usize = 0;
-    let mut indices: Vec<Option<usize>> = vec![None; n];
-    let mut lowlinks: Vec<usize> = vec![0; n];
-    let mut scc_stack: Vec<usize> = Vec::new();
-    let mut on_stack: Vec<bool> = vec![false; n];
-    let mut component_of: Vec<usize> = vec![0; n];
-    let mut components: Vec<Vec<usize>> = Vec::new();
-
-    // Each frame: (node, neighbor_cursor). When we first visit a node
-    // we set cursor = 0 and push it onto scc_stack. On resume we pick
-    // up where we left off in its neighbor list.
-    let mut work: Vec<(usize, usize)> = Vec::new();
-
-    for root in 0..n {
-        if indices[root].is_some() {
-            continue;
-        }
-
-        work.push((root, 0));
-
-        while let Some((node, cursor)) = work.last_mut() {
-            let node = *node;
-
-            if *cursor == 0 {
-                // First visit — initialise Tarjan state for this node.
-                indices[node] = Some(index);
-                lowlinks[node] = index;
-                index += 1;
-                scc_stack.push(node);
-                on_stack[node] = true;
-            }
-
-            let neighbors = &adjacency[node];
-            let mut descended = false;
-
-            while *cursor < neighbors.len() {
-                let neighbor = neighbors[*cursor];
-                if indices[neighbor].is_none() {
-                    // Descend into unvisited neighbor (simulates recursion).
-                    *cursor += 1;
-                    work.push((neighbor, 0));
-                    descended = true;
-                    break;
+        let mut front = Vec::with_capacity(n);
+        let mut back = Vec::new();
+        let mut remaining = n;
+        while remaining > 0 {
+            if let Some(v) = state.sinks.pop_front() {
+                if state.remove(v) {
+                    back.push(v);
+                    remaining -= 1;
                 }
-                if on_stack[neighbor] {
-                    lowlinks[node] = lowlinks[node].min(
-                        indices[neighbor]
-                            .expect("on_stack[neighbor] implies indices[neighbor] is Some"),
-                    );
-                }
-                *cursor += 1;
+                continue;
             }
-            if descended {
+            if let Some(v) = state.sources.pop_front() {
+                if state.remove(v) {
+                    front.push(v);
+                    remaining -= 1;
+                }
                 continue;
             }
 
-            // All neighbors processed — equivalent of the post-recursion
-            // lowlink propagation and SCC extraction.
-            if lowlinks[node] == indices[node].expect("node was assigned an index on first visit") {
-                let comp_idx = components.len();
-                let mut component = Vec::new();
-                while let Some(top) = scc_stack.pop() {
-                    on_stack[top] = false;
-                    component_of[top] = comp_idx;
-                    component.push(top);
-                    if top == node {
-                        break;
-                    }
-                }
-                components.push(component);
-            }
-
-            work.pop();
-
-            // Propagate lowlink to parent frame.
-            if let Some((parent, _)) = work.last() {
-                lowlinks[*parent] = lowlinks[*parent].min(lowlinks[node]);
-            }
+            // Only cycles remain: move the node with the most outgoing surplus
+            // to the front so it breaks as few edges as possible.
+            let pick = (0..n)
+                .filter(|&v| !state.removed[v])
+                .max_by_key(|&v| {
+                    let delta =
+                        state.out_degree[v].cast_signed() - state.in_degree[v].cast_signed();
+                    (delta, std::cmp::Reverse(v))
+                })
+                .expect("remaining > 0 implies an unremoved node");
+            state.remove(pick);
+            front.push(pick);
+            remaining -= 1;
         }
-    }
 
-    StronglyConnectedComponents {
-        component_of,
-        components,
+        front.extend(back.into_iter().rev());
+        front
     }
 }
 
-fn build_rank_assignment(_graph: &LayoutGraph, node_rank: Vec<usize>) -> RankAssignment {
+/// Mutable bookkeeping for [`RankingGraph::greedy_acyclic_order`].
+struct PeelState<'a> {
+    graph: &'a RankingGraph,
+    out_degree: Vec<usize>,
+    in_degree: Vec<usize>,
+    removed: Vec<bool>,
+    sinks: VecDeque<usize>,
+    sources: VecDeque<usize>,
+}
+
+impl PeelState<'_> {
+    /// Removes `v` from the remaining graph, queueing neighbors that become
+    /// sinks or sources. Returns `false` when `v` was already removed.
+    fn remove(&mut self, v: usize) -> bool {
+        if self.removed[v] {
+            return false;
+        }
+        self.removed[v] = true;
+        for &lower in &self.graph.lowers[v] {
+            if !self.removed[lower] {
+                self.in_degree[lower] -= 1;
+                if self.in_degree[lower] == 0 {
+                    self.sources.push_back(lower);
+                }
+            }
+        }
+        for &upper in &self.graph.uppers[v] {
+            if !self.removed[upper] {
+                self.out_degree[upper] -= 1;
+                if self.out_degree[upper] == 0 {
+                    self.sinks.push_back(upper);
+                }
+            }
+        }
+        true
+    }
+}
+
+fn build_rank_assignment(node_rank: Vec<usize>) -> RankAssignment {
     let num_ranks = node_rank.iter().copied().max().map_or(0, |r| r + 1);
 
     let mut nodes_by_rank = vec![Vec::new(); num_ranks];
@@ -319,309 +235,145 @@ fn build_rank_assignment(_graph: &LayoutGraph, node_rank: Vec<usize>) -> RankAss
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::graph::LayoutGraphBuilder;
     use relune_core::{Column, ColumnId, ForeignKey, ReferentialAction, Schema, Table, TableId};
 
-    fn make_test_schema() -> Schema {
+    /// Builds a schema where each `(table, references)` entry declares one
+    /// foreign key from `table` to every referenced table.
+    fn schema_with_references(tables: &[(&str, &[&str])]) -> Schema {
+        let tables = tables
+            .iter()
+            .enumerate()
+            .map(|(index, (name, references))| {
+                let id = u64::try_from(index + 1).unwrap();
+                Table {
+                    id: TableId(id),
+                    stable_id: (*name).to_string(),
+                    schema_name: None,
+                    name: (*name).to_string(),
+                    columns: vec![Column {
+                        id: ColumnId(id),
+                        name: "id".to_string(),
+                        data_type: "int".to_string(),
+                        nullable: false,
+                        is_primary_key: true,
+                        comment: None,
+                        enum_values: None,
+                        semantics: relune_core::ColumnSemantics::default(),
+                    }],
+                    foreign_keys: references
+                        .iter()
+                        .map(|target| ForeignKey {
+                            name: None,
+                            from_columns: vec![format!("{target}_id")],
+                            to_schema: None,
+                            to_table: (*target).to_string(),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        })
+                        .collect(),
+                    indexes: vec![],
+                    primary_key_name: None,
+                    check_constraints: Vec::new(),
+                    comment: None,
+                }
+            })
+            .collect();
         Schema {
-            tables: vec![
-                Table {
-                    id: TableId(1),
-                    stable_id: "a".to_string(),
-                    schema_name: None,
-                    name: "a".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(1),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-                Table {
-                    id: TableId(2),
-                    stable_id: "b".to_string(),
-                    schema_name: None,
-                    name: "b".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(2),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["a_id".to_string()],
-                        to_schema: None,
-                        to_table: "a".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-                Table {
-                    id: TableId(3),
-                    stable_id: "c".to_string(),
-                    schema_name: None,
-                    name: "c".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(3),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["b_id".to_string()],
-                        to_schema: None,
-                        to_table: "b".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-            ],
+            tables,
             views: vec![],
             enums: vec![],
         }
     }
 
-    #[test]
-    fn test_assign_ranks_topological() {
-        let schema = make_test_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
-
-        // Build a map from node ID to rank for easier testing
-        let node_ranks: std::collections::BTreeMap<&str, usize> = graph
+    fn ranks_by_id(tables: &[(&str, &[&str])]) -> (BTreeMap<String, usize>, usize) {
+        let graph = LayoutGraphBuilder::new().build(&schema_with_references(tables));
+        let ranks = assign_ranks(&graph);
+        let by_id = graph
             .nodes
             .iter()
             .enumerate()
-            .map(|(idx, node)| (node.id.as_str(), ranks.node_rank[idx]))
+            .map(|(idx, node)| (node.id.clone(), ranks.node_rank[idx]))
             .collect();
-
-        // The FK chain is: c -> b -> a (FK edges point from child to referenced parent)
-        // Parent tables get lower ranks so they appear first in the layout direction.
-        // So a has rank 0, b has rank 1, c has rank 2
-        let a_rank = *node_ranks.get("a").unwrap();
-        let b_rank = *node_ranks.get("b").unwrap();
-        let c_rank = *node_ranks.get("c").unwrap();
-
-        assert_eq!(a_rank, 0); // a is the root parent
-        assert_eq!(b_rank, 1); // b references a
-        assert_eq!(c_rank, 2); // c references b
-        assert_eq!(ranks.num_ranks, 3);
+        (by_id, ranks.num_ranks)
     }
 
     #[test]
-    fn test_assign_ranks_longest_path() {
-        let schema = make_test_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
+    fn test_assign_ranks_places_parents_above_children() {
+        let (ranks, num_ranks) = ranks_by_id(&[("a", &[]), ("b", &["a"]), ("c", &["b"])]);
 
-        assert_eq!(ranks.num_ranks, 3);
+        assert_eq!(ranks["a"], 0);
+        assert_eq!(ranks["b"], 1);
+        assert_eq!(ranks["c"], 2);
+        assert_eq!(num_ranks, 3);
     }
 
     #[test]
-    fn test_detect_cycle_nodes() {
-        let schema = Schema {
-            tables: vec![
-                Table {
-                    id: TableId(1),
-                    stable_id: "a".to_string(),
-                    schema_name: None,
-                    name: "a".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(1),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["b_id".to_string()],
-                        to_schema: None,
-                        to_table: "b".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-                Table {
-                    id: TableId(2),
-                    stable_id: "b".to_string(),
-                    schema_name: None,
-                    name: "b".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(2),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["a_id".to_string()],
-                        to_schema: None,
-                        to_table: "a".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-            ],
-            views: vec![],
-            enums: vec![],
-        };
+    fn test_assign_ranks_uses_longest_parent_chain() {
+        let (ranks, _) =
+            ranks_by_id(&[("a", &[]), ("b", &["a"]), ("c", &["b"]), ("d", &["a", "c"])]);
 
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        assert_eq!(
-            detect_cycle_nodes(&graph),
-            vec!["a".to_string(), "b".to_string()]
-        );
+        assert_eq!(ranks["d"], 3);
     }
 
     #[test]
-    fn test_assign_ranks_spreads_cycle_nodes_across_layers() {
-        let schema = Schema {
-            tables: vec![
-                Table {
-                    id: TableId(1),
-                    stable_id: "a".to_string(),
-                    schema_name: None,
-                    name: "a".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(1),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["b_id".to_string()],
-                        to_schema: None,
-                        to_table: "b".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-                Table {
-                    id: TableId(2),
-                    stable_id: "b".to_string(),
-                    schema_name: None,
-                    name: "b".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(2),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["c_id".to_string()],
-                        to_schema: None,
-                        to_table: "c".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-                Table {
-                    id: TableId(3),
-                    stable_id: "c".to_string(),
-                    schema_name: None,
-                    name: "c".to_string(),
-                    columns: vec![Column {
-                        id: ColumnId(3),
-                        name: "id".to_string(),
-                        data_type: "int".to_string(),
-                        nullable: false,
-                        is_primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: relune_core::ColumnSemantics::default(),
-                    }],
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["a_id".to_string()],
-                        to_schema: None,
-                        to_table: "a".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    indexes: vec![],
-                    primary_key_name: None,
-                    check_constraints: Vec::new(),
-                    comment: None,
-                },
-            ],
-            views: vec![],
-            enums: vec![],
-        };
+    fn test_assign_ranks_spreads_simple_cycle_across_layers() {
+        let (ranks, num_ranks) = ranks_by_id(&[("a", &["b"]), ("b", &["c"]), ("c", &["a"])]);
 
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::LongestPath);
-        let mut cycle_ranks = ranks.node_rank;
+        let mut cycle_ranks: Vec<usize> = ranks.into_values().collect();
         cycle_ranks.sort_unstable();
-
         assert_eq!(cycle_ranks, vec![0, 1, 2]);
+        assert_eq!(num_ranks, 3);
+    }
+
+    #[test]
+    fn test_assign_ranks_keeps_dense_cycle_compact() {
+        // Every spoke references the hub and the hub references every spoke.
+        // Ranking one node per layer would need nine layers; reversing the
+        // hub's outgoing references leaves a two-layer star.
+        let spokes = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"];
+        let mut tables: Vec<(&str, &[&str])> = vec![("hub", &spokes)];
+        tables.extend(spokes.iter().map(|spoke| (*spoke, &["hub"] as &[&str])));
+
+        let (ranks, num_ranks) = ranks_by_id(&tables);
+
+        assert_eq!(num_ranks, 2);
+        let hub_rank = ranks["hub"];
+        assert!(spokes.iter().all(|spoke| ranks[*spoke] != hub_rank));
+    }
+
+    #[test]
+    fn test_assign_ranks_keeps_acyclic_edges_downward_around_cycle() {
+        // `root` is referenced by the cycle, and `leaf` references the cycle.
+        let (ranks, _) = ranks_by_id(&[
+            ("root", &[]),
+            ("a", &["root", "b"]),
+            ("b", &["a"]),
+            ("leaf", &["b"]),
+        ]);
+
+        assert!(ranks["root"] < ranks["a"].min(ranks["b"]));
+        assert!(ranks["leaf"] > ranks["b"]);
+    }
+
+    #[test]
+    fn test_assign_ranks_ignores_self_loops() {
+        let (ranks, num_ranks) = ranks_by_id(&[("a", &["a"]), ("b", &["a"])]);
+
+        assert_eq!(ranks["a"], 0);
+        assert_eq!(ranks["b"], 1);
+        assert_eq!(num_ranks, 2);
+    }
+
+    #[test]
+    fn test_assign_ranks_handles_empty_graph() {
+        let (ranks, num_ranks) = ranks_by_id(&[]);
+
+        assert!(ranks.is_empty());
+        assert_eq!(num_ranks, 0);
     }
 }

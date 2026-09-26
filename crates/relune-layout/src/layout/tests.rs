@@ -1428,7 +1428,7 @@ fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
 fn test_hierarchical_layout_handles_fully_connected_cycles() {
     let schema = make_fully_connected_cycle_schema();
     let layout_graph = LayoutGraphBuilder::new().build(&schema);
-    let ranks = assign_ranks(&layout_graph, RankAssignmentStrategy::LongestPath);
+    let ranks = assign_ranks(&layout_graph);
     let ordered_nodes = order_nodes_within_layers(&layout_graph, &ranks);
     let graph = build_layout(&schema).unwrap();
 

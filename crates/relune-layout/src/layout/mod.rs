@@ -16,7 +16,7 @@ use relune_core::{
 use crate::focus::FocusExtractor;
 use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRequest};
 use crate::order::order_nodes_within_layers;
-use crate::rank::{RankAssignmentStrategy, assign_ranks};
+use crate::rank::assign_ranks;
 
 mod edge_routing;
 mod force;
@@ -653,7 +653,7 @@ pub fn build_layout_from_graph_with_config(
     let (positioned_nodes, width, height, node_ranks) = match effective_config.mode {
         LayoutAlgorithm::Hierarchical => {
             // Hierarchical layout: assign ranks and order
-            let ranks = assign_ranks(graph, RankAssignmentStrategy::LongestPath);
+            let ranks = assign_ranks(graph);
             debug!("Assigned {} ranks", ranks.num_ranks);
             let ordered_nodes = order_nodes_within_layers(graph, &ranks);
             let node_ranks = ranks.node_rank;
@@ -662,7 +662,7 @@ pub fn build_layout_from_graph_with_config(
             (positioned_nodes, width, height, Some(node_ranks))
         }
         LayoutAlgorithm::ForceDirected => {
-            let ranks = assign_ranks(graph, RankAssignmentStrategy::LongestPath);
+            let ranks = assign_ranks(graph);
             debug!(
                 "Assigned {} ranks for force-directed directional guidance",
                 ranks.num_ranks

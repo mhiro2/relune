@@ -611,7 +611,7 @@ fn count_inserted_node_crossings(
 mod tests {
     use super::*;
     use crate::graph::LayoutGraphBuilder;
-    use crate::rank::{RankAssignmentStrategy, assign_ranks};
+    use crate::rank::assign_ranks;
     use relune_core::{Column, ColumnId, ForeignKey, ReferentialAction, Schema, Table, TableId};
 
     fn make_test_schema() -> Schema {
@@ -853,7 +853,7 @@ mod tests {
     fn test_order_nodes_deterministic() {
         let schema = make_test_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let ordered1 = order_nodes_within_layers(&graph, &ranks);
         let ordered2 = order_nodes_within_layers(&graph, &ranks);
@@ -866,7 +866,7 @@ mod tests {
     fn test_order_nodes_deterministic_with_strategy() {
         let schema = make_test_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         for strategy in [
             CrossingReductionStrategy::Barycenter,
@@ -889,7 +889,7 @@ mod tests {
     fn test_barycenter_ordering() {
         let schema = make_test_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let ordered = order_nodes_within_layers_with_strategy(
             &graph,
@@ -906,7 +906,7 @@ mod tests {
     fn test_median_ordering() {
         let schema = make_test_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let ordered = order_nodes_within_layers_with_strategy(
             &graph,
@@ -923,7 +923,7 @@ mod tests {
     fn test_sifting_ordering() {
         let schema = make_test_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let ordered = order_nodes_within_layers_with_strategy(
             &graph,
@@ -940,7 +940,7 @@ mod tests {
     fn test_combined_strategy_picks_best() {
         let schema = make_complex_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let edges_by_node = build_edges_by_node(&graph);
 
@@ -1022,7 +1022,7 @@ mod tests {
     fn test_improved_ordering_reduces_crossings() {
         let schema = make_complex_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let edges_by_node = build_edges_by_node(&graph);
 
@@ -1048,7 +1048,7 @@ mod tests {
     fn test_all_strategies_produce_valid_ordering() {
         let schema = make_complex_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph, RankAssignmentStrategy::Topological);
+        let ranks = assign_ranks(&graph);
 
         let original_nodes: Vec<std::collections::BTreeSet<usize>> = ranks
             .nodes_by_rank
