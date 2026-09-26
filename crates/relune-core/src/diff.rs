@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::export::{ColumnExport, ForeignKeyExport, IndexExport};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
@@ -247,8 +247,8 @@ fn diff_columns_with(
         .map(|c| (c.name.to_lowercase(), c))
         .collect();
 
-    let old_names: HashSet<&String> = old_map.keys().collect();
-    let new_names: HashSet<&String> = new_map.keys().collect();
+    let old_names: BTreeSet<&String> = old_map.keys().collect();
+    let new_names: BTreeSet<&String> = new_map.keys().collect();
 
     let mut diffs = Vec::new();
 
@@ -539,8 +539,8 @@ impl TableDiff {
             old_checks.iter().map(|c| (key(c), c)).collect();
         let new_map: HashMap<String, &crate::model::CheckConstraint> =
             new_checks.iter().map(|c| (key(c), c)).collect();
-        let old_keys: HashSet<&String> = old_map.keys().collect();
-        let new_keys: HashSet<&String> = new_map.keys().collect();
+        let old_keys: BTreeSet<&String> = old_map.keys().collect();
+        let new_keys: BTreeSet<&String> = new_map.keys().collect();
 
         let mut diffs = Vec::new();
         for k in old_keys.difference(&new_keys) {
@@ -582,8 +582,8 @@ impl TableDiff {
         let new_map: HashMap<String, &ForeignKey> =
             new_fks.iter().map(|fk| (Self::fk_key(fk), fk)).collect();
 
-        let old_keys: HashSet<&String> = old_map.keys().collect();
-        let new_keys: HashSet<&String> = new_map.keys().collect();
+        let old_keys: BTreeSet<&String> = old_map.keys().collect();
+        let new_keys: BTreeSet<&String> = new_map.keys().collect();
 
         let mut diffs = Vec::new();
 
@@ -697,8 +697,8 @@ impl TableDiff {
             .map(|idx| (Self::index_key(idx), idx))
             .collect();
 
-        let old_keys: HashSet<&Cow<'_, str>> = old_map.keys().collect();
-        let new_keys: HashSet<&Cow<'_, str>> = new_map.keys().collect();
+        let old_keys: BTreeSet<&Cow<'_, str>> = old_map.keys().collect();
+        let new_keys: BTreeSet<&Cow<'_, str>> = new_map.keys().collect();
 
         let mut diffs = Vec::new();
 
@@ -2273,5 +2273,121 @@ mod tests {
             modified.modified_tables[0].check_diffs[0].change_kind,
             ChangeKind::Modified
         );
+    }
+
+    /// Table whose columns, FKs, indexes, and checks are all named after
+    /// `names`; entries in `changed` get a different type, FK action, UNIQUE
+    /// flag, and check expression.
+    fn ordering_fixture_table(names: &[&str], changed: &[&str]) -> Table {
+        use crate::model::{CheckConstraint, Index, IndexColumn, IndexKey};
+
+        let is_changed = |name: &str| changed.contains(&name);
+        let mut table = create_test_table(
+            "t",
+            names
+                .iter()
+                .map(|n| {
+                    (
+                        *n,
+                        if is_changed(n) { "bigint" } else { "int" },
+                        true,
+                        false,
+                    )
+                })
+                .collect(),
+            names
+                .iter()
+                .map(|n| (*n, vec![*n], "other", vec!["id"]))
+                .collect(),
+        );
+        for fk in &mut table.foreign_keys {
+            if is_changed(fk.name.as_deref().unwrap_or_default()) {
+                fk.on_delete = ReferentialAction::Cascade;
+            }
+        }
+        table.indexes = names
+            .iter()
+            .map(|n| Index {
+                name: Some((*n).to_string()),
+                key_parts: vec![IndexKey::Column(IndexColumn {
+                    name: (*n).to_string(),
+                    order: None,
+                    nulls: None,
+                    prefix_length: None,
+                })],
+                is_unique: is_changed(n),
+                predicate: None,
+                included_columns: Vec::new(),
+                method: None,
+            })
+            .collect();
+        table.check_constraints = names
+            .iter()
+            .map(|n| CheckConstraint {
+                name: Some((*n).to_string()),
+                expression: if is_changed(n) { "x > 1" } else { "x > 0" }.to_string(),
+            })
+            .collect();
+        table
+    }
+
+    #[test]
+    fn test_child_diffs_are_ordered_deterministically() {
+        // Remove "e"/"c", modify "a"/"d"/"b", add "z"/"y" in every child kind.
+        let before_table = ordering_fixture_table(&["e", "c", "a", "d", "b", "h", "g", "f"], &[]);
+        let after_table =
+            ordering_fixture_table(&["z", "h", "d", "y", "a", "g", "f", "b"], &["a", "b", "d"]);
+
+        let before = Schema {
+            tables: vec![before_table],
+            ..Schema::default()
+        };
+        let after = Schema {
+            tables: vec![after_table],
+            ..Schema::default()
+        };
+
+        let expected = vec![
+            ("c", ChangeKind::Removed),
+            ("e", ChangeKind::Removed),
+            ("y", ChangeKind::Added),
+            ("z", ChangeKind::Added),
+            ("a", ChangeKind::Modified),
+            ("b", ChangeKind::Modified),
+            ("d", ChangeKind::Modified),
+        ];
+
+        let first = diff_schemas(&before, &after);
+        let table = &first.modified_tables[0];
+        let columns: Vec<_> = table
+            .column_diffs
+            .iter()
+            .map(|d| (d.column_name.as_str(), d.change_kind))
+            .collect();
+        let fks: Vec<_> = table
+            .fk_diffs
+            .iter()
+            .map(|d| (d.name.as_deref().unwrap_or_default(), d.change_kind))
+            .collect();
+        let indexes: Vec<_> = table
+            .index_diffs
+            .iter()
+            .map(|d| (d.name.as_deref().unwrap_or_default(), d.change_kind))
+            .collect();
+        let checks: Vec<_> = table
+            .check_diffs
+            .iter()
+            .map(|d| (d.name.as_deref().unwrap_or_default(), d.change_kind))
+            .collect();
+        assert_eq!(columns, expected);
+        assert_eq!(fks, expected);
+        assert_eq!(indexes, expected);
+        assert_eq!(checks, expected);
+
+        // Each run builds fresh hash maps with new random seeds; the output
+        // must not depend on them.
+        for _ in 0..32 {
+            assert_eq!(diff_schemas(&before, &after), first);
+        }
     }
 }

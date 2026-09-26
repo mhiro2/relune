@@ -369,7 +369,7 @@ impl ReviewRuleId {
             }
             Self::DropPkOrUnique => "Primary key or unique constraint is being dropped",
             Self::AddUniqueOnExisting => {
-                "UNIQUE added to an existing table; existing duplicates will fail"
+                "UNIQUE added or tightened on an existing table; existing duplicates will fail"
             }
             Self::AddCascadeDelete => "Foreign key now uses ON DELETE CASCADE",
             Self::FkWithoutIndex => "New foreign key has no supporting index",
