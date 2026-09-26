@@ -876,35 +876,134 @@ fn separate_force_groups(
             })
     });
 
-    // `(item, bounds after shifting)` for every item placed so far.
-    let mut placed: Vec<(ForcePackItem, PackedBounds)> = Vec::with_capacity(packed_items.len());
+    let mut index = ForcePackIndex::new(graph, &connected);
     for (item, bounds) in packed_items {
-        let required_min = placed
-            .iter()
-            .filter(|&&(other_item, other)| {
-                let shares_rank = bounds.min_y < other.max_y + FORCE_GROUP_GAP
-                    && other.min_y < bounds.max_y + FORCE_GROUP_GAP;
-                // Connected tables keep a corridor on both axes so orthogonal
-                // edge stubs stay long enough for their markers.
-                shares_rank || force_nodes_linked(&connected, other_item, item)
-            })
-            .map(|&(other_item, other)| {
-                other.max_x + force_pack_gap(graph, &connected, other_item, item)
-            })
-            .fold(f32::NEG_INFINITY, f32::max);
-        let delta = (required_min - bounds.min_x).max(0.0);
+        let delta = (index.required_min_x(item, bounds) - bounds.min_x).max(0.0);
         if delta > 0.0 {
             shift_force_pack_item(graph, positions, item, delta);
         }
-        placed.push((
+        index.insert(
             item,
             PackedBounds {
                 min_x: bounds.min_x + delta,
                 max_x: bounds.max_x + delta,
                 ..bounds
             },
-        ));
+        );
     }
+}
+
+/// Cross-axis bucket size used to find already placed nodes on the same rank.
+const FORCE_PACK_BUCKET: f32 = 16.0;
+
+/// Spatial index over items placed by [`separate_force_groups`].
+///
+/// Ungrouped nodes are recorded in cross-axis buckets holding the furthest
+/// packing-axis end (plus the gap they demand) seen so far, so finding the
+/// required start of a node costs O(extent / bucket) instead of a scan over
+/// every placed node. Group containers are few and checked exactly.
+struct ForcePackIndex<'a> {
+    graph: &'a LayoutGraph,
+    connected: &'a std::collections::HashSet<(usize, usize)>,
+    neighbours: Vec<Vec<usize>>,
+    buckets: std::collections::HashMap<i32, f32>,
+    placed_nodes: Vec<Option<PackedBounds>>,
+    placed_groups: Vec<(ForcePackItem, PackedBounds)>,
+}
+
+impl<'a> ForcePackIndex<'a> {
+    fn new(
+        graph: &'a LayoutGraph,
+        connected: &'a std::collections::HashSet<(usize, usize)>,
+    ) -> Self {
+        let mut neighbours = vec![Vec::new(); graph.nodes.len()];
+        for &(a, b) in connected {
+            neighbours[a].push(b);
+            neighbours[b].push(a);
+        }
+        Self {
+            graph,
+            connected,
+            neighbours,
+            buckets: std::collections::HashMap::new(),
+            placed_nodes: vec![None; graph.nodes.len()],
+            placed_groups: Vec::new(),
+        }
+    }
+
+    /// Smallest packing-axis start that keeps `item` clear of every placed
+    /// item on the same rank and of the tables it is directly linked to.
+    fn required_min_x(&self, item: ForcePackItem, bounds: PackedBounds) -> f32 {
+        let shares_rank = |other: &PackedBounds| {
+            bounds.min_y < other.max_y + FORCE_GROUP_GAP
+                && other.min_y < bounds.max_y + FORCE_GROUP_GAP
+        };
+        let exact_required = |other_item: ForcePackItem, other: &PackedBounds| {
+            shares_rank(other)
+                .then(|| other.max_x + force_pack_gap(self.graph, self.connected, other_item, item))
+        };
+
+        let groups = self
+            .placed_groups
+            .iter()
+            .filter_map(|(other_item, other)| exact_required(*other_item, other));
+        match item {
+            ForcePackItem::Group(_) => groups
+                .chain(
+                    self.placed_nodes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, other)| {
+                            exact_required(ForcePackItem::UngroupedNode(idx), other.as_ref()?)
+                        }),
+                )
+                .fold(f32::NEG_INFINITY, f32::max),
+            ForcePackItem::UngroupedNode(node_idx) => {
+                let same_rank = bucket_range(bounds.min_y, bounds.max_y)
+                    .filter_map(|bucket| self.buckets.get(&bucket).copied());
+                // Connected tables keep a corridor on both axes so orthogonal
+                // edge stubs stay long enough for their markers.
+                let linked = self.neighbours[node_idx].iter().filter_map(|&other_idx| {
+                    self.placed_nodes[other_idx]
+                        .map(|other| other.max_x + FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP))
+                });
+                groups
+                    .chain(same_rank)
+                    .chain(linked)
+                    .fold(f32::NEG_INFINITY, f32::max)
+            }
+        }
+    }
+
+    fn insert(&mut self, item: ForcePackItem, bounds: PackedBounds) {
+        match item {
+            ForcePackItem::Group(_) => self.placed_groups.push((item, bounds)),
+            ForcePackItem::UngroupedNode(node_idx) => {
+                // Self-loops are drawn on the east side, so a node that carries
+                // one needs the wider corridor towards its right-hand neighbour.
+                let gap = if self.graph.nodes[node_idx].has_self_loop {
+                    FORCE_CONNECTED_NODE_GAP.max(FORCE_GROUP_GAP)
+                } else {
+                    FORCE_GROUP_GAP
+                };
+                let end = bounds.max_x + gap;
+                for bucket in bucket_range(
+                    bounds.min_y - FORCE_GROUP_GAP,
+                    bounds.max_y + FORCE_GROUP_GAP,
+                ) {
+                    let slot = self.buckets.entry(bucket).or_insert(f32::NEG_INFINITY);
+                    *slot = slot.max(end);
+                }
+                self.placed_nodes[node_idx] = Some(bounds);
+            }
+        }
+    }
+}
+
+#[allow(clippy::cast_possible_truncation)] // Layout coordinates are far below i32 range.
+fn bucket_range(min: f32, max: f32) -> std::ops::RangeInclusive<i32> {
+    let bucket = |value: f32| (value / FORCE_PACK_BUCKET).floor() as i32;
+    bucket(min)..=bucket(max)
 }
 
 /// Builds the set of connected node-index pairs (normalized as `(min, max)`)
@@ -979,20 +1078,6 @@ fn force_pack_items_are_connected(
                     })
             }),
     }
-}
-
-/// Whether two ungrouped nodes share an edge. Group containers are separated
-/// by their cross-axis extent alone.
-fn force_nodes_linked(
-    connected: &std::collections::HashSet<(usize, usize)>,
-    left: ForcePackItem,
-    right: ForcePackItem,
-) -> bool {
-    matches!(
-        (left, right),
-        (ForcePackItem::UngroupedNode(left_idx), ForcePackItem::UngroupedNode(right_idx))
-            if force_nodes_are_connected(connected, left_idx, right_idx)
-    )
 }
 
 fn force_nodes_are_connected(
