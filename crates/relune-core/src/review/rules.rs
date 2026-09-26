@@ -9,7 +9,9 @@ use std::collections::{HashMap, HashSet};
 use super::{DialectScope, EffectiveDialect, ReviewRuleId, ReviewSeverity, RiskFinding};
 use crate::SqlDialect;
 use crate::diff::{ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff};
-use crate::model::{Column, Enum, ForeignKey, Schema, Table};
+use crate::model::{
+    Column, Enum, ForeignKey, ForeignKeyTargetResolution, Schema, Table, resolve_table_reference,
+};
 
 /// Runs every rule in `applied_rules` against the diff.
 ///
@@ -2176,117 +2178,34 @@ fn index_covers_prefix(idx: &crate::model::Index, fk_cols: &[String]) -> bool {
 }
 
 /// Decide whether `fk` (owned by a table in `owner_schema`) references
-/// `target`.
-///
-/// Resolution policy for unqualified FKs (`fk.to_schema = None`):
-/// 1. If `owner_schema` is provided and any same-name table exists in
-///    that schema, treat the bare name as resolving to the
-///    owner-schema homonym only — matching the disambiguation in
-///    [`resolve_table_id`].
-/// 2. Otherwise (no owner-schema homonym, or owner has no schema),
-///    fall back to a unique bare-name match across the whole schema
-///    set. This approximates Postgres' `search_path` lookup when the
-///    owner schema does not own a homonym.
-///
-/// Note: this approximation does not model an arbitrary `search_path`
-/// chain, so dialect-specific resolution that would point at a
-/// different schema cannot be expressed here.
+/// `target`, using the same resolution as schema validation and lint
+/// ([`resolve_table_reference`]).
 fn fk_targets_table(
     fk: &ForeignKey,
     target: &Table,
     schema: &Schema,
     owner_schema: Option<&str>,
 ) -> bool {
-    let target_qname_lower = target.qualified_name().to_lowercase();
-    if let Some(fk_schema) = fk.to_schema.as_deref() {
-        let qname = format!(
-            "{}.{}",
-            fk_schema.to_lowercase(),
-            fk.to_table.to_lowercase()
-        );
-        return qname == target_qname_lower;
-    }
-    if !fk.to_table.eq_ignore_ascii_case(&target.name) {
-        return false;
-    }
-    if let Some(owner) = owner_schema {
-        let owner_has_homonym = schema.tables.iter().any(|t| {
-            t.name.eq_ignore_ascii_case(&target.name)
-                && t.schema_name
-                    .as_deref()
-                    .is_some_and(|s| s.eq_ignore_ascii_case(owner))
-        });
-        if owner_has_homonym {
-            return target
-                .schema_name
-                .as_deref()
-                .is_some_and(|s| s.eq_ignore_ascii_case(owner));
-        }
-    }
-    let same_name_tables = schema
-        .tables
-        .iter()
-        .filter(|t| t.name.eq_ignore_ascii_case(&target.name))
-        .count();
-    same_name_tables == 1
+    matches!(
+        resolve_table_reference(schema, owner_schema, fk.to_schema.as_deref(), &fk.to_table),
+        ForeignKeyTargetResolution::Found(table) if table.stable_id == target.stable_id
+    )
 }
 
-/// Resolve a stable id for the table named `table_name` in `schema`.
-///
-/// `schema_name` carries the FK's explicit schema qualifier when
-/// present. When the FK is unqualified, `default_schema` (typically the
-/// owner table's schema) is consulted as the search-path head so that
-/// `REFERENCES users` from `public.orders` resolves to `public.users`
-/// when one exists.
-///
-/// Resolution policy, in order:
-/// 1. Explicit qualifier (`schema_name = Some`): match only that schema.
-/// 2. Owner schema preferred (`default_schema = Some`): if a same-name
-///    table exists in that schema, return it. Otherwise fall through
-///    to (3) so an unqualified FK can still resolve to the only
-///    homonym (Postgres `search_path`-style behavior).
-/// 3. Bare-name lookup: return the unique match, or None when more
-///    than one table shares the name. Mirrors `fk_targets_table`'s
-///    disambiguation policy.
+/// Resolve the stable id of the table referenced as
+/// `schema_name.table_name` from a table in `owner_schema`. Returns `None`
+/// when the reference is missing or ambiguous. See
+/// [`resolve_table_reference`] for the resolution order.
 fn resolve_table_id(
     schema: &Schema,
     schema_name: Option<&str>,
     table_name: &str,
-    default_schema: Option<&str>,
+    owner_schema: Option<&str>,
 ) -> Option<String> {
-    if let Some(s) = schema_name {
-        return schema
-            .tables
-            .iter()
-            .find(|t| {
-                t.name.eq_ignore_ascii_case(table_name)
-                    && t.schema_name
-                        .as_deref()
-                        .is_some_and(|a| a.eq_ignore_ascii_case(s))
-            })
-            .map(|t| t.stable_id.clone());
+    match resolve_table_reference(schema, owner_schema, schema_name, table_name) {
+        ForeignKeyTargetResolution::Found(table) => Some(table.stable_id.clone()),
+        ForeignKeyTargetResolution::Missing | ForeignKeyTargetResolution::Ambiguous => None,
     }
-
-    if let Some(s) = default_schema
-        && let Some(t) = schema.tables.iter().find(|t| {
-            t.name.eq_ignore_ascii_case(table_name)
-                && t.schema_name
-                    .as_deref()
-                    .is_some_and(|a| a.eq_ignore_ascii_case(s))
-        })
-    {
-        return Some(t.stable_id.clone());
-    }
-
-    let mut matches = schema
-        .tables
-        .iter()
-        .filter(|t| t.name.eq_ignore_ascii_case(table_name));
-    let first = matches.next()?;
-    if matches.next().is_some() {
-        return None;
-    }
-    Some(first.stable_id.clone())
 }
 
 #[cfg(test)]
@@ -3055,6 +2974,57 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::DropTableReferenced)
             .expect("expected DropTableReferenced finding");
         assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.table_name.as_deref(), Some("users"));
+    }
+
+    #[test]
+    fn drop_table_referenced_resolves_unqualified_homonym() {
+        // `orders` is unqualified and references bare `users`. With both an
+        // unqualified `users` and `auth.users` present, the reference must
+        // resolve to the unqualified table instead of being treated as
+        // ambiguous and skipped.
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let auth_users = table_in(
+            "auth",
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_id", "BIGINT", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = Schema {
+            tables: vec![users, auth_users.clone(), orders.clone()],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![auth_users, orders],
+            ..Default::default()
+        };
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropTableReferenced)
+            .expect("expected DropTableReferenced finding");
         assert_eq!(drop.table_name.as_deref(), Some("users"));
     }
 

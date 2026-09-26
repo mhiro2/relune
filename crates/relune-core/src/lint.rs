@@ -884,7 +884,12 @@ fn resolve_referenced_table<'a>(
     table: &Table,
     fk: &ForeignKey,
 ) -> Option<&'a Table> {
-    match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
+    match resolve_table_reference(
+        schema,
+        table.schema_name.as_deref(),
+        fk.to_schema.as_deref(),
+        &fk.to_table,
+    ) {
         ForeignKeyTargetResolution::Found(ref_table) => Some(ref_table),
         ForeignKeyTargetResolution::Missing | ForeignKeyTargetResolution::Ambiguous => None,
     }
@@ -1133,7 +1138,7 @@ fn check_unresolved_foreign_keys(schema: &Schema, table: &Table, result: &mut Li
     for fk in &table.foreign_keys {
         let message = match resolve_table_reference(
             schema,
-            Some(table),
+            table.schema_name.as_deref(),
             fk.to_schema.as_deref(),
             &fk.to_table,
         ) {
