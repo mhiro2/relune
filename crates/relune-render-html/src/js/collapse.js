@@ -1,5 +1,107 @@
 "use strict";
 (() => {
+  // ts/collapse_dom.ts
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var HEADER_SELECTOR = ".table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator";
+  var KIND_LABEL_RESERVE = 44;
+  var INDICATOR_WIDTH = 16;
+  var INDICATOR_GAP = 4;
+  var MIN_NAME_CLIP_WIDTH = 24;
+  var FIRST_ROW_BASELINE = 46;
+  var EXPANDED_GLYPH = "\u25BE";
+  var COLLAPSED_GLYPH = "\u25B8";
+  function numericAttribute(el, name) {
+    return Number.parseFloat(el.getAttribute(name) ?? "") || 0;
+  }
+  function createSvgText(className, x, y, text) {
+    const el = document.createElementNS(SVG_NS, "text");
+    el.setAttribute("class", className);
+    el.setAttribute("x", String(x));
+    el.setAttribute("y", String(y));
+    el.textContent = text;
+    return el;
+  }
+  function shrinkNameClip(node) {
+    const clipRef = node.querySelector(".table-name")?.getAttribute("clip-path") ?? "";
+    const clipId = /^url\(#(.+)\)$/.exec(clipRef)?.[1];
+    if (clipId === void 0) return;
+    const clipRect = node.querySelector(`clipPath[id="${CSS.escape(clipId)}"] rect`);
+    if (clipRect === null) return;
+    const width = numericAttribute(clipRect, "width");
+    clipRect.setAttribute(
+      "width",
+      String(Math.max(width - INDICATOR_WIDTH - INDICATOR_GAP * 2, MIN_NAME_CLIP_WIDTH))
+    );
+  }
+  function decorateTable(node, header, columnCount) {
+    const x = numericAttribute(header, "x");
+    const y = numericAttribute(header, "y");
+    const width = numericAttribute(header, "width");
+    const headerHeight = numericAttribute(header, "height");
+    const indicator = createSvgText(
+      "collapse-indicator",
+      x + width - KIND_LABEL_RESERVE - INDICATOR_GAP - INDICATOR_WIDTH / 2,
+      y + headerHeight / 2,
+      EXPANDED_GLYPH
+    );
+    indicator.setAttribute("text-anchor", "middle");
+    indicator.setAttribute("dominant-baseline", "central");
+    node.appendChild(indicator);
+    shrinkNameClip(node);
+    if (columnCount > 0) {
+      const label = `${columnCount} ${columnCount === 1 ? "column" : "columns"} hidden`;
+      node.appendChild(createSvgText("column-count-badge", x + 10, y + FIRST_ROW_BASELINE, label));
+    }
+    return indicator;
+  }
+  function createCollapseController(svg, options) {
+    const tables = /* @__PURE__ */ new Map();
+    const collapsed = /* @__PURE__ */ new Set();
+    const apply = (tableId, collapse) => {
+      const table = tables.get(tableId);
+      if (table === void 0) return;
+      table.node.classList.toggle("collapsed", collapse);
+      table.indicator.textContent = collapse ? COLLAPSED_GLYPH : EXPANDED_GLYPH;
+      if (collapse) {
+        collapsed.add(tableId);
+      } else {
+        collapsed.delete(tableId);
+      }
+    };
+    svg.querySelectorAll(".table-node[data-table-id]").forEach((node) => {
+      const tableId = node.getAttribute("data-table-id");
+      const header = node.querySelector(".table-header");
+      if (tableId === null || header === null || tables.has(tableId)) return;
+      const indicator = decorateTable(node, header, options.columnCounts.get(tableId) ?? 0);
+      tables.set(tableId, { node, indicator });
+      const onClick = (event) => {
+        event.stopPropagation();
+        apply(tableId, !collapsed.has(tableId));
+        options.onToggle();
+      };
+      node.querySelectorAll(HEADER_SELECTOR).forEach((el) => {
+        el.addEventListener("click", onClick);
+      });
+    });
+    for (const tableId of options.initiallyCollapsed) {
+      apply(tableId, true);
+    }
+    return {
+      getCollapsed() {
+        return Array.from(collapsed);
+      },
+      setCollapsed(tableIds) {
+        const target = new Set(tableIds);
+        for (const tableId of Array.from(collapsed)) {
+          if (!target.has(tableId)) apply(tableId, false);
+        }
+        for (const tableId of target) {
+          apply(tableId, true);
+        }
+      }
+    };
+  }
+
   // ts/metadata.ts
   var METADATA_ELEMENT_ID = "relune-metadata";
   function parseReluneMetadata() {
@@ -106,206 +208,60 @@
   }
 
   // ts/collapse.ts
-  function setStyleCursor(el, cursor) {
-    const styled = el;
-    styled.style.cursor = cursor;
-  }
-  function setStyleDisplay(el, display) {
-    const styled = el;
-    styled.style.display = display;
-  }
+  var STORAGE_KEY = "relune-collapsed-tables";
   {
-    let saveState2 = function() {
+    let loadState2 = function() {
+      try {
+        const saved = sessionStorageRef?.getItem(STORAGE_KEY);
+        if (saved) {
+          const arr = JSON.parse(saved);
+          if (Array.isArray(arr)) {
+            return arr.filter((id) => typeof id === "string");
+          }
+        }
+      } catch (error) {
+        reportSessionStorageError("restoring collapsed tables", error);
+      }
+      return [];
+    }, saveState2 = function(tableIds) {
       if (sessionStorageRef === null) {
         return;
       }
       try {
-        sessionStorageRef.setItem(
-          "relune-collapsed-tables",
-          JSON.stringify(Array.from(collapsedTables))
-        );
+        sessionStorageRef.setItem(STORAGE_KEY, JSON.stringify(tableIds));
       } catch (error) {
         reportSessionStorageError("saving collapsed tables", error);
       }
     };
-    saveState = saveState2;
+    loadState = loadState2, saveState = saveState2;
     const metadata = parseReluneMetadata();
-    const columnCounts = {};
-    if (metadata?.tables) {
-      for (const table of metadata.tables) {
-        columnCounts[table.id] = table.columns?.length ?? 0;
-      }
-    }
-    const collapsedTables = /* @__PURE__ */ new Set();
+    const columnCounts = new Map(
+      (metadata?.tables ?? []).map((table) => [table.id, table.columns?.length ?? 0])
+    );
     const sessionStorageRef = getSessionStorage();
-    try {
-      const saved = sessionStorageRef?.getItem("relune-collapsed-tables");
-      if (saved) {
-        const arr = JSON.parse(saved);
-        if (Array.isArray(arr)) {
-          for (const id of arr) {
-            if (typeof id === "string") {
-              collapsedTables.add(id);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      reportSessionStorageError("restoring collapsed tables", error);
-    }
-    const canvas = document.getElementById("canvas");
-    const svg = canvas?.querySelector("svg");
+    const svg = document.getElementById("canvas")?.querySelector("svg");
     if (svg) {
-      let applyCollapseState2 = function(tableId, collapse) {
-        const entry = tableNodeMap.get(tableId);
-        if (entry === void 0) return;
-        const tableNode = entry.node;
-        const isCurrentlyCollapsed = tableNode.classList.contains("collapsed");
-        if (isCurrentlyCollapsed === collapse) return;
-        const collapseInd = tableNode.querySelector(".collapse-indicator");
-        const badge = tableNode.querySelector(".column-count-badge");
-        const rows = tableNode.querySelectorAll(".column-row, .column-name, .column-text");
-        if (collapse) {
-          tableNode.classList.add("collapsed");
-          collapsedTables.add(tableId);
-          rows.forEach((row) => setStyleDisplay(row, "none"));
-          if (collapseInd) collapseInd.textContent = "+";
-          if (badge) badge.style.display = "";
-        } else {
-          tableNode.classList.remove("collapsed");
-          collapsedTables.delete(tableId);
-          rows.forEach((row) => setStyleDisplay(row, ""));
-          if (collapseInd) collapseInd.textContent = "-";
-          if (badge) badge.style.display = "none";
-        }
-      };
-      applyCollapseState = applyCollapseState2;
-      const tableNodes = [];
-      svg.querySelectorAll(".table-node[data-table-id]").forEach((node) => {
-        const id = node.getAttribute("data-table-id");
-        if (id) {
-          tableNodes.push({ node, id });
-        }
-      });
-      svg.querySelectorAll("g.node[data-id]").forEach((node) => {
-        const id = node.getAttribute("data-id");
-        if (id) {
-          tableNodes.push({ node, id });
-        }
-      });
-      for (const entry of tableNodes) {
-        const tableNode = entry.node;
-        const tableId = entry.id;
-        const columnCount = columnCounts[tableId] ?? 0;
-        const header = tableNode.querySelector(".table-header") ?? tableNode.querySelector("rect");
-        if (!header) {
-          continue;
-        }
-        const tableNameText = tableNode.querySelector(".table-name") ?? tableNode.querySelector("text");
-        setStyleCursor(header, "pointer");
-        let collapseIndicator = null;
-        let countBadge = null;
-        if (tableNameText) {
-          const headerY = parseFloat(tableNameText.getAttribute("y") ?? "") || 0;
-          const tableRect = tableNode.querySelector("rect");
-          const tableWidth = tableRect ? parseFloat(tableRect.getAttribute("width") ?? "") || 200 : 200;
-          collapseIndicator = document.createElementNS("http://www.w3.org/2000/svg", "text");
-          collapseIndicator.setAttribute("class", "collapse-indicator");
-          collapseIndicator.setAttribute("x", String(tableWidth - 20));
-          collapseIndicator.setAttribute("y", String(headerY));
-          collapseIndicator.setAttribute("text-anchor", "middle");
-          collapseIndicator.setAttribute("fill", "#64748b");
-          collapseIndicator.textContent = "-";
-          tableNode.appendChild(collapseIndicator);
-          if (columnCount > 0) {
-            countBadge = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            countBadge.setAttribute("class", "column-count-badge");
-            countBadge.setAttribute("x", String(tableWidth - 40));
-            countBadge.setAttribute("y", String(headerY));
-            countBadge.setAttribute("text-anchor", "end");
-            countBadge.setAttribute("fill", "#64748b");
-            countBadge.textContent = `(${columnCount})`;
-            countBadge.style.display = "none";
-            tableNode.appendChild(countBadge);
-          }
-        }
-        let columnRows = tableNode.querySelectorAll(".column-row, .column-name");
-        if (columnRows.length === 0 && tableNameText) {
-          tableNode.querySelectorAll("text").forEach((text) => {
-            if (text === tableNameText) {
-              return;
-            }
-            if (text.classList.contains("collapse-indicator") || text.classList.contains("column-count-badge")) {
-              return;
-            }
-            text.classList.add("column-text");
-          });
-          columnRows = tableNode.querySelectorAll(".column-text");
-        }
-        if (collapsedTables.has(tableId)) {
-          tableNode.classList.add("collapsed");
-          Array.from(columnRows).forEach((row) => {
-            setStyleDisplay(row, "none");
-          });
-          if (collapseIndicator) {
-            collapseIndicator.textContent = "+";
-          }
-          if (countBadge) {
-            countBadge.style.display = "";
-          }
-        }
-        header.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const isCollapsed = tableNode.classList.toggle("collapsed");
-          if (isCollapsed) {
-            collapsedTables.add(tableId);
-            Array.from(columnRows).forEach((row) => {
-              setStyleDisplay(row, "none");
-            });
-            if (collapseIndicator) {
-              collapseIndicator.textContent = "+";
-            }
-            if (countBadge) {
-              countBadge.style.display = "";
-            }
-          } else {
-            collapsedTables.delete(tableId);
-            Array.from(columnRows).forEach((row) => {
-              setStyleDisplay(row, "");
-            });
-            if (collapseIndicator) {
-              collapseIndicator.textContent = "-";
-            }
-            if (countBadge) {
-              countBadge.style.display = "none";
-            }
-          }
-          saveState2();
+      const controller = createCollapseController(svg, {
+        columnCounts,
+        initiallyCollapsed: loadState2(),
+        onToggle: () => {
+          saveState2(controller.getCollapsed());
           emitViewerEvent("relune:collapse-changed", void 0);
-        });
-      }
-      const tableNodeMap = new Map(tableNodes.map((entry) => [entry.id, entry]));
+        }
+      });
       const runtime = getViewerRuntime();
       runtime.collapse = {
         getCollapsed() {
-          return Array.from(collapsedTables);
+          return controller.getCollapsed();
         },
         setCollapsed(tableIds) {
-          const target = new Set(tableIds);
-          for (const id of collapsedTables) {
-            if (!target.has(id)) {
-              applyCollapseState2(id, false);
-            }
-          }
-          for (const id of target) {
-            applyCollapseState2(id, true);
-          }
-          saveState2();
+          controller.setCollapsed(tableIds);
+          saveState2(controller.getCollapsed());
         }
       };
       markViewerModuleReady("collapse");
     }
   }
-  var applyCollapseState;
+  var loadState;
   var saveState;
 })();

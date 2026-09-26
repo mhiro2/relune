@@ -449,10 +449,10 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(html.contains("collapsedTables"));
-        assert!(html.contains("columnCounts"));
+        assert!(html.contains("relune-collapsed-tables"));
         assert!(html.contains("collapse-indicator"));
         assert!(html.contains("column-count-badge"));
+        assert!(html.contains(".table-node.collapsed .column-row"));
     }
 
     #[test]
@@ -466,7 +466,8 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(!html.contains("collapsedTables"));
+        assert!(!html.contains("relune-collapsed-tables"));
+        assert!(!html.contains(".table-node.collapsed .column-row"));
     }
 
     #[test]
