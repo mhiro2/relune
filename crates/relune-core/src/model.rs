@@ -423,7 +423,12 @@ impl Schema {
             }
         }
 
-        match resolve_table_reference(schema, Some(table), fk.to_schema.as_deref(), &fk.to_table) {
+        match resolve_table_reference(
+            schema,
+            table.schema_name.as_deref(),
+            fk.to_schema.as_deref(),
+            &fk.to_table,
+        ) {
             ForeignKeyTargetResolution::Missing => {
                 errors.push(ValidationError::consistency(
                     Some(table.name.clone()),
@@ -473,7 +478,7 @@ impl Schema {
             for fk in &table.foreign_keys {
                 if let ForeignKeyTargetResolution::Found(target) = resolve_table_reference(
                     self,
-                    Some(table),
+                    table.schema_name.as_deref(),
                     fk.to_schema.as_deref(),
                     &fk.to_table,
                 ) {
@@ -506,9 +511,15 @@ pub(crate) enum ForeignKeyTargetResolution<'a> {
     Ambiguous,
 }
 
+/// Resolves a table reference such as an FK target.
+///
+/// An explicit `to_schema` matches only that schema. An unqualified name
+/// resolves against `source_schema` (the referencing table's schema)
+/// first, then against unqualified tables, and finally against a unique
+/// same-name table in any schema.
 pub(crate) fn resolve_table_reference<'a>(
     schema: &'a Schema,
-    from_table: Option<&Table>,
+    source_schema: Option<&str>,
     to_schema: Option<&str>,
     to_table: &str,
 ) -> ForeignKeyTargetResolution<'a> {
@@ -518,7 +529,7 @@ pub(crate) fn resolve_table_reference<'a>(
         return resolve_matching_tables(schema, &target_table, Some(target_schema));
     }
 
-    if let Some(source_schema) = from_table.and_then(|table| table.schema_name.as_deref()) {
+    if let Some(source_schema) = source_schema {
         match resolve_matching_tables(schema, &target_table, Some(source_schema)) {
             ForeignKeyTargetResolution::Found(table) => {
                 return ForeignKeyTargetResolution::Found(table);
@@ -544,34 +555,48 @@ fn resolve_matching_tables<'a>(
     target_schema: Option<&str>,
 ) -> ForeignKeyTargetResolution<'a> {
     let target_schema = target_schema.map(str::to_lowercase);
-    let mut matches = schema.tables.iter().filter(|table| {
-        let schema_matches = match &target_schema {
+    resolve_unique_table(
+        schema.tables.iter().filter(|table| match &target_schema {
             Some(target_schema) => table
                 .schema_name
                 .as_deref()
                 .is_some_and(|schema_name| schema_name.to_lowercase() == *target_schema),
             None => table.schema_name.is_none(),
-        };
-        schema_matches
-            && (table.name.to_lowercase() == target_table
-                || table.stable_id.to_lowercase() == target_table)
-    });
-
-    match (matches.next(), matches.next()) {
-        (None, _) => ForeignKeyTargetResolution::Missing,
-        (Some(table), None) => ForeignKeyTargetResolution::Found(table),
-        _ => ForeignKeyTargetResolution::Ambiguous,
-    }
+        }),
+        target_table,
+    )
 }
 
 fn resolve_matching_tables_any_schema<'a>(
     schema: &'a Schema,
     target_table: &str,
 ) -> ForeignKeyTargetResolution<'a> {
-    let mut matches = schema.tables.iter().filter(|table| {
-        table.name.to_lowercase() == target_table || table.stable_id.to_lowercase() == target_table
-    });
+    resolve_unique_table(schema.tables.iter(), target_table)
+}
 
+/// Picks the unique table among `candidates` named `target_table`
+/// (lowercase). Table names take precedence; `stable_id` is only
+/// consulted when no candidate has that name, so a custom stable id that
+/// happens to equal another table's name does not create ambiguity.
+fn resolve_unique_table<'a>(
+    candidates: impl Iterator<Item = &'a Table> + Clone,
+    target_table: &str,
+) -> ForeignKeyTargetResolution<'a> {
+    match unique_table(
+        candidates
+            .clone()
+            .filter(|table| table.name.to_lowercase() == target_table),
+    ) {
+        ForeignKeyTargetResolution::Missing => {
+            unique_table(candidates.filter(|table| table.stable_id.to_lowercase() == target_table))
+        }
+        resolution => resolution,
+    }
+}
+
+fn unique_table<'a>(
+    mut matches: impl Iterator<Item = &'a Table>,
+) -> ForeignKeyTargetResolution<'a> {
     match (matches.next(), matches.next()) {
         (None, _) => ForeignKeyTargetResolution::Missing,
         (Some(table), None) => ForeignKeyTargetResolution::Found(table),
@@ -1188,6 +1213,34 @@ mod tests {
         };
         let errs = schema.validate();
         assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn validate_fk_prefers_table_name_over_colliding_stable_id() {
+        let schema = Schema {
+            tables: vec![
+                make_table("users", Some("public"), &["id"], vec![]),
+                Table {
+                    stable_id: "users".to_string(),
+                    ..make_table("accounts", Some("public"), &["id"], vec![])
+                },
+                Table {
+                    foreign_keys: vec![ForeignKey {
+                        name: None,
+                        from_columns: vec!["user_id".to_string()],
+                        to_schema: Some("public".to_string()),
+                        to_table: "users".to_string(),
+                        to_columns: vec!["id".to_string()],
+                        on_delete: ReferentialAction::NoAction,
+                        on_update: ReferentialAction::NoAction,
+                    }],
+                    ..make_table("posts", None, &["id", "user_id"], vec![])
+                },
+            ],
+            views: vec![],
+            enums: vec![],
+        };
+        assert!(schema.validate().is_empty(), "{:?}", schema.validate());
     }
 
     #[test]

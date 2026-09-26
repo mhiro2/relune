@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use relune_core::{Diagnostic, Schema, SqlDialect, ValidationErrorKind};
+use relune_core::{Diagnostic, Schema, SqlDialect, ValidationErrorKind, align_default_schema};
 use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
 use tracing::info;
 
@@ -105,6 +105,31 @@ pub(crate) fn schema_from_input_checked(
         )
     }));
     Ok((schema, diagnostics, context))
+}
+
+/// Align schema qualification between two inputs that are compared
+/// against each other (diff, review), so that unqualified DDL and
+/// schema-qualified introspection results match object by object.
+///
+/// See [`relune_core::align_default_schema`] for the rules.
+pub(crate) fn align_input_schemas(
+    before: &mut Schema,
+    before_context: SchemaInputContext,
+    after: &mut Schema,
+    after_context: SchemaInputContext,
+) {
+    let aligned = align_default_schema(
+        before,
+        before_context.resolved_dialect,
+        after,
+        after_context.resolved_dialect,
+    );
+    if !aligned.is_empty() {
+        info!(
+            default_schemas = %aligned.join(", "),
+            "treating objects in the default schema as unqualified for comparison"
+        );
+    }
 }
 
 fn load_schema(

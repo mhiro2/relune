@@ -134,6 +134,8 @@ Types live in `relune-core` (see `model.rs`, `graph.rs`, and related modules).
 
 **Qualified names and stable IDs** — `stable_id` and `qualified_name()` are both produced by `qualified_identifier`, which joins `schema.name` and double-quotes any component containing `.` or `"` (doubling embedded quotes). Every distinct `(schema, name)` pair therefore maps to a distinct string: the unqualified table `"a.b"` gets `"a.b"` while table `b` in schema `a` gets `a.b`. `Schema::validate()` additionally reports duplicate `stable_id`s.
 
+**Default-schema alignment** — Unqualified DDL parses into objects with `schema_name = None`, while introspection always records the owning schema (`public.users`, `main.users`, or the connected MySQL database). Before comparing, `diff` and `review` call `align_default_schema`, which rewrites objects in the default schema as unqualified on both sides so they match by `stable_id` instead of showing up as removed + added. Each side strips the default schema of its own resolved dialect: `public` for PostgreSQL, `main` for SQLite, and for MySQL the single schema shared by every object (the connected database). Schema-JSON inputs carry no dialect and strip the other side's default. Alignment is skipped when neither side has an unqualified table, view, or enum, so fully qualified inputs keep their names. An object stays qualified when its side already has an unqualified homonym, and a table stays qualified when a foreign key from another schema references it explicitly while that schema owns a same-name table (the unqualified reference would resolve to the homonym first).
+
 **Derived artifacts** flow through the pipeline:
 
 - **Graph** — nodes and edges with stable identities (input to layout)

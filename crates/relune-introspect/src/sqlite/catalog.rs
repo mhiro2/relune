@@ -1,6 +1,6 @@
 //! `SQLite` catalog introspection via `sqlite_master` and `PRAGMA`s.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 
 use sqlx::sqlite::SqlitePool;
@@ -309,7 +309,10 @@ async fn fetch_columns(pool: &SqlitePool) -> Result<Vec<RawColumn>, IntrospectEr
                 p.type AS col_type,
                 p."notnull" AS "notnull",
                 p.dflt_value AS dflt_value,
-                p.pk AS pk
+                p.pk AS pk,
+                EXISTS (
+                    SELECT 1 FROM pragma_index_list(m.name) i WHERE i.origin = 'pk'
+                ) AS has_pk_index
             FROM sqlite_master m
             JOIN pragma_table_info(m.name) p
             WHERE m.type = 'table'
@@ -323,17 +326,35 @@ async fn fetch_columns(pool: &SqlitePool) -> Result<Vec<RawColumn>, IntrospectEr
     })
     .await?;
 
+    let mut primary_key_widths: HashMap<String, usize> = HashMap::new();
+    for row in rows.iter().filter(|row| row.pk > 0) {
+        *primary_key_widths
+            .entry(row.table_name.clone())
+            .or_default() += 1;
+    }
+
     rows.into_iter()
         .map(|row| {
             let ordinal_position =
                 ordinal_position_from_row(row.cid.saturating_add(1), &row.table_name)?;
+            let is_primary_key = row.pk > 0;
+            // A single-column `INTEGER PRIMARY KEY` aliases the rowid and can
+            // never hold NULL, but `notnull` stays 0 unless NOT NULL is
+            // spelled out. Other primary keys of rowid tables do accept NULL,
+            // and WITHOUT ROWID tables already report `notnull = 1`. A primary
+            // key backed by its own index (e.g. `INTEGER PRIMARY KEY DESC`) is
+            // not a rowid alias.
+            let is_rowid_alias = is_primary_key
+                && !row.has_pk_index
+                && row.col_type.eq_ignore_ascii_case("INTEGER")
+                && primary_key_widths.get(&row.table_name) == Some(&1);
             let mut column = RawColumn::new(
                 row.table_name,
                 MAIN_SCHEMA.to_string(),
                 row.name,
                 row.col_type,
-                row.notnull == 0,
-                row.pk > 0,
+                row.notnull == 0 && !is_rowid_alias,
+                is_primary_key,
                 None,
                 ordinal_position,
             );
@@ -429,6 +450,7 @@ struct SqliteColumnRow {
     notnull: i64,
     dflt_value: Option<String>,
     pk: i64,
+    has_pk_index: bool,
 }
 
 #[derive(Debug, sqlx::FromRow)]

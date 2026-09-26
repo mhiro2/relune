@@ -281,6 +281,8 @@ File inputs are auto-detected by content (schema JSON works even without `.json`
 
 `diff` and `review` refuse inputs whose objects cannot be matched unambiguously (empty or duplicate table, column, view, or enum names) and exit `1`; pass `--allow-invalid-schema` to compare them anyway. Other validation problems, such as foreign keys to missing tables, stay `SCHEMA004` warnings.
 
+When one input is unqualified DDL and the other is qualified (for example, schema JSON exported from a database), `diff` and `review` treat the default schema (`public` for PostgreSQL, `main` for SQLite, the connected database for MySQL) as unqualified, so `users` and `public.users` compare as the same table.
+
 ### review
 
 Compare a `before` schema with an `after` schema and emit migration risk findings, grouped into `info`, `warning`, `caution`, and `breaking` severities. Both before and after inputs are required (except in `--list-rules` mode).
