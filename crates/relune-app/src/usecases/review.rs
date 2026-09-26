@@ -14,19 +14,25 @@ use crate::error::AppError;
 use crate::markdown;
 use crate::request::ReviewRequest;
 use crate::result::{ReviewInputCoverage, ReviewInputs, ReviewResult};
-use crate::schema_input::{SchemaValidation, schema_from_input_checked};
+use crate::schema_input::{SchemaValidation, align_input_schemas, schema_from_input_checked};
 
 /// Execute a review request.
 #[allow(clippy::needless_pass_by_value)]
 pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
-    let (before_schema, mut diagnostics, before_context) = schema_from_input_checked(
+    let (mut before_schema, mut diagnostics, before_context) = schema_from_input_checked(
         &request.before,
         SchemaValidation::for_comparison("before", request.allow_invalid_schema),
     )?;
-    let (after_schema, after_diagnostics, after_context) = schema_from_input_checked(
+    let (mut after_schema, after_diagnostics, after_context) = schema_from_input_checked(
         &request.after,
         SchemaValidation::for_comparison("after", request.allow_invalid_schema),
     )?;
+    align_input_schemas(
+        &mut before_schema,
+        before_context,
+        &mut after_schema,
+        after_context,
+    );
     let inputs = ReviewInputs {
         before: input_coverage(&before_schema, &diagnostics),
         after: input_coverage(&after_schema, &after_diagnostics),
@@ -552,6 +558,33 @@ mod tests {
                 .iter()
                 .any(|f| f.rule_id == ReviewRuleId::DropTableReferenced)
         );
+    }
+
+    #[test]
+    fn review_matches_unqualified_ddl_with_default_schema() {
+        use crate::request::InputSource;
+
+        let before = "
+            CREATE TABLE public.users (id INT PRIMARY KEY, email TEXT);
+            CREATE TABLE public.orders (id INT PRIMARY KEY, user_id INT REFERENCES public.users(id));
+        ";
+        let after = "
+            CREATE TABLE users (id INT PRIMARY KEY);
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
+        ";
+
+        let result = run(ReviewRequest {
+            before: InputSource::sql_text_with_dialect(before, SqlDialect::Postgres),
+            after: InputSource::sql_text_with_dialect(after, SqlDialect::Postgres),
+            ..ReviewRequest::from_sql("", "")
+        });
+        let rule_ids: Vec<ReviewRuleId> = result
+            .review
+            .findings
+            .iter()
+            .map(|finding| finding.rule_id)
+            .collect();
+        assert_eq!(rule_ids, vec![ReviewRuleId::DropColumn]);
     }
 
     #[test]

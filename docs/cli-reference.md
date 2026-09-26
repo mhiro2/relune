@@ -257,6 +257,8 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 
 `diff` and `review` match objects between the two schemas by name, so they refuse an input with empty or duplicate table, column, view, or enum names (or empty / duplicate table `stable_id`s) and exit `1` before comparing anything. `--allow-invalid-schema` downgrades those errors to `SCHEMA004` warnings; duplicate objects may then be merged in the output. Two cases are handled earlier and are not affected by the flag: the SQL parser keeps the first of several `CREATE TABLE` statements for the same table and reports the rest as parse warnings, and schema JSON import always rejects empty or duplicate `id`s. Other validation problems, such as foreign keys or indexes that reference missing tables or columns, are always reported as `SCHEMA004` warnings, because review rules such as `risk/drop-table-referenced` analyze exactly those states. `render`, `inspect`, `export`, `doc`, and `lint` always report validation errors as warnings.
 
+Before comparing, `diff` and `review` treat objects in the default schema as unqualified when either input contains unqualified objects, so hand-written DDL (`CREATE TABLE users`) matches a schema exported from the database (`public.users`) instead of reporting every table as removed and re-added. The default schema is `public` for PostgreSQL, `main` for SQLite, and the connected database for MySQL (the schema shared by every object). Tables in other schemas, such as `auth.users`, stay qualified. When both inputs are fully qualified, names are reported as they are.
+
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json

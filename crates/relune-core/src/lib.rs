@@ -54,7 +54,7 @@ pub use config::{
     LayoutDirection, LayoutSpec,
 };
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
-pub use diff::{ChangeKind, SchemaDiff, diff_schemas};
+pub use diff::{ChangeKind, SchemaDiff, align_default_schema, diff_schemas};
 pub use graph::{EdgeKind, NodeKind, SqlRelation, SqlRelationParseError, collect_sql_relations};
 pub use layout::{Cardinality, EdgeRoute, RouteStyle};
 pub use lint::{

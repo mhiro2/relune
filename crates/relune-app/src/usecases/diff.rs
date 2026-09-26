@@ -11,7 +11,7 @@ use crate::error::AppError;
 use crate::markdown;
 use crate::request::DiffRequest;
 use crate::result::DiffResult;
-use crate::schema_input::{SchemaValidation, schema_from_input_checked};
+use crate::schema_input::{SchemaValidation, align_input_schemas, schema_from_input_checked};
 
 /// Execute a diff request.
 #[allow(clippy::needless_pass_by_value)]
@@ -19,15 +19,21 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     use crate::request::DiffFormat;
 
     // Step 1: Resolve schemas
-    let (before_schema, mut diagnostics, _) = schema_from_input_checked(
+    let (mut before_schema, mut diagnostics, before_context) = schema_from_input_checked(
         &request.before,
         SchemaValidation::for_comparison("before", request.allow_invalid_schema),
     )?;
-    let (after_schema, after_diagnostics, _) = schema_from_input_checked(
+    let (mut after_schema, after_diagnostics, after_context) = schema_from_input_checked(
         &request.after,
         SchemaValidation::for_comparison("after", request.allow_invalid_schema),
     )?;
     diagnostics.extend(after_diagnostics);
+    align_input_schemas(
+        &mut before_schema,
+        before_context,
+        &mut after_schema,
+        after_context,
+    );
 
     // Step 2: Compute diff
     let schema_diff = diff_schemas(&before_schema, &after_schema);
@@ -1284,6 +1290,34 @@ mod tests {
 
         assert!(result.diff.is_empty());
         assert!(!result.has_changes());
+    }
+
+    #[test]
+    fn test_diff_matches_unqualified_ddl_with_default_schema() {
+        use crate::request::InputSource;
+        use relune_core::SqlDialect;
+
+        let before = "
+            CREATE TABLE public.users (id INT PRIMARY KEY);
+            CREATE TABLE public.orders (id INT PRIMARY KEY, user_id INT REFERENCES public.users(id));
+        ";
+        let after = "
+            CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
+        ";
+
+        let result = diff(DiffRequest {
+            before: InputSource::sql_text_with_dialect(before, SqlDialect::Postgres),
+            after: InputSource::sql_text_with_dialect(after, SqlDialect::Postgres),
+            ..DiffRequest::from_sql("", "")
+        })
+        .unwrap();
+
+        assert!(result.diff.added_tables.is_empty());
+        assert!(result.diff.removed_tables.is_empty());
+        assert_eq!(result.diff.modified_tables.len(), 1);
+        assert_eq!(result.diff.modified_tables[0].table_name, "users");
+        assert_eq!(result.diff.modified_tables[0].column_diffs.len(), 1);
     }
 
     #[test]

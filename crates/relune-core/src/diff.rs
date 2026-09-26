@@ -11,6 +11,10 @@ use std::collections::{HashMap, HashSet};
 use crate::export::{ColumnExport, ForeignKeyExport, IndexExport};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
 
+mod default_schema;
+
+pub use default_schema::{align_default_schema, default_schema_name};
+
 /// Case-insensitive fingerprint of an index's non-key-part attributes:
 /// uniqueness, partial predicate, `INCLUDE` columns, and access method. Key
 /// parts are compared separately (see `key_parts_differ`) so that per-column
