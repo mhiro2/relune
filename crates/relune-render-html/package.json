@@ -6,16 +6,19 @@
     "build": "node esbuild.config.mjs",
     "fmt": "oxfmt -c ../../.oxfmtrc.json",
     "fmt:check": "oxfmt -c ../../.oxfmtrc.json --check",
-    "lint": "oxlint -c ../../.oxlintrc.json ts esbuild.config.mjs",
+    "lint": "oxlint -c ../../.oxlintrc.json ts esbuild.config.mjs vitest.config.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "check": "pnpm fmt:check && pnpm lint && pnpm typecheck"
+    "check": "pnpm fmt:check && pnpm lint && pnpm typecheck",
+    "test": "vitest run"
   },
   "dependencies": {},
   "devDependencies": {
     "esbuild": "catalog:",
+    "happy-dom": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

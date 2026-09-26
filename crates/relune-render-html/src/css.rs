@@ -10,7 +10,7 @@ pub(crate) fn build_css(
     theme: Theme,
     enable_group_toggles: bool,
     enable_search: bool,
-    _enable_collapse: bool,
+    enable_collapse: bool,
     enable_highlight: bool,
 ) -> String {
     let colors = get_colors(theme);
@@ -670,6 +670,51 @@ pub(crate) fn build_css(
     .edge.hidden-by-group {
       display: none !important;
     }"#
+    } else {
+        ""
+    };
+
+    let collapse_css = if enable_collapse {
+        r"
+    /* Table collapse styles */
+    .table-node .table-header,
+    .table-node .table-header-fade,
+    .table-node .table-name,
+    .table-node .table-kind,
+    .table-node .collapse-indicator {
+      cursor: pointer;
+    }
+
+    .collapse-indicator,
+    .column-count-badge {
+      fill: var(--text-color);
+      fill-opacity: 0.6;
+      font-family: var(--mono-font);
+      font-size: 11px;
+      user-select: none;
+    }
+
+    .collapse-indicator {
+      font-size: 14px;
+    }
+
+    .table-node:hover .collapse-indicator {
+      fill-opacity: 0.9;
+    }
+
+    .column-count-badge {
+      display: none;
+      font-style: italic;
+      pointer-events: none;
+    }
+
+    .table-node.collapsed .column-row {
+      display: none;
+    }
+
+    .table-node.collapsed .column-count-badge {
+      display: inline;
+    }"
     } else {
         ""
     };
@@ -1477,6 +1522,10 @@ pub(crate) fn build_css(
       cursor: pointer;
     }
 
+    .type-filter-overlay {
+      pointer-events: none;
+    }
+
     .node.dimmed-by-filter .type-filter-overlay {
       opacity: 0.34;
     }
@@ -1699,7 +1748,7 @@ pub(crate) fn build_css(
     .viewport:hover::after {{
       opacity: 0.8;
     }}
-{search_css}{filter_section_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
+{search_css}{filter_section_css}{group_panel_css}{collapse_css}{highlight_css}{viewer_shell_css}",
         bg_color = colors.background,
         color_scheme = if matches!(theme, Theme::Dark) {
             "dark"

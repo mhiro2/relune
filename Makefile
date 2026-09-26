@@ -1,4 +1,4 @@
-.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-update test-coverage test-wasm test-playground test-ci build-frontend build deny-check
+.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-html-viewer test-update test-coverage test-wasm test-playground test-ci build-frontend build deny-check
 
 .DEFAULT_GOAL := help
 
@@ -40,10 +40,13 @@ build-playground: ## Build the public WASM playground.
 	cd crates/relune-wasm && wasm-pack build --target web --release --out-dir ../../playground/dist/pkg
 	cd playground && pnpm build
 
-test: test-rust test-wasm test-playground ## Run local Rust, wasm, and playground checks.
+test: test-rust test-html-viewer test-wasm test-playground ## Run local Rust, HTML viewer, wasm, and playground checks.
 
 test-rust: ## Run workspace Rust tests.
 	cargo test --workspace
+
+test-html-viewer: ## Run HTML viewer TypeScript tests.
+	cd crates/relune-render-html && pnpm test
 
 test-update: ## Update insta snapshots and rerun workspace Rust tests.
 	INSTA_UPDATE=always cargo test --workspace
