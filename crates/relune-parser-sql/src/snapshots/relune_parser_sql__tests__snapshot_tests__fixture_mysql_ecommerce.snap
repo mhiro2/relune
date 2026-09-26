@@ -82,7 +82,7 @@ expression: snapshot_data(&output)
                 }
               }
             ],
-            "name": null
+            "name": "idx_users_email"
           },
           {
             "is_unique": false,

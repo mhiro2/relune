@@ -1725,6 +1725,38 @@ fn test_parse_mysql_prefix_key_parts_record_prefix_length() {
 }
 
 #[test]
+fn test_parse_mysql_unique_key_keeps_index_name() {
+    let sql = r"
+        CREATE TABLE `users` (
+            `id` BIGINT NOT NULL,
+            `email` VARCHAR(255) NOT NULL,
+            `handle` VARCHAR(64) NOT NULL,
+            `code` VARCHAR(16) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_users_email` (`email`),
+            CONSTRAINT `uq_users_handle` UNIQUE (`handle`)
+        ) ENGINE=InnoDB;
+        ALTER TABLE `users` ADD UNIQUE INDEX `uq_users_code` (`code`);
+    ";
+    let schema =
+        parse_sql_to_schema_with_dialect(sql, SqlDialect::Mysql).expect("parse should succeed");
+    let names: Vec<Option<&str>> = schema.tables[0]
+        .indexes
+        .iter()
+        .filter(|ix| ix.is_unique)
+        .map(|ix| ix.name.as_deref())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            Some("uq_users_email"),
+            Some("uq_users_handle"),
+            Some("uq_users_code")
+        ]
+    );
+}
+
+#[test]
 fn test_parse_mysql_functional_key_part_stays_expression() {
     use relune_core::IndexKey;
 

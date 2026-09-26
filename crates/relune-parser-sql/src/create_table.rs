@@ -11,7 +11,7 @@ use relune_core::{
 use sqlparser::ast::{
     ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GeneratedAs,
     GeneratedExpressionMode, Ident, IndexColumn, IndexConstraint, IndexOption, OrderBySort,
-    TableConstraint, Value,
+    TableConstraint, UniqueConstraint, Value,
 };
 use sqlparser::tokenizer::Token;
 
@@ -126,9 +126,7 @@ pub(crate) fn parse_create_table(
             }
             TableConstraint::Unique(unique) => {
                 if let Some(key_parts) = unique_key_parts(&unique.columns, ctx.dialect) {
-                    let constraint_name =
-                        unique.name.as_ref().map(|n| normalize_identifier(&n.value));
-                    push_unique_index(&mut indexes, constraint_name, key_parts);
+                    push_unique_index(&mut indexes, unique_index_name(unique), key_parts);
                 } else {
                     warn_expression_key(
                         ctx,
@@ -239,6 +237,19 @@ pub(crate) fn push_unique_index(
         included_columns: Vec::new(),
         method: None,
     });
+}
+
+/// Name of the index backing a UNIQUE constraint.
+///
+/// `MySQL` `UNIQUE KEY idx (col)` carries the index name separately from a
+/// `CONSTRAINT c` name; the server names the index after `idx` when given and
+/// falls back to `c`, so mirror that to match introspected index names.
+pub(crate) fn unique_index_name(unique: &UniqueConstraint) -> Option<String> {
+    unique
+        .index_name
+        .as_ref()
+        .or(unique.name.as_ref())
+        .map(|ident| normalize_identifier(&ident.value))
 }
 
 /// Case-insensitive identity of an index key list (column name or expression

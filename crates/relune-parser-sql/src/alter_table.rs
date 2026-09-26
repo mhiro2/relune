@@ -3,8 +3,8 @@
 use crate::context::{LineOffsets, ParseContext, span_from_ident, span_from_spanned};
 use crate::create_table::{
     canonicalize_data_type, column_attributes_from_options, index_from_constraint,
-    parsed_column_from_column_def, plain_column_names, push_unique_index, unique_key_parts,
-    warn_expression_key,
+    parsed_column_from_column_def, plain_column_names, push_unique_index, unique_index_name,
+    unique_key_parts, warn_expression_key,
 };
 use crate::diagnostics::truncate_unsupported_debug;
 use crate::names::{
@@ -804,11 +804,7 @@ fn apply_add_table_constraint(
         }
         TableConstraint::Unique(unique) => {
             if let Some(key_parts) = unique_key_parts(&unique.columns, ctx.dialect) {
-                let index_name = unique
-                    .name
-                    .as_ref()
-                    .map(|ident| normalize_identifier(&ident.value));
-                push_unique_index(&mut table.indexes, index_name, key_parts);
+                push_unique_index(&mut table.indexes, unique_index_name(unique), key_parts);
             } else {
                 warn_expression_key(
                     ctx,
