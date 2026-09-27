@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 
 use super::edge_routing::{
-    BYPASS_CHANNEL_LANE_STEP, MIN_LABEL_ROUTE_T, ObstacleRoutingContext, RankAxisBounds,
-    bypass_channel_candidates, bypass_channel_lane_count, channel_candidates, channel_search_plan,
-    edge_endpoint_marker_obstacles, edge_route_obstacle_spacing, label_rect,
-    obstacle_aware_channel_for_edge, parallel_label_parameter, place_label_on_route,
-    rank_axis_bounds, rect_overlaps_any, route_edges, route_edges_with_diagnostics,
-    route_obstacle_hit_count,
+    BYPASS_CHANNEL_LANE_STEP, EdgeObstacles, MIN_LABEL_ROUTE_T, NodeObstacleIndex,
+    ObstacleRoutingContext, RankAxisBounds, bypass_channel_candidates, bypass_channel_lane_count,
+    channel_candidates, channel_search_plan, edge_endpoint_marker_obstacles,
+    edge_route_obstacle_spacing, label_rect, obstacle_aware_channel_for_edge,
+    parallel_label_parameter, place_label_on_route, rank_axis_bounds, rect_overlaps_any,
+    route_edges, route_edges_with_diagnostics, route_obstacle_hit_count,
 };
 use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
@@ -2462,6 +2462,7 @@ fn test_obstacle_aware_channel_rejects_candidates_that_violate_hard_constraints(
         w: 900.0,
         h: 180.0,
     }];
+    let obstacle_index = NodeObstacleIndex::from_rects(&obstacles);
 
     let candidate = obstacle_aware_channel_for_edge(
         ObstacleRoutingContext {
@@ -2471,7 +2472,7 @@ fn test_obstacle_aware_channel_rejects_candidates_that_violate_hard_constraints(
             rank_bounds: Some(&rank_bounds),
             direction: config.direction,
             assignment: &assignment,
-            obstacles: &obstacles,
+            obstacles: EdgeObstacles::new(&obstacle_index, "users", "posts"),
             channel_usage: &BTreeMap::new(),
             style: RouteStyle::Orthogonal,
         },

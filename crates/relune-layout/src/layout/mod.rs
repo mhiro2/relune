@@ -24,6 +24,7 @@ mod groups;
 mod hierarchical;
 mod routing_debug;
 mod spacing;
+mod spatial;
 
 use edge_routing::route_edges_with_diagnostics;
 use force::apply_force_layout;

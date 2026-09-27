@@ -1,7 +1,6 @@
 //! Edge routing, parallel-edge bundling, channel selection, and label placement.
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::RangeInclusive;
+use std::collections::BTreeMap;
 
 use tracing::debug;
 
@@ -22,6 +21,7 @@ use crate::route::{
 };
 
 use super::routing_debug::{build_regular_edge_debug, channel_axis_name};
+use super::spatial::{BBox, SpatialGrid};
 use super::{
     LayoutConfig, LayoutError, PositionedEdge, PositionedEdgeRoutingDebug, PositionedNode,
 };
@@ -38,6 +38,12 @@ const BYPASS_CHANNEL_MARGIN: f32 = 24.0;
 pub(super) const BYPASS_CHANNEL_LANE_STEP: f32 = 48.0;
 /// Additional bypass lanes explored beyond the first outer lane on each side.
 const BYPASS_CHANNEL_EXTRA_LANES: usize = 3;
+
+/// Cell size of the routing spatial indexes. Large enough that a typical edge
+/// or node footprint touches only a handful of cells.
+const ROUTING_GRID_CELL_SIZE: f32 = 256.0;
+/// Margin kept between a label and the obstacles around it during initial placement.
+const LABEL_PLACEMENT_MARGIN: f32 = 4.0;
 
 /// Half-size of sampled edge-path obstacles used during label collision avoidance.
 const EDGE_ROUTE_OBSTACLE_HALF_SIZE: f32 = 7.0;
@@ -115,7 +121,7 @@ struct SingleEdgeRoutingContext<'a> {
     config: &'a LayoutConfig,
     node_ranks: Option<&'a [usize]>,
     rank_bounds: Option<&'a [RankAxisBounds]>,
-    detour_obstacles: &'a [Rect],
+    obstacles: EdgeObstacles<'a>,
 }
 
 struct SingleEdgeResult {
@@ -216,7 +222,7 @@ fn route_single_edge(
                     rank_bounds: ctx.rank_bounds,
                     direction: ctx.config.direction,
                     assignment,
-                    obstacles: ctx.detour_obstacles,
+                    obstacles: ctx.obstacles,
                     channel_usage,
                     style: ctx.config.edge_style,
                 },
@@ -305,16 +311,18 @@ fn route_single_edge(
                 (Some(&(_, _, w, h)), _) | (_, Some(&(_, _, w, h))) => Some((w, h)),
                 _ => None,
             };
+            // Detours may wander arbitrarily far from the loop, so self-loops
+            // (rare in practice) check against every node.
             detour_around_obstacles_with_endpoint_sizes(
                 &route,
-                ctx.detour_obstacles,
+                &ctx.obstacles.all(),
                 Some(AttachmentSide::East),
                 Some(AttachmentSide::East),
                 self_size,
                 self_size,
             )
         }
-        false if route_needs_detour(&route, ctx.detour_obstacles) => {
+        false if route_needs_detour(&route, ctx.obstacles) => {
             bundle_metadata = None;
             used_detour_fallback = true;
             routing_debug.detour_activation_counted = true;
@@ -341,31 +349,33 @@ fn finalize_routed_edge(
     draft: &RoutedEdgeDraft,
     source_edge: &crate::graph::LayoutEdge,
     node_positions: &BTreeMap<&str, (f32, f32, f32, f32)>,
-    positioned_nodes: &[PositionedNode],
+    node_obstacles: &NodeObstacleIndex<'_>,
     lane_index: usize,
     lane_total: usize,
-    placed_labels: &mut Vec<Rect>,
+    placed_labels: &mut PlacedLabels,
 ) -> PositionedEdge {
     let from_pos = node_positions.get(source_edge.from.as_str());
     let to_pos = node_positions.get(source_edge.to.as_str());
 
-    let mut label_obstacles: Vec<Rect> = positioned_nodes
-        .iter()
-        .filter(|node| node.id != source_edge.from && node.id != source_edge.to)
-        .map(|node| Rect {
-            x: node.x,
-            y: node.y,
-            w: node.width,
-            h: node.height,
-        })
-        .collect();
+    // Labels stay within `label_reach` of their route, so only obstacles in
+    // that region can influence placement; the order below (other nodes,
+    // endpoint markers, earlier labels, endpoint nodes) is kept stable.
+    let lhw = estimate_label_half_width(&draft.label);
+    let reach = BBox::from_points(&route_points(&draft.route))
+        .expanded(label_reach(lhw) + LABEL_PLACEMENT_MARGIN);
+    let mut label_obstacles = EdgeObstacles::new(
+        node_obstacles,
+        source_edge.from.as_str(),
+        source_edge.to.as_str(),
+    )
+    .near_bbox(&reach);
     label_obstacles.extend(edge_endpoint_marker_obstacles(
         &draft.route,
         source_edge.kind,
         source_edge.nullable,
         source_edge.target_cardinality,
     ));
-    label_obstacles.extend_from_slice(placed_labels);
+    label_obstacles.extend(placed_labels.near(&reach));
     if let Some(&(x, y, w, h)) = from_pos {
         label_obstacles.push(Rect { x, y, w, h });
     }
@@ -375,7 +385,6 @@ fn finalize_routed_edge(
         label_obstacles.push(Rect { x, y, w, h });
     }
 
-    let lhw = estimate_label_half_width(&draft.label);
     let label_pos = if lane_total > 1 && !source_edge.is_self_loop {
         let t =
             parallel_label_parameter(&source_edge.from, &source_edge.to, lane_index, lane_total);
@@ -389,8 +398,13 @@ fn finalize_routed_edge(
     } else {
         estimate_route_parameter(&draft.route, label_pos)
     };
-    let (label_x, label_y) =
-        place_label_on_route(&draft.route, preferred_t, &label_obstacles, 4.0, lhw);
+    let (label_x, label_y) = place_label_on_route(
+        &draft.route,
+        preferred_t,
+        &label_obstacles,
+        LABEL_PLACEMENT_MARGIN,
+        lhw,
+    );
     placed_labels.push(label_rect(label_x, label_y, lhw));
 
     PositionedEdge {
@@ -412,21 +426,140 @@ fn finalize_routed_edge(
     }
 }
 
-fn collect_node_obstacles(positioned_nodes: &[PositionedNode]) -> Vec<(&str, Rect)> {
-    positioned_nodes
-        .iter()
-        .map(|node| {
-            (
-                node.id.as_str(),
-                Rect {
-                    x: node.x,
-                    y: node.y,
-                    w: node.width,
-                    h: node.height,
-                },
-            )
-        })
-        .collect()
+/// Node rectangles indexed by a uniform grid, so obstacle checks along a route
+/// only visit nodes near its segments instead of every node in the graph.
+#[derive(Debug)]
+pub(super) struct NodeObstacleIndex<'a> {
+    ids: Vec<&'a str>,
+    rects: Vec<Rect>,
+    grid: SpatialGrid,
+}
+
+impl<'a> NodeObstacleIndex<'a> {
+    pub(super) fn from_nodes(nodes: &'a [PositionedNode]) -> Self {
+        Self::build(
+            nodes
+                .iter()
+                .map(|node| {
+                    (
+                        node.id.as_str(),
+                        Rect {
+                            x: node.x,
+                            y: node.y,
+                            w: node.width,
+                            h: node.height,
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Indexes anonymous obstacles that are never excluded as edge endpoints.
+    #[cfg(test)]
+    pub(super) fn from_rects(rects: &[Rect]) -> Self {
+        Self::build(rects.iter().map(|rect| ("", *rect)).collect())
+    }
+
+    fn build(entries: Vec<(&'a str, Rect)>) -> Self {
+        let mut grid = SpatialGrid::new(ROUTING_GRID_CELL_SIZE);
+        for (index, (_, rect)) in entries.iter().enumerate() {
+            grid.insert(index, &BBox::from_rect(rect));
+        }
+        let (ids, rects) = entries.into_iter().unzip();
+        Self { ids, rects, grid }
+    }
+}
+
+/// Obstacles seen by one edge: every indexed node except its endpoints.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct EdgeObstacles<'a> {
+    index: &'a NodeObstacleIndex<'a>,
+    endpoints: [&'a str; 2],
+}
+
+impl<'a> EdgeObstacles<'a> {
+    pub(super) const fn new(index: &'a NodeObstacleIndex<'a>, from: &'a str, to: &'a str) -> Self {
+        Self {
+            index,
+            endpoints: [from, to],
+        }
+    }
+
+    fn is_obstacle(&self, index: usize) -> bool {
+        let id = self.index.ids[index];
+        id.is_empty() || !self.endpoints.contains(&id)
+    }
+
+    fn collect(&self, indices: impl IntoIterator<Item = usize>) -> Vec<Rect> {
+        indices
+            .into_iter()
+            .filter(|&index| self.is_obstacle(index))
+            .map(|index| self.index.rects[index])
+            .collect()
+    }
+
+    /// Obstacles that may lie within `reach` of any route segment, in node order.
+    ///
+    /// Querying per segment keeps long orthogonal routes from pulling in every
+    /// node inside their overall bounding box.
+    fn near_route(&self, route: &EdgeRoute, reach: f32) -> Vec<Rect> {
+        let points = route_points(route);
+        let segments: Vec<BBox> = if points.len() < 2 {
+            vec![BBox::from_points(&points).expanded(reach)]
+        } else {
+            points
+                .windows(2)
+                .map(|segment| BBox::from_points(segment).expanded(reach))
+                .collect()
+        };
+        self.collect(self.index.grid.query_many_sorted(&segments))
+    }
+
+    /// Obstacles that may intersect `bbox`, in node order.
+    fn near_bbox(&self, bbox: &BBox) -> Vec<Rect> {
+        self.collect(self.index.grid.query_sorted(bbox))
+    }
+
+    /// Every obstacle, in node order.
+    fn all(&self) -> Vec<Rect> {
+        self.collect(0..self.index.rects.len())
+    }
+}
+
+/// Labels placed so far, indexed for neighbourhood queries.
+struct PlacedLabels {
+    rects: Vec<Rect>,
+    grid: SpatialGrid,
+}
+
+impl PlacedLabels {
+    fn new() -> Self {
+        Self {
+            rects: Vec::new(),
+            grid: SpatialGrid::new(ROUTING_GRID_CELL_SIZE),
+        }
+    }
+
+    fn push(&mut self, rect: Rect) {
+        self.grid.insert(self.rects.len(), &BBox::from_rect(&rect));
+        self.rects.push(rect);
+    }
+
+    /// Placed labels that may intersect `bbox`, in placement order.
+    fn near(&self, bbox: &BBox) -> impl Iterator<Item = Rect> + '_ {
+        self.grid
+            .query_sorted(bbox)
+            .into_iter()
+            .map(|index| self.rects[index])
+    }
+}
+
+/// Distance from its route beyond which a label can never reach: candidate
+/// centres lie on the route, nudging moves them up to the fallback offset along
+/// the normal, and the label rect spans its half extents around the centre.
+fn label_reach(label_half_w: f32) -> f32 {
+    LABEL_ROUTE_FALLBACK_MAX_OFFSET.max(label_half_w) + label_half_w + LABEL_HALF_H
 }
 
 pub(super) fn route_edges_with_diagnostics(
@@ -449,8 +582,7 @@ pub(super) fn route_edges_with_diagnostics(
 
     let mut routed_edges = vec![None; graph.edges.len()];
 
-    let node_obstacles = collect_node_obstacles(positioned_nodes);
-    let mut detour_obstacles: Vec<Rect> = Vec::with_capacity(node_obstacles.len());
+    let node_obstacles = NodeObstacleIndex::from_nodes(positioned_nodes);
 
     for &edge_index in &routing_order {
         let edge = &graph.edges[edge_index];
@@ -466,22 +598,12 @@ pub(super) fn route_edges_with_diagnostics(
             });
         };
 
-        detour_obstacles.clear();
-        let from_id = edge.from.as_str();
-        let to_id = edge.to.as_str();
-        detour_obstacles.extend(
-            node_obstacles
-                .iter()
-                .filter(|(id, _)| *id != from_id && *id != to_id)
-                .map(|(_, rect)| *rect),
-        );
-
         let ctx = SingleEdgeRoutingContext {
             graph,
             config,
             node_ranks,
             rank_bounds: rank_bounds.as_deref(),
-            detour_obstacles: &detour_obstacles,
+            obstacles: EdgeObstacles::new(&node_obstacles, edge.from.as_str(), edge.to.as_str()),
         };
         let result = route_single_edge(
             &ctx,
@@ -520,7 +642,7 @@ pub(super) fn route_edges_with_diagnostics(
     apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph);
 
     let mut edges = vec![None; graph.edges.len()];
-    let mut placed_labels: Vec<Rect> = Vec::new();
+    let mut placed_labels = PlacedLabels::new();
 
     for &edge_index in &routing_order {
         let Some(draft) = routed_edges[edge_index].as_ref() else {
@@ -535,7 +657,7 @@ pub(super) fn route_edges_with_diagnostics(
             draft,
             source_edge,
             &node_positions,
-            positioned_nodes,
+            &node_obstacles,
             lane_index,
             lane_total,
             &mut placed_labels,
@@ -892,7 +1014,7 @@ pub(super) struct ObstacleRoutingContext<'a> {
     pub(super) rank_bounds: Option<&'a [RankAxisBounds]>,
     pub(super) direction: LayoutDirection,
     pub(super) assignment: &'a RegularPortAssignment,
-    pub(super) obstacles: &'a [Rect],
+    pub(super) obstacles: EdgeObstacles<'a>,
     pub(super) channel_usage: &'a BTreeMap<(ChannelAxis, i32), u32>,
     pub(super) style: RouteStyle,
 }
@@ -1316,7 +1438,7 @@ fn node_rank_for_edge_endpoint(
 #[allow(clippy::too_many_arguments)] // Channel scoring stays clearer with explicit ranking and routing inputs.
 fn score_channel_candidate(
     route: &EdgeRoute,
-    obstacles: &[Rect],
+    obstacles: EdgeObstacles<'_>,
     direction: LayoutDirection,
     source_rank: usize,
     target_rank: usize,
@@ -1325,13 +1447,16 @@ fn score_channel_candidate(
     candidate: ObstacleAwareChannelCandidate,
     channel_usage: &BTreeMap<(ChannelAxis, i32), u32>,
 ) -> ChannelCandidateScore {
-    let hard_constraint_violations = clipped_u16(route_obstacle_hit_count(route, obstacles, 0.0))
+    // Obstacles farther than the clearance target neither intersect the route
+    // nor add a clearance penalty, so only nearby nodes are scored.
+    let obstacles = obstacles.near_route(route, ROUTE_CLEARANCE_TARGET);
+    let hard_constraint_violations = clipped_u16(route_obstacle_hit_count(route, &obstacles, 0.0))
         + route_primary_direction_violations(route, direction, source_rank, target_rank)
         + endpoint_side_violations(route, source_side, target_side);
 
     ChannelCandidateScore {
         hard_constraint_violations,
-        clearance_penalty: route_clearance_penalty(route, obstacles, ROUTE_CLEARANCE_TARGET),
+        clearance_penalty: route_clearance_penalty(route, &obstacles, ROUTE_CLEARANCE_TARGET),
         total_length: rounded_metric(approximate_route_length(route)),
         bend_count: clipped_u16(route.control_points.len()),
         center_deviation: rounded_metric((candidate.coordinate - candidate.baseline).abs()),
@@ -1382,8 +1507,9 @@ const fn primary_axis_value(point: (f32, f32), direction: LayoutDirection) -> f3
     }
 }
 
-fn route_needs_detour(route: &EdgeRoute, obstacles: &[Rect]) -> bool {
-    route_obstacle_hit_count(route, obstacles, ROUTE_CLEARANCE_TARGET) > 0
+fn route_needs_detour(route: &EdgeRoute, obstacles: EdgeObstacles<'_>) -> bool {
+    let nearby = obstacles.near_route(route, ROUTE_CLEARANCE_TARGET);
+    route_obstacle_hit_count(route, &nearby, ROUTE_CLEARANCE_TARGET) > 0
 }
 
 pub(super) fn route_obstacle_hit_count(
@@ -1852,113 +1978,6 @@ fn estimate_route_parameter(route: &EdgeRoute, point: (f32, f32)) -> f32 {
     best_t
 }
 
-/// Axis-aligned bounding box used to drive the obstacle spatial index.
-#[derive(Clone, Copy)]
-struct BBox {
-    min_x: f32,
-    min_y: f32,
-    max_x: f32,
-    max_y: f32,
-}
-
-impl BBox {
-    const EMPTY: Self = Self {
-        min_x: f32::MAX,
-        min_y: f32::MAX,
-        max_x: f32::MIN,
-        max_y: f32::MIN,
-    };
-
-    fn from_points(points: &[(f32, f32)]) -> Self {
-        let mut bbox = Self::EMPTY;
-        for &(x, y) in points {
-            bbox.min_x = bbox.min_x.min(x);
-            bbox.min_y = bbox.min_y.min(y);
-            bbox.max_x = bbox.max_x.max(x);
-            bbox.max_y = bbox.max_y.max(y);
-        }
-        bbox
-    }
-
-    fn include_rect(&mut self, rect: &Rect) {
-        self.min_x = self.min_x.min(rect.x);
-        self.min_y = self.min_y.min(rect.y);
-        self.max_x = self.max_x.max(rect.x + rect.w);
-        self.max_y = self.max_y.max(rect.y + rect.h);
-    }
-
-    fn expanded(self, margin: f32) -> Self {
-        Self {
-            min_x: self.min_x - margin,
-            min_y: self.min_y - margin,
-            max_x: self.max_x + margin,
-            max_y: self.max_y + margin,
-        }
-    }
-}
-
-/// Uniform-grid spatial index mapping cells to the indices of items whose
-/// bounding box covers them. Mirrors the `compute_repulsion_with_grid` approach
-/// in `force.rs`: it lets label relaxation consider only spatially-nearby
-/// obstacles instead of every other edge, turning the previous O(E²) sweep into
-/// roughly O(E) for locally-clustered graphs.
-struct ObstacleGrid {
-    inv_cell: f32,
-    cells: HashMap<(i32, i32), Vec<usize>>,
-}
-
-impl ObstacleGrid {
-    /// Cell size for the obstacle index. Large enough that a typical edge or
-    /// node footprint touches only a handful of cells.
-    const CELL_SIZE: f32 = 256.0;
-
-    fn new() -> Self {
-        Self {
-            inv_cell: 1.0 / Self::CELL_SIZE,
-            cells: HashMap::new(),
-        }
-    }
-
-    #[allow(clippy::cast_possible_truncation)] // Layout coordinates stay well within i32 cell indices.
-    fn cell_range(&self, bbox: &BBox) -> (RangeInclusive<i32>, RangeInclusive<i32>) {
-        let cell = |value: f32| (value * self.inv_cell).floor() as i32;
-        (
-            cell(bbox.min_x)..=cell(bbox.max_x),
-            cell(bbox.min_y)..=cell(bbox.max_y),
-        )
-    }
-
-    fn insert(&mut self, index: usize, bbox: &BBox) {
-        if bbox.min_x > bbox.max_x {
-            return;
-        }
-        let (x_cells, y_cells) = self.cell_range(bbox);
-        for x in x_cells {
-            for y in y_cells.clone() {
-                self.cells.entry((x, y)).or_default().push(index);
-            }
-        }
-    }
-
-    /// Returns the indices of all items whose footprint may intersect `bbox`,
-    /// sorted ascending and de-duplicated so callers can preserve the original
-    /// obstacle iteration order (and therefore identical floating-point results).
-    fn query_sorted(&self, bbox: &BBox) -> Vec<usize> {
-        let (x_cells, y_cells) = self.cell_range(bbox);
-        let mut indices = Vec::new();
-        for x in x_cells {
-            for y in y_cells.clone() {
-                if let Some(items) = self.cells.get(&(x, y)) {
-                    indices.extend_from_slice(items);
-                }
-            }
-        }
-        indices.sort_unstable();
-        indices.dedup();
-        indices
-    }
-}
-
 #[allow(clippy::too_many_lines)] // Obstacle setup plus the relaxation loop read most clearly together.
 fn resolve_edge_label_collisions(
     edges: &mut [PositionedEdge],
@@ -2010,11 +2029,9 @@ fn resolve_edge_label_collisions(
     // the rect spans the label half extents. Any obstacle outside the route
     // bbox grown by this reach can never overlap (and contributes exactly zero
     // to the overlap-area sum), so excluding it leaves the result unchanged.
-    let label_reach: Vec<f32> = (0..edges.len())
-        .map(|index| {
-            let half_w = label_half_widths[index];
-            LABEL_ROUTE_FALLBACK_MAX_OFFSET.max(half_w) + half_w + LABEL_HALF_H
-        })
+    let label_reach: Vec<f32> = label_half_widths
+        .iter()
+        .map(|&half_w| label_reach(half_w))
         .collect();
     let route_bboxes: Vec<BBox> = edges
         .iter()
@@ -2023,7 +2040,7 @@ fn resolve_edge_label_collisions(
 
     // Footprint covering every obstacle an edge contributes (route samples,
     // endpoint markers, and its reachable label), used to populate the index.
-    let mut edge_grid = ObstacleGrid::new();
+    let mut edge_grid = SpatialGrid::new(ROUTING_GRID_CELL_SIZE);
     for index in 0..edges.len() {
         let mut footprint = route_bboxes[index].expanded(label_reach[index]);
         for rect in &route_obstacles[index] {
@@ -2034,11 +2051,9 @@ fn resolve_edge_label_collisions(
         }
         edge_grid.insert(index, &footprint);
     }
-    let mut node_grid = ObstacleGrid::new();
+    let mut node_grid = SpatialGrid::new(ROUTING_GRID_CELL_SIZE);
     for (index, node) in node_obstacles.iter().enumerate() {
-        let mut bbox = BBox::EMPTY;
-        bbox.include_rect(node);
-        node_grid.insert(index, &bbox);
+        node_grid.insert(index, &BBox::from_rect(node));
     }
 
     for _ in 0..EDGE_LABEL_RELAXATION_PASSES {
@@ -2074,6 +2089,9 @@ fn resolve_edge_label_collisions(
                 obstacles.extend_from_slice(&route_obstacles[other_index]);
                 obstacles.extend_from_slice(&endpoint_marker_obstacles[other_index]);
             }
+            // Nearby edges contribute every sample along their whole route;
+            // samples outside the reachable region can never overlap a label.
+            obstacles.retain(|obstacle| query.intersects_rect(obstacle));
 
             let current_t = estimate_route_parameter(
                 &edges[index].route,
