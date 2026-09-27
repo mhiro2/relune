@@ -180,6 +180,8 @@ Supported paths into a `Schema`:
 
 `relune-app` selects the adapter from the request (CLI or WASM DTO). Parsing is **pure text**; introspection uses **read-only** metadata queries. PostgreSQL/MySQL/MariaDB introspection applies a default 30 second per-statement deadline, and remote TCP connections default to verifying TLS (PostgreSQL `verify-full`, MySQL/MariaDB `verify-identity`) — set `sslmode=require` / `ssl-mode=required` in the URL to keep encryption while accepting self-signed clusters. Connection acquisition (including the initial TCP/TLS connect) is bounded by a 30 second acquire timeout, and the entire catalog fetch is bounded by an overall introspection deadline (default 600 seconds, overridable with `RELUNE_DB_INTROSPECTION_TIMEOUT_SECS`) so backends without an enforceable per-statement deadline — SQLite, or MySQL servers that cannot set a session timeout — still complete in bounded time. Native file-backed SQL and schema JSON inputs are size-limited before reading.
 
+Property tests feed arbitrary text, keyword soup, and mutated DDL to the parser in every dialect, and generated schema JSON documents to import, lint, diff, and review: none may panic, and every schema the parser produces must survive the schema JSON round trip unchanged.
+
 ---
 
 ## 7. Output adapters
@@ -231,7 +233,14 @@ Phases: build layout graph → grouping/focus → layout algorithm → coordinat
 
 Fixture-level routing regressions are audited in
 `crates/relune-app/tests/fixture_render_audit.rs`, which snapshots `layout-json`
-and rendered outputs across the main SQL fixtures.
+and rendered outputs across the main SQL fixtures. A property test lays out
+generated schemas (self references, cycles, parallel foreign keys, schemas and
+prefixes) in every direction, algorithm, edge style, and grouping, and requires
+finite coordinates, non-overlapping nodes, edge endpoints on node borders
+(self-loops aside), content inside the canvas, and identical output across runs. `crates/relune-layout/tests/large_schemas.rs`
+checks finite coordinates, non-overlapping nodes, and canvas containment on
+generated 500–2000 table schemas in release mode (`make test-large`, a separate
+CI job), and `make bench` times those layouts.
 
 **Overlay** (`overlay` module) — A `DiagramOverlay` attaches annotations (lint warnings, diff status, etc.) to nodes and edges by stable ID, without modifying the positioned graph itself. Renderers accept an optional overlay and apply visual cues (badges, border colors, tooltips) when present. When no overlay is provided the diagram renders normally.
 
