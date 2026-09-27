@@ -43,12 +43,25 @@ describe('computeNeighborHighlights', () => {
 
   it('walks further hops while keeping direction sets to direct neighbours', () => {
     const result = computeNeighborHighlights('users', state, 2);
-    expect([...result.neighborIds].toSorted()).toEqual(['comments', 'post_tags', 'posts', 'users']);
+    // The cycle back through posts -> users does not make users its own neighbour.
+    expect([...result.neighborIds].toSorted()).toEqual(['comments', 'post_tags', 'posts']);
     expect([...result.inboundNodeIds].toSorted()).toEqual(['comments', 'posts']);
     expect(result.outboundNodeIds.size).toBe(0);
     // post_tags -> tags is three hops away from users.
     expect(result.connectedEdgeIndices.has(4)).toBe(false);
     expect([...result.connectedEdgeIndices].toSorted((a, b) => a - b)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('keeps self-references out of the neighbour sets but highlights their edge', () => {
+    const selfRef = createHighlightState(tables, [
+      edge('users', 'users', { name: 'users_manager_fk' }),
+      edge('posts', 'users'),
+    ]);
+    const result = computeNeighborHighlights('users', selfRef);
+    expect([...result.neighborIds]).toEqual(['posts']);
+    expect([...result.inboundNodeIds]).toEqual(['posts']);
+    expect(result.outboundNodeIds.size).toBe(0);
+    expect([...result.connectedEdgeIndices].toSorted((a, b) => a - b)).toEqual([0, 1]);
   });
 
   it('returns an empty neighbourhood for isolated or unknown nodes', () => {

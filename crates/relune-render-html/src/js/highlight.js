@@ -32,6 +32,9 @@
       }
       frontier = nextFrontier;
     }
+    neighborIds.delete(nodeId);
+    inboundNodeIds.delete(nodeId);
+    outboundNodeIds.delete(nodeId);
     const connectedEdgeIndices = /* @__PURE__ */ new Set();
     state.edges.forEach((edge, index) => {
       if (traversedEdgeKeys.has(edgeKey(edge))) {

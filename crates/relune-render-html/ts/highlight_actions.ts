@@ -57,6 +57,11 @@ function collectNeighborhood(
     frontier = nextFrontier;
   }
 
+  // Cycles and self-references lead back to the root; it is not its own neighbor.
+  neighborIds.delete(nodeId);
+  inboundNodeIds.delete(nodeId);
+  outboundNodeIds.delete(nodeId);
+
   // Only highlight edges that were actually traversed
   const connectedEdgeIndices = new Set<number>();
   state.edges.forEach((edge, index) => {
