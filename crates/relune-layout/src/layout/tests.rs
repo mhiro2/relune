@@ -16,6 +16,7 @@ use super::force::{
 };
 use super::spacing::{
     COLUMN_FONT_SIZE, build_positioned_node, estimate_node_height, estimate_text_width,
+    fit_canvas_to_content,
 };
 use super::*;
 use crate::channel::ChannelCandidateClass;
@@ -3746,4 +3747,20 @@ fn hierarchical_layout_aligns_a_chain_of_different_widths() {
             );
         }
     }
+}
+
+#[test]
+fn canvas_fits_group_labels_wider_than_their_group() {
+    let mut groups = vec![PositionedGroup {
+        id: "schema_0".to_string(),
+        label: "an_extraordinarily_long_schema_name_for_a_tiny_group".to_string(),
+        x: 10.0,
+        y: 10.0,
+        width: 120.0,
+        height: 80.0,
+    }];
+    let (width, _) = fit_canvas_to_content(140.0, 100.0, &mut [], &mut [], &mut groups);
+
+    let label_width = estimate_text_width(&groups[0].label, 11.0);
+    assert!(width >= groups[0].x + 12.0 + label_width);
 }

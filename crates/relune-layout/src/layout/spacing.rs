@@ -170,6 +170,11 @@ pub(super) fn mirror_positioned_nodes_for_direction(
 const CANVAS_MARKER_PAD: f32 = 24.0;
 /// Room kept around edge labels.
 const CANVAS_LABEL_PAD: f32 = 4.0;
+/// Group label geometry used by renderers: inset from the group's left edge,
+/// font size, and letter spacing (0.12em).
+const GROUP_LABEL_INSET: f32 = 12.0;
+const GROUP_LABEL_FONT_SIZE: f32 = 11.0;
+const GROUP_LABEL_LETTER_SPACING: f32 = GROUP_LABEL_FONT_SIZE * 0.12;
 
 /// Fits the canvas to everything that is drawn: nodes, groups, edge routes
 /// (bypass lanes, self-loops and markers) and edge labels.
@@ -200,6 +205,18 @@ pub(super) fn fit_canvas_to_content(
             y: group.y,
             w: group.width,
             h: group.height,
+        });
+        // Group labels are not clipped to their container.
+        #[allow(clippy::cast_precision_loss)] // Label lengths are small.
+        let label_width = (group.label.chars().count() as f32).mul_add(
+            GROUP_LABEL_LETTER_SPACING,
+            estimate_text_width(&group.label, GROUP_LABEL_FONT_SIZE),
+        );
+        bounds.include_rect(&Rect {
+            x: group.x,
+            y: group.y,
+            w: GROUP_LABEL_INSET + label_width + CANVAS_LABEL_PAD,
+            h: 0.0,
         });
     }
     for edge in edges.iter() {
