@@ -19,5 +19,9 @@ unicode-width.workspace = true
 insta.workspace = true
 proptest = "1.6"
 
+[[bench]]
+name = "layout_scale"
+harness = false
+
 [lints]
 workspace = true
