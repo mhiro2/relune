@@ -412,16 +412,16 @@ impl LayoutGraphBuilder {
         let (mut nodes, mut edges, diagnostics) =
             self.build_nodes_and_edges(&filtered_tables, &filtered_views, &filtered_enums);
 
-        // Step 3: Compute relationship counts
-        self.compute_relationship_counts(&mut nodes, &edges);
-
-        // Step 4: Mark join table candidates
+        // Step 3: Mark join table candidates
         self.mark_join_table_candidates(&mut nodes, &edges);
 
-        // Step 5: Collapse join tables if requested
+        // Step 4: Collapse join tables if requested
         if self.request.collapse_join_tables {
             self.do_collapse_join_tables(&mut nodes, &mut edges);
         }
+
+        // Step 5: Compute relationship counts on the final edge set
+        self.compute_relationship_counts(&mut nodes, &edges);
 
         // Step 6: Build groups
         let groups = self.build_groups(&nodes);
@@ -830,117 +830,91 @@ impl LayoutGraphBuilder {
 
     /// Collapse join tables, removing them from the graph and creating
     /// direct edges between the tables they connect.
-    #[allow(clippy::similar_names)]
+    ///
+    /// Only self-contained binary join tables are collapsed: their sole edges
+    /// must be two foreign keys to two distinct tables. A candidate that is
+    /// referenced by another table or view, has a self-reference, or carries
+    /// extra foreign keys stays visible, because hiding it would silently drop
+    /// those relationships.
     #[allow(clippy::unused_self)]
     fn do_collapse_join_tables(&self, nodes: &mut Vec<LayoutNode>, edges: &mut Vec<LayoutEdge>) {
         use tracing::debug;
 
-        // Find all binary join table candidates we can safely collapse.
-        let join_table_ids: BTreeSet<String> = nodes
+        let mut incident: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (idx, edge) in edges.iter().enumerate() {
+            incident.entry(edge.from.as_str()).or_default().push(idx);
+            if edge.to != edge.from {
+                incident.entry(edge.to.as_str()).or_default().push(idx);
+            }
+        }
+
+        // (join table index, first FK edge index, second FK edge index)
+        let collapsible: Vec<(usize, usize, usize)> = nodes
             .iter()
-            .filter(|n| n.kind == NodeKind::Table && n.is_join_table_candidate)
-            .filter(|node| {
-                let target_tables: BTreeSet<&str> = edges
-                    .iter()
-                    .filter(|edge| {
-                        edge.from == node.id
-                            && !edge.is_self_loop
-                            && edge.kind == EdgeKind::ForeignKey
-                    })
-                    .map(|edge| edge.to.as_str())
-                    .collect();
-                target_tables.len() == 2
+            .enumerate()
+            .filter(|(_, node)| node.kind == NodeKind::Table && node.is_join_table_candidate)
+            .filter_map(|(node_idx, node)| {
+                let edge_indices = incident.get(node.id.as_str())?;
+                let [first, second] = edge_indices.as_slice() else {
+                    debug!(join_table = %node.id, "Join table has extra relationships; keeping it");
+                    return None;
+                };
+                let is_outbound_fk = |edge: &LayoutEdge| {
+                    edge.from == node.id && !edge.is_self_loop && edge.kind == EdgeKind::ForeignKey
+                };
+                let (edge_a, edge_b) = (&edges[*first], &edges[*second]);
+                (is_outbound_fk(edge_a) && is_outbound_fk(edge_b) && edge_a.to != edge_b.to)
+                    .then_some((node_idx, *first, *second))
             })
-            .map(|n| n.id.clone())
             .collect();
 
-        if join_table_ids.is_empty() {
+        if collapsible.is_empty() {
             debug!("No join table candidates to collapse");
             return;
         }
 
-        debug!("Collapsing {} join table candidates", join_table_ids.len());
+        debug!("Collapsing {} join tables", collapsible.len());
 
-        // For each join table, find the two tables it connects and create a direct edge
-        let mut new_edges: Vec<LayoutEdge> = Vec::new();
-        let mut edges_to_remove: BTreeSet<usize> = BTreeSet::new();
-
-        for join_table_id in &join_table_ids {
-            // Find edges from this join table to other tables
-            let outgoing_edges: Vec<(usize, &LayoutEdge)> = edges
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| {
-                    &e.from == join_table_id && !e.is_self_loop && e.kind == EdgeKind::ForeignKey
-                })
-                .collect();
-
-            // A join table should have exactly 2 outgoing edges
-            if outgoing_edges.len() != 2 {
-                debug!(
-                    "Join table {} has {} outgoing edges, skipping",
-                    join_table_id,
-                    outgoing_edges.len()
-                );
-                continue;
-            }
-
-            let (idx_a, edge1) = outgoing_edges[0];
-            let (idx_b, edge2) = outgoing_edges[1];
-
-            // Find the join table node to get its label
-            let join_table_label = nodes
-                .iter()
-                .find(|n| &n.id == join_table_id)
-                .map_or_else(|| join_table_id.clone(), |n| n.label.clone());
-
-            // Create a new edge connecting the two tables directly
-            // The edge goes from edge1.to to edge2.to (both targets of the join table's FKs)
-            let collapsed_edge = LayoutEdge {
-                from: edge1.to.clone(),
-                to: edge2.to.clone(),
-                name: Some(format!("m2m:{join_table_label}")),
-                from_columns: edge1.to_columns.clone(),
-                to_columns: edge2.to_columns.clone(),
+        let mut removed_nodes: BTreeSet<usize> = BTreeSet::new();
+        let mut removed_edges: BTreeSet<usize> = BTreeSet::new();
+        let mut collapsed_edges: Vec<LayoutEdge> = Vec::with_capacity(collapsible.len());
+        for (node_idx, idx_a, idx_b) in collapsible {
+            let join_table = &nodes[node_idx];
+            let (edge_a, edge_b) = (&edges[idx_a], &edges[idx_b]);
+            collapsed_edges.push(LayoutEdge {
+                from: edge_a.to.clone(),
+                to: edge_b.to.clone(),
+                name: Some(format!("m2m:{}", join_table.label)),
+                from_columns: edge_a.to_columns.clone(),
+                to_columns: edge_b.to_columns.clone(),
                 kind: EdgeKind::ForeignKey,
-                is_self_loop: edge1.to == edge2.to,
-                nullable: edge1.nullable && edge2.nullable,
+                is_self_loop: false,
+                nullable: edge_a.nullable && edge_b.nullable,
                 target_cardinality: Cardinality::Many,
                 is_collapsed_join: true,
                 collapsed_join_table: Some(CollapsedJoinTable {
-                    table_id: join_table_id.clone(),
-                    table_label: join_table_label,
+                    table_id: join_table.id.clone(),
+                    table_label: join_table.label.clone(),
                 }),
-            };
-
-            new_edges.push(collapsed_edge);
-            edges_to_remove.insert(idx_a);
-            edges_to_remove.insert(idx_b);
-
-            // Also mark any incoming edges to the join table for removal
-            for (idx, edge) in edges.iter().enumerate() {
-                if &edge.to == join_table_id {
-                    edges_to_remove.insert(idx);
-                }
-            }
+            });
+            removed_nodes.insert(node_idx);
+            removed_edges.insert(idx_a);
+            removed_edges.insert(idx_b);
         }
 
-        // Remove the collapsed join table nodes
-        nodes.retain(|n| !join_table_ids.contains(&n.id));
-
-        // Remove edges that were replaced or connected to collapsed tables
-        // and add the new collapsed edges
-        let mut retained_edges: Vec<LayoutEdge> = Vec::new();
-        for (idx, edge) in edges.drain(..).enumerate() {
-            if !edges_to_remove.contains(&idx) {
-                // Also skip edges that connect to/from collapsed tables
-                if !join_table_ids.contains(&edge.from) && !join_table_ids.contains(&edge.to) {
-                    retained_edges.push(edge);
-                }
-            }
-        }
-        retained_edges.extend(new_edges);
-        *edges = retained_edges;
+        let mut node_idx = 0;
+        nodes.retain(|_| {
+            let keep = !removed_nodes.contains(&node_idx);
+            node_idx += 1;
+            keep
+        });
+        let mut edge_idx = 0;
+        edges.retain(|_| {
+            let keep = !removed_edges.contains(&edge_idx);
+            edge_idx += 1;
+            keep
+        });
+        edges.extend(collapsed_edges);
 
         debug!(
             "After collapse: {} nodes, {} edges",
@@ -2725,6 +2699,92 @@ mod collapse_tests {
 
         // Label should indicate many-to-many
         assert!(edge.name.as_ref().unwrap().starts_with("m2m:"));
+    }
+
+    fn assert_edges_reference_nodes(graph: &LayoutGraph) {
+        for edge in &graph.edges {
+            assert!(
+                graph.node_index.contains_key(&edge.from)
+                    && graph.node_index.contains_key(&edge.to),
+                "edge {} -> {} references a missing node",
+                edge.from,
+                edge.to
+            );
+        }
+    }
+
+    fn add_join_table_fk(schema: &mut Schema, column: &str, to_table: &str) {
+        let join_table = schema
+            .tables
+            .iter_mut()
+            .find(|table| table.stable_id == "user_roles")
+            .unwrap();
+        let mut fk_column = join_table.columns[0].clone();
+        fk_column.id = ColumnId(100);
+        fk_column.name = column.to_string();
+        join_table.columns.push(fk_column);
+        let mut fk = join_table.foreign_keys[0].clone();
+        fk.name = Some(format!("fk_user_roles_{column}"));
+        fk.from_columns = vec![column.to_string()];
+        fk.to_table = to_table.to_string();
+        join_table.foreign_keys.push(fk);
+    }
+
+    #[test]
+    fn test_collapse_keeps_join_table_referenced_by_other_tables() {
+        let mut schema = make_many_to_many_schema();
+        let mut audit_logs = schema.tables[0].clone();
+        audit_logs.id = TableId(10);
+        audit_logs.stable_id = "audit_logs".to_string();
+        audit_logs.name = "audit_logs".to_string();
+        audit_logs.foreign_keys = vec![ForeignKey {
+            name: Some("fk_audit_logs_user_roles".to_string()),
+            from_columns: vec!["id".to_string()],
+            to_schema: None,
+            to_table: "user_roles".to_string(),
+            to_columns: vec!["user_id".to_string()],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+        }];
+        schema.tables.push(audit_logs);
+
+        let graph = LayoutGraphBuilder::new()
+            .collapse_join_tables(true)
+            .build(&schema);
+
+        assert!(graph.nodes.iter().any(|node| node.id == "user_roles"));
+        assert_eq!(graph.edges.len(), 3);
+        assert!(graph.edges.iter().all(|edge| !edge.is_collapsed_join));
+        assert_edges_reference_nodes(&graph);
+    }
+
+    #[test]
+    fn test_collapse_keeps_join_table_with_extra_foreign_keys() {
+        let mut schema = make_many_to_many_schema();
+        add_join_table_fk(&mut schema, "granted_by", "users");
+
+        let graph = LayoutGraphBuilder::new()
+            .collapse_join_tables(true)
+            .build(&schema);
+
+        let user_roles = graph.nodes.iter().find(|node| node.id == "user_roles");
+        assert!(user_roles.is_some_and(|node| node.is_join_table_candidate));
+        assert_eq!(graph.edges.len(), 3);
+        assert!(graph.edges.iter().all(|edge| !edge.is_collapsed_join));
+        assert_edges_reference_nodes(&graph);
+    }
+
+    #[test]
+    fn test_collapse_updates_relationship_counts() {
+        let graph = LayoutGraphBuilder::new()
+            .collapse_join_tables(true)
+            .build(&make_many_to_many_schema());
+
+        let users = graph.nodes.iter().find(|node| node.id == "users").unwrap();
+        let roles = graph.nodes.iter().find(|node| node.id == "roles").unwrap();
+        assert_eq!((users.inbound_count, users.outbound_count), (0, 1));
+        assert_eq!((roles.inbound_count, roles.outbound_count), (1, 0));
+        assert_edges_reference_nodes(&graph);
     }
 
     #[test]
