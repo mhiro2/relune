@@ -9,7 +9,7 @@ use crate::create_table::{
 use crate::diagnostics::truncate_unsupported_debug;
 use crate::names::{
     build_foreign_key, normalized_stable_id, normalized_stable_id_for_object_name_with_diagnostics,
-    split_object_name_with_diagnostics,
+    split_named_object_with_diagnostics,
 };
 use relune_core::{
     Column, ColumnId, Diagnostic, ForeignKey, IndexKey, Table, diagnostic::codes,
@@ -386,13 +386,15 @@ fn apply_single_alter_operation(
                 sqlparser::ast::RenameTableNameKind::As(name)
                 | sqlparser::ast::RenameTableNameKind::To(name) => name,
             };
-            let (new_schema_raw, new_name_raw) = split_object_name_with_diagnostics(
+            let Some((new_schema_raw, new_name_raw)) = split_named_object_with_diagnostics(
                 ctx,
                 input,
                 offsets,
                 renamed_target,
                 "ALTER TABLE RENAME TO",
-            );
+            ) else {
+                return;
+            };
             let new_schema = new_schema_raw
                 .map(|schema_name| normalize_identifier(&schema_name))
                 .or_else(|| old_schema.clone());
@@ -401,7 +403,7 @@ fn apply_single_alter_operation(
             if renamed_stable_id != old_stable && table_map.contains_key(&renamed_stable_id) {
                 ctx.diagnostics.push(
                     Diagnostic::error(
-                        codes::schema_duplicate_table(),
+                        codes::schema_duplicate_object(),
                         format!(
                             "ALTER TABLE RENAME TO: cannot rename `{old_stable}` to \
                              `{renamed_stable_id}` because that table already exists. \

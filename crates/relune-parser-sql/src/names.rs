@@ -53,6 +53,32 @@ pub(crate) fn split_object_name_with_diagnostics(
     split_object_name(name)
 }
 
+/// Like [`split_object_name_with_diagnostics`], but rejects an empty object
+/// name (e.g. `CREATE TABLE ""`). The schema model identifies objects by name,
+/// so such a statement is skipped with a warning instead of producing an
+/// object that cannot be exported and imported again.
+pub(crate) fn split_named_object_with_diagnostics(
+    ctx: &mut ParseContext,
+    input: &str,
+    offsets: &LineOffsets,
+    name: &ObjectName,
+    context: &str,
+) -> Option<(Option<String>, String)> {
+    let (schema_name, object_name) =
+        split_object_name_with_diagnostics(ctx, input, offsets, name, context);
+    if object_name.is_empty() {
+        ctx.diagnostics.push(
+            Diagnostic::warning(
+                codes::parse_unsupported(),
+                format!("{context}: empty object names are not supported. This statement will be skipped."),
+            )
+            .with_span_opt(span_from_spanned(input, offsets, name)),
+        );
+        return None;
+    }
+    Some((schema_name, object_name))
+}
+
 pub(crate) fn normalized_stable_id_for_object_name_with_diagnostics(
     ctx: &mut ParseContext,
     input: &str,

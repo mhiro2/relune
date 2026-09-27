@@ -25,7 +25,7 @@ mod query_columns;
 mod recovery;
 mod view;
 
-use relune_core::{Diagnostic, Schema, Severity, SqlDialect};
+use relune_core::{Diagnostic, Enum, Schema, Severity, SqlDialect, View};
 use sqlparser::ast::{Spanned, Statement, UserDefinedTypeRepresentation};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -153,8 +153,8 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
 
     // Build schema in source order so ALTER TABLE is visible to later CREATE INDEX / COMMENT.
     let mut tables = Vec::new();
-    let mut enums = Vec::new();
-    let mut views = Vec::new();
+    let mut enums: Vec<Enum> = Vec::new();
+    let mut views: Vec<View> = Vec::new();
     let mut table_map: HashMap<String, usize> = HashMap::new();
 
     for statement in &statements {
@@ -163,7 +163,8 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 if let Some(table) = parse_create_table(&mut ctx, input, &offsets, create) {
                     let stable_id = table.stable_id.clone();
                     if ctx.seen_tables.contains(&stable_id) {
-                        ctx.warn_duplicate_table(
+                        ctx.warn_duplicate_object(
+                            "table",
                             &stable_id,
                             source_span_from_sql_span(input, &offsets, create.span()),
                         );
@@ -180,8 +181,19 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                 representation,
             } => {
                 if let Some(UserDefinedTypeRepresentation::Enum { labels }) = representation {
-                    let enum_def = parse_create_type_enum(&mut ctx, input, &offsets, name, labels);
-                    enums.push(enum_def);
+                    if let Some(enum_def) =
+                        parse_create_type_enum(&mut ctx, input, &offsets, name, labels)
+                    {
+                        if enums.iter().any(|existing| existing.id == enum_def.id) {
+                            ctx.warn_duplicate_object(
+                                "enum",
+                                &enum_def.id,
+                                source_span_from_sql_span(input, &offsets, statement.span()),
+                            );
+                        } else {
+                            enums.push(enum_def);
+                        }
+                    }
                 } else {
                     ctx.warn_unsupported(
                         "CREATE TYPE (non-enum)",
@@ -225,7 +237,17 @@ pub fn parse_sql_to_schema_with_diagnostics_and_dialect(
                     &create_view.columns,
                     &create_view.query,
                 ) {
-                    views.push(view);
+                    // `CREATE OR REPLACE VIEW` redefines an existing view in
+                    // place; a plain repeated `CREATE VIEW` keeps the first.
+                    match views.iter().position(|existing| existing.id == view.id) {
+                        Some(index) if create_view.or_replace => views[index] = view,
+                        Some(_) => ctx.warn_duplicate_object(
+                            "view",
+                            &view.id,
+                            source_span_from_sql_span(input, &offsets, statement.span()),
+                        ),
+                        None => views.push(view),
+                    }
                 }
             }
             Statement::AlterTable(alter_table) => {
