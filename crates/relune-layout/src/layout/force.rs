@@ -1,6 +1,7 @@
 //! Force-directed layout, repulsion, overlap resolution, and group packing.
 
 use relune_core::LayoutDirection;
+use tracing::debug;
 
 use crate::graph::LayoutGraph;
 
@@ -8,6 +9,7 @@ use super::hierarchical::{HierarchicalPlacement, assign_coordinates};
 use super::spacing::{
     build_positioned_node, compute_graph_bounds, mirror_positioned_nodes_for_direction,
 };
+use super::spatial::{BBox, SpatialGrid};
 use super::{
     GROUP_PADDING, GROUP_TOP_PADDING, LayoutConfig, LayoutError, NodeSize, PositionedNode,
 };
@@ -86,14 +88,40 @@ fn apply_repulsion_pair(
     forces[j].1 -= fy;
 }
 
+/// Median of the larger side of every node, used to size spatial-grid cells.
+///
+/// Sizing cells from the median instead of the largest node keeps one very
+/// tall table from collapsing every other node into a handful of cells.
+fn typical_node_span(node_sizes: &[NodeSize]) -> f32 {
+    let mut spans: Vec<f32> = node_sizes
+        .iter()
+        .map(|size| size.width.max(size.height))
+        .collect();
+    if spans.is_empty() {
+        return 0.0;
+    }
+    let middle = spans.len() / 2;
+    *spans.select_nth_unstable_by(middle, f32::total_cmp).1
+}
+
+/// Node rectangle (top-left anchored) grown by `right_bottom` on the right and
+/// bottom and by `all_sides` on every side.
+fn node_bbox(position: (f32, f32), size: NodeSize, right_bottom: f32, all_sides: f32) -> BBox {
+    BBox {
+        min_x: position.0,
+        min_y: position.1,
+        max_x: position.0 + size.width + right_bottom,
+        max_y: position.1 + size.height + right_bottom,
+    }
+    .expanded(all_sides)
+}
+
 /// Compute repulsive forces using a uniform spatial grid.
 ///
-/// Nodes are binned into grid cells. Repulsion is only computed between nodes
-/// in the same cell or in adjacent cells, giving O(V) amortised cost when
-/// the graph is spread out (each cell contains O(1) nodes on average).
-#[allow(clippy::cast_precision_loss)]
-#[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::cast_sign_loss)]
+/// Every node is registered in each cell its rectangle, grown by half a cell,
+/// covers; repulsion is only computed between nodes sharing a cell. Cells are
+/// sized from the typical node, so the cost stays near O(V) for spread-out
+/// graphs even when a few tables are much larger than the rest.
 fn compute_repulsion_with_grid(
     positions: &[(f32, f32)],
     node_sizes: &[NodeSize],
@@ -103,60 +131,21 @@ fn compute_repulsion_with_grid(
     min_distance: f32,
     forces: &mut [(f32, f32)],
 ) {
-    use std::collections::HashMap;
-
-    let n = positions.len();
-    if n == 0 {
+    if positions.is_empty() {
         return;
     }
 
-    // Choose cell size based on the effective interaction range.
-    // Repulsion falls off as 1/d^2, so beyond a few multiples of the
-    // typical node spacing the force is negligible.
-    let max_span = node_sizes
-        .iter()
-        .map(|s| s.width.max(s.height))
-        .fold(0.0_f32, f32::max);
-    let cell_size = (config.horizontal_spacing + max_span).max(1.0);
-    let inv_cell = 1.0 / cell_size;
-
-    // Build grid: map (cell_x, cell_y) → list of node indices
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    for (idx, &(px, py)) in positions.iter().enumerate() {
-        let cx = (px * inv_cell).floor() as i32;
-        let cy = (py * inv_cell).floor() as i32;
-        grid.entry((cx, cy)).or_default().push(idx);
+    // Repulsion falls off as 1/d^2, so beyond a few multiples of the typical
+    // node spacing the force is negligible.
+    let cell_size = (config.horizontal_spacing + typical_node_span(node_sizes)).max(1.0);
+    let mut grid = SpatialGrid::new(cell_size);
+    for (idx, (&position, &size)) in positions.iter().zip(node_sizes).enumerate() {
+        grid.insert(idx, &node_bbox(position, size, 0.0, cell_size * 0.5));
     }
 
-    // For each cell, compute repulsion within the cell and with 4 neighbours
-    // (right, below, below-right, below-left) to avoid double-counting.
-    let neighbour_offsets: [(i32, i32); 4] = [(1, 0), (0, 1), (1, 1), (-1, 1)];
-
-    // Collect candidate pairs first, then apply repulsion in a sorted order so
-    // the per-pair traversal is deterministic regardless of `HashMap` iteration
-    // order. Without sorting, floating-point non-associativity would make the
-    // accumulated force values depend on the random `HashMap` seed once the
-    // graph crosses the spatial-grid threshold.
-    let mut pairs: Vec<(usize, usize)> = Vec::new();
-    for (&(cx, cy), cell_nodes) in &grid {
-        for (a, &i) in cell_nodes.iter().enumerate() {
-            for &j in &cell_nodes[a + 1..] {
-                pairs.push((i.min(j), i.max(j)));
-            }
-        }
-        for &(dx, dy) in &neighbour_offsets {
-            if let Some(neighbour_nodes) = grid.get(&(cx + dx, cy + dy)) {
-                for &i in cell_nodes {
-                    for &j in neighbour_nodes {
-                        pairs.push((i.min(j), i.max(j)));
-                    }
-                }
-            }
-        }
-    }
-
-    pairs.sort_unstable();
-
+    // Pairs come back sorted, so the per-pair traversal (and therefore the
+    // floating-point accumulation order) is deterministic.
+    let pairs = grid.cell_pairs();
     for &(i, j) in &pairs {
         apply_repulsion_pair(
             i,
@@ -331,18 +320,19 @@ pub(super) fn apply_force_layout(
 
     // Post-simulation overlap resolution: iteratively push apart any
     // remaining overlapping node pairs.
-    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    let mut legalized = false;
+    legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
 
     // Compact: pull connected nodes closer to remove excess space introduced
     // by the overlap resolution cascade.
-    compact_toward_neighbours(&mut positions, node_sizes, &edges, config);
+    legalized |= compact_toward_neighbours(&mut positions, node_sizes, &edges, config);
 
     // Preserve a visible corridor between connected nodes so short orthogonal
     // routes do not collapse into barely-visible edge stubs.
     enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
 
     // Re-resolve any overlaps introduced while widening connected node gaps.
-    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
 
     // Grouped force-directed layouts need an explicit packing pass so schema
     // containers do not overlap and cover each other's label bands. Packing
@@ -352,18 +342,18 @@ pub(super) fn apply_force_layout(
     // Group packing can tighten connected pairs again, especially in
     // left-to-right layouts where ungrouped nodes share the same column.
     enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
-    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
     separate_force_groups(graph, &mut positions, node_sizes, &primary_targets);
 
     // Last group pack only moves along the secondary axis; restore FK corridor
     // gaps so edge backbones (especially first/last orthogonal legs) stay long
     // enough for markers after packing.
     enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
-    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
     restore_force_primary_axis_positions(&mut positions, &primary_targets);
-    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
     enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
-    resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
 
     if matches!(
         config.direction,
@@ -375,7 +365,11 @@ pub(super) fn apply_force_layout(
         // Clearance was enforced in canonical TB simulation space; swapping axes
         // can leave the former vertical gap as the on-screen horizontal gap.
         enforce_force_edge_clearance(&mut positions, node_sizes, &edges);
-        resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+        legalized |= resolve_force_overlaps(&mut positions, node_sizes, config.node_padding);
+    }
+
+    if legalized {
+        debug!("Force-directed overlap resolution did not converge; legalized remaining overlaps");
     }
 
     // Calculate bounding box and shift to positive coordinates
@@ -533,79 +527,32 @@ fn edge_target_distance(a: NodeSize, b: NodeSize, dx: f32, dy: f32, config: &Lay
 /// pair along the axis of minimum penetration. Candidate pairs are pruned
 /// with a uniform spatial grid so the per-pass cost scales with the number
 /// of actually-nearby nodes rather than `N(N-1)/2`.
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::similar_names
-)]
+///
+/// If overlaps survive the pass budget, a deterministic sweep legalizes the
+/// remaining nodes. Returns whether that fallback was needed.
 pub(super) fn resolve_force_overlaps(
     positions: &mut [(f32, f32)],
     node_sizes: &[NodeSize],
     padding: f32,
-) {
-    use std::collections::HashMap;
+) -> bool {
+    const MAX_PASSES: usize = 80;
 
-    let n = positions.len();
-    if n <= 1 {
-        return;
+    if positions.len() <= 1 {
+        return false;
     }
-    let max_passes = 80;
 
-    // Pick a cell size large enough that any two padded AABBs which actually
-    // overlap fall into the same cell or into adjacent cells. Two rectangles
-    // with widths `W_a`, `W_b` and `padding` margin overlap on the X axis only
-    // when `|x_a - x_b| <= max(W_a, W_b) + padding`, so taking
-    // `cell_size = max(W, H) + padding` bounds the cell distance to <= 1.
-    let max_span = node_sizes
-        .iter()
-        .map(|s| s.width.max(s.height))
-        .fold(0.0_f32, f32::max);
-    let cell_size = (max_span + padding).max(1.0);
-    let inv_cell = 1.0 / cell_size;
+    // Each node is registered with its padded extent, matching the overlap
+    // test below, so every overlapping pair shares at least one cell.
+    let mut grid = SpatialGrid::new(typical_node_span(node_sizes) + padding);
 
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    let mut candidates: Vec<(usize, usize)> = Vec::new();
-    // Forward neighbours only: each cross-cell pair is reported exactly once
-    // because reverse offsets are not in this list.
-    let neighbour_offsets: [(i32, i32); 4] = [(1, 0), (0, 1), (1, 1), (-1, 1)];
-
-    for _ in 0..max_passes {
+    for _ in 0..MAX_PASSES {
         grid.clear();
-        candidates.clear();
-
-        // Bin nodes by the cell containing their top-left corner.
-        for (i, &(px, py)) in positions.iter().enumerate() {
-            let cx = (px * inv_cell).floor() as i32;
-            let cy = (py * inv_cell).floor() as i32;
-            grid.entry((cx, cy)).or_default().push(i);
+        for (i, (&position, &size)) in positions.iter().zip(node_sizes).enumerate() {
+            grid.insert(i, &node_bbox(position, size, padding, 0.0));
         }
-
-        // Collect candidate pairs from same-cell and forward-neighbour cells.
-        for (&(cx, cy), cell_nodes) in &grid {
-            for (a, &i) in cell_nodes.iter().enumerate() {
-                for &j in &cell_nodes[a + 1..] {
-                    candidates.push((i.min(j), i.max(j)));
-                }
-            }
-            for &(dx, dy) in &neighbour_offsets {
-                if let Some(neighbour_nodes) = grid.get(&(cx + dx, cy + dy)) {
-                    for &i in cell_nodes {
-                        for &j in neighbour_nodes {
-                            candidates.push((i.min(j), i.max(j)));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sort so the per-pair traversal order is deterministic regardless of
-        // `HashMap` iteration order. Forward-only neighbour walks already make
-        // each pair appear at most once, so no dedup pass is needed.
-        candidates.sort_unstable();
 
         let mut moved = false;
-        for &(i, j) in &candidates {
+        for (i, j) in grid.cell_pairs() {
             let dx = positions[j].0 - positions[i].0;
             let dy = positions[j].1 - positions[i].1;
 
@@ -623,12 +570,12 @@ pub(super) fn resolve_force_overlaps(
             if overlap_x > 0.0 && overlap_y > 0.0 {
                 // Push apart along the axis of least overlap.
                 if overlap_x < overlap_y {
-                    let push = overlap_x * 0.5 + 0.5;
+                    let push = overlap_x.mul_add(0.5, 0.5);
                     let sign = if dx >= 0.0 { 1.0_f32 } else { -1.0 };
                     positions[i].0 -= push * sign;
                     positions[j].0 += push * sign;
                 } else {
-                    let push = overlap_y * 0.5 + 0.5;
+                    let push = overlap_y.mul_add(0.5, 0.5);
                     let sign = if dy >= 0.0 { 1.0_f32 } else { -1.0 };
                     positions[i].1 -= push * sign;
                     positions[j].1 += push * sign;
@@ -637,9 +584,59 @@ pub(super) fn resolve_force_overlaps(
             }
         }
         if !moved {
-            break;
+            return false;
         }
     }
+
+    legalize_overlaps(positions, node_sizes, padding)
+}
+
+/// Removes any remaining overlaps by sweeping nodes in secondary-axis order
+/// and pushing each one past the already placed nodes it still overlaps.
+///
+/// Nodes only ever move toward larger x, so the sweep terminates and leaves
+/// every padded rectangle disjoint. Returns whether any node moved.
+fn legalize_overlaps(positions: &mut [(f32, f32)], node_sizes: &[NodeSize], padding: f32) -> bool {
+    let overlaps = |a: usize, b: usize, positions: &[(f32, f32)]| {
+        positions[a].0 < positions[b].0 + node_sizes[b].width + padding
+            && positions[b].0 < positions[a].0 + node_sizes[a].width + padding
+            && positions[a].1 < positions[b].1 + node_sizes[b].height + padding
+            && positions[b].1 < positions[a].1 + node_sizes[a].height + padding
+    };
+
+    let mut order: Vec<usize> = (0..positions.len()).collect();
+    order.sort_by(|&a, &b| {
+        positions[a]
+            .0
+            .total_cmp(&positions[b].0)
+            .then(positions[a].1.total_cmp(&positions[b].1))
+            .then(a.cmp(&b))
+    });
+
+    let mut placed = SpatialGrid::new(typical_node_span(node_sizes) + padding);
+    let mut moved = false;
+    for node in order {
+        loop {
+            let blocker_edge = placed
+                .query_sorted(&node_bbox(positions[node], node_sizes[node], padding, 0.0))
+                .into_iter()
+                .filter(|&other| overlaps(node, other, positions))
+                .map(|other| positions[other].0 + node_sizes[other].width + padding)
+                .fold(None, |edge: Option<f32>, value| {
+                    Some(edge.map_or(value, |edge| edge.max(value)))
+                });
+            let Some(edge) = blocker_edge else {
+                break;
+            };
+            positions[node].0 = edge;
+            moved = true;
+        }
+        placed.insert(
+            node,
+            &node_bbox(positions[node], node_sizes[node], padding, 0.0),
+        );
+    }
+    moved
 }
 
 /// Pull connected nodes closer after overlap resolution.
@@ -647,16 +644,17 @@ pub(super) fn resolve_force_overlaps(
 /// The overlap cascade can push nodes far from their neighbours. This pass
 /// moves each node toward the centroid of its connected neighbours, then
 /// re-runs overlap resolution to guarantee no new overlaps are introduced.
+/// Returns whether overlap legalization was needed.
 #[allow(clippy::cast_precision_loss)]
 fn compact_toward_neighbours(
     positions: &mut [(f32, f32)],
     node_sizes: &[NodeSize],
     edges: &[(usize, usize)],
     config: &LayoutConfig,
-) {
+) -> bool {
     let n = positions.len();
     if n <= 1 || edges.is_empty() {
-        return;
+        return false;
     }
 
     // Build adjacency: for each node, collect its neighbours.
@@ -666,6 +664,7 @@ fn compact_toward_neighbours(
         adj[b].push(a);
     }
 
+    let mut legalized = false;
     let step = 0.25_f32; // fraction of the gap to close per pass
     let passes = 15;
     // Minimum centre-to-centre distance to preserve between connected nodes
@@ -723,8 +722,9 @@ fn compact_toward_neighbours(
         }
 
         // Re-resolve any overlaps introduced by compaction.
-        resolve_force_overlaps(positions, node_sizes, config.node_padding);
+        legalized |= resolve_force_overlaps(positions, node_sizes, config.node_padding);
     }
+    legalized
 }
 
 /// Axis-aligned separation between two node rectangles (`x`, `y`, `width`, `height`).

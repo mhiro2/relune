@@ -1695,6 +1695,70 @@ fn test_resolve_force_overlaps_grid_handles_many_nodes() {
     }
 }
 
+fn assert_no_padded_overlaps(positions: &[(f32, f32)], node_sizes: &[NodeSize], padding: f32) {
+    for i in 0..positions.len() {
+        for j in (i + 1)..positions.len() {
+            let (xi, yi) = positions[i];
+            let (xj, yj) = positions[j];
+            let overlap_x = xi < xj + node_sizes[j].width + padding - 0.01
+                && xj < xi + node_sizes[i].width + padding - 0.01;
+            let overlap_y = yi < yj + node_sizes[j].height + padding - 0.01
+                && yj < yi + node_sizes[i].height + padding - 0.01;
+            assert!(
+                !(overlap_x && overlap_y),
+                "nodes {i} and {j} still overlap: {:?} {:?}",
+                positions[i],
+                positions[j]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_resolve_force_overlaps_handles_one_oversized_node() {
+    // One very tall table must not coarsen the grid for everything else.
+    let mut positions = vec![(0.0_f32, 0.0_f32)];
+    let mut node_sizes = vec![NodeSize {
+        width: 240.0,
+        height: 6000.0,
+    }];
+    for index in 0..200_u16 {
+        let offset = f32::from(index);
+        positions.push((offset * 37.0 % 900.0, offset * 29.0));
+        node_sizes.push(NodeSize {
+            width: 160.0,
+            height: 90.0,
+        });
+    }
+
+    resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
+
+    assert_no_padded_overlaps(&positions, &node_sizes, 8.0);
+}
+
+#[test]
+fn test_resolve_force_overlaps_legalizes_stacked_nodes() {
+    // Identical, perfectly stacked nodes cannot be separated by the
+    // symmetric pairwise push alone within the pass budget.
+    let mut positions = vec![(100.0_f32, 100.0_f32); 40];
+    let node_sizes = vec![
+        NodeSize {
+            width: 160.0,
+            height: 90.0,
+        };
+        40
+    ];
+
+    resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
+
+    assert_no_padded_overlaps(&positions, &node_sizes, 8.0);
+    assert!(
+        positions
+            .iter()
+            .all(|(x, y)| x.is_finite() && y.is_finite())
+    );
+}
+
 #[test]
 fn test_single_node_force_directed() {
     let schema = make_single_table_schema();

@@ -100,6 +100,10 @@ impl SpatialGrid {
         )
     }
 
+    pub(super) fn clear(&mut self) {
+        self.cells.clear();
+    }
+
     pub(super) fn insert(&mut self, index: usize, bbox: &BBox) {
         if bbox.is_empty() {
             return;
@@ -145,6 +149,24 @@ impl SpatialGrid {
         indices.dedup();
         indices
     }
+
+    /// Returns every pair of items that share at least one cell, as
+    /// `(smaller, larger)` index pairs sorted ascending without duplicates.
+    pub(super) fn cell_pairs(&self) -> Vec<(usize, usize)> {
+        let mut pairs = Vec::new();
+        for items in self.cells.values() {
+            for (offset, &left) in items.iter().enumerate() {
+                for &right in &items[offset + 1..] {
+                    if left != right {
+                        pairs.push((left.min(right), left.max(right)));
+                    }
+                }
+            }
+        }
+        pairs.sort_unstable();
+        pairs.dedup();
+        pairs
+    }
 }
 
 #[cfg(test)]
@@ -153,6 +175,16 @@ mod tests {
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect { x, y, w, h }
+    }
+
+    #[test]
+    fn oversized_item_only_pairs_with_items_it_touches() {
+        let mut grid = SpatialGrid::new(100.0);
+        grid.insert(0, &BBox::from_rect(&rect(0.0, 0.0, 1000.0, 50.0)));
+        grid.insert(1, &BBox::from_rect(&rect(900.0, 10.0, 40.0, 40.0)));
+        grid.insert(2, &BBox::from_rect(&rect(0.0, 500.0, 40.0, 40.0)));
+
+        assert_eq!(grid.cell_pairs(), vec![(0, 1)]);
     }
 
     #[test]
