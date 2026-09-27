@@ -2788,6 +2788,45 @@ fn test_channel_search_plan_treats_child_to_parent_edges_as_regular_flow() {
 }
 
 #[test]
+fn test_bypass_channel_candidates_clear_nodes_between_endpoints() {
+    let source_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 80.0,
+    };
+    let target_rect = Rect {
+        x: 0.0,
+        y: 420.0,
+        w: 100.0,
+        h: 80.0,
+    };
+    let between = Rect {
+        x: -40.0,
+        y: 200.0,
+        w: 220.0,
+        h: 80.0,
+    };
+    let elsewhere = Rect {
+        x: 600.0,
+        y: 200.0,
+        w: 100.0,
+        h: 80.0,
+    };
+
+    let candidates = bypass_channel_candidates(
+        LayoutDirection::TopToBottom,
+        source_rect,
+        target_rect,
+        &[between, elsewhere],
+        0,
+    );
+
+    assert!((candidates[0].baseline - (180.0 + 24.0)).abs() < f32::EPSILON);
+    assert!((candidates[1].baseline - (-40.0 - 24.0)).abs() < f32::EPSILON);
+}
+
+#[test]
 fn test_bypass_channel_candidates_expand_symmetrically_per_lane() {
     let source_rect = Rect {
         x: 0.0,
@@ -2802,8 +2841,13 @@ fn test_bypass_channel_candidates_expand_symmetrically_per_lane() {
         h: 80.0,
     };
 
-    let candidates =
-        bypass_channel_candidates(LayoutDirection::TopToBottom, source_rect, target_rect, 7);
+    let candidates = bypass_channel_candidates(
+        LayoutDirection::TopToBottom,
+        source_rect,
+        target_rect,
+        &[],
+        7,
+    );
 
     assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
     for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {

@@ -1052,10 +1052,14 @@ pub(super) fn obstacle_aware_channel_for_edge(
     let mut candidates = channel_candidates(search_plan, source_rank, target_rank, rank_bounds);
     if search_plan.class != ChannelCandidateClass::SameRank {
         let start_order = u32::try_from(candidates.len()).unwrap_or(u32::MAX);
+        let mut span = BBox::from_rect(&source_rect);
+        span.include_rect(&target_rect);
+        let blockers = context.obstacles.near_bbox(&span);
         candidates.extend(bypass_channel_candidates(
             context.direction,
             source_rect,
             target_rect,
+            &blockers,
             start_order,
         ));
     }
@@ -1191,37 +1195,48 @@ pub(super) fn channel_candidates(
     candidates
 }
 
+/// Candidates in the outer corridors on both sides of an edge.
+///
+/// The first lane on each side starts outside the endpoints and any `blockers`
+/// that overlap the rectangle spanned by them, so a lane never runs through
+/// (or hugs) a node sitting between the endpoints.
 pub(super) fn bypass_channel_candidates(
     direction: LayoutDirection,
     source_rect: Rect,
     target_rect: Rect,
+    blockers: &[Rect],
     start_order: u32,
 ) -> Vec<ObstacleAwareChannelCandidate> {
     let mut candidates = Vec::with_capacity(bypass_channel_lane_count().saturating_mul(2));
+    let mut span = BBox::from_rect(&source_rect);
+    span.include_rect(&target_rect);
+    let mut corridor = span;
+    for blocker in blockers {
+        let overlaps_span = blocker.x < span.max_x
+            && blocker.x + blocker.w > span.min_x
+            && blocker.y < span.max_y
+            && blocker.y + blocker.h > span.min_y;
+        if overlaps_span {
+            corridor.include_rect(blocker);
+        }
+    }
 
     match direction {
         LayoutDirection::TopToBottom | LayoutDirection::BottomToTop => {
-            let right_baseline = (source_rect.x + source_rect.w).max(target_rect.x + target_rect.w)
-                + BYPASS_CHANNEL_MARGIN;
-            let left_baseline = source_rect.x.min(target_rect.x) - BYPASS_CHANNEL_MARGIN;
             append_bypass_candidates(
                 &mut candidates,
                 ChannelAxis::X,
-                right_baseline,
-                left_baseline,
+                corridor.max_x + BYPASS_CHANNEL_MARGIN,
+                corridor.min_x - BYPASS_CHANNEL_MARGIN,
                 start_order,
             );
         }
         LayoutDirection::LeftToRight | LayoutDirection::RightToLeft => {
-            let bottom_baseline = (source_rect.y + source_rect.h)
-                .max(target_rect.y + target_rect.h)
-                + BYPASS_CHANNEL_MARGIN;
-            let top_baseline = source_rect.y.min(target_rect.y) - BYPASS_CHANNEL_MARGIN;
             append_bypass_candidates(
                 &mut candidates,
                 ChannelAxis::Y,
-                bottom_baseline,
-                top_baseline,
+                corridor.max_y + BYPASS_CHANNEL_MARGIN,
+                corridor.min_y - BYPASS_CHANNEL_MARGIN,
                 start_order,
             );
         }

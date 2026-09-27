@@ -499,11 +499,11 @@ expression: snapshot
             ],
             [
               1715.0,
-              1135.66796875
+              841.6680297851563
             ],
             [
               940.0,
-              1135.66796875
+              841.6680297851563
             ],
             [
               940.0,
@@ -520,12 +520,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_id",
-          "label_x": 1315.0,
-          "label_y": 1135.66796875,
+          "label_x": 1688.8900146484375,
+          "label_y": 877.6589965820313,
           "nullable": false,
           "route_label_position": [
-            1315.0,
-            1135.66796875
+            1333.0,
+            841.6680297851563
           ],
           "source_side": "west",
           "start": [
@@ -651,8 +651,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 1186.0,
-          "label_y": 845.6680297851563,
+          "label_x": 940.0,
+          "label_y": 775.6680297851563,
           "nullable": false,
           "route_label_position": [
             1186.0,
@@ -1145,11 +1145,11 @@ expression: snapshot
             ],
             [
               2290.0,
-              1401.66796875
+              1407.66796875
             ],
             [
               940.0,
-              1401.66796875
+              1407.66796875
             ],
             [
               940.0,
@@ -1167,11 +1167,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tag_id",
           "label_x": 1923.0,
-          "label_y": 1401.66796875,
+          "label_y": 1407.66796875,
           "nullable": false,
           "route_label_position": [
             1923.0,
-            1401.66796875
+            1407.66796875
           ],
           "source_side": "west",
           "start": [
@@ -2548,11 +2548,11 @@ expression: snapshot
             ],
             [
               1715.0,
-              1135.66796875
+              841.6680297851563
             ],
             [
               940.0,
-              1135.66796875
+              841.6680297851563
             ],
             [
               940.0,
@@ -2569,12 +2569,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "integration_id",
-          "label_x": 1315.0,
-          "label_y": 1135.66796875,
+          "label_x": 1688.8900146484375,
+          "label_y": 877.6589965820313,
           "nullable": false,
           "route_label_position": [
-            1315.0,
-            1135.66796875
+            1333.0,
+            841.6680297851563
           ],
           "source_side": "west",
           "start": [
@@ -2700,8 +2700,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 1186.0,
-          "label_y": 845.6680297851563,
+          "label_x": 940.0,
+          "label_y": 775.6680297851563,
           "nullable": false,
           "route_label_position": [
             1186.0,
@@ -3194,11 +3194,11 @@ expression: snapshot
             ],
             [
               2290.0,
-              1401.66796875
+              1407.66796875
             ],
             [
               940.0,
-              1401.66796875
+              1407.66796875
             ],
             [
               940.0,
@@ -3216,11 +3216,11 @@ expression: snapshot
           "is_self_loop": false,
           "label": "tag_id",
           "label_x": 1923.0,
-          "label_y": 1401.66796875,
+          "label_y": 1407.66796875,
           "nullable": false,
           "route_label_position": [
             1923.0,
-            1401.66796875
+            1407.66796875
           ],
           "source_side": "west",
           "start": [
