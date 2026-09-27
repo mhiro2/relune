@@ -267,7 +267,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     if ((metadata?.groups?.length ?? 0) > 0) {
       modules.push('groups');
     }
-    if (document.getElementById('canvas')?.querySelector('svg') !== null) {
+    if (document.getElementById('canvas')?.querySelector('svg') != null) {
       modules.push('collapse');
     }
     if (document.getElementById('minimap-shell') !== null) {

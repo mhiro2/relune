@@ -202,6 +202,17 @@ describe('restoring state from the URL hash', () => {
     expect(mocks.setHidden).toHaveBeenCalledWith(true, { silent: true });
   });
 
+  it('only waits for the modules the page provides', async () => {
+    const { state } = installRuntime();
+    document.getElementById('canvas')?.remove();
+    for (const module of ALL_MODULES.filter((m) => m !== 'collapse')) {
+      markViewerModuleReady(module);
+    }
+    history.replaceState(null, '', '/diagram.html#t=public.users');
+    await loadUrlState();
+    expect(state.selected).toBe('public.users');
+  });
+
   it('rejects pans far outside the diagram', async () => {
     const { mocks } = installRuntime();
     markAllReady();
