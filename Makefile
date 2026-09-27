@@ -3,6 +3,8 @@
 .DEFAULT_GOAL := help
 
 WASM_TARGET := wasm32-unknown-unknown
+# Size budget for the optimized playground WASM binary: 4 MiB (4 * 1024 * 1024 bytes).
+WASM_SIZE_LIMIT := 4194304
 
 help: ## Show available make targets.
 	@printf 'Usage: make <target>\n\n'
@@ -38,6 +40,10 @@ check-generated-html-js: ## Verify committed HTML viewer bundles match TypeScrip
 
 build-playground: ## Build the public WASM playground.
 	cd crates/relune-wasm && wasm-pack build --target web --profile wasm-release --out-dir ../../playground/dist/pkg
+	@size=$$(wc -c < playground/dist/pkg/relune_wasm_bg.wasm | tr -d ' '); \
+	if [ "$$size" -gt $(WASM_SIZE_LIMIT) ]; then \
+		echo "relune_wasm_bg.wasm is $$size bytes, over the $(WASM_SIZE_LIMIT) byte limit" >&2; exit 1; \
+	fi
 	cd playground && pnpm build
 
 test: test-rust test-html-viewer test-wasm test-playground ## Run local Rust, HTML viewer, wasm, and playground checks.
