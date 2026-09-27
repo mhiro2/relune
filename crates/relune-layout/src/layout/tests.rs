@@ -3431,3 +3431,90 @@ fn layout_is_deterministic_across_repeated_runs() {
         }
     }
 }
+
+fn assert_drawing_within_canvas(graph: &PositionedGraph, context: &str) {
+    let inside = |x: f32, y: f32| x >= 0.0 && y >= 0.0 && x <= graph.width && y <= graph.height;
+    for node in &graph.nodes {
+        assert!(
+            inside(node.x, node.y) && inside(node.x + node.width, node.y + node.height),
+            "{context}: node {} leaves the canvas",
+            node.id
+        );
+    }
+    for group in &graph.groups {
+        assert!(
+            inside(group.x, group.y) && inside(group.x + group.width, group.y + group.height),
+            "{context}: group {} leaves the canvas",
+            group.id
+        );
+    }
+    for edge in &graph.edges {
+        for (x, y) in route_points(&edge.route) {
+            assert!(
+                inside(x, y),
+                "{context}: route of {} -> {} leaves the canvas at ({x}, {y})",
+                edge.from,
+                edge.to
+            );
+        }
+        let half_w = estimate_label_half_width(&edge.label);
+        assert!(
+            inside(edge.label_x - half_w, edge.label_y - LABEL_HALF_H)
+                && inside(edge.label_x + half_w, edge.label_y + LABEL_HALF_H),
+            "{context}: label of {} -> {} leaves the canvas",
+            edge.from,
+            edge.to
+        );
+    }
+}
+
+fn with_self_loop(mut schema: Schema) -> Schema {
+    let table = &mut schema.tables[0];
+    table.foreign_keys.push(ForeignKey {
+        name: Some("fk_self_parent".to_string()),
+        from_columns: vec![table.columns[0].name.clone()],
+        to_schema: None,
+        to_table: table.name.clone(),
+        to_columns: vec![table.columns[0].name.clone()],
+        on_delete: ReferentialAction::NoAction,
+        on_update: ReferentialAction::NoAction,
+    });
+    schema
+}
+
+#[test]
+fn layout_keeps_routes_and_labels_inside_the_canvas() {
+    let schemas = [
+        ("test", with_self_loop(make_test_schema())),
+        ("cycle", with_self_loop(make_fully_connected_cycle_schema())),
+        ("variable", with_self_loop(make_variable_width_schema())),
+        ("multi_schema", make_multi_schema_for_grouping()),
+    ];
+    let small_origin = LayoutConfig {
+        origin_x: 4.0,
+        origin_y: 4.0,
+        ..LayoutConfig::default()
+    };
+    for (name, schema) in &schemas {
+        for mode in [
+            LayoutAlgorithm::Hierarchical,
+            LayoutAlgorithm::ForceDirected,
+        ] {
+            for direction in [
+                LayoutDirection::TopToBottom,
+                LayoutDirection::BottomToTop,
+                LayoutDirection::LeftToRight,
+                LayoutDirection::RightToLeft,
+            ] {
+                let config = LayoutConfig {
+                    direction,
+                    mode,
+                    ..small_origin.clone()
+                };
+                let graph = build_layout_with_config(schema, &LayoutRequest::default(), &config)
+                    .expect("layout succeeds");
+                assert_drawing_within_canvas(&graph, &format!("{name} {mode:?} {direction:?}"));
+            }
+        }
+    }
+}

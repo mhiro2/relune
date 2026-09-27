@@ -655,7 +655,7 @@ expression: snapshot
         "edge_count": 12,
         "height": 976.0,
         "node_count": 12,
-        "width": 2057.60009765625
+        "width": 2137.0
       }
     },
     "orthogonal": {
@@ -1307,7 +1307,7 @@ expression: snapshot
         "edge_count": 12,
         "height": 976.0,
         "node_count": 12,
-        "width": 2057.60009765625
+        "width": 2137.0
       }
     },
     "straight": {
@@ -1871,7 +1871,7 @@ expression: snapshot
         "edge_count": 12,
         "height": 976.0,
         "node_count": 12,
-        "width": 2057.60009765625
+        "width": 2137.0
       }
     }
   }

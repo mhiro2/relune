@@ -30,7 +30,7 @@ use edge_routing::route_edges_with_diagnostics;
 use force::apply_force_layout;
 use groups::position_groups;
 use hierarchical::{HierarchicalPlacement, assign_coordinates};
-use spacing::{expand_bounds_for_edges, measure_node_sizes};
+use spacing::{fit_canvas_to_content, measure_node_sizes};
 
 /// Default number of iterations for force-directed layout.
 const fn default_force_iterations() -> usize {
@@ -688,10 +688,18 @@ pub fn build_layout_from_graph_with_config(
     )?;
 
     // Step 5: Position groups
-    let positioned_groups = position_groups(&graph.groups, &positioned_nodes);
+    let mut positioned_groups = position_groups(&graph.groups, &positioned_nodes);
 
-    // Expand canvas bounds so self-loop curves are not clipped.
-    let (width, height) = expand_bounds_for_edges(width, height, &positioned_edges);
+    // Fit the canvas to routes and labels so nothing is clipped.
+    let mut positioned_nodes = positioned_nodes;
+    let mut positioned_edges = positioned_edges;
+    let (width, height) = fit_canvas_to_content(
+        width,
+        height,
+        &mut positioned_nodes,
+        &mut positioned_edges,
+        &mut positioned_groups,
+    );
 
     info!("Layout complete: {}x{} pixels", width, height);
 

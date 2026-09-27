@@ -8,7 +8,7 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
     "edge_count": 3,
     "height": 704.0,
     "node_count": 3,
-    "width": 445.0
+    "width": 448.3999938964844
   },
   "patterns": {
     "long_detours": {

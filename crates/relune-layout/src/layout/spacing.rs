@@ -3,10 +3,12 @@
 use relune_core::{LayoutDirection, NodeKind};
 use unicode_width::UnicodeWidthChar;
 
+use super::spatial::BBox;
 use super::{
     ColumnFlags, ColumnRelationFlags, LayoutConfig, NodeSize, PositionedColumn, PositionedEdge,
-    PositionedNode,
+    PositionedGroup, PositionedNode,
 };
+use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
 /// Node header font size used for width estimation.
 const HEADER_FONT_SIZE: f32 = 13.0;
@@ -164,38 +166,110 @@ pub(super) fn mirror_positioned_nodes_for_direction(
     }
 }
 
-/// Expand graph bounds so that edge routes (especially self-loop curves and
-/// their control points) are not clipped by the SVG viewport.
-pub(super) fn expand_bounds_for_edges(
+/// Room kept around route points for Crow's Foot markers.
+const CANVAS_MARKER_PAD: f32 = 24.0;
+/// Room kept around edge labels.
+const CANVAS_LABEL_PAD: f32 = 4.0;
+
+/// Fits the canvas to everything that is drawn: nodes, groups, edge routes
+/// (bypass lanes, self-loops and markers) and edge labels.
+///
+/// Routing may place bypass lanes, self-loops or labels left of or above the
+/// node area; the whole drawing is then shifted so its top-left content stays
+/// at a non-negative coordinate, since renderers use a `0 0 width height`
+/// viewport. Returns the resulting canvas size.
+pub(super) fn fit_canvas_to_content(
     width: f32,
     height: f32,
-    edges: &[PositionedEdge],
+    nodes: &mut [PositionedNode],
+    edges: &mut [PositionedEdge],
+    groups: &mut [PositionedGroup],
 ) -> (f32, f32) {
-    const MARKER_PAD: f32 = 24.0; // room for Crow's Foot markers
-    let mut w = width;
-    let mut h = height;
+    let mut bounds = BBox::from_points(&[(0.0, 0.0), (width, height)]);
+    for node in nodes.iter() {
+        bounds.include_rect(&Rect {
+            x: node.x,
+            y: node.y,
+            w: node.width,
+            h: node.height,
+        });
+    }
+    for group in groups.iter() {
+        bounds.include_rect(&Rect {
+            x: group.x,
+            y: group.y,
+            w: group.width,
+            h: group.height,
+        });
+    }
+    for edge in edges.iter() {
+        for point in route_points(&edge.route) {
+            bounds.include_rect(&Rect {
+                x: point.0 - CANVAS_MARKER_PAD,
+                y: point.1 - CANVAS_MARKER_PAD,
+                w: CANVAS_MARKER_PAD * 2.0,
+                h: CANVAS_MARKER_PAD * 2.0,
+            });
+        }
+        let half_w = estimate_label_half_width(&edge.label) + CANVAS_LABEL_PAD;
+        let half_h = LABEL_HALF_H + CANVAS_LABEL_PAD;
+        bounds.include_rect(&Rect {
+            x: edge.label_x - half_w,
+            y: edge.label_y - half_h,
+            w: half_w * 2.0,
+            h: half_h * 2.0,
+        });
+    }
+
+    // Left/top overflow shifts the drawing; the existing origin margin on the
+    // right/bottom is kept by measuring from the unshifted bounds.
+    let dx = (-bounds.min_x).max(0.0);
+    let dy = (-bounds.min_y).max(0.0);
+    if dx > 0.0 || dy > 0.0 {
+        translate_drawing(nodes, edges, groups, dx, dy);
+    }
+    (bounds.max_x + dx, bounds.max_y + dy)
+}
+
+fn translate_drawing(
+    nodes: &mut [PositionedNode],
+    edges: &mut [PositionedEdge],
+    groups: &mut [PositionedGroup],
+    dx: f32,
+    dy: f32,
+) {
+    let shift = |point: &mut (f32, f32)| {
+        point.0 += dx;
+        point.1 += dy;
+    };
+    for node in nodes {
+        node.x += dx;
+        node.y += dy;
+    }
+    for group in groups {
+        group.x += dx;
+        group.y += dy;
+    }
     for edge in edges {
-        let r = &edge.route;
-        for &x in &[r.x1, r.x2] {
-            if x + MARKER_PAD > w {
-                w = x + MARKER_PAD;
-            }
-        }
-        for &y in &[r.y1, r.y2] {
-            if y + MARKER_PAD > h {
-                h = y + MARKER_PAD;
-            }
-        }
-        for &(cx, cy) in &r.control_points {
-            if cx + MARKER_PAD > w {
-                w = cx + MARKER_PAD;
-            }
-            if cy + MARKER_PAD > h {
-                h = cy + MARKER_PAD;
+        let route = &mut edge.route;
+        route.x1 += dx;
+        route.y1 += dy;
+        route.x2 += dx;
+        route.y2 += dy;
+        route.control_points.iter_mut().for_each(shift);
+        shift(&mut route.label_position);
+        edge.label_x += dx;
+        edge.label_y += dy;
+        if let Some(debug) = edge.routing_debug.as_mut()
+            && let Some(coordinate) = debug.channel_coordinate.as_mut()
+        {
+            match debug.channel_axis.as_deref() {
+                Some("x") => *coordinate += dx,
+                Some("y") => *coordinate += dy,
+                _ => {}
             }
         }
     }
-    (w, h)
 }
 
 pub(super) fn display_column_text(kind: NodeKind, name: &str, data_type: &str) -> String {
