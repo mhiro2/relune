@@ -1,6 +1,5 @@
 ---
 source: crates/relune-app/tests/layout_json_regression_matrix.rs
-assertion_line: 163
 expression: snapshot
 ---
 {
@@ -768,8 +767,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "created_by",
-          "label_x": 1640.8480224609375,
-          "label_y": 275.3370056152344,
+          "label_x": 1605.0,
+          "label_y": 309.0419921875,
           "nullable": true,
           "route_label_position": [
             1605.0,
@@ -1415,8 +1414,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 1651.375,
-          "label_y": 348.0,
+          "label_x": 1629.0,
+          "label_y": 587.75,
           "nullable": false,
           "route_label_position": [
             1629.0,
@@ -1520,11 +1519,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1581.0,
+              1653.0,
               413.9169921875
             ],
             [
-              1581.0,
+              1653.0,
               98.0
             ]
           ],
@@ -1538,12 +1537,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "role_id",
-          "label_x": 1581.0,
-          "label_y": 174.95899963378906,
+          "label_x": 1653.0,
+          "label_y": 246.95899963378906,
           "nullable": false,
           "route_label_position": [
-            1581.0,
-            174.95899963378906
+            1653.0,
+            246.95899963378906
           ],
           "source_side": "east",
           "start": [
@@ -1561,11 +1560,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1725.0,
+              1605.0,
               467.0
             ],
             [
-              1725.0,
+              1605.0,
               554.0
             ]
           ],
@@ -1579,12 +1578,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assigned_by",
-          "label_x": 1724.75,
-          "label_y": 467.0,
+          "label_x": 1605.0,
+          "label_y": 473.75,
           "nullable": true,
           "route_label_position": [
-            1696.5,
-            467.0
+            1609.5,
+            554.0
           ],
           "source_side": "east",
           "start": [
@@ -1602,11 +1601,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1653.0,
+              1701.0,
               430.0830078125
             ],
             [
-              1653.0,
+              1701.0,
               544.0
             ]
           ],
@@ -1620,12 +1619,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1648.9720458984375,
-          "label_y": 430.0830078125,
+          "label_x": 1701.0,
+          "label_y": 439.0409851074219,
           "nullable": false,
           "route_label_position": [
-            1653.0,
-            487.0409851074219
+            1701.0,
+            439.0409851074219
           ],
           "source_side": "east",
           "start": [
@@ -2705,8 +2704,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "created_by",
-          "label_x": 1640.8480224609375,
-          "label_y": 275.3370056152344,
+          "label_x": 1605.0,
+          "label_y": 309.0419921875,
           "nullable": true,
           "route_label_position": [
             1605.0,
@@ -3352,8 +3351,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "team_id",
-          "label_x": 1651.375,
-          "label_y": 348.0,
+          "label_x": 1629.0,
+          "label_y": 587.75,
           "nullable": false,
           "route_label_position": [
             1629.0,
@@ -3457,11 +3456,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1581.0,
+              1653.0,
               413.9169921875
             ],
             [
-              1581.0,
+              1653.0,
               98.0
             ]
           ],
@@ -3475,12 +3474,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "role_id",
-          "label_x": 1581.0,
-          "label_y": 174.95899963378906,
+          "label_x": 1653.0,
+          "label_y": 246.95899963378906,
           "nullable": false,
           "route_label_position": [
-            1581.0,
-            174.95899963378906
+            1653.0,
+            246.95899963378906
           ],
           "source_side": "east",
           "start": [
@@ -3498,11 +3497,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1725.0,
+              1605.0,
               467.0
             ],
             [
-              1725.0,
+              1605.0,
               554.0
             ]
           ],
@@ -3516,12 +3515,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "assigned_by",
-          "label_x": 1724.75,
-          "label_y": 467.0,
+          "label_x": 1605.0,
+          "label_y": 473.75,
           "nullable": true,
           "route_label_position": [
-            1696.5,
-            467.0
+            1609.5,
+            554.0
           ],
           "source_side": "east",
           "start": [
@@ -3539,11 +3538,11 @@ expression: snapshot
         {
           "control_points": [
             [
-              1653.0,
+              1701.0,
               430.0830078125
             ],
             [
-              1653.0,
+              1701.0,
               544.0
             ]
           ],
@@ -3557,12 +3556,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1648.9720458984375,
-          "label_y": 430.0830078125,
+          "label_x": 1701.0,
+          "label_y": 439.0409851074219,
           "nullable": false,
           "route_label_position": [
-            1653.0,
-            487.0409851074219
+            1701.0,
+            439.0409851074219
           ],
           "source_side": "east",
           "start": [

@@ -3,9 +3,10 @@
 use std::collections::BTreeMap;
 
 use super::edge_routing::{
-    BYPASS_CHANNEL_LANE_STEP, MIN_LABEL_ROUTE_T, ObstacleRoutingContext, bypass_channel_candidates,
-    bypass_channel_lane_count, edge_endpoint_marker_obstacles, edge_route_obstacle_spacing,
-    label_rect, obstacle_aware_channel_for_edge, parallel_label_parameter, place_label_on_route,
+    BYPASS_CHANNEL_LANE_STEP, MIN_LABEL_ROUTE_T, ObstacleRoutingContext, RankAxisBounds,
+    bypass_channel_candidates, bypass_channel_lane_count, channel_candidates, channel_search_plan,
+    edge_endpoint_marker_obstacles, edge_route_obstacle_spacing, label_rect,
+    obstacle_aware_channel_for_edge, parallel_label_parameter, place_label_on_route,
     rank_axis_bounds, rect_overlaps_any, route_edges, route_edges_with_diagnostics,
     route_obstacle_hit_count,
 };
@@ -17,6 +18,7 @@ use super::spacing::{
     COLUMN_FONT_SIZE, build_positioned_node, estimate_node_height, estimate_text_width,
 };
 use super::*;
+use crate::channel::ChannelCandidateClass;
 use crate::graph::{LayoutEdge, LayoutGraph};
 use crate::port::{RegularPortAssignment, column_y_offset_from_center};
 use crate::route::{
@@ -2662,6 +2664,62 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_vertical_rank() {
         0
     );
     assert!(edge.route.control_points.len() >= 4);
+}
+
+#[test]
+fn test_channel_search_plan_treats_child_to_parent_edges_as_regular_flow() {
+    let rank_bounds = [
+        RankAxisBounds {
+            min: 0.0,
+            max: 100.0,
+        },
+        RankAxisBounds {
+            min: 160.0,
+            max: 260.0,
+        },
+    ];
+    let parent = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 120.0,
+        h: 100.0,
+    };
+    let child = Rect {
+        x: 0.0,
+        y: 160.0,
+        w: 120.0,
+        h: 100.0,
+    };
+
+    // A foreign key points from the child (rank 1) to its parent (rank 0).
+    let regular = channel_search_plan(
+        1,
+        0,
+        &rank_bounds,
+        LayoutDirection::TopToBottom,
+        child,
+        parent,
+    )
+    .unwrap();
+    assert_eq!(regular.class, ChannelCandidateClass::InterRank);
+    for candidate in channel_candidates(regular, 1, 0, &rank_bounds) {
+        assert!(
+            (100.0..=160.0).contains(&candidate.coordinate),
+            "regular edge channel left the inter-rank gap: {}",
+            candidate.coordinate
+        );
+    }
+
+    let reverse = channel_search_plan(
+        0,
+        1,
+        &rank_bounds,
+        LayoutDirection::TopToBottom,
+        parent,
+        child,
+    )
+    .unwrap();
+    assert_eq!(reverse.class, ChannelCandidateClass::ReverseEdge);
 }
 
 #[test]

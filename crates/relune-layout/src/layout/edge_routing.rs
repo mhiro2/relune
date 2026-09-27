@@ -862,10 +862,10 @@ fn same_rank_y_channel(source_rect: Rect, target_rect: Rect) -> f32 {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ChannelSearchPlan {
+pub(super) struct ChannelSearchPlan {
     axis: ChannelAxis,
     baseline: f32,
-    class: ChannelCandidateClass,
+    pub(super) class: ChannelCandidateClass,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -973,7 +973,7 @@ pub(super) fn obstacle_aware_channel_for_edge(
     best_candidate
 }
 
-fn channel_search_plan(
+pub(super) fn channel_search_plan(
     source_rank: usize,
     target_rank: usize,
     rank_bounds: &[RankAxisBounds],
@@ -1014,9 +1014,12 @@ fn channel_search_plan(
             }
         }
     };
+    // Foreign keys point from a child to the parent ranked above it, so the
+    // regular flow runs from a higher rank to a lower one. Only edges pointing
+    // down the ranks (cycle-closing edges) are reverse edges.
     let class = if same_rank {
         ChannelCandidateClass::SameRank
-    } else if source_rank > target_rank {
+    } else if source_rank < target_rank {
         ChannelCandidateClass::ReverseEdge
     } else {
         ChannelCandidateClass::InterRank
@@ -1029,7 +1032,7 @@ fn channel_search_plan(
     })
 }
 
-fn channel_candidates(
+pub(super) fn channel_candidates(
     plan: ChannelSearchPlan,
     source_rank: usize,
     target_rank: usize,
