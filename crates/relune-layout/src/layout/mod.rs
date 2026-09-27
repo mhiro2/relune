@@ -29,7 +29,7 @@ mod spatial;
 use edge_routing::route_edges_with_diagnostics;
 use force::apply_force_layout;
 use groups::position_groups;
-use hierarchical::{HierarchicalPlacement, assign_coordinates};
+use hierarchical::{HierarchicalPlacement, RowAlignment, assign_coordinates};
 use spacing::{fit_canvas_to_content, measure_node_sizes};
 
 /// Default number of iterations for force-directed layout.
@@ -661,6 +661,7 @@ pub fn build_layout_from_graph_with_config(
             &ordered_nodes,
             &effective_config,
             &node_sizes,
+            RowAlignment::Neighbors,
         )?,
         // Force-directed mode seeds the simulation from the hierarchical
         // placement for directional guidance.

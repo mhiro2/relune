@@ -7,7 +7,7 @@
 //! schemas with many unrelated tables (or no foreign keys at all) close to a
 //! screen-friendly aspect ratio instead of one unbounded row.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use relune_core::LayoutDirection;
 
@@ -24,6 +24,11 @@ use super::{
 const MIN_GROUP_CLEARANCE: f32 = 16.0;
 /// Preferred on-screen width / height ratio of a packed layout.
 const TARGET_SCREEN_ASPECT: f32 = 1.6;
+/// Down/up sweep pairs used to align ranked rows with their neighbours.
+const ALIGNMENT_SWEEPS: usize = 4;
+/// Weight of a node without neighbours in the swept rows, which then mostly
+/// keeps its place but still yields to anchored nodes.
+const UNANCHORED_WEIGHT: f32 = 1e-3;
 
 /// Positioned nodes plus the row structure that produced them.
 #[derive(Debug, Clone)]
@@ -36,6 +41,16 @@ pub(super) struct HierarchicalPlacement {
     pub(super) node_rows: Vec<usize>,
 }
 
+/// How nodes are placed along the secondary axis inside their rank rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowAlignment {
+    /// Centre nodes over their neighbours in other rows.
+    Neighbors,
+    /// Pack each row from the start; used as the force-directed seed, which
+    /// relaxes the secondary axis on its own.
+    Packed,
+}
+
 /// Assign coordinates to nodes based on their ranks and order.
 pub(super) fn assign_coordinates(
     graph: &LayoutGraph,
@@ -43,12 +58,14 @@ pub(super) fn assign_coordinates(
     ordered_nodes: &[Vec<usize>],
     config: &LayoutConfig,
     node_sizes: &[NodeSize],
+    alignment: RowAlignment,
 ) -> Result<HierarchicalPlacement, LayoutError> {
     let axes = Axes::new(config);
     let packer = Packer {
         node_sizes,
         axes,
         target_ratio: axes.target_secondary_to_primary_ratio(),
+        alignment,
     };
     let layout = packer.pack_graph(graph, node_ranks, ordered_nodes);
 
@@ -219,6 +236,7 @@ struct Packer<'a> {
     node_sizes: &'a [NodeSize],
     axes: Axes,
     target_ratio: f32,
+    alignment: RowAlignment,
 }
 
 impl Packer<'_> {
@@ -236,9 +254,16 @@ impl Packer<'_> {
             }
         }
         let mut is_isolated = vec![true; n];
+        let mut neighbors = vec![Vec::new(); n];
         for (from, to) in graph_edges(graph) {
             is_isolated[from] = false;
             is_isolated[to] = false;
+            neighbors[from].push(to);
+            neighbors[to].push(from);
+        }
+        for list in &mut neighbors {
+            list.sort_unstable();
+            list.dedup();
         }
 
         let context = ClusterContext {
@@ -246,6 +271,7 @@ impl Packer<'_> {
             node_ranks,
             order_in_rank: &order_in_rank,
             is_isolated: &is_isolated,
+            neighbors: &neighbors,
         };
         let mut clusters: Vec<(usize, Block)> = clusters(graph)
             .into_iter()
@@ -290,10 +316,17 @@ impl Packer<'_> {
         let lanes: Vec<Block> = lanes
             .into_iter()
             .map(|((ungrouped, _), (ranked, isolated))| {
-                let mut lane = self.rows_block(ranked.into_iter().map(|mut row| {
-                    row.sort_by_key(|&idx| context.order_in_rank[idx]);
-                    row
-                }));
+                let ranked: Vec<Vec<usize>> = ranked
+                    .into_iter()
+                    .map(|mut row| {
+                        row.sort_by_key(|&idx| context.order_in_rank[idx]);
+                        row
+                    })
+                    .collect();
+                let mut lane = match self.alignment {
+                    RowAlignment::Neighbors => self.aligned_rows_block(&ranked, context.neighbors),
+                    RowAlignment::Packed => self.rows_block(ranked),
+                };
                 let grid = self.pack_shelves(
                     isolated
                         .into_iter()
@@ -312,6 +345,128 @@ impl Packer<'_> {
         Block {
             is_group,
             ..self.pack_shelves(lanes, f32::INFINITY)
+        }
+    }
+
+    /// Places ranked rows so nodes line up with their neighbours in other
+    /// rows while keeping each row's order and minimum gaps.
+    ///
+    /// Starting from left-packed rows, alternating down and up sweeps move
+    /// every row towards the median centre of each node's neighbours in the
+    /// rows already swept. Each row is solved exactly as a weighted isotonic
+    /// regression (pool adjacent violators), so rows never overlap or reorder.
+    #[allow(clippy::too_many_lines)] // The sweep closure and final normalization read best together.
+    fn aligned_rows_block(&self, rows: &[Vec<usize>], neighbors: &[Vec<usize>]) -> Block {
+        let extent = |node: usize| self.axes.secondary_extent(self.node_sizes[node]);
+        let mut row_of: HashMap<usize, usize> = HashMap::new();
+        let mut center: HashMap<usize, f32> = HashMap::new();
+        let mut lane_extent = 0.0_f32;
+        for (row_idx, row) in rows.iter().enumerate() {
+            let mut cursor = 0.0_f32;
+            for &node in row {
+                row_of.insert(node, row_idx);
+                center.insert(node, cursor + extent(node) / 2.0);
+                cursor += extent(node) + self.axes.secondary_gap;
+            }
+            lane_extent = lane_extent.max(cursor - self.axes.secondary_gap);
+        }
+
+        let align_row = |row_idx: usize, toward_upper: bool, center: &mut HashMap<usize, f32>| {
+            let row = &rows[row_idx];
+            let (targets, weights): (Vec<f32>, Vec<f32>) = row
+                .iter()
+                .map(|&node| {
+                    let mut anchors: Vec<f32> = neighbors[node]
+                        .iter()
+                        .filter(|neighbor| {
+                            row_of.get(neighbor).is_some_and(|&other_row| {
+                                if toward_upper {
+                                    other_row < row_idx
+                                } else {
+                                    other_row > row_idx
+                                }
+                            })
+                        })
+                        .map(|neighbor| center[neighbor])
+                        .collect();
+                    if anchors.is_empty() {
+                        (center[&node], UNANCHORED_WEIGHT)
+                    } else {
+                        #[allow(clippy::cast_precision_loss)] // Neighbour counts are small.
+                        let weight = anchors.len() as f32;
+                        (median_value(&mut anchors), weight)
+                    }
+                })
+                .unzip();
+            // Offsets turn "centres at least a gap apart" into "shifted
+            // centres non-decreasing", which isotonic regression solves.
+            let mut offsets = Vec::with_capacity(row.len());
+            let mut offset = 0.0_f32;
+            for (position, &node) in row.iter().enumerate() {
+                if position > 0 {
+                    offset += f32::midpoint(extent(row[position - 1]), extent(node))
+                        + self.axes.secondary_gap;
+                }
+                offsets.push(offset);
+            }
+            let shifted: Vec<f32> = targets
+                .iter()
+                .zip(&offsets)
+                .map(|(target, offset)| target - offset)
+                .collect();
+            // Keep the row inside the widest packed row, so alignment never
+            // widens the lane. Clamping preserves the non-decreasing fit.
+            let (Some(&first), Some(&last), Some(&last_offset)) =
+                (row.first(), row.last(), offsets.last())
+            else {
+                return;
+            };
+            let lower = extent(first) / 2.0;
+            let upper = (lane_extent - extent(last) / 2.0 - last_offset).max(lower);
+            for ((&node, fitted), offset) in row
+                .iter()
+                .zip(isotonic_regression(&shifted, &weights))
+                .zip(offsets)
+            {
+                center.insert(node, fitted.clamp(lower, upper) + offset);
+            }
+        };
+
+        for _ in 0..ALIGNMENT_SWEEPS {
+            for row_idx in 1..rows.len() {
+                align_row(row_idx, true, &mut center);
+            }
+            for row_idx in (0..rows.len().saturating_sub(1)).rev() {
+                align_row(row_idx, false, &mut center);
+            }
+        }
+
+        let left = |node: usize| center[&node] - extent(node) / 2.0;
+        let min_left = rows
+            .iter()
+            .flatten()
+            .map(|&node| left(node))
+            .fold(f32::INFINITY, f32::min);
+        let mut secondary_extent = 0.0_f32;
+        let rows = rows
+            .iter()
+            .map(|row| BlockRow {
+                extra_gap_before: 0.0,
+                cells: row
+                    .iter()
+                    .map(|&node| {
+                        let offset = left(node) - min_left;
+                        secondary_extent = secondary_extent.max(offset + extent(node));
+                        (node, offset)
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        Block {
+            rows,
+            secondary_extent,
+            is_group: false,
         }
     }
 
@@ -466,6 +621,40 @@ impl Packer<'_> {
     }
 }
 
+/// Median of `values`, averaging the two middle values for even counts.
+fn median_value(values: &mut [f32]) -> f32 {
+    values.sort_by(f32::total_cmp);
+    let middle = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        f32::midpoint(values[middle - 1], values[middle])
+    } else {
+        values[middle]
+    }
+}
+
+/// Weighted least-squares fit of a non-decreasing sequence to `targets`
+/// (pool adjacent violators). `weights` must be positive.
+fn isotonic_regression(targets: &[f32], weights: &[f32]) -> Vec<f32> {
+    // (weighted sum, total weight, member count) of each pooled block.
+    let mut blocks: Vec<(f32, f32, usize)> = Vec::with_capacity(targets.len());
+    for (&target, &weight) in targets.iter().zip(weights) {
+        blocks.push((target * weight, weight, 1));
+        while let [.., (left_sum, left_weight, _), (right_sum, right_weight, _)] = blocks[..]
+            && left_sum / left_weight > right_sum / right_weight
+        {
+            let (sum, weight, count) = blocks.pop().expect("two blocks present");
+            let last = blocks.last_mut().expect("two blocks present");
+            last.0 += sum;
+            last.1 += weight;
+            last.2 += count;
+        }
+    }
+    blocks
+        .into_iter()
+        .flat_map(|(sum, weight, count)| std::iter::repeat_n(sum / weight, count))
+        .collect()
+}
+
 /// Ranked rows and edge-less nodes of one lane, in that order.
 type LaneNodes = (Vec<Vec<usize>>, Vec<usize>);
 
@@ -475,6 +664,8 @@ struct ClusterContext<'a> {
     node_ranks: &'a [usize],
     order_in_rank: &'a [usize],
     is_isolated: &'a [bool],
+    /// Deduplicated neighbours of every node across non-self-loop edges.
+    neighbors: &'a [Vec<usize>],
 }
 
 /// Resolved `(from, to)` node indices of every non-self-loop edge.
@@ -536,4 +727,21 @@ fn clusters(graph: &LayoutGraph) -> Vec<Vec<usize>> {
         clusters[cluster_idx].push(node_idx);
     }
     clusters
+}
+
+#[cfg(test)]
+mod tests {
+    use super::isotonic_regression;
+
+    #[test]
+    fn isotonic_regression_pools_violating_neighbours() {
+        let fitted = isotonic_regression(&[1.0, 3.0, 2.0, 4.0], &[1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(fitted, vec![1.0, 2.5, 2.5, 4.0]);
+    }
+
+    #[test]
+    fn isotonic_regression_respects_weights() {
+        let fitted = isotonic_regression(&[10.0, 0.0], &[3.0, 1.0]);
+        assert_eq!(fitted, vec![7.5, 7.5]);
+    }
 }

@@ -5,7 +5,7 @@ use tracing::debug;
 
 use crate::graph::LayoutGraph;
 
-use super::hierarchical::{HierarchicalPlacement, assign_coordinates};
+use super::hierarchical::{HierarchicalPlacement, RowAlignment, assign_coordinates};
 use super::spacing::{
     build_positioned_node, compute_graph_bounds, mirror_positioned_nodes_for_direction,
 };
@@ -206,6 +206,7 @@ pub(super) fn apply_force_layout(
         ordered_nodes,
         &canonical_config,
         node_sizes,
+        RowAlignment::Packed,
     )?;
     let seed_nodes = seed.nodes;
     let mut positions: Vec<(f32, f32)> = seed_nodes.iter().map(|node| (node.x, node.y)).collect();

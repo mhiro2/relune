@@ -3626,3 +3626,124 @@ fn layout_keeps_routes_and_labels_inside_the_canvas() {
         }
     }
 }
+
+fn table_referencing(id: u64, name: &str, extra_columns: usize, parents: &[&str]) -> Table {
+    let mut columns = vec![Column {
+        id: ColumnId(id * 100),
+        name: "id".to_string(),
+        data_type: "int".to_string(),
+        nullable: false,
+        is_primary_key: true,
+        comment: None,
+        enum_values: None,
+        semantics: relune_core::ColumnSemantics::default(),
+    }];
+    for (offset, parent) in parents.iter().enumerate() {
+        columns.push(Column {
+            id: ColumnId(id * 100 + 1 + offset as u64),
+            name: format!("{parent}_id"),
+            data_type: "int".to_string(),
+            nullable: false,
+            is_primary_key: false,
+            comment: None,
+            enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
+        });
+    }
+    for extra in 0..extra_columns {
+        columns.push(Column {
+            id: ColumnId(id * 100 + 50 + extra as u64),
+            name: format!("a_rather_long_descriptive_column_{extra}"),
+            data_type: "varchar(255)".to_string(),
+            nullable: true,
+            is_primary_key: false,
+            comment: None,
+            enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
+        });
+    }
+    Table {
+        id: TableId(id),
+        stable_id: name.to_string(),
+        schema_name: None,
+        name: name.to_string(),
+        columns,
+        foreign_keys: parents
+            .iter()
+            .map(|parent| ForeignKey {
+                name: None,
+                from_columns: vec![format!("{parent}_id")],
+                to_schema: None,
+                to_table: (*parent).to_string(),
+                to_columns: vec!["id".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            })
+            .collect(),
+        indexes: vec![],
+        primary_key_name: None,
+        check_constraints: Vec::new(),
+        comment: None,
+    }
+}
+
+fn center_x(graph: &PositionedGraph, id: &str) -> f32 {
+    let node = graph.nodes.iter().find(|node| node.id == id).unwrap();
+    node.x + node.width / 2.0
+}
+
+#[test]
+fn hierarchical_layout_centers_parents_over_their_children() {
+    let schema = Schema {
+        tables: vec![
+            table_referencing(1, "parent", 0, &[]),
+            table_referencing(2, "left_child", 3, &["parent"]),
+            table_referencing(3, "middle_child", 0, &["parent"]),
+            table_referencing(4, "right_child", 3, &["parent"]),
+        ],
+        views: vec![],
+        enums: vec![],
+    };
+    let graph = build_layout(&schema).unwrap();
+
+    let parent = center_x(&graph, "parent");
+    let middle = center_x(&graph, "middle_child");
+    assert!(
+        (parent - middle).abs() < 1.0,
+        "parent centre {parent} should sit over the middle child {middle}"
+    );
+    assert!(center_x(&graph, "left_child") < parent);
+    assert!(center_x(&graph, "right_child") > parent);
+}
+
+#[test]
+fn hierarchical_layout_aligns_a_chain_of_different_widths() {
+    let schema = Schema {
+        tables: vec![
+            table_referencing(1, "wide_root", 2, &[]),
+            table_referencing(2, "wide_middle", 4, &["wide_root"]),
+            table_referencing(3, "narrow_leaf", 0, &["wide_middle"]),
+            table_referencing(4, "sibling", 4, &["wide_root"]),
+        ],
+        views: vec![],
+        enums: vec![],
+    };
+    let graph = build_layout(&schema).unwrap();
+
+    let middle = center_x(&graph, "wide_middle");
+    let leaf = center_x(&graph, "narrow_leaf");
+    assert!(
+        (middle - leaf).abs() < 1.0,
+        "a single child should sit under its parent: {middle} vs {leaf}"
+    );
+    for (index, node) in graph.nodes.iter().enumerate() {
+        for other in graph.nodes.iter().skip(index + 1) {
+            assert!(
+                !nodes_overlap(node, other),
+                "{} overlaps {}",
+                node.id,
+                other.id
+            );
+        }
+    }
+}
