@@ -14,5 +14,8 @@ sqlparser.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+proptest = "1.6"
+
 [lints]
 workspace = true
