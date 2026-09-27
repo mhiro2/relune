@@ -29,6 +29,15 @@ pub enum CrossingReductionStrategy {
 const MAX_SWEEPS: usize = 12;
 /// Consecutive sweeps without improvement after which the search stops.
 const SWEEP_PATIENCE: usize = 3;
+/// Virtual nodes allowed per real node, with a floor for small graphs.
+const VIRTUAL_NODES_PER_NODE: usize = 16;
+const MIN_VIRTUAL_NODE_BUDGET: usize = 4096;
+
+fn virtual_node_budget(real_count: usize) -> usize {
+    real_count
+        .saturating_mul(VIRTUAL_NODES_PER_NODE)
+        .max(MIN_VIRTUAL_NODE_BUDGET)
+}
 
 /// Order nodes within each layer to minimize edge crossings.
 ///
@@ -97,17 +106,35 @@ impl LayeredGraph {
         let mut adjacency = vec![Vec::new(); real_count];
         let mut layer_of = node_rank.to_vec();
 
-        for (from, to) in edges {
-            let (upper, lower) = if layer_of[from] <= layer_of[to] {
-                (from, to)
-            } else {
-                (to, from)
-            };
+        // Edges inside one layer do not influence the ordering. Shorter edges
+        // are split first so the virtual node budget covers as many edges as
+        // possible; the stable sort keeps input order among equal spans.
+        let mut spans: Vec<(usize, usize)> = edges
+            .into_iter()
+            .map(|(from, to)| {
+                if node_rank[from] <= node_rank[to] {
+                    (from, to)
+                } else {
+                    (to, from)
+                }
+            })
+            .filter(|&(upper, lower)| node_rank[upper] != node_rank[lower])
+            .collect();
+        spans.sort_by_key(|&(upper, lower)| node_rank[lower] - node_rank[upper]);
+        let mut virtual_budget = virtual_node_budget(real_count);
+
+        for (upper, lower) in spans {
             let (start, end) = (layer_of[upper], layer_of[lower]);
-            // Edges inside one layer do not influence the ordering.
-            if start == end {
+            let needed = end - start - 1;
+            if needed > virtual_budget {
+                // Dense, deep graphs could need a cubic number of virtual
+                // nodes; beyond the budget a long edge still links its
+                // endpoints for the ordering keys but is not split.
+                adjacency[upper].push(lower);
+                adjacency[lower].push(upper);
                 continue;
             }
+            virtual_budget -= needed;
             let mut previous = upper;
             for (layer, layer_nodes) in layers.iter_mut().enumerate().take(end).skip(start + 1) {
                 let virtual_node = adjacency.len();
@@ -160,17 +187,29 @@ impl LayeredGraph {
             if best_crossings == 0 {
                 break;
             }
-            for layer in 1..layers.len() {
-                layers[layer] = self.reorder_layer(strategy, &layers[layer], &layers[layer - 1]);
+            let mut improved = false;
+            for downward in [true, false] {
+                if downward {
+                    for layer in 1..layers.len() {
+                        layers[layer] =
+                            self.reorder_layer(strategy, &layers[layer], &layers[layer - 1]);
+                    }
+                } else {
+                    for layer in (0..layers.len().saturating_sub(1)).rev() {
+                        layers[layer] =
+                            self.reorder_layer(strategy, &layers[layer], &layers[layer + 1]);
+                    }
+                }
+                // Check after each direction: an upward sweep can undo what
+                // the downward sweep gained.
+                let crossings = self.count_crossings(&layers);
+                if crossings < best_crossings {
+                    best.clone_from(&layers);
+                    best_crossings = crossings;
+                    improved = true;
+                }
             }
-            for layer in (0..layers.len().saturating_sub(1)).rev() {
-                layers[layer] = self.reorder_layer(strategy, &layers[layer], &layers[layer + 1]);
-            }
-
-            let crossings = self.count_crossings(&layers);
-            if crossings < best_crossings {
-                best.clone_from(&layers);
-                best_crossings = crossings;
+            if improved {
                 stale_sweeps = 0;
             } else {
                 stale_sweeps += 1;
@@ -990,6 +1029,36 @@ mod tests {
         let (best, crossings) = layered.reduce_crossings(CrossingReductionStrategy::Barycenter);
         assert_eq!(crossings, 0);
         assert_eq!(layered.count_crossings(&best), 0);
+    }
+
+    #[test]
+    fn test_reduce_crossings_keeps_improvement_from_a_downward_sweep() {
+        // The downward sweep reaches one crossing and the following upward
+        // sweep returns to two; the better ordering must be kept.
+        let layered = LayeredGraph::from_parts(
+            &[vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8]],
+            &[0, 0, 0, 1, 1, 1, 2, 2, 2],
+            [(0, 3), (0, 5), (1, 4), (2, 4), (3, 6), (4, 6), (5, 7)],
+        );
+        assert_eq!(layered.count_crossings(&layered.layers), 2);
+        let (best, crossings) = layered.reduce_crossings(CrossingReductionStrategy::Barycenter);
+        assert!(crossings <= 1);
+        assert_eq!(layered.count_crossings(&best), crossings);
+    }
+
+    #[test]
+    fn test_virtual_nodes_stay_within_budget_for_dense_deep_graphs() {
+        // A transitively closed chain would need C(n, 3) virtual nodes.
+        let count = 120;
+        let node_rank: Vec<usize> = (0..count).collect();
+        let nodes_by_rank: Vec<Vec<usize>> = (0..count).map(|node| vec![node]).collect();
+        let edges =
+            (0..count).flat_map(|upper| (upper + 1..count).map(move |lower| (upper, lower)));
+        let layered = LayeredGraph::from_parts(&nodes_by_rank, &node_rank, edges);
+
+        assert!(layered.adjacency.len() - count <= virtual_node_budget(count));
+        let (best, _) = layered.reduce_crossings(CrossingReductionStrategy::Barycenter);
+        assert_eq!(layered.without_virtual_nodes(best), nodes_by_rank);
     }
 
     #[test]
