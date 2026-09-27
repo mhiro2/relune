@@ -14,9 +14,9 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
     "long_detours": {
       "count_over_1_8x": 1,
       "worst_examples": [
-        "project_watchers[user_id] -> users[id] (1.85x)",
-        "project_teams[team_id] -> teams[id] (1.70x)",
-        "projects[tenant_id] -> tenants[id] (1.65x)"
+        "attachments[tenant_id] -> tenants[id] (1.85x)",
+        "task_watchers[user_id] -> users[id] (1.79x)",
+        "project_watchers[user_id] -> users[id] (1.75x)"
       ]
     },
     "parallel_groups": {
@@ -43,23 +43,23 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 6,
+      "count_under_24px": 5,
       "worst_examples": [
-        "attachments[uploader_id] -> users[id] (16.0px)",
-        "comments[author_id] -> users[id] (16.0px)",
-        "project_watchers[project_id] -> projects[id] (16.0px)"
+        "role_permissions[permission_id] -> permissions[id] (15.0px)",
+        "role_permissions[role_id] -> roles[id] (16.0px)",
+        "task_tags[task_id] -> tasks[id] (16.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 611073,
+      "bytes": 610491,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 227969,
+      "bytes": 227387,
       "edge_groups": 320,
       "node_groups": 23
     }

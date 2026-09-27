@@ -8,13 +8,13 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
     "edge_count": 3,
     "height": 704.0,
     "node_count": 3,
-    "width": 445.0
+    "width": 448.3999938964844
   },
   "patterns": {
     "long_detours": {
       "count_over_1_8x": 1,
       "worst_examples": [
-        "comments[user_id] -> users[id] (1.98x)",
+        "comments[user_id] -> users[id] (2.11x)",
         "comments[post_id] -> posts[id] (1.00x)",
         "posts[user_id] -> users[id] (1.00x)"
       ]

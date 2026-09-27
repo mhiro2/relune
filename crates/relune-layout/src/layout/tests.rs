@@ -3,11 +3,12 @@
 use std::collections::BTreeMap;
 
 use super::edge_routing::{
-    BYPASS_CHANNEL_LANE_STEP, MIN_LABEL_ROUTE_T, ObstacleRoutingContext, bypass_channel_candidates,
-    bypass_channel_lane_count, edge_endpoint_marker_obstacles, edge_route_obstacle_spacing,
-    label_rect, obstacle_aware_channel_for_edge, parallel_label_parameter, place_label_on_route,
-    rank_axis_bounds, rect_overlaps_any, route_edges, route_edges_with_diagnostics,
-    route_obstacle_hit_count,
+    BYPASS_CHANNEL_LANE_STEP, EdgeObstacles, MIN_LABEL_ROUTE_T, NodeObstacleIndex,
+    ObstacleRoutingContext, RankAxisBounds, bypass_channel_candidates, bypass_channel_lane_count,
+    channel_candidates, channel_search_plan, edge_endpoint_marker_obstacles,
+    edge_route_obstacle_spacing, label_rect, obstacle_aware_channel_for_edge,
+    parallel_label_parameter, place_label_on_route, rank_axis_bounds, rect_overlaps_any,
+    route_edges, route_edges_with_diagnostics, route_obstacle_hit_count,
 };
 use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
@@ -15,8 +16,10 @@ use super::force::{
 };
 use super::spacing::{
     COLUMN_FONT_SIZE, build_positioned_node, estimate_node_height, estimate_text_width,
+    fit_canvas_to_content,
 };
 use super::*;
+use crate::channel::ChannelCandidateClass;
 use crate::graph::{LayoutEdge, LayoutGraph};
 use crate::port::{RegularPortAssignment, column_y_offset_from_center};
 use crate::route::{
@@ -1693,6 +1696,70 @@ fn test_resolve_force_overlaps_grid_handles_many_nodes() {
     }
 }
 
+fn assert_no_padded_overlaps(positions: &[(f32, f32)], node_sizes: &[NodeSize], padding: f32) {
+    for i in 0..positions.len() {
+        for j in (i + 1)..positions.len() {
+            let (xi, yi) = positions[i];
+            let (xj, yj) = positions[j];
+            let overlap_x = xi < xj + node_sizes[j].width + padding - 0.01
+                && xj < xi + node_sizes[i].width + padding - 0.01;
+            let overlap_y = yi < yj + node_sizes[j].height + padding - 0.01
+                && yj < yi + node_sizes[i].height + padding - 0.01;
+            assert!(
+                !(overlap_x && overlap_y),
+                "nodes {i} and {j} still overlap: {:?} {:?}",
+                positions[i],
+                positions[j]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_resolve_force_overlaps_handles_one_oversized_node() {
+    // One very tall table must not coarsen the grid for everything else.
+    let mut positions = vec![(0.0_f32, 0.0_f32)];
+    let mut node_sizes = vec![NodeSize {
+        width: 240.0,
+        height: 6000.0,
+    }];
+    for index in 0..200_u16 {
+        let offset = f32::from(index);
+        positions.push((offset * 37.0 % 900.0, offset * 29.0));
+        node_sizes.push(NodeSize {
+            width: 160.0,
+            height: 90.0,
+        });
+    }
+
+    resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
+
+    assert_no_padded_overlaps(&positions, &node_sizes, 8.0);
+}
+
+#[test]
+fn test_resolve_force_overlaps_legalizes_stacked_nodes() {
+    // Identical, perfectly stacked nodes cannot be separated by the
+    // symmetric pairwise push alone within the pass budget.
+    let mut positions = vec![(100.0_f32, 100.0_f32); 40];
+    let node_sizes = vec![
+        NodeSize {
+            width: 160.0,
+            height: 90.0,
+        };
+        40
+    ];
+
+    resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
+
+    assert_no_padded_overlaps(&positions, &node_sizes, 8.0);
+    assert!(
+        positions
+            .iter()
+            .all(|(x, y)| x.is_finite() && y.is_finite())
+    );
+}
+
 #[test]
 fn test_single_node_force_directed() {
     let schema = make_single_table_schema();
@@ -2460,6 +2527,7 @@ fn test_obstacle_aware_channel_rejects_candidates_that_violate_hard_constraints(
         w: 900.0,
         h: 180.0,
     }];
+    let obstacle_index = NodeObstacleIndex::from_rects(&obstacles);
 
     let candidate = obstacle_aware_channel_for_edge(
         ObstacleRoutingContext {
@@ -2469,7 +2537,7 @@ fn test_obstacle_aware_channel_rejects_candidates_that_violate_hard_constraints(
             rank_bounds: Some(&rank_bounds),
             direction: config.direction,
             assignment: &assignment,
-            obstacles: &obstacles,
+            obstacles: EdgeObstacles::new(&obstacle_index, "users", "posts"),
             channel_usage: &BTreeMap::new(),
             style: RouteStyle::Orthogonal,
         },
@@ -2665,6 +2733,101 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_vertical_rank() {
 }
 
 #[test]
+fn test_channel_search_plan_treats_child_to_parent_edges_as_regular_flow() {
+    let rank_bounds = [
+        RankAxisBounds {
+            min: 0.0,
+            max: 100.0,
+        },
+        RankAxisBounds {
+            min: 160.0,
+            max: 260.0,
+        },
+    ];
+    let parent = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 120.0,
+        h: 100.0,
+    };
+    let child = Rect {
+        x: 0.0,
+        y: 160.0,
+        w: 120.0,
+        h: 100.0,
+    };
+
+    // A foreign key points from the child (rank 1) to its parent (rank 0).
+    let regular = channel_search_plan(
+        1,
+        0,
+        &rank_bounds,
+        LayoutDirection::TopToBottom,
+        child,
+        parent,
+    )
+    .unwrap();
+    assert_eq!(regular.class, ChannelCandidateClass::InterRank);
+    for candidate in channel_candidates(regular, 1, 0, &rank_bounds) {
+        assert!(
+            (100.0..=160.0).contains(&candidate.coordinate),
+            "regular edge channel left the inter-rank gap: {}",
+            candidate.coordinate
+        );
+    }
+
+    let reverse = channel_search_plan(
+        0,
+        1,
+        &rank_bounds,
+        LayoutDirection::TopToBottom,
+        parent,
+        child,
+    )
+    .unwrap();
+    assert_eq!(reverse.class, ChannelCandidateClass::ReverseEdge);
+}
+
+#[test]
+fn test_bypass_channel_candidates_clear_nodes_between_endpoints() {
+    let source_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 80.0,
+    };
+    let target_rect = Rect {
+        x: 0.0,
+        y: 420.0,
+        w: 100.0,
+        h: 80.0,
+    };
+    let between = Rect {
+        x: -40.0,
+        y: 200.0,
+        w: 220.0,
+        h: 80.0,
+    };
+    let elsewhere = Rect {
+        x: 600.0,
+        y: 200.0,
+        w: 100.0,
+        h: 80.0,
+    };
+
+    let candidates = bypass_channel_candidates(
+        LayoutDirection::TopToBottom,
+        source_rect,
+        target_rect,
+        &[between, elsewhere],
+        0,
+    );
+
+    assert!((candidates[0].baseline - (180.0 + 24.0)).abs() < f32::EPSILON);
+    assert!((candidates[1].baseline - (-40.0 - 24.0)).abs() < f32::EPSILON);
+}
+
+#[test]
 fn test_bypass_channel_candidates_expand_symmetrically_per_lane() {
     let source_rect = Rect {
         x: 0.0,
@@ -2679,8 +2842,13 @@ fn test_bypass_channel_candidates_expand_symmetrically_per_lane() {
         h: 80.0,
     };
 
-    let candidates =
-        bypass_channel_candidates(LayoutDirection::TopToBottom, source_rect, target_rect, 7);
+    let candidates = bypass_channel_candidates(
+        LayoutDirection::TopToBottom,
+        source_rect,
+        target_rect,
+        &[],
+        7,
+    );
 
     assert_eq!(candidates.len(), bypass_channel_lane_count() * 2);
     for (lane_index, pair) in candidates.chunks_exact(2).enumerate() {
@@ -3371,4 +3539,228 @@ fn layout_is_deterministic_across_repeated_runs() {
             }
         }
     }
+}
+
+fn assert_drawing_within_canvas(graph: &PositionedGraph, context: &str) {
+    let inside = |x: f32, y: f32| x >= 0.0 && y >= 0.0 && x <= graph.width && y <= graph.height;
+    for node in &graph.nodes {
+        assert!(
+            inside(node.x, node.y) && inside(node.x + node.width, node.y + node.height),
+            "{context}: node {} leaves the canvas",
+            node.id
+        );
+    }
+    for group in &graph.groups {
+        assert!(
+            inside(group.x, group.y) && inside(group.x + group.width, group.y + group.height),
+            "{context}: group {} leaves the canvas",
+            group.id
+        );
+    }
+    for edge in &graph.edges {
+        for (x, y) in route_points(&edge.route) {
+            assert!(
+                inside(x, y),
+                "{context}: route of {} -> {} leaves the canvas at ({x}, {y})",
+                edge.from,
+                edge.to
+            );
+        }
+        let half_w = estimate_label_half_width(&edge.label);
+        assert!(
+            inside(edge.label_x - half_w, edge.label_y - LABEL_HALF_H)
+                && inside(edge.label_x + half_w, edge.label_y + LABEL_HALF_H),
+            "{context}: label of {} -> {} leaves the canvas",
+            edge.from,
+            edge.to
+        );
+    }
+}
+
+fn with_self_loop(mut schema: Schema) -> Schema {
+    let table = &mut schema.tables[0];
+    table.foreign_keys.push(ForeignKey {
+        name: Some("fk_self_parent".to_string()),
+        from_columns: vec![table.columns[0].name.clone()],
+        to_schema: None,
+        to_table: table.name.clone(),
+        to_columns: vec![table.columns[0].name.clone()],
+        on_delete: ReferentialAction::NoAction,
+        on_update: ReferentialAction::NoAction,
+    });
+    schema
+}
+
+#[test]
+fn layout_keeps_routes_and_labels_inside_the_canvas() {
+    let schemas = [
+        ("test", with_self_loop(make_test_schema())),
+        ("cycle", with_self_loop(make_fully_connected_cycle_schema())),
+        ("variable", with_self_loop(make_variable_width_schema())),
+        ("multi_schema", make_multi_schema_for_grouping()),
+    ];
+    let small_origin = LayoutConfig {
+        origin_x: 4.0,
+        origin_y: 4.0,
+        ..LayoutConfig::default()
+    };
+    for (name, schema) in &schemas {
+        for mode in [
+            LayoutAlgorithm::Hierarchical,
+            LayoutAlgorithm::ForceDirected,
+        ] {
+            for direction in [
+                LayoutDirection::TopToBottom,
+                LayoutDirection::BottomToTop,
+                LayoutDirection::LeftToRight,
+                LayoutDirection::RightToLeft,
+            ] {
+                let config = LayoutConfig {
+                    direction,
+                    mode,
+                    ..small_origin.clone()
+                };
+                let graph = build_layout_with_config(schema, &LayoutRequest::default(), &config)
+                    .expect("layout succeeds");
+                assert_drawing_within_canvas(&graph, &format!("{name} {mode:?} {direction:?}"));
+            }
+        }
+    }
+}
+
+fn table_referencing(id: u64, name: &str, extra_columns: usize, parents: &[&str]) -> Table {
+    let mut columns = vec![Column {
+        id: ColumnId(id * 100),
+        name: "id".to_string(),
+        data_type: "int".to_string(),
+        nullable: false,
+        is_primary_key: true,
+        comment: None,
+        enum_values: None,
+        semantics: relune_core::ColumnSemantics::default(),
+    }];
+    for (offset, parent) in parents.iter().enumerate() {
+        columns.push(Column {
+            id: ColumnId(id * 100 + 1 + offset as u64),
+            name: format!("{parent}_id"),
+            data_type: "int".to_string(),
+            nullable: false,
+            is_primary_key: false,
+            comment: None,
+            enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
+        });
+    }
+    for extra in 0..extra_columns {
+        columns.push(Column {
+            id: ColumnId(id * 100 + 50 + extra as u64),
+            name: format!("a_rather_long_descriptive_column_{extra}"),
+            data_type: "varchar(255)".to_string(),
+            nullable: true,
+            is_primary_key: false,
+            comment: None,
+            enum_values: None,
+            semantics: relune_core::ColumnSemantics::default(),
+        });
+    }
+    Table {
+        id: TableId(id),
+        stable_id: name.to_string(),
+        schema_name: None,
+        name: name.to_string(),
+        columns,
+        foreign_keys: parents
+            .iter()
+            .map(|parent| ForeignKey {
+                name: None,
+                from_columns: vec![format!("{parent}_id")],
+                to_schema: None,
+                to_table: (*parent).to_string(),
+                to_columns: vec!["id".to_string()],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+            })
+            .collect(),
+        indexes: vec![],
+        primary_key_name: None,
+        check_constraints: Vec::new(),
+        comment: None,
+    }
+}
+
+fn center_x(graph: &PositionedGraph, id: &str) -> f32 {
+    let node = graph.nodes.iter().find(|node| node.id == id).unwrap();
+    node.x + node.width / 2.0
+}
+
+#[test]
+fn hierarchical_layout_centers_parents_over_their_children() {
+    let schema = Schema {
+        tables: vec![
+            table_referencing(1, "parent", 0, &[]),
+            table_referencing(2, "left_child", 3, &["parent"]),
+            table_referencing(3, "middle_child", 0, &["parent"]),
+            table_referencing(4, "right_child", 3, &["parent"]),
+        ],
+        views: vec![],
+        enums: vec![],
+    };
+    let graph = build_layout(&schema).unwrap();
+
+    let parent = center_x(&graph, "parent");
+    let middle = center_x(&graph, "middle_child");
+    assert!(
+        (parent - middle).abs() < 1.0,
+        "parent centre {parent} should sit over the middle child {middle}"
+    );
+    assert!(center_x(&graph, "left_child") < parent);
+    assert!(center_x(&graph, "right_child") > parent);
+}
+
+#[test]
+fn hierarchical_layout_aligns_a_chain_of_different_widths() {
+    let schema = Schema {
+        tables: vec![
+            table_referencing(1, "wide_root", 2, &[]),
+            table_referencing(2, "wide_middle", 4, &["wide_root"]),
+            table_referencing(3, "narrow_leaf", 0, &["wide_middle"]),
+            table_referencing(4, "sibling", 4, &["wide_root"]),
+        ],
+        views: vec![],
+        enums: vec![],
+    };
+    let graph = build_layout(&schema).unwrap();
+
+    let middle = center_x(&graph, "wide_middle");
+    let leaf = center_x(&graph, "narrow_leaf");
+    assert!(
+        (middle - leaf).abs() < 1.0,
+        "a single child should sit under its parent: {middle} vs {leaf}"
+    );
+    for (index, node) in graph.nodes.iter().enumerate() {
+        for other in graph.nodes.iter().skip(index + 1) {
+            assert!(
+                !nodes_overlap(node, other),
+                "{} overlaps {}",
+                node.id,
+                other.id
+            );
+        }
+    }
+}
+
+#[test]
+fn canvas_fits_group_labels_wider_than_their_group() {
+    let mut groups = vec![PositionedGroup {
+        id: "schema_0".to_string(),
+        label: "an_extraordinarily_long_schema_name_for_a_tiny_group".to_string(),
+        x: 10.0,
+        y: 10.0,
+        width: 120.0,
+        height: 80.0,
+    }];
+    let (width, _) = fit_canvas_to_content(140.0, 100.0, &mut [], &mut [], &mut groups);
+
+    let label_width = estimate_text_width(&groups[0].label, 11.0);
+    assert!(width >= groups[0].x + 12.0 + label_width);
 }

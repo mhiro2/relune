@@ -14,7 +14,7 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
     "long_detours": {
       "count_over_1_8x": 0,
       "worst_examples": [
-        "order_items[product_id] -> products[id] (1.23x)",
+        "order_items[product_id] -> products[id] (1.37x)",
         "addresses[customer_id] -> customers[id] (1.00x)",
         "order_items[order_id] -> orders[id] (1.00x)"
       ]
@@ -39,23 +39,23 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 0,
+      "count_under_24px": 1,
       "worst_examples": [
-        "addresses[customer_id] -> customers[id] (40.0px)",
-        "product_categories[product_id] -> products[id] (40.0px)",
-        "order_items[product_id] -> products[id] (42.0px)"
+        "product_categories[category_id] -> categories[id] (16.0px)",
+        "order_items[product_id] -> products[id] (24.0px)",
+        "addresses[customer_id] -> customers[id] (40.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 429641,
+      "bytes": 429171,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 65328,
+      "bytes": 64858,
       "edge_groups": 56,
       "node_groups": 7
     }

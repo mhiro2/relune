@@ -1,9 +1,12 @@
 //! Node ordering within layers
 //!
-//! This module implements algorithms for ordering nodes within each layer
-//! to minimize edge crossings and improve readability.
+//! Crossing reduction runs on a proper layered graph: every edge spanning
+//! more than one rank is split into a chain of virtual nodes, one per
+//! intermediate rank, so long edges take part in the ordering of every layer
+//! they cross and their crossings are counted. Layer sweeps keep the best
+//! ordering seen so far, and virtual nodes are removed from the result.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::graph::LayoutGraph;
 use crate::rank::RankAssignment;
@@ -20,6 +23,20 @@ pub enum CrossingReductionStrategy {
     Sifting,
     /// Try multiple strategies and pick the one with fewest crossings.
     Combined,
+}
+
+/// Maximum number of down/up sweep pairs per strategy.
+const MAX_SWEEPS: usize = 12;
+/// Consecutive sweeps without improvement after which the search stops.
+const SWEEP_PATIENCE: usize = 3;
+/// Virtual nodes allowed per real node, with a floor for small graphs.
+const VIRTUAL_NODES_PER_NODE: usize = 16;
+const MIN_VIRTUAL_NODE_BUDGET: usize = 4096;
+
+fn virtual_node_budget(real_count: usize) -> usize {
+    real_count
+        .saturating_mul(VIRTUAL_NODES_PER_NODE)
+        .max(MIN_VIRTUAL_NODE_BUDGET)
 }
 
 /// Order nodes within each layer to minimize edge crossings.
@@ -45,200 +62,239 @@ pub fn order_nodes_within_layers_with_strategy(
         return Vec::new();
     }
 
-    // Build edge information for crossing counting
-    let edges_by_node = build_edges_by_node(graph);
-
-    match strategy {
-        CrossingReductionStrategy::Combined => {
-            // Try all strategies and pick the best
-            let strategies = [
-                CrossingReductionStrategy::Barycenter,
-                CrossingReductionStrategy::Median,
-                CrossingReductionStrategy::Sifting,
-            ];
-
-            let mut best_ordering = Vec::new();
-            let mut best_crossings = usize::MAX;
-
-            for strat in strategies {
-                let ordering = apply_strategy(graph, ranks, strat);
-                let crossings = count_crossings(&ordering, &edges_by_node);
-
-                if crossings < best_crossings {
-                    best_crossings = crossings;
-                    best_ordering = ordering;
-                }
-            }
-
-            best_ordering
-        }
-        _ => apply_strategy(graph, ranks, strategy),
-    }
+    let layered = LayeredGraph::new(graph, ranks);
+    let (ordering, _) = layered.best_ordering(strategy);
+    layered.without_virtual_nodes(ordering)
 }
 
-/// Apply a single crossing reduction strategy.
-fn apply_strategy(
-    graph: &LayoutGraph,
-    ranks: &RankAssignment,
-    strategy: CrossingReductionStrategy,
-) -> Vec<Vec<usize>> {
-    let mut nodes_by_rank = ranks.nodes_by_rank.clone();
-
-    // Build adjacency information for crossing reduction
-    let adjacency = build_adjacency(graph);
-
-    // Multiple passes for better results
-    for _ in 0..3 {
-        // Forward pass
-        for rank_idx in 1..ranks.num_ranks {
-            nodes_by_rank[rank_idx] = match strategy {
-                CrossingReductionStrategy::Barycenter => order_by_barycenter(
-                    &nodes_by_rank[rank_idx],
-                    &nodes_by_rank[rank_idx - 1],
-                    &adjacency,
-                ),
-                CrossingReductionStrategy::Median => order_by_median(
-                    &nodes_by_rank[rank_idx],
-                    &nodes_by_rank[rank_idx - 1],
-                    &adjacency,
-                ),
-                CrossingReductionStrategy::Sifting => order_by_sifting(
-                    &nodes_by_rank[rank_idx],
-                    &nodes_by_rank[rank_idx - 1],
-                    &adjacency,
-                ),
-                CrossingReductionStrategy::Combined => unreachable!(),
-            };
-        }
-
-        // Backward pass
-        for rank_idx in (0..ranks.num_ranks.saturating_sub(1)).rev() {
-            nodes_by_rank[rank_idx] = match strategy {
-                CrossingReductionStrategy::Barycenter => order_by_barycenter(
-                    &nodes_by_rank[rank_idx],
-                    &nodes_by_rank[rank_idx + 1],
-                    &adjacency,
-                ),
-                CrossingReductionStrategy::Median => order_by_median(
-                    &nodes_by_rank[rank_idx],
-                    &nodes_by_rank[rank_idx + 1],
-                    &adjacency,
-                ),
-                CrossingReductionStrategy::Sifting => order_by_sifting(
-                    &nodes_by_rank[rank_idx],
-                    &nodes_by_rank[rank_idx + 1],
-                    &adjacency,
-                ),
-                CrossingReductionStrategy::Combined => unreachable!(),
-            };
-        }
-    }
-
-    // Apply final sifting pass for local optimization
-    if strategy == CrossingReductionStrategy::Sifting {
-        apply_global_sifting(&mut nodes_by_rank, &adjacency);
-    }
-
-    nodes_by_rank
+/// Layered graph in which every edge connects adjacent layers.
+///
+/// Node ids below `real_count` are graph nodes; the rest are virtual nodes
+/// that stand in for a long edge on an intermediate layer.
+struct LayeredGraph {
+    real_count: usize,
+    /// Initial ordering of every layer, virtual nodes appended.
+    layers: Vec<Vec<usize>>,
+    /// Neighbours of every node, all on an adjacent layer.
+    adjacency: Vec<Vec<usize>>,
+    /// Layer of every node.
+    layer_of: Vec<usize>,
 }
 
-/// Build adjacency information for each node.
-fn build_adjacency(graph: &LayoutGraph) -> BTreeMap<usize, Vec<usize>> {
-    let mut adjacency: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-
-    for edge in &graph.edges {
-        if edge.is_self_loop {
-            continue;
-        }
-        if let (Some(&from_idx), Some(&to_idx)) = (
-            graph.node_index.get(&edge.from),
-            graph.node_index.get(&edge.to),
-        ) {
-            adjacency.entry(from_idx).or_default().push(to_idx);
-            adjacency.entry(to_idx).or_default().push(from_idx);
-        }
-    }
-
-    adjacency
-}
-
-/// Build edge information organized by node for crossing counting.
-fn build_edges_by_node(graph: &LayoutGraph) -> BTreeMap<usize, Vec<(usize, usize)>> {
-    let mut edges_by_node: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
-
-    for edge in &graph.edges {
-        if edge.is_self_loop {
-            continue;
-        }
-        if let (Some(&from_idx), Some(&to_idx)) = (
-            graph.node_index.get(&edge.from),
-            graph.node_index.get(&edge.to),
-        ) {
-            edges_by_node
-                .entry(from_idx)
-                .or_default()
-                .push((from_idx, to_idx));
-            edges_by_node
-                .entry(to_idx)
-                .or_default()
-                .push((from_idx, to_idx));
-        }
-    }
-
-    edges_by_node
-}
-
-/// Count the number of edge crossings in the current ordering.
-fn count_crossings(
-    nodes_by_rank: &[Vec<usize>],
-    edges_by_node: &BTreeMap<usize, Vec<(usize, usize)>>,
-) -> usize {
-    let mut crossings = 0;
-
-    // Build position map for all nodes. Rank and position are packed into the
-    // high/low 32 bits of a u64 so the limit (~4 billion ranks/nodes per rank)
-    // is effectively unreachable for any real schema.
-    let mut position: BTreeMap<usize, u64> = BTreeMap::new();
-    for (rank_idx, rank_nodes) in nodes_by_rank.iter().enumerate() {
-        for (pos, &node_idx) in rank_nodes.iter().enumerate() {
-            position.insert(node_idx, ((rank_idx as u64) << 32) | pos as u64);
-        }
-    }
-
-    // Collect all edges with their positions
-    let mut all_edges: Vec<(usize, usize, usize, usize)> = Vec::new(); // (from_rank, from_pos, to_rank, to_pos)
-    for edges in edges_by_node.values() {
-        for &(from_idx, to_idx) in edges {
-            if let (Some(&from_pos), Some(&to_pos)) =
-                (position.get(&from_idx), position.get(&to_idx))
-            {
-                let from_rank = (from_pos >> 32) as usize;
-                let from_col = (from_pos & 0xFFFF_FFFF) as usize;
-                let to_rank = (to_pos >> 32) as usize;
-                let to_col = (to_pos & 0xFFFF_FFFF) as usize;
-                // Only count each edge once (from lower rank to higher rank)
-                if from_rank < to_rank {
-                    all_edges.push((from_rank, from_col, to_rank, to_col));
-                }
-            }
-        }
-    }
-
-    // Count crossings between consecutive layers using merge-sort inversion count O(E log E)
-    for rank_idx in 0..nodes_by_rank.len().saturating_sub(1) {
-        let mut edges_in_layer: Vec<(usize, usize)> = all_edges
+impl LayeredGraph {
+    fn new(graph: &LayoutGraph, ranks: &RankAssignment) -> Self {
+        let edges = graph
+            .edges
             .iter()
-            .filter(|(fr, _, tr, _)| *fr == rank_idx && *tr == rank_idx + 1)
-            .map(|(_, fp, _, tp)| (*fp, *tp))
-            .collect();
-
-        // Sort by source position, then count inversions in target positions
-        edges_in_layer.sort_unstable_by_key(|&(fp, _)| fp);
-        let targets: Vec<usize> = edges_in_layer.iter().map(|&(_, tp)| tp).collect();
-        crossings += count_inversions(&targets);
+            .filter(|edge| !edge.is_self_loop)
+            .filter_map(|edge| {
+                Some((
+                    *graph.node_index.get(&edge.from)?,
+                    *graph.node_index.get(&edge.to)?,
+                ))
+            });
+        Self::from_parts(&ranks.nodes_by_rank, &ranks.node_rank, edges)
     }
 
-    crossings
+    fn from_parts(
+        nodes_by_rank: &[Vec<usize>],
+        node_rank: &[usize],
+        edges: impl IntoIterator<Item = (usize, usize)>,
+    ) -> Self {
+        let real_count = node_rank.len();
+        let mut layers = nodes_by_rank.to_vec();
+        let mut adjacency = vec![Vec::new(); real_count];
+        let mut layer_of = node_rank.to_vec();
+
+        // Edges inside one layer do not influence the ordering. Shorter edges
+        // are split first so the virtual node budget covers as many edges as
+        // possible; the stable sort keeps input order among equal spans.
+        let mut spans: Vec<(usize, usize)> = edges
+            .into_iter()
+            .map(|(from, to)| {
+                if node_rank[from] <= node_rank[to] {
+                    (from, to)
+                } else {
+                    (to, from)
+                }
+            })
+            .filter(|&(upper, lower)| node_rank[upper] != node_rank[lower])
+            .collect();
+        spans.sort_by_key(|&(upper, lower)| node_rank[lower] - node_rank[upper]);
+        let mut virtual_budget = virtual_node_budget(real_count);
+
+        for (upper, lower) in spans {
+            let (start, end) = (layer_of[upper], layer_of[lower]);
+            let needed = end - start - 1;
+            if needed > virtual_budget {
+                // Dense, deep graphs could need a cubic number of virtual
+                // nodes; beyond the budget a long edge still links its
+                // endpoints for the ordering keys but is not split.
+                adjacency[upper].push(lower);
+                adjacency[lower].push(upper);
+                continue;
+            }
+            virtual_budget -= needed;
+            let mut previous = upper;
+            for (layer, layer_nodes) in layers.iter_mut().enumerate().take(end).skip(start + 1) {
+                let virtual_node = adjacency.len();
+                adjacency.push(Vec::new());
+                layer_of.push(layer);
+                layer_nodes.push(virtual_node);
+                adjacency[previous].push(virtual_node);
+                adjacency[virtual_node].push(previous);
+                previous = virtual_node;
+            }
+            adjacency[previous].push(lower);
+            adjacency[lower].push(previous);
+        }
+
+        Self {
+            real_count,
+            layers,
+            adjacency,
+            layer_of,
+        }
+    }
+
+    /// Returns the best ordering for `strategy` (trying every single strategy
+    /// for [`CrossingReductionStrategy::Combined`]) and its crossing count.
+    fn best_ordering(&self, strategy: CrossingReductionStrategy) -> (Vec<Vec<usize>>, usize) {
+        if strategy != CrossingReductionStrategy::Combined {
+            return self.reduce_crossings(strategy);
+        }
+        // `min_by_key` keeps the first strategy among equally good results.
+        [
+            CrossingReductionStrategy::Barycenter,
+            CrossingReductionStrategy::Median,
+            CrossingReductionStrategy::Sifting,
+        ]
+        .into_iter()
+        .map(|single| self.reduce_crossings(single))
+        .min_by_key(|(_, crossings)| *crossings)
+        .unwrap_or_else(|| (self.layers.clone(), 0))
+    }
+
+    /// Runs alternating down/up sweeps and returns the ordering with the
+    /// fewest crossings seen, together with that crossing count.
+    fn reduce_crossings(&self, strategy: CrossingReductionStrategy) -> (Vec<Vec<usize>>, usize) {
+        let mut layers = self.layers.clone();
+        let mut best = layers.clone();
+        let mut best_crossings = self.count_crossings(&best);
+        let mut stale_sweeps = 0;
+
+        for _ in 0..MAX_SWEEPS {
+            if best_crossings == 0 {
+                break;
+            }
+            let mut improved = false;
+            for downward in [true, false] {
+                if downward {
+                    for layer in 1..layers.len() {
+                        layers[layer] =
+                            self.reorder_layer(strategy, &layers[layer], &layers[layer - 1]);
+                    }
+                } else {
+                    for layer in (0..layers.len().saturating_sub(1)).rev() {
+                        layers[layer] =
+                            self.reorder_layer(strategy, &layers[layer], &layers[layer + 1]);
+                    }
+                }
+                // Check after each direction: an upward sweep can undo what
+                // the downward sweep gained.
+                let crossings = self.count_crossings(&layers);
+                if crossings < best_crossings {
+                    best.clone_from(&layers);
+                    best_crossings = crossings;
+                    improved = true;
+                }
+            }
+            if improved {
+                stale_sweeps = 0;
+            } else {
+                stale_sweeps += 1;
+                if stale_sweeps >= SWEEP_PATIENCE {
+                    break;
+                }
+            }
+        }
+
+        if strategy == CrossingReductionStrategy::Sifting && best_crossings > 0 {
+            let mut sifted = best.clone();
+            apply_global_sifting(&mut sifted, &self.adjacency);
+            let crossings = self.count_crossings(&sifted);
+            if crossings < best_crossings {
+                best = sifted;
+                best_crossings = crossings;
+            }
+        }
+
+        (best, best_crossings)
+    }
+
+    fn reorder_layer(
+        &self,
+        strategy: CrossingReductionStrategy,
+        layer_nodes: &[usize],
+        adjacent_layer: &[usize],
+    ) -> Vec<usize> {
+        match strategy {
+            CrossingReductionStrategy::Barycenter | CrossingReductionStrategy::Combined => {
+                order_by_key(layer_nodes, adjacent_layer, &self.adjacency, barycenter)
+            }
+            CrossingReductionStrategy::Median => {
+                order_by_key(layer_nodes, adjacent_layer, &self.adjacency, median)
+            }
+            CrossingReductionStrategy::Sifting => {
+                order_by_sifting(layer_nodes, adjacent_layer, &self.adjacency)
+            }
+        }
+    }
+
+    /// Counts crossings between every pair of adjacent layers.
+    fn count_crossings(&self, layers: &[Vec<usize>]) -> usize {
+        let mut position = vec![0usize; self.adjacency.len()];
+        for layer in layers {
+            for (pos, &node) in layer.iter().enumerate() {
+                position[node] = pos;
+            }
+        }
+
+        layers
+            .iter()
+            .enumerate()
+            .take(layers.len().saturating_sub(1))
+            .map(|(layer_idx, layer)| {
+                let mut edges: Vec<(usize, usize)> = layer
+                    .iter()
+                    .flat_map(|&node| {
+                        self.adjacency[node]
+                            .iter()
+                            .filter(|&&neighbor| self.layer_of[neighbor] == layer_idx + 1)
+                            .map(|&neighbor| (position[node], position[neighbor]))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                // Edges sharing a source never cross each other, so sort
+                // targets too before counting inversions.
+                edges.sort_unstable();
+                let targets: Vec<usize> = edges.into_iter().map(|(_, target)| target).collect();
+                count_inversions(&targets)
+            })
+            .sum()
+    }
+
+    fn without_virtual_nodes(&self, layers: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+        layers
+            .into_iter()
+            .map(|layer| {
+                layer
+                    .into_iter()
+                    .filter(|&node| node < self.real_count)
+                    .collect()
+            })
+            .collect()
+    }
 }
 
 /// Counts inversions using merge sort in O(n log n).
@@ -292,102 +348,62 @@ fn merge_sort_count(arr: &mut [usize], scratch: &mut [usize]) -> usize {
     count
 }
 
-/// Order nodes in a layer using the barycenter heuristic.
-fn order_by_barycenter(
-    layer_nodes: &[usize],
-    adjacent_layer: &[usize],
-    adjacency: &BTreeMap<usize, Vec<usize>>,
-) -> Vec<usize> {
-    // Create position map for adjacent layer
-    let position: BTreeMap<usize, usize> = adjacent_layer
-        .iter()
-        .enumerate()
-        .map(|(pos, &idx)| (idx, pos))
-        .collect();
-
-    // Calculate barycenter for each node in current layer
-    #[allow(clippy::cast_precision_loss)]
-    #[allow(clippy::map_unwrap_or)]
-    let mut nodes_with_barycenter: Vec<(usize, f64)> = layer_nodes
-        .iter()
-        .map(|&node_idx| {
-            let neighbors = adjacency.get(&node_idx).map(Vec::as_slice).unwrap_or(&[]);
-            let positions: Vec<usize> = neighbors
-                .iter()
-                .filter_map(|&n| position.get(&n).copied())
-                .collect();
-
-            let barycenter = if positions.is_empty() {
-                // No connections - use node index as tie-breaker for determinism
-                node_idx as f64
-            } else {
-                positions.iter().sum::<usize>() as f64 / positions.len() as f64
-            };
-
-            (node_idx, barycenter)
-        })
-        .collect();
-
-    // Sort by barycenter, then by node index for determinism
-    nodes_with_barycenter.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-
-    nodes_with_barycenter
-        .into_iter()
-        .map(|(idx, _)| idx)
-        .collect()
+#[allow(clippy::cast_precision_loss)] // Layer positions are small layout values.
+fn barycenter(positions: &mut [usize]) -> f64 {
+    positions.iter().sum::<usize>() as f64 / positions.len() as f64
 }
 
-/// Order nodes in a layer using the median heuristic.
-#[allow(clippy::map_unwrap_or)]
-#[allow(clippy::cast_precision_loss)]
-#[allow(clippy::stable_sort_primitive)]
-fn order_by_median(
+#[allow(clippy::cast_precision_loss)] // Layer positions are small layout values.
+fn median(positions: &mut [usize]) -> f64 {
+    positions.sort_unstable();
+    let middle = positions.len() / 2;
+    if positions.len() % 2 == 1 {
+        positions[middle] as f64
+    } else {
+        (positions[middle - 1] + positions[middle]) as f64 / 2.0
+    }
+}
+
+/// Reorders a layer by a key computed from neighbour positions in the
+/// adjacent layer.
+///
+/// Nodes without neighbours there keep their current slot, and the remaining
+/// nodes fill the other slots in key order (ties keep their current order).
+fn order_by_key(
     layer_nodes: &[usize],
     adjacent_layer: &[usize],
-    adjacency: &BTreeMap<usize, Vec<usize>>,
+    adjacency: &[Vec<usize>],
+    key: fn(&mut [usize]) -> f64,
 ) -> Vec<usize> {
-    // Create position map for adjacent layer
-    let position: BTreeMap<usize, usize> = adjacent_layer
+    let position = build_position_index(adjacent_layer);
+    let keys: Vec<Option<f64>> = layer_nodes
         .iter()
-        .enumerate()
-        .map(|(pos, &idx)| (idx, pos))
-        .collect();
-
-    // Calculate median for each node in current layer
-    #[allow(clippy::map_unwrap_or)]
-    #[allow(clippy::cast_precision_loss)]
-    #[allow(clippy::stable_sort_primitive)]
-    let mut nodes_with_median: Vec<(usize, f64)> = layer_nodes
-        .iter()
-        .map(|&node_idx| {
-            let neighbors = adjacency.get(&node_idx).map(Vec::as_slice).unwrap_or(&[]);
-            let mut positions: Vec<usize> = neighbors
-                .iter()
-                .filter_map(|&n| position.get(&n).copied())
-                .collect();
-
-            let median = if positions.is_empty() {
-                // No connections - use node index as tie-breaker for determinism
-                node_idx as f64
-            } else {
-                positions.sort();
-                let len = positions.len();
-                if len % 2 == 1 {
-                    positions[len / 2] as f64
-                } else {
-                    // Average of two middle elements
-                    (positions[len / 2 - 1] + positions[len / 2]) as f64 / 2.0
-                }
-            };
-
-            (node_idx, median)
+        .map(|&node| {
+            let mut positions = collect_target_positions(node, adjacency, &position);
+            (!positions.is_empty()).then(|| key(&mut positions))
         })
         .collect();
 
-    // Sort by median, then by node index for determinism
-    nodes_with_median.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    let mut keyed: Vec<(f64, usize)> = keys
+        .iter()
+        .zip(layer_nodes)
+        .filter_map(|(key, &node)| key.map(|key| (key, node)))
+        .collect();
+    // Stable sort keeps the current order for equal keys.
+    keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut sorted = keyed.into_iter().map(|(_, node)| node);
 
-    nodes_with_median.into_iter().map(|(idx, _)| idx).collect()
+    layer_nodes
+        .iter()
+        .zip(&keys)
+        .filter_map(|(&node, key)| {
+            if key.is_some() {
+                sorted.next()
+            } else {
+                Some(node)
+            }
+        })
+        .collect()
 }
 
 /// Threshold for sifting: above this, fall back to median heuristic only.
@@ -402,7 +418,7 @@ const SIFTING_NODE_LIMIT: usize = 100;
 fn order_by_sifting(
     layer_nodes: &[usize],
     adjacent_layer: &[usize],
-    adjacency: &BTreeMap<usize, Vec<usize>>,
+    adjacency: &[Vec<usize>],
 ) -> Vec<usize> {
     if layer_nodes.len() <= 1 || layer_nodes.len() > SIFTING_NODE_LIMIT {
         return layer_nodes.to_vec();
@@ -453,17 +469,17 @@ fn order_by_sifting(
 fn count_layer_crossings(
     layer_nodes: &[usize],
     adj_position: &HashMap<usize, usize>,
-    adjacency: &BTreeMap<usize, Vec<usize>>,
+    adjacency: &[Vec<usize>],
 ) -> usize {
     let mut edges = collect_layer_edges(layer_nodes, adjacency, adj_position);
-    edges.sort_unstable_by_key(|&(src_pos, _)| src_pos);
+    edges.sort_unstable();
     let targets: Vec<usize> = edges.into_iter().map(|(_, dst_pos)| dst_pos).collect();
     count_inversions(&targets)
 }
 
 /// Apply global sifting across all layers.
 #[allow(clippy::assigning_clones)]
-fn apply_global_sifting(nodes_by_rank: &mut [Vec<usize>], adjacency: &BTreeMap<usize, Vec<usize>>) {
+fn apply_global_sifting(nodes_by_rank: &mut [Vec<usize>], adjacency: &[Vec<usize>]) {
     if nodes_by_rank.is_empty() {
         return;
     }
@@ -547,12 +563,10 @@ fn fill_reduced_ordering(ordering: &[usize], skip_idx: usize, reduced_ordering: 
 
 fn collect_target_positions(
     node_idx: usize,
-    adjacency: &BTreeMap<usize, Vec<usize>>,
+    adjacency: &[Vec<usize>],
     target_positions: &HashMap<usize, usize>,
 ) -> Vec<usize> {
-    adjacency
-        .get(&node_idx)
-        .map_or_else(|| &[] as &[usize], Vec::as_slice)
+    adjacency[node_idx]
         .iter()
         .filter_map(|&neighbor| target_positions.get(&neighbor).copied())
         .collect()
@@ -560,23 +574,19 @@ fn collect_target_positions(
 
 fn collect_layer_edges(
     ordering: &[usize],
-    adjacency: &BTreeMap<usize, Vec<usize>>,
+    adjacency: &[Vec<usize>],
     adjacent_positions: &HashMap<usize, usize>,
 ) -> Vec<(usize, usize)> {
     ordering
         .iter()
         .enumerate()
         .flat_map(|(src_pos, &node_idx)| {
-            adjacency
-                .get(&node_idx)
-                .map_or_else(|| &[] as &[usize], Vec::as_slice)
-                .iter()
-                .filter_map(move |&neighbor| {
-                    adjacent_positions
-                        .get(&neighbor)
-                        .copied()
-                        .map(|dst_pos| (src_pos, dst_pos))
-                })
+            adjacency[node_idx].iter().filter_map(move |&neighbor| {
+                adjacent_positions
+                    .get(&neighbor)
+                    .copied()
+                    .map(|dst_pos| (src_pos, dst_pos))
+            })
         })
         .collect()
 }
@@ -941,107 +951,158 @@ mod tests {
         let schema = make_complex_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
         let ranks = assign_ranks(&graph);
+        let layered = LayeredGraph::new(&graph, &ranks);
 
-        let edges_by_node = build_edges_by_node(&graph);
-
-        // Get results from individual strategies
-        let barycenter = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
+        let min_crossings = [
             CrossingReductionStrategy::Barycenter,
-        );
-        let median = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
             CrossingReductionStrategy::Median,
-        );
-        let sifting = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
             CrossingReductionStrategy::Sifting,
-        );
-        let combined = order_nodes_within_layers_with_strategy(
+        ]
+        .into_iter()
+        .map(|strategy| layered.reduce_crossings(strategy).1)
+        .min()
+        .unwrap();
+
+        // Combined should not be worse than the best individual strategy
+        let combined = layered.best_ordering(CrossingReductionStrategy::Combined).1;
+        assert_eq!(combined, min_crossings);
+        let combined_ordering = order_nodes_within_layers_with_strategy(
             &graph,
             &ranks,
             CrossingReductionStrategy::Combined,
         );
-
-        let barycenter_crossings = count_crossings(&barycenter, &edges_by_node);
-        let median_crossings = count_crossings(&median, &edges_by_node);
-        let sifting_crossings = count_crossings(&sifting, &edges_by_node);
-        let combined_crossings = count_crossings(&combined, &edges_by_node);
-
-        let min_crossings = barycenter_crossings
-            .min(median_crossings)
-            .min(sifting_crossings);
-
-        // Combined should not be worse than the best individual strategy
-        assert!(
-            combined_crossings <= min_crossings,
-            "Combined crossings ({combined_crossings}) should be <= min of individual strategies ({min_crossings})",
+        assert_eq!(
+            combined_ordering.iter().map(Vec::len).sum::<usize>(),
+            graph.nodes.len()
         );
     }
 
     #[test]
     fn test_crossing_count() {
-        // Test the crossing count function directly
-        // Simple case: two nodes in each of two layers
-        let nodes_by_rank = vec![
-            vec![0, 1], // Layer 0
-            vec![2, 3], // Layer 1
-        ];
-
-        // Build edges_by_node manually
-        let mut edges_by_node: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
-        // Edge from 0 to 2
-        edges_by_node.entry(0).or_default().push((0, 2));
-        edges_by_node.entry(2).or_default().push((0, 2));
-        // Edge from 1 to 3
-        edges_by_node.entry(1).or_default().push((1, 3));
-        edges_by_node.entry(3).or_default().push((1, 3));
-
-        // No crossings: 0->2, 1->3 (parallel edges)
-        let crossings = count_crossings(&nodes_by_rank, &edges_by_node);
-        assert_eq!(crossings, 0, "Parallel edges should have no crossings");
-
-        // Swap layer 1 nodes to create crossing
-        let nodes_crossing = vec![
-            vec![0, 1], // Layer 0
-            vec![3, 2], // Layer 1 (swapped)
-        ];
-
-        // Now 0->2 crosses 1->3 because:
-        // - Node 0 is at position 0 in layer 0, connects to node 2 at position 1 in layer 1
-        // - Node 1 is at position 1 in layer 0, connects to node 3 at position 0 in layer 1
-        // This creates a crossing
-        let crossings = count_crossings(&nodes_crossing, &edges_by_node);
-        assert!(crossings > 0, "Crossed edges should have crossings");
+        // Two nodes in each of two layers: 0 -> 2 and 1 -> 3.
+        let layered =
+            LayeredGraph::from_parts(&[vec![0, 1], vec![2, 3]], &[0, 0, 1, 1], [(0, 2), (1, 3)]);
+        assert_eq!(layered.count_crossings(&[vec![0, 1], vec![2, 3]]), 0);
+        assert_eq!(layered.count_crossings(&[vec![0, 1], vec![3, 2]]), 1);
     }
 
     #[test]
-    fn test_improved_ordering_reduces_crossings() {
-        let schema = make_complex_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph);
+    fn test_crossing_count_ignores_edges_sharing_a_source() {
+        let layered =
+            LayeredGraph::from_parts(&[vec![0], vec![1, 2]], &[0, 1, 1], [(0, 1), (0, 2)]);
+        assert_eq!(layered.count_crossings(&[vec![0], vec![2, 1]]), 0);
+    }
 
-        let edges_by_node = build_edges_by_node(&graph);
-
-        // Get ordering with default strategy
-        let ordered = order_nodes_within_layers(&graph, &ranks);
-        let crossings = count_crossings(&ordered, &edges_by_node);
-
-        // Combined strategy should be at least as good
-        let combined = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
-            CrossingReductionStrategy::Combined,
+    #[test]
+    fn test_long_edges_are_split_into_virtual_nodes() {
+        // 0 (layer 0) -> 3 (layer 3) spans two intermediate layers.
+        let layered = LayeredGraph::from_parts(
+            &[vec![0], vec![1], vec![2], vec![3]],
+            &[0, 1, 2, 3],
+            [(0, 3), (0, 1), (1, 2)],
         );
-        let combined_crossings = count_crossings(&combined, &edges_by_node);
-
-        assert!(
-            combined_crossings <= crossings,
-            "Combined strategy crossings ({combined_crossings}) should be <= default crossings ({crossings})",
+        assert_eq!(layered.adjacency.len(), 6);
+        assert_eq!(layered.layers[1], vec![1, 4]);
+        assert_eq!(layered.layers[2], vec![2, 5]);
+        assert_eq!(layered.adjacency[3], vec![5]);
+        assert_eq!(
+            layered.without_virtual_nodes(layered.layers.clone()),
+            vec![vec![0], vec![1], vec![2], vec![3]]
         );
+    }
+
+    #[test]
+    fn test_long_edge_crossings_are_counted() {
+        // Layer 0: [a=0, b=1], layer 1: [c=2], layer 2: [d=3, e=4].
+        // a -> e spans layer 1 through a virtual node; b -> c -> d is short.
+        let layered = LayeredGraph::from_parts(
+            &[vec![0, 1], vec![2], vec![3, 4]],
+            &[0, 0, 1, 2, 2],
+            [(0, 4), (1, 2), (2, 3)],
+        );
+        let virtual_node = 5;
+        // Virtual node right of c while a is left of b: the long edge crosses b -> c.
+        assert_eq!(
+            layered.count_crossings(&[vec![0, 1], vec![2, virtual_node], vec![3, 4]]),
+            1
+        );
+        let (best, crossings) = layered.reduce_crossings(CrossingReductionStrategy::Barycenter);
+        assert_eq!(crossings, 0);
+        assert_eq!(layered.count_crossings(&best), 0);
+    }
+
+    #[test]
+    fn test_reduce_crossings_keeps_improvement_from_a_downward_sweep() {
+        // The downward sweep reaches one crossing and the following upward
+        // sweep returns to two; the better ordering must be kept.
+        let layered = LayeredGraph::from_parts(
+            &[vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8]],
+            &[0, 0, 0, 1, 1, 1, 2, 2, 2],
+            [(0, 3), (0, 5), (1, 4), (2, 4), (3, 6), (4, 6), (5, 7)],
+        );
+        assert_eq!(layered.count_crossings(&layered.layers), 2);
+        let (best, crossings) = layered.reduce_crossings(CrossingReductionStrategy::Barycenter);
+        assert!(crossings <= 1);
+        assert_eq!(layered.count_crossings(&best), crossings);
+    }
+
+    #[test]
+    fn test_virtual_nodes_stay_within_budget_for_dense_deep_graphs() {
+        // A transitively closed chain would need C(n, 3) virtual nodes.
+        let count = 120;
+        let node_rank: Vec<usize> = (0..count).collect();
+        let nodes_by_rank: Vec<Vec<usize>> = (0..count).map(|node| vec![node]).collect();
+        let edges =
+            (0..count).flat_map(|upper| (upper + 1..count).map(move |lower| (upper, lower)));
+        let layered = LayeredGraph::from_parts(&nodes_by_rank, &node_rank, edges);
+
+        assert!(layered.adjacency.len() - count <= virtual_node_budget(count));
+        let (best, _) = layered.reduce_crossings(CrossingReductionStrategy::Barycenter);
+        assert_eq!(layered.without_virtual_nodes(best), nodes_by_rank);
+    }
+
+    #[test]
+    fn test_nodes_without_neighbors_keep_their_slot() {
+        // Node 9 has no neighbour in the adjacent layer and stays first while
+        // the connected nodes swap to follow their neighbours.
+        let mut adjacency = vec![Vec::new(); 10];
+        adjacency[1] = vec![5];
+        adjacency[2] = vec![4];
+        let ordered = order_by_key(&[9, 1, 2], &[4, 5], &adjacency, barycenter);
+        assert_eq!(ordered, vec![9, 2, 1]);
+    }
+
+    #[test]
+    fn test_reduce_crossings_never_worsens_the_initial_ordering() {
+        for seed in 0..20_usize {
+            let layer_count = 5;
+            let per_layer = 6;
+            let node_rank: Vec<usize> = (0..layer_count * per_layer)
+                .map(|node| node / per_layer)
+                .collect();
+            let nodes_by_rank: Vec<Vec<usize>> = (0..layer_count)
+                .map(|layer| (layer * per_layer..(layer + 1) * per_layer).collect())
+                .collect();
+            let edges: Vec<(usize, usize)> = (0..40)
+                .map(|step| {
+                    let from = (seed * 7 + step * 13) % node_rank.len();
+                    let to = (seed * 11 + step * 5 + 3) % node_rank.len();
+                    (from, to)
+                })
+                .filter(|(from, to)| node_rank[*from] != node_rank[*to])
+                .collect();
+            let layered = LayeredGraph::from_parts(&nodes_by_rank, &node_rank, edges);
+            let initial = layered.count_crossings(&layered.layers);
+            for strategy in [
+                CrossingReductionStrategy::Barycenter,
+                CrossingReductionStrategy::Median,
+                CrossingReductionStrategy::Sifting,
+            ] {
+                let (best, crossings) = layered.reduce_crossings(strategy);
+                assert!(crossings <= initial, "seed {seed} {strategy:?}");
+                assert_eq!(layered.count_crossings(&best), crossings);
+            }
+        }
     }
 
     #[test]
