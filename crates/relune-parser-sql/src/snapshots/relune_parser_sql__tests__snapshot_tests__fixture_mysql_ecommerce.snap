@@ -1,6 +1,5 @@
 ---
 source: crates/relune-parser-sql/src/tests.rs
-assertion_line: 1230
 expression: snapshot_data(&output)
 ---
 {
@@ -83,7 +82,18 @@ expression: snapshot_data(&output)
                 }
               }
             ],
-            "name": null
+            "name": "idx_users_email"
+          },
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "username"
+                }
+              }
+            ],
+            "name": "idx_users_username"
           }
         ],
         "name": "users",
@@ -138,7 +148,19 @@ expression: snapshot_data(&output)
           }
         ],
         "id": 2,
-        "indexes": [],
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "parent_id"
+                }
+              }
+            ],
+            "name": "idx_categories_parent"
+          }
+        ],
         "name": "categories",
         "schema_name": null,
         "stable_id": "categories"
@@ -236,7 +258,19 @@ expression: snapshot_data(&output)
           }
         ],
         "id": 3,
-        "indexes": [],
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "category_id"
+                }
+              }
+            ],
+            "name": "idx_products_category"
+          }
+        ],
         "name": "products",
         "schema_name": null,
         "stable_id": "products"
@@ -315,7 +349,30 @@ expression: snapshot_data(&output)
           }
         ],
         "id": 4,
-        "indexes": [],
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
+            "name": "idx_orders_user"
+          },
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "status"
+                }
+              }
+            ],
+            "name": "idx_orders_status"
+          }
+        ],
         "name": "orders",
         "schema_name": null,
         "stable_id": "orders"
@@ -391,7 +448,30 @@ expression: snapshot_data(&output)
           }
         ],
         "id": 5,
-        "indexes": [],
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "order_id"
+                }
+              }
+            ],
+            "name": "idx_order_items_order"
+          },
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "product_id"
+                }
+              }
+            ],
+            "name": "idx_order_items_product"
+          }
+        ],
         "name": "order_items",
         "schema_name": null,
         "stable_id": "order_items"

@@ -2210,15 +2210,15 @@ fn column_list_has_prefix(index_cols: &[&str], fk_cols: &[String]) -> bool {
 }
 
 /// Returns whether the ordered index key parts start with `fk_cols`. An
-/// expression key part in a leading position never matches, so a functional
-/// index does not spuriously satisfy coverage.
+/// expression or prefix-indexed key part in a leading position never matches,
+/// so a functional or prefix index does not spuriously satisfy coverage.
 fn index_covers_prefix(idx: &crate::model::Index, fk_cols: &[String]) -> bool {
     // A partial index only covers rows matching its predicate, so it cannot
     // satisfy the FK lookup for every referencing row.
     if idx.predicate.is_some() {
         return false;
     }
-    let slots = idx.key_slots();
+    let slots = idx.full_key_slots();
     if slots.len() < fk_cols.len() {
         return false;
     }
@@ -4493,6 +4493,56 @@ mod tests {
             findings
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::FkWithoutIndex)
+        );
+    }
+
+    #[test]
+    fn fk_without_index_not_silenced_by_prefix_index() {
+        let users = table(
+            "users",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let orders_before = table(
+            "orders",
+            vec![col("id", "BIGINT", false, true)],
+            vec![],
+            vec![],
+        );
+        let mut prefix = index("orders_user_prefix_idx", &["user_code"], false);
+        if let crate::model::IndexKey::Column(column) = &mut prefix.key_parts[0] {
+            column.prefix_length = Some(4);
+        }
+        let orders_after = table(
+            "orders",
+            vec![
+                col("id", "BIGINT", false, true),
+                col("user_code", "VARCHAR(32)", false, false),
+            ],
+            vec![fk(
+                "orders_user_fkey",
+                &["user_code"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![prefix],
+        );
+        let before = Schema {
+            tables: vec![users.clone(), orders_before],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![users, orders_after],
+            ..Default::default()
+        };
+        let findings = run_all(&before, &after);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::FkWithoutIndex),
+            "a prefix index must not count as FK index coverage"
         );
     }
 

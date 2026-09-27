@@ -6,11 +6,12 @@ use crate::names::{build_foreign_key, normalized_stable_id, split_object_name_wi
 use crate::query_columns::columns_from_query;
 use relune_core::{
     CheckConstraint, ColumnId, ColumnSemantics, Diagnostic, GeneratedColumn, IdentitySpec, Index,
-    SourceSpan, Table, diagnostic::codes, normalize_identifier,
+    IndexKey, SourceSpan, SqlDialect, Table, diagnostic::codes, normalize_identifier,
 };
 use sqlparser::ast::{
-    ColumnOption, DataType, GeneratedAs, GeneratedExpressionMode, Ident, IndexColumn, OrderBySort,
-    TableConstraint,
+    ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GeneratedAs,
+    GeneratedExpressionMode, Ident, IndexColumn, IndexConstraint, IndexOption, OrderBySort,
+    TableConstraint, UniqueConstraint, Value,
 };
 use sqlparser::tokenizer::Token;
 
@@ -89,7 +90,11 @@ pub(crate) fn parse_create_table(
                     let col_name = normalize_identifier(&column.name.value);
                     let constraint_name =
                         option.name.as_ref().map(|n| normalize_identifier(&n.value));
-                    push_unique_index(&mut indexes, constraint_name, vec![col_name]);
+                    push_unique_index(
+                        &mut indexes,
+                        constraint_name,
+                        vec![IndexKey::column(col_name)],
+                    );
                 }
                 _ => {}
             }
@@ -120,10 +125,8 @@ pub(crate) fn parse_create_table(
                 }
             }
             TableConstraint::Unique(unique) => {
-                if let Some(col_names) = plain_column_names(&unique.columns) {
-                    let constraint_name =
-                        unique.name.as_ref().map(|n| normalize_identifier(&n.value));
-                    push_unique_index(&mut indexes, constraint_name, col_names);
+                if let Some(key_parts) = unique_key_parts(&unique.columns, ctx.dialect) {
+                    push_unique_index(&mut indexes, unique_index_name(unique), key_parts);
                 } else {
                     warn_expression_key(
                         ctx,
@@ -158,8 +161,10 @@ pub(crate) fn parse_create_table(
                     expression: check.expr.to_string(),
                 });
             }
-            TableConstraint::Index(_) => {
-                // Index constraints are informational only.
+            TableConstraint::Index(index) => {
+                if let Some(index) = index_from_constraint(index, ctx.dialect) {
+                    indexes.push(index);
+                }
             }
             TableConstraint::FulltextOrSpatial(_) => {
                 ctx.warn_unsupported(
@@ -193,23 +198,23 @@ pub(crate) fn parse_create_table(
         name: normalized_name,
         columns,
         foreign_keys,
-        indexes, // Inline UNIQUE indexes; CREATE INDEX statements are merged in a second pass.
+        indexes, // Inline UNIQUE/KEY indexes; CREATE INDEX statements are merged in a second pass.
         primary_key_name,
         comment: None, // Comments are added in third pass
         check_constraints: table_check_constraints,
     })
 }
 
-/// Append a UNIQUE index entry to `indexes`, deduplicating by name and column set.
+/// Append a UNIQUE index entry to `indexes`, deduplicating by name and key parts.
 pub(crate) fn push_unique_index(
     indexes: &mut Vec<Index>,
     name: Option<String>,
-    columns: Vec<String>,
+    key_parts: Vec<IndexKey>,
 ) {
-    if columns.is_empty() {
+    if key_parts.is_empty() {
         return;
     }
-    let lower_cols: Vec<String> = columns.iter().map(|c| c.to_ascii_lowercase()).collect();
+    let signature = key_part_signature(&key_parts);
     let already_present = indexes.iter().any(|existing| {
         if !existing.is_unique {
             return false;
@@ -219,17 +224,85 @@ pub(crate) fn push_unique_index(
         {
             return true;
         }
-        let existing_lower: Vec<String> = existing
-            .column_names()
-            .iter()
-            .map(|c| c.to_ascii_lowercase())
-            .collect();
-        existing_lower == lower_cols
+        key_part_signature(&existing.key_parts) == signature
     });
     if already_present {
         return;
     }
-    indexes.push(Index::from_columns(name, columns, true));
+    indexes.push(Index {
+        name,
+        key_parts,
+        is_unique: true,
+        predicate: None,
+        included_columns: Vec::new(),
+        method: None,
+    });
+}
+
+/// Name of the index backing a UNIQUE constraint.
+///
+/// `MySQL` `UNIQUE KEY idx (col)` carries the index name separately from a
+/// `CONSTRAINT c` name; the server names the index after `idx` when given and
+/// falls back to `c`, so mirror that to match introspected index names.
+pub(crate) fn unique_index_name(unique: &UniqueConstraint) -> Option<String> {
+    unique
+        .index_name
+        .as_ref()
+        .or(unique.name.as_ref())
+        .map(|ident| normalize_identifier(&ident.value))
+}
+
+/// Case-insensitive identity of an index key list (column name or expression
+/// text plus prefix length), used to deduplicate equivalent UNIQUE entries.
+fn key_part_signature(key_parts: &[IndexKey]) -> Vec<(String, Option<u32>)> {
+    key_parts
+        .iter()
+        .map(|part| match part {
+            IndexKey::Column(column) => (column.name.to_ascii_lowercase(), column.prefix_length),
+            IndexKey::Expression(expr) => (expr.to_ascii_lowercase(), None),
+        })
+        .collect()
+}
+
+/// Build a non-unique index from a `MySQL` inline `KEY`/`INDEX` definition
+/// (`CREATE TABLE ... KEY idx (col)` or `ALTER TABLE ... ADD INDEX idx (col)`).
+///
+/// Expression key parts are kept as explicit expression parts, matching
+/// `CREATE INDEX`, so the index still counts toward FK coverage decisions.
+pub(crate) fn index_from_constraint(
+    constraint: &IndexConstraint,
+    dialect: SqlDialect,
+) -> Option<Index> {
+    let key_parts = index_key_parts(&constraint.columns, dialect);
+    if key_parts.is_empty() {
+        return None;
+    }
+    // `USING` may appear before the column list (`index_type`) or after it
+    // (as an index option); either spelling names the access method.
+    let method = constraint
+        .index_type
+        .as_ref()
+        .or_else(|| {
+            constraint
+                .index_options
+                .iter()
+                .find_map(|option| match option {
+                    IndexOption::Using(index_type) => Some(index_type),
+                    IndexOption::Comment(_) => None,
+                })
+        })
+        .map(|index_type| index_type.to_string().to_lowercase());
+    Some(Index {
+        name: constraint
+            .name
+            .as_ref()
+            .map(|ident| normalize_identifier(&ident.value)),
+        key_parts,
+        is_unique: false,
+        predicate: None,
+        included_columns: Vec::new(),
+        method,
+    })
 }
 
 /// Extract the referenced column name from an `IndexColumn`, if it is a plain
@@ -262,23 +335,47 @@ pub(crate) fn plain_column_names(columns: &[IndexColumn]) -> Option<Vec<String>>
     columns.iter().map(extract_column_name).collect()
 }
 
+/// Key parts of a UNIQUE constraint, or `None` if any part is a
+/// functional/expression column (see [`plain_column_names`] for why such
+/// constraints are dropped). `MySQL` prefix parts (`col(10)`) are kept with
+/// their prefix length, which marks them as not guaranteeing whole-column
+/// uniqueness.
+pub(crate) fn unique_key_parts(
+    columns: &[IndexColumn],
+    dialect: SqlDialect,
+) -> Option<Vec<IndexKey>> {
+    let key_parts = index_key_parts(columns, dialect);
+    if key_parts
+        .iter()
+        .any(|part| matches!(part, IndexKey::Expression(_)))
+    {
+        return None;
+    }
+    Some(key_parts)
+}
+
 /// Build structured [`relune_core::IndexKey`] parts from a parsed index column
-/// list, preserving sort/nulls ordering for plain columns and recording
-/// functional/expression parts as [`relune_core::IndexKey::Expression`].
-pub(crate) fn index_key_parts(columns: &[IndexColumn]) -> Vec<relune_core::IndexKey> {
-    use relune_core::{IndexColumn as ModelIndexColumn, IndexKey, NullsOrder, SortOrder};
-    use sqlparser::ast::Expr;
+/// list, preserving sort/nulls ordering and `MySQL` prefix lengths for plain
+/// columns and recording functional/expression parts as
+/// [`relune_core::IndexKey::Expression`].
+pub(crate) fn index_key_parts(columns: &[IndexColumn], dialect: SqlDialect) -> Vec<IndexKey> {
+    use relune_core::{IndexColumn as ModelIndexColumn, NullsOrder, SortOrder};
 
     columns
         .iter()
         .map(|index_col| {
             let order_by = &index_col.column;
-            let name = match &order_by.expr {
-                Expr::Identifier(ident) => Some(normalize_identifier(&ident.value)),
-                Expr::CompoundIdentifier(parts) => {
-                    parts.last().map(|ident| normalize_identifier(&ident.value))
-                }
-                _ => None,
+            let (name, prefix_length) = match &order_by.expr {
+                Expr::Identifier(ident) => (Some(normalize_identifier(&ident.value)), None),
+                Expr::CompoundIdentifier(parts) => (
+                    parts.last().map(|ident| normalize_identifier(&ident.value)),
+                    None,
+                ),
+                expr if dialect == SqlDialect::Mysql => match mysql_prefix_column(expr) {
+                    Some((name, length)) => (Some(name), Some(length)),
+                    None => (None, None),
+                },
+                _ => (None, None),
             };
             match name {
                 Some(name) => IndexKey::Column(ModelIndexColumn {
@@ -295,12 +392,51 @@ pub(crate) fn index_key_parts(columns: &[IndexColumn]) -> Vec<relune_core::Index
                             NullsOrder::Last
                         }
                     }),
-                    prefix_length: None,
+                    prefix_length,
                 }),
                 None => IndexKey::Expression(order_by.expr.to_string()),
             }
         })
         .collect()
+}
+
+/// Recognize a `MySQL` prefix key part such as `name(10)`.
+///
+/// sqlparser has no dedicated node for it and parses it as a one-argument
+/// function call. `MySQL` requires functional key parts to be wrapped in their
+/// own parentheses (`((lower(name)))`), so an unwrapped call with a single
+/// integer literal argument is always a column prefix.
+fn mysql_prefix_column(expr: &Expr) -> Option<(String, u32)> {
+    let Expr::Function(function) = expr else {
+        return None;
+    };
+    if function.filter.is_some()
+        || function.over.is_some()
+        || function.null_treatment.is_some()
+        || !function.within_group.is_empty()
+        || !matches!(function.parameters, FunctionArguments::None)
+    {
+        return None;
+    }
+    let [name] = function.name.0.as_slice() else {
+        return None;
+    };
+    let name = name.as_ident()?;
+    let FunctionArguments::List(list) = &function.args else {
+        return None;
+    };
+    if list.duplicate_treatment.is_some() || !list.clauses.is_empty() {
+        return None;
+    }
+    let [FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(value)))] = list.args.as_slice()
+    else {
+        return None;
+    };
+    let Value::Number(length, _) = &value.value else {
+        return None;
+    };
+    let length = length.parse::<u32>().ok().filter(|length| *length > 0)?;
+    Some((normalize_identifier(&name.value), length))
 }
 
 /// Warn that an index or key is dropped because it contains a

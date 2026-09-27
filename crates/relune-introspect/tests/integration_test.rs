@@ -11,6 +11,7 @@ use relune_parser_sql::parse_sql_to_schema;
 use std::collections::HashSet;
 use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::mariadb::Mariadb;
 use testcontainers_modules::mysql::Mysql;
 use testcontainers_modules::postgres::Postgres;
 
@@ -521,6 +522,11 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
             amount INT NOT NULL,
             CONSTRAINT amount_positive CHECK (amount >= 0)
         );
+        CREATE TABLE ledger (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code INT NOT NULL,
+            UNIQUE KEY amount_positive (code)
+        );
     ";
     let (database_url, _container) = setup_mysql_with_sql(sql).await.expect("mysql setup");
     let schema = introspect_database(&database_url)
@@ -559,6 +565,158 @@ async fn test_introspect_mysql_column_semantics_and_checks() {
 
     assert_eq!(accounts.check_constraints.len(), 1);
     assert!(accounts.check_constraints[0].expression.contains("amount"));
+
+    // A UNIQUE key sharing the check's name on another table must not pull the
+    // check onto that table.
+    let ledger = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "ledger")
+        .expect("ledger table");
+    assert!(
+        ledger.check_constraints.is_empty(),
+        "ledger must not inherit accounts' check: {:?}",
+        ledger.check_constraints
+    );
+}
+
+#[tokio::test]
+async fn test_introspect_mysql_indexes_match_parsed_mysqldump_keys() {
+    type IndexShape = (Option<String>, bool, Vec<(String, Option<u32>)>);
+
+    // mysqldump emits secondary indexes as inline `KEY`/`UNIQUE KEY` clauses;
+    // parsing the DDL must yield the same index names and key parts
+    // (including prefix lengths) as introspecting the live database.
+    let sql = r"
+        CREATE TABLE `users` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `email` VARCHAR(255) NOT NULL,
+            `bio` TEXT,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_users_email` (`email`),
+            KEY `idx_users_bio` (`bio`(100))
+        ) ENGINE=InnoDB;
+        CREATE TABLE `posts` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `user_id` INT NOT NULL,
+            `title` VARCHAR(255) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `fk_posts_user` (`user_id`),
+            KEY `idx_posts_user_title` (`user_id`, `title`(32)),
+            CONSTRAINT `fk_posts_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ) ENGINE=InnoDB;
+        ALTER TABLE `posts` ADD INDEX `idx_posts_title` (`title`);
+    ";
+    let (database_url, _container) = setup_mysql_with_sql(sql).await.expect("mysql setup");
+    let introspected = introspect_database(&database_url)
+        .await
+        .expect("introspect mysql");
+    let parsed =
+        relune_parser_sql::parse_sql_to_schema_with_dialect(sql, relune_core::SqlDialect::Mysql)
+            .expect("parse mysqldump DDL");
+
+    let shapes = |schema: &relune_core::Schema, table: &str| -> Vec<IndexShape> {
+        let mut shapes: Vec<IndexShape> = schema
+            .tables
+            .iter()
+            .find(|t| t.name == table)
+            .unwrap_or_else(|| panic!("{table} table"))
+            .indexes
+            .iter()
+            .map(|ix| {
+                let parts = ix
+                    .key_parts
+                    .iter()
+                    .map(|part| match part {
+                        relune_core::IndexKey::Column(c) => (c.name.clone(), c.prefix_length),
+                        relune_core::IndexKey::Expression(e) => (e.clone(), None),
+                    })
+                    .collect();
+                (ix.name.clone(), ix.is_unique, parts)
+            })
+            .collect();
+        shapes.sort();
+        shapes
+    };
+
+    for table in ["users", "posts"] {
+        assert_eq!(
+            shapes(&parsed, table),
+            shapes(&introspected, table),
+            "index shapes for `{table}` differ between parsed DDL and introspection"
+        );
+    }
+}
+
+/// Sets up a `MariaDB` container and executes SQL in its `test` database.
+async fn setup_mariadb_with_sql(
+    sql: &str,
+) -> Result<(String, testcontainers::ContainerAsync<Mariadb>), Box<dyn std::error::Error>> {
+    let container = Mariadb::default().start().await?;
+    let host = container.get_host().await?;
+    let port = container.get_host_port_ipv4(3306).await?;
+    // The `MariaDB` module starts with a passwordless root and a `test` database.
+    let database_url = format!("mysql://root@{host}:{port}/test");
+
+    let pool = sqlx::mysql::MySqlPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok((database_url, container))
+}
+
+#[tokio::test]
+async fn test_introspect_mariadb_checks_stay_on_their_table() {
+    // MariaDB scopes CHECK constraint names to the table, so two tables can
+    // each own a check with the same name.
+    let sql = r"
+        CREATE TABLE accounts (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            amount INT NOT NULL,
+            CONSTRAINT chk_positive CHECK (amount >= 0)
+        );
+        CREATE TABLE payments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            total INT NOT NULL,
+            CONSTRAINT chk_positive CHECK (total > 0)
+        );
+        CREATE TABLE ledger (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code INT NOT NULL,
+            UNIQUE KEY chk_positive (code)
+        );
+    ";
+    let (database_url, _container) = setup_mariadb_with_sql(sql).await.expect("mariadb setup");
+    let schema = introspect_database(&database_url)
+        .await
+        .expect("introspect mariadb");
+
+    let checks_of = |name: &str| -> Vec<String> {
+        schema
+            .tables
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("{name} table"))
+            .check_constraints
+            .iter()
+            .map(|c| c.expression.clone())
+            .collect()
+    };
+
+    let accounts = checks_of("accounts");
+    assert_eq!(accounts.len(), 1, "accounts checks: {accounts:?}");
+    assert!(accounts[0].contains("amount"));
+
+    let payments = checks_of("payments");
+    assert_eq!(payments.len(), 1, "payments checks: {payments:?}");
+    assert!(payments[0].contains("total"));
+
+    assert!(checks_of("ledger").is_empty());
 }
 
 #[tokio::test]
