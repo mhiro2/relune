@@ -37,7 +37,7 @@ check-generated-html-js: ## Verify committed HTML viewer bundles match TypeScrip
 	test -z "$$(git ls-files --others --exclude-standard -- crates/relune-render-html/src/js)"
 
 build-playground: ## Build the public WASM playground.
-	cd crates/relune-wasm && wasm-pack build --target web --release --out-dir ../../playground/dist/pkg
+	cd crates/relune-wasm && wasm-pack build --target web --profile wasm-release --out-dir ../../playground/dist/pkg
 	cd playground && pnpm build
 
 test: test-rust test-html-viewer test-wasm test-playground ## Run local Rust, HTML viewer, wasm, and playground checks.
