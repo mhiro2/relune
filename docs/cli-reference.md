@@ -259,6 +259,8 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 
 Before comparing, `diff` and `review` treat objects in the default schema as unqualified when either input contains unqualified objects, so hand-written DDL (`CREATE TABLE users`) matches a schema exported from the database (`public.users`) instead of reporting every table as removed and re-added. The default schema is `public` for PostgreSQL, `main` for SQLite, and the connected database for MySQL (the schema shared by every object). Tables in other schemas, such as `auth.users`, stay qualified. When both inputs are fully qualified, names are reported as they are.
 
+Within a table, an unnamed foreign key, index, or `CHECK` written in DDL matches the same constraint under the name the database generated for it (such as `orders_user_id_fkey` or `users_email_key`), so it is not reported as dropped and re-added; two differently named constraints stay a rename. Index predicates, expression keys, and `CHECK` expressions are compared with keyword case ignored, while text inside quoted literals and identifiers must match (`'Active'` → `'active'` is a change). Tables are paired by their `stable_id` (the `id` in schema JSON), so renaming a table there while keeping its `id` is reported as a modification of the same table.
+
 ```bash
 relune diff --before old_schema.sql --after new_schema.sql
 relune diff --before old.sql --after new.sql --format json -o diff.json
@@ -294,7 +296,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` or `--fail-on-warning` short-circuits (rc=10 / rc=3) |
 | `--allow-invalid-schema` | Review inputs that fail identity validation instead of exiting `1` (same rules as [`diff`](#diff)) |
 
-Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen rules:
+Rule IDs are kebab-case under the `risk/` namespace. The catalog covers sixteen rules:
 
 | Rule ID | Default severity | Dialect |
 |---------|------------------|---------|
@@ -307,6 +309,7 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen 
 | `risk/type-narrow` | breaking | any |
 | `risk/drop-pk-or-unique` | warning (breaking with referencing FK) | any |
 | `risk/add-unique-on-existing` | warning | any |
+| `risk/add-check-on-existing` | warning | any |
 | `risk/add-cascade-delete` | warning | any |
 | `risk/fk-without-index` | info | any |
 | `risk/add-index-on-large-table` | caution | postgres / mysql |
@@ -316,11 +319,17 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers fifteen 
 
 `risk/drop-table` and `risk/drop-column` flag every dropped table and every dropped stored column (generated columns are skipped) because their data is permanently lost, whether or not anything references them. When a foreign key still references the dropped object, `risk/drop-table-referenced` / `risk/drop-column-referenced` additionally report that the migration itself will fail. `risk/drop-enum-value` flags values removed from a named enum type (once per pre-existing column that still uses it) or from an inline `ENUM(...)` / `SET(...)` column, because rows holding the removed value fail the migration or lose it. Review compares schema states, so a rename of a table, column, or enum value shows up as a drop plus an add and is reported by these rules too; exclude them with `--except-rule` / `--except-table` for intentional renames and cleanups.
 
-`risk/add-unique-on-existing` covers both a newly added UNIQUE index and a modified index whose new uniqueness the old definition does not guarantee (it gains `UNIQUE`, its key is narrowed, or its partial predicate is dropped or changed). It stays silent when the table already guaranteed uniqueness over those columns, such as a widened UNIQUE key or a UNIQUE covering the primary key.
+`risk/add-not-null-on-existing` skips a new NOT NULL column that the database fills for existing rows: one with a non-NULL `DEFAULT`, an identity or generated definition, or an auto-increment / `SERIAL` type. Changing an existing nullable column to NOT NULL is always reported, because existing NULLs fail regardless of the default.
+
+`risk/add-unique-on-existing` covers a newly added UNIQUE index, a modified index whose new uniqueness the old definition does not guarantee (it gains `UNIQUE`, its key is narrowed, or its partial predicate is dropped or changed), and a primary key moved onto existing columns (`ADD PRIMARY KEY (email)`, or a PK rotated from `id` to `email`). It stays silent when the table already guaranteed uniqueness over those columns, such as a widened UNIQUE key or a UNIQUE covering the primary key, and when the new primary key includes a column added in the same migration.
+
+`risk/add-check-on-existing` reports a table-level `CHECK` that is added or whose expression changes, and a column-level `CHECK` added to an existing column, because existing rows may violate it. `CHECK`s on columns added in the same migration are skipped.
+
+`risk/drop-pk-or-unique` is `breaking` when a surviving foreign key, including a self-referencing one such as `parent_id -> id`, still references the dropped primary key or UNIQUE column set. Neither PostgreSQL nor MySQL changes an FK or index definition in place, so a changed FK or index counts as a new one: `risk/add-index-on-large-table` and `risk/add-fk-on-existing` report it on an existing table (including an FK whose only change is its `ON DELETE` / `ON UPDATE` action), and `risk/fk-without-index` checks an FK moved onto other columns for a supporting index.
 
 `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
 
-`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all fifteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 or rc=3 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
+`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all sixteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 or rc=3 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
 
 Review only sees what the parser modeled. When an input produced no schema objects (`PARSE004`), or the parser skipped constructs it does not support (`PARSE002`, e.g. an unsupported `ALTER TABLE` form), the text and markdown reports print a "Review coverage is incomplete" warning above the findings, and the JSON report records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`). A run with no findings is then not evidence that the migration is safe. `--deny` only looks at findings, so add `--fail-on-warning` (or `[review] fail_on_warning = true`) to make CI fail on these warnings too. When both apply, `--deny` takes precedence (exit `10`).
 
@@ -339,7 +348,7 @@ relune review --before old.sql --after new.sql --except-table 'audit_*'
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
 relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
 relune review --before old.sql --after new.sql --dialect postgres --deny caution
-relune review --list-rules                       # text listing of all 15 rules
+relune review --list-rules                       # text listing of all 16 rules
 relune review --list-rules --format json | jq '.[0]'
 relune --config relune.toml review --before old.sql --after new.sql
 ```
