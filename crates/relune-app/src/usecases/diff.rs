@@ -2318,6 +2318,7 @@ mod tests {
             .added_tables
             .push("table|with<pipe&amp".to_string());
         diff_result.modified_tables.push(TableDiff {
+            stable_id: "t<able".to_string(),
             table_name: "t<able".to_string(),
             change_kind: ChangeKind::Modified,
             column_diffs: vec![ColumnDiff {

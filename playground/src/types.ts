@@ -160,6 +160,7 @@ export type DiffSummary = {
 };
 
 export type TableDiff = {
+  stable_id: string;
   table_name: string;
   column_diffs: unknown[];
   fk_diffs: unknown[];

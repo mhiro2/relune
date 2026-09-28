@@ -513,6 +513,10 @@ pub struct CheckConstraintDiff {
 /// Diff for a single table between two schemas.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TableDiff {
+    /// Stable identifier of the table (matches `Table::stable_id`). Tables
+    /// are paired across the two schemas by this id, so it also locates the
+    /// `before` side of a table whose name changed.
+    pub stable_id: String,
     /// Table name (qualified with schema if applicable).
     pub table_name: String,
     /// Kind of change.
@@ -534,6 +538,7 @@ impl TableDiff {
     #[must_use]
     pub fn added(table: &Table) -> Self {
         Self {
+            stable_id: table.stable_id.clone(),
             table_name: table.qualified_name(),
             change_kind: ChangeKind::Added,
             column_diffs: table.columns.iter().map(ColumnDiff::added).collect(),
@@ -560,6 +565,7 @@ impl TableDiff {
     #[must_use]
     pub fn removed(table: &Table) -> Self {
         Self {
+            stable_id: table.stable_id.clone(),
             table_name: table.qualified_name(),
             change_kind: ChangeKind::Removed,
             column_diffs: table.columns.iter().map(ColumnDiff::removed).collect(),
@@ -594,6 +600,7 @@ impl TableDiff {
         );
 
         Self {
+            stable_id: new_table.stable_id.clone(),
             table_name: new_table.qualified_name(),
             change_kind: ChangeKind::Modified,
             column_diffs,
