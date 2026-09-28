@@ -8,8 +8,19 @@ rust-version.workspace = true
 publish = false
 description = "WebAssembly bindings for relune"
 
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+# `make build-playground` builds with `--profile wasm-release`, which wasm-pack
+# maps to its `custom` profile. The feature flags match the WASM proposals
+# rustc enables by default for wasm32-unknown-unknown.
+[package.metadata.wasm-pack.profile.custom]
+wasm-opt = [
+  "-Os",
+  "--enable-bulk-memory",
+  "--enable-mutable-globals",
+  "--enable-multivalue",
+  "--enable-nontrapping-float-to-int",
+  "--enable-reference-types",
+  "--enable-sign-ext",
+]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

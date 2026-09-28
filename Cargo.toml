@@ -67,3 +67,10 @@ opt-level = 3
 debug = false
 lto = "thin"
 strip = true
+
+# Size-oriented profile for the browser WASM bundle (used by wasm-pack).
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
