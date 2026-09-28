@@ -1076,15 +1076,20 @@ fn fills_existing_rows(column: &crate::export::ColumnExport) -> bool {
         let value = value.trim_start_matches('(').trim_end_matches(')').trim();
         !value.eq_ignore_ascii_case("null")
     });
-    let serial_type = matches!(
-        column.data_type.trim().to_ascii_lowercase().as_str(),
-        "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8"
-    );
     has_default
-        || semantics.identity.is_some()
         || semantics.generated.is_some()
+        || generates_distinct_values(&column.data_type, semantics)
+}
+
+/// Returns true when the database numbers a column's rows itself (identity,
+/// auto-increment, or a `SERIAL` type), so every row gets a distinct value.
+fn generates_distinct_values(data_type: &str, semantics: &crate::model::ColumnSemantics) -> bool {
+    semantics.identity.is_some()
         || semantics.auto_increment
-        || serial_type
+        || matches!(
+            data_type.trim().to_ascii_lowercase().as_str(),
+            "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8"
+        )
 }
 
 /// `risk/type-narrow` — column data type is being narrowed in a way
@@ -1659,9 +1664,11 @@ fn check_add_unique_on_existing(
 /// not guaranteed unique before, e.g. `ADD PRIMARY KEY (email)` or a PK
 /// rotated from `id` to `email`. Existing duplicate rows fail it.
 ///
-/// A PK that includes a newly added column is skipped: the new column's
-/// values are produced by the migration itself (typically a sequence),
-/// not by existing data.
+/// Columns added in the same migration give every existing row the same
+/// value, so they add no uniqueness and only the pre-existing PK columns
+/// are judged. A new column the database numbers itself (identity,
+/// auto-increment, `SERIAL`) makes every key distinct, so the PK is skipped;
+/// so is a PK made only of new columns, whose rows are the migration's own.
 fn check_add_pk_on_existing(
     table_diff: &TableDiff,
     before_table: Option<&Table>,
@@ -1683,13 +1690,26 @@ fn check_add_pk_on_existing(
     if after_pk_cols.is_empty() || same_column_set(&after_pk_cols, &pk_columns(before_table)) {
         return;
     }
-    let all_pre_existing = after_pk_cols.iter().all(|name| {
+    let existed_before = |name: &String| {
         before_table
             .columns
             .iter()
             .any(|c| c.name.eq_ignore_ascii_case(name))
+    };
+    let numbered_new_column = after_table.columns.iter().any(|c| {
+        c.is_primary_key
+            && !existed_before(&c.name.to_ascii_lowercase())
+            && generates_distinct_values(&c.data_type, &c.semantics)
     });
-    if !all_pre_existing || already_unique_in(before_table, &after_pk_cols) {
+    let pre_existing: Vec<String> = after_pk_cols
+        .iter()
+        .filter(|name| existed_before(name))
+        .cloned()
+        .collect();
+    if numbered_new_column
+        || pre_existing.is_empty()
+        || already_unique_in(before_table, &pre_existing)
+    {
         return;
     }
 
@@ -5901,11 +5921,20 @@ mod tests {
         let findings = run_all(&schema(vec![unique_before]), &schema(vec![unique_after]));
         assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
 
-        // A new surrogate key column is filled by the migration.
-        let mut surrogate = base;
+        // A new surrogate key column is numbered by the database.
+        let mut surrogate = base.clone();
         surrogate.columns.push(col("id", "BIGSERIAL", false, true));
         let findings = run_all(&before, &schema(vec![surrogate]));
         assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+
+        // A new constant-default column adds no uniqueness to (email).
+        let mut constant = base;
+        constant.columns[0].is_primary_key = true;
+        let mut tenant = col("tenant_id", "int", false, true);
+        tenant.semantics.default_expression = Some("1".into());
+        constant.columns.push(tenant);
+        let findings = run_all(&before, &schema(vec![constant]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 1);
     }
 
     #[test]
