@@ -3764,3 +3764,231 @@ fn canvas_fits_group_labels_wider_than_their_group() {
     let label_width = estimate_text_width(&groups[0].label, 11.0);
     assert!(width >= groups[0].x + 12.0 + label_width);
 }
+
+mod layout_properties {
+    use super::*;
+    use proptest::prelude::*;
+    use proptest::sample::{Index as PoolIndex, select};
+    use relune_core::{GroupingSpec, GroupingStrategy};
+
+    /// Slack for the canvas bounds check; routes and labels are laid out in
+    /// `f32`, so exact containment would flag rounding noise.
+    const CANVAS_EPS: f32 = 0.5;
+
+    #[derive(Debug, Clone)]
+    struct TableShape {
+        prefix: &'static str,
+        schema: Option<&'static str>,
+        column_names: Vec<&'static str>,
+        references: Vec<PoolIndex>,
+    }
+
+    fn table_shape() -> impl Strategy<Value = TableShape> {
+        (
+            select(&["app_", "auth_", "billing_", ""][..]),
+            select(&[None, Some("public"), Some("audit")][..]),
+            prop::collection::vec(
+                select(
+                    &[
+                        "name",
+                        "created_at",
+                        "a_rather_long_descriptive_column_name",
+                        "x",
+                    ][..],
+                ),
+                0..8,
+            ),
+            prop::collection::vec(any::<PoolIndex>(), 0..3),
+        )
+            .prop_map(|(prefix, schema, column_names, references)| TableShape {
+                prefix,
+                schema,
+                column_names,
+                references,
+            })
+    }
+
+    /// Builds a schema from table shapes. References may point at the table
+    /// itself or form cycles, and each foreign key gets its own column so
+    /// parallel edges between one pair of tables are exercised too.
+    fn schema_from_shapes(shapes: &[TableShape]) -> Schema {
+        let name = |index: usize| format!("{}t{index:02}", shapes[index].prefix);
+        let tables = shapes
+            .iter()
+            .enumerate()
+            .map(|(index, shape)| {
+                let column = |id: usize, name: String, is_primary_key: bool| Column {
+                    id: ColumnId(u64::try_from(id).unwrap()),
+                    name,
+                    data_type: "int".to_string(),
+                    nullable: !is_primary_key,
+                    is_primary_key,
+                    comment: None,
+                    enum_values: None,
+                    semantics: relune_core::ColumnSemantics::default(),
+                };
+                let mut columns = vec![column(1, "id".to_string(), true)];
+                columns.extend(
+                    shape
+                        .column_names
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| column(i + 2, format!("{name}_{i}"), false)),
+                );
+                let foreign_keys = shape
+                    .references
+                    .iter()
+                    .enumerate()
+                    .map(|(i, target)| {
+                        let from = format!("ref_{i}_id");
+                        columns.push(column(columns.len() + 1, from.clone(), false));
+                        let target = target.index(shapes.len());
+                        ForeignKey {
+                            name: None,
+                            from_columns: vec![from],
+                            to_schema: shapes[target].schema.map(ToString::to_string),
+                            to_table: name(target),
+                            to_columns: vec!["id".to_string()],
+                            on_delete: ReferentialAction::NoAction,
+                            on_update: ReferentialAction::NoAction,
+                        }
+                    })
+                    .collect();
+                Table {
+                    id: TableId(u64::try_from(index + 1).unwrap()),
+                    stable_id: relune_core::qualified_identifier(shape.schema, &name(index)),
+                    schema_name: shape.schema.map(ToString::to_string),
+                    name: name(index),
+                    columns,
+                    foreign_keys,
+                    indexes: vec![],
+                    primary_key_name: None,
+                    check_constraints: Vec::new(),
+                    comment: None,
+                }
+            })
+            .collect();
+        Schema {
+            tables,
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    /// Every direction, algorithm, edge style, and grouping combination.
+    fn layout_option_matrix(force_iterations: usize) -> Vec<(LayoutRequest, LayoutConfig)> {
+        let mut options = Vec::new();
+        for direction in [
+            LayoutDirection::TopToBottom,
+            LayoutDirection::BottomToTop,
+            LayoutDirection::LeftToRight,
+            LayoutDirection::RightToLeft,
+        ] {
+            for mode in [
+                LayoutAlgorithm::Hierarchical,
+                LayoutAlgorithm::ForceDirected,
+            ] {
+                for edge_style in [
+                    RouteStyle::Straight,
+                    RouteStyle::Orthogonal,
+                    RouteStyle::Curved,
+                ] {
+                    for strategy in [
+                        GroupingStrategy::None,
+                        GroupingStrategy::BySchema,
+                        GroupingStrategy::ByPrefix,
+                    ] {
+                        let request = LayoutRequest {
+                            grouping: GroupingSpec { strategy },
+                            ..LayoutRequest::default()
+                        };
+                        let config = LayoutConfig {
+                            direction,
+                            edge_style,
+                            mode,
+                            force_iterations,
+                            ..LayoutConfig::default()
+                        };
+                        options.push((request, config));
+                    }
+                }
+            }
+        }
+        options
+    }
+
+    fn assert_within_canvas(graph: &PositionedGraph) {
+        let inside = |x: f32, y: f32| {
+            (-CANVAS_EPS..=graph.width + CANVAS_EPS).contains(&x)
+                && (-CANVAS_EPS..=graph.height + CANVAS_EPS).contains(&y)
+        };
+        for node in &graph.nodes {
+            assert!(
+                inside(node.x, node.y) && inside(node.x + node.width, node.y + node.height),
+                "node {} ({}, {}, {} x {}) leaves the {} x {} canvas",
+                node.id,
+                node.x,
+                node.y,
+                node.width,
+                node.height,
+                graph.width,
+                graph.height
+            );
+        }
+        for group in &graph.groups {
+            assert!(
+                inside(group.x, group.y) && inside(group.x + group.width, group.y + group.height),
+                "group {} leaves the {} x {} canvas",
+                group.id,
+                graph.width,
+                graph.height
+            );
+        }
+        for edge in &graph.edges {
+            for point in route_points(&edge.route) {
+                assert!(
+                    inside(point.0, point.1),
+                    "edge {} -> {} routes through {point:?}, outside the {} x {} canvas",
+                    edge.from,
+                    edge.to,
+                    graph.width,
+                    graph.height
+                );
+            }
+            assert!(
+                inside(edge.label_x, edge.label_y),
+                "edge {} -> {} places its label outside the canvas",
+                edge.from,
+                edge.to
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(8))]
+
+        #[test]
+        fn layouts_keep_their_invariants(
+            shapes in prop::collection::vec(table_shape(), 1..24),
+            force_iterations in 20usize..120,
+        ) {
+            let schema = schema_from_shapes(&shapes);
+            for (request, config) in layout_option_matrix(force_iterations) {
+                let graph = build_layout_with_config(&schema, &request, &config).unwrap();
+
+                assert_layout_invariants(&graph);
+                assert_no_node_overlaps(&graph);
+                assert_within_canvas(&graph);
+
+                let again = build_layout_with_config(&schema, &request, &config).unwrap();
+                prop_assert_eq!(
+                    serde_json::to_string(&graph).unwrap(),
+                    serde_json::to_string(&again).unwrap(),
+                    "{:?} / {:?}",
+                    request.grouping.strategy,
+                    config
+                );
+            }
+        }
+    }
+}

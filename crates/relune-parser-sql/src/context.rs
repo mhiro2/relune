@@ -102,13 +102,18 @@ impl ParseContext {
         ));
     }
 
-    pub(crate) fn warn_duplicate_table(&mut self, table_name: &str, span: Option<SourceSpan>) {
+    /// Reports a repeated `CREATE` for a table, view, or enum (`kind`) that
+    /// already exists; the first definition is kept.
+    pub(crate) fn warn_duplicate_object(
+        &mut self,
+        kind: &str,
+        name: &str,
+        span: Option<SourceSpan>,
+    ) {
         self.diagnostics.push(
             Diagnostic::warning(
-                codes::schema_duplicate_table(),
-                format!(
-                    "Duplicate table definition: {table_name}. The first definition will be used."
-                ),
+                codes::schema_duplicate_object(),
+                format!("Duplicate {kind} definition: {name}. The first definition will be used."),
             )
             .with_span_opt(span),
         );

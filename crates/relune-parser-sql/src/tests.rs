@@ -608,7 +608,7 @@ fn handles_duplicate_tables() {
         output
             .diagnostics
             .iter()
-            .filter(|d| d.code == codes::schema_duplicate_table())
+            .filter(|d| d.code == codes::schema_duplicate_object())
             .count(),
         1
     );
@@ -616,9 +616,110 @@ fn handles_duplicate_tables() {
         output
             .diagnostics
             .iter()
-            .find(|d| d.code == codes::schema_duplicate_table())
+            .find(|d| d.code == codes::schema_duplicate_object())
             .and_then(|d| d.span)
             .is_some()
+    );
+}
+
+fn duplicate_object_warnings(output: &ParseOutput) -> Vec<&str> {
+    output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == codes::schema_duplicate_object())
+        .map(|d| d.message.as_str())
+        .collect()
+}
+
+#[test]
+fn keeps_the_first_of_duplicate_enums() {
+    let sql = r"
+    CREATE TYPE mood AS ENUM ('happy');
+    CREATE TYPE mood AS ENUM ('sad');
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.as_ref().unwrap();
+
+    assert_eq!(schema.enums.len(), 1);
+    assert_eq!(schema.enums[0].values, vec!["happy"]);
+    assert_eq!(
+        duplicate_object_warnings(&output),
+        vec!["Duplicate enum definition: mood. The first definition will be used."]
+    );
+}
+
+#[test]
+fn create_or_replace_view_redefines_the_view() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);
+    CREATE VIEW user_ids AS SELECT id FROM users;
+    CREATE OR REPLACE VIEW user_ids AS SELECT id, email FROM users;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.as_ref().unwrap();
+
+    assert_eq!(schema.views.len(), 1);
+    let columns: Vec<&str> = schema.views[0]
+        .columns
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(columns, vec!["id", "email"]);
+    assert!(duplicate_object_warnings(&output).is_empty());
+}
+
+#[test]
+fn keeps_the_first_of_duplicate_views() {
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);
+    CREATE VIEW user_ids AS SELECT id FROM users;
+    CREATE VIEW user_ids AS SELECT id, email FROM users;
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics(sql);
+    let schema = output.schema.as_ref().unwrap();
+
+    assert_eq!(schema.views.len(), 1);
+    assert_eq!(schema.views[0].columns.len(), 1);
+    assert_eq!(
+        duplicate_object_warnings(&output),
+        vec!["Duplicate view definition: user_ids. The first definition will be used."]
+    );
+}
+
+#[test]
+fn skips_objects_with_empty_names() {
+    let sql = r#"
+    CREATE TABLE "" (id INT);
+    CREATE VIEW "" AS SELECT 1 AS one;
+    CREATE TYPE "" AS ENUM ('a');
+    CREATE TABLE users (id INT);
+    ALTER TABLE users RENAME TO "";
+    "#;
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    let schema = output.schema.as_ref().unwrap();
+
+    let tables: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(tables, vec!["users"]);
+    assert!(schema.views.is_empty());
+    assert!(schema.enums.is_empty());
+    let skipped: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == codes::parse_unsupported())
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![
+            "CREATE TABLE: empty object names are not supported. This statement will be skipped.",
+            "CREATE VIEW: empty object names are not supported. This statement will be skipped.",
+            "CREATE TYPE: empty object names are not supported. This statement will be skipped.",
+            "ALTER TABLE RENAME TO: empty object names are not supported. This statement will be skipped.",
+        ]
     );
 }
 
@@ -2400,7 +2501,7 @@ fn alter_table_rename_table_rejects_existing_target_name() {
     let diagnostic = output
         .diagnostics
         .iter()
-        .find(|d| d.code == codes::schema_duplicate_table())
+        .find(|d| d.code == codes::schema_duplicate_object())
         .expect("rename collision should be reported");
     assert_eq!(diagnostic.severity, Severity::Error);
     assert!(diagnostic.message.contains("`b`"));

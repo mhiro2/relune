@@ -2,7 +2,7 @@
 
 use crate::context::{LineOffsets, ParseContext, ParsedColumn, span_from_spanned};
 use crate::mysql_enum::canonicalize_mysql_enum_like_type;
-use crate::names::{build_foreign_key, normalized_stable_id, split_object_name_with_diagnostics};
+use crate::names::{build_foreign_key, normalized_stable_id, split_named_object_with_diagnostics};
 use crate::query_columns::columns_from_query;
 use relune_core::{
     CheckConstraint, ColumnId, ColumnSemantics, Diagnostic, GeneratedColumn, IdentitySpec, Index,
@@ -17,7 +17,6 @@ use sqlparser::tokenizer::Token;
 
 /// Parse a CREATE TABLE statement into a Table.
 #[allow(clippy::too_many_lines)]
-#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn parse_create_table(
     ctx: &mut ParseContext,
     input: &str,
@@ -25,7 +24,7 @@ pub(crate) fn parse_create_table(
     create: &sqlparser::ast::CreateTable,
 ) -> Option<Table> {
     let (schema_name, name) =
-        split_object_name_with_diagnostics(ctx, input, offsets, &create.name, "CREATE TABLE");
+        split_named_object_with_diagnostics(ctx, input, offsets, &create.name, "CREATE TABLE")?;
     let stable_id = normalized_stable_id(schema_name.as_deref(), &name);
 
     let table_id = ctx.next_table_id();

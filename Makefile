@@ -1,4 +1,4 @@
-.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-html-viewer test-update test-coverage test-wasm test-playground test-ci build-frontend build deny-check
+.PHONY: help setup-tools fmt fmt-check lint check-generated-html-js build-playground test test-rust test-html-viewer test-update test-coverage test-wasm test-playground test-large test-ci bench build-frontend build deny-check
 
 .DEFAULT_GOAL := help
 
@@ -66,7 +66,13 @@ test-wasm: ## Run relune-wasm tests in Node.js.
 test-playground: ## Build the public WASM playground as a smoke test.
 	$(MAKE) build-playground
 
+test-large: ## Run large-schema layout regression tests in release mode.
+	cargo test --release -p relune-layout --test large_schemas -- --ignored
+
 test-ci: test-coverage test-wasm ## Run CI coverage and wasm tests.
+
+bench: ## Time layouts of generated 500-2000 table schemas.
+	cargo bench -p relune-layout --bench layout_scale
 
 build-frontend: ## Rebuild committed HTML viewer bundles from TypeScript.
 	cd crates/relune-render-html && pnpm build

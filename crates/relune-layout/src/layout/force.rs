@@ -24,6 +24,14 @@ const FORCE_GROUP_GAP: f32 = 28.0;
 /// Crow's Foot SVG markers (roughly 24–26px along the path from each vertex).  Hierarchical
 /// layout never uses this constant.
 pub(super) const FORCE_CONNECTED_NODE_GAP: f32 = 64.0;
+/// Upper bound on the summed edge-attraction stiffness acting on one node.
+///
+/// Each edge pulls its endpoints with `attraction_strength`, so a hub
+/// referenced by hundreds of tables would get a stiffness far beyond what the
+/// explicit, damped update can integrate: it overshoots further every step
+/// until positions overflow to NaN. The limit sits well inside the stable
+/// range and only affects nodes with more than 20 edges.
+const FORCE_MAX_ATTRACTION_STIFFNESS: f32 = 1.0;
 
 /// Apply a single repulsion pair force between nodes `i` and `j`.
 ///
@@ -235,6 +243,24 @@ pub(super) fn apply_force_layout(
         })
         .collect();
 
+    // Scale down each node's share of edge attraction once its summed
+    // stiffness would exceed the stable limit. Self-loops never pull.
+    let mut stiffness = vec![0.0_f32; n];
+    for &(from_idx, to_idx) in edges.iter().filter(|(from, to)| from != to) {
+        stiffness[from_idx] += attraction_strength;
+        stiffness[to_idx] += attraction_strength;
+    }
+    let attraction_scale: Vec<f32> = stiffness
+        .iter()
+        .map(|&stiffness| {
+            if stiffness > FORCE_MAX_ATTRACTION_STIFFNESS {
+                FORCE_MAX_ATTRACTION_STIFFNESS / stiffness
+            } else {
+                1.0
+            }
+        })
+        .collect();
+
     // For large graphs, cap iterations to limit O(V^2 * iterations) cost
     let effective_iterations = if n > 100 {
         config.force_iterations.min(50)
@@ -290,10 +316,10 @@ pub(super) fn apply_force_layout(
             let fx = force * dx / dist;
             let fy = force * dy / dist;
 
-            forces[from_idx].0 += fx;
-            forces[from_idx].1 += fy;
-            forces[to_idx].0 -= fx;
-            forces[to_idx].1 -= fy;
+            forces[from_idx].0 += fx * attraction_scale[from_idx];
+            forces[from_idx].1 += fy * attraction_scale[from_idx];
+            forces[to_idx].0 -= fx * attraction_scale[to_idx];
+            forces[to_idx].1 -= fy * attraction_scale[to_idx];
         }
 
         // Rank-guided gravity keeps the semantic parent/child order aligned with

@@ -194,9 +194,9 @@ pub mod codes {
     pub fn schema_unknown_table() -> DiagnosticCode {
         DiagnosticCode::new("SCHEMA", 1)
     }
-    /// Returns the code for a duplicate table definition.
+    /// Returns the code for a duplicate table, view, or enum definition.
     #[must_use]
-    pub fn schema_duplicate_table() -> DiagnosticCode {
+    pub fn schema_duplicate_object() -> DiagnosticCode {
         DiagnosticCode::new("SCHEMA", 2)
     }
     /// Returns the code for an unknown column reference.

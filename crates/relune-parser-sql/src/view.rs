@@ -1,7 +1,7 @@
 //! `CREATE VIEW` parsing and column extraction.
 
 use crate::context::{LineOffsets, ParseContext};
-use crate::names::{normalized_stable_id, split_object_name_with_diagnostics};
+use crate::names::{normalized_stable_id, split_named_object_with_diagnostics};
 use crate::query_columns::columns_from_query;
 use relune_core::{Column, ColumnId, View, normalize_identifier};
 use sqlparser::ast::ObjectName;
@@ -17,7 +17,7 @@ pub(crate) fn parse_create_view(
     query: &sqlparser::ast::Query,
 ) -> Option<View> {
     let (schema_name, view_name) =
-        split_object_name_with_diagnostics(ctx, input, offsets, name, "CREATE VIEW");
+        split_named_object_with_diagnostics(ctx, input, offsets, name, "CREATE VIEW")?;
 
     // Generate a stable ID for the view
     let id = normalized_stable_id(schema_name.as_deref(), &view_name);
