@@ -70,7 +70,8 @@ pub(crate) fn normalize_sql_case(text: &str) -> String {
     normalized
 }
 
-/// Items of one kind (foreign keys, indexes) matched between two tables.
+/// Items of one kind (foreign keys, indexes, checks) matched between two
+/// tables.
 struct MatchedItems<'a, T> {
     removed: Vec<&'a T>,
     added: Vec<&'a T>,
@@ -614,53 +615,52 @@ impl TableDiff {
         old_checks: &[crate::model::CheckConstraint],
         new_checks: &[crate::model::CheckConstraint],
     ) -> Vec<CheckConstraintDiff> {
-        // Key by name when present; otherwise by the (lowercased) expression so
+        // Key by name when present; otherwise by the normalized expression so
         // that an unnamed check keeps its identity across before/after.
         fn key(check: &crate::model::CheckConstraint) -> String {
             match &check.name {
                 Some(name) if !name.is_empty() => format!("n:{name}"),
-                _ => format!("e:{}", check.expression.to_lowercase()),
+                _ => shape(check),
             }
         }
+        fn shape(check: &crate::model::CheckConstraint) -> String {
+            format!("e:{}", normalize_sql_case(&check.expression))
+        }
 
-        let old_map: HashMap<String, &crate::model::CheckConstraint> =
-            old_checks.iter().map(|c| (key(c), c)).collect();
-        let new_map: HashMap<String, &crate::model::CheckConstraint> =
-            new_checks.iter().map(|c| (key(c), c)).collect();
-        let old_keys: BTreeSet<&String> = old_map.keys().collect();
-        let new_keys: BTreeSet<&String> = new_map.keys().collect();
+        let matched = match_items(old_checks, new_checks, key, shape, |check| {
+            check.name.as_ref().is_some_and(|name| !name.is_empty())
+        });
 
-        let mut diffs = Vec::new();
-        for k in old_keys.difference(&new_keys) {
-            let c = old_map[k.as_str()];
-            diffs.push(CheckConstraintDiff {
+        let mut diffs: Vec<CheckConstraintDiff> = matched
+            .removed
+            .into_iter()
+            .map(|c| CheckConstraintDiff {
                 name: c.name.clone(),
                 change_kind: ChangeKind::Removed,
                 old_value: Some(c.expression.clone()),
                 new_value: None,
-            });
-        }
-        for k in new_keys.difference(&old_keys) {
-            let c = new_map[k.as_str()];
-            diffs.push(CheckConstraintDiff {
-                name: c.name.clone(),
-                change_kind: ChangeKind::Added,
-                old_value: None,
-                new_value: Some(c.expression.clone()),
-            });
-        }
-        for k in old_keys.intersection(&new_keys) {
-            let old_c = old_map[k.as_str()];
-            let new_c = new_map[k.as_str()];
-            if old_c.expression != new_c.expression {
-                diffs.push(CheckConstraintDiff {
+            })
+            .collect();
+        diffs.extend(matched.added.into_iter().map(|c| CheckConstraintDiff {
+            name: c.name.clone(),
+            change_kind: ChangeKind::Added,
+            old_value: None,
+            new_value: Some(c.expression.clone()),
+        }));
+        diffs.extend(
+            matched
+                .paired
+                .into_iter()
+                .filter(|(old_c, new_c)| {
+                    normalize_sql_case(&old_c.expression) != normalize_sql_case(&new_c.expression)
+                })
+                .map(|(old_c, new_c)| CheckConstraintDiff {
                     name: new_c.name.clone(),
                     change_kind: ChangeKind::Modified,
                     old_value: Some(old_c.expression.clone()),
                     new_value: Some(new_c.expression.clone()),
-                });
-            }
-        }
+                }),
+        );
         diffs
     }
 
