@@ -1,0 +1,19 @@
+[
+  {
+    "message": "CHECK price_positive (price > 0) is being added to existing table items. Existing rows that violate it will fail the migration.",
+    "mitigation": "Verify existing rows satisfy the condition first; on PostgreSQL add the constraint NOT VALID and VALIDATE CONSTRAINT in a separate step.",
+    "rule_id": "risk/add-check-on-existing",
+    "severity": "warning",
+    "table_id": "items",
+    "table_name": "items"
+  },
+  {
+    "column_name": "qty",
+    "message": "CHECK (qty >= 0) is being added to existing table items. Existing rows that violate it will fail the migration.",
+    "mitigation": "Verify existing rows satisfy the condition first; on PostgreSQL add the constraint NOT VALID and VALIDATE CONSTRAINT in a separate step.",
+    "rule_id": "risk/add-check-on-existing",
+    "severity": "warning",
+    "table_id": "items",
+    "table_name": "items"
+  }
+]

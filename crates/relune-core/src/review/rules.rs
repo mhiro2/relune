@@ -126,6 +126,13 @@ pub fn run_rules(
             }
         }
 
+        if context.rule_active(ReviewRuleId::AddUniqueOnExisting, &selected) {
+            check_add_pk_on_existing(table_diff, before_table, after_table, &mut findings);
+        }
+        if context.rule_active(ReviewRuleId::AddCheckOnExisting, &selected) {
+            check_add_check_on_existing(table_diff, before_table, after_table, &mut findings);
+        }
+
         if context.rule_active(ReviewRuleId::DropPkOrUnique, &selected) {
             check_drop_pk_or_unique_widened(
                 table_diff,
@@ -1644,6 +1651,128 @@ fn check_add_unique_on_existing(
         .with_table(&after_table.stable_id, &table_diff.table_name)
         .with_mitigation("Verify no duplicates exist or deduplicate before applying."),
     );
+}
+
+/// `risk/add-unique-on-existing` (primary key path) — the primary key of
+/// an existing table moves onto columns that already hold data and were
+/// not guaranteed unique before, e.g. `ADD PRIMARY KEY (email)` or a PK
+/// rotated from `id` to `email`. Existing duplicate rows fail it.
+///
+/// A PK that includes a newly added column is skipped: the new column's
+/// values are produced by the migration itself (typically a sequence),
+/// not by existing data.
+fn check_add_pk_on_existing(
+    table_diff: &TableDiff,
+    before_table: Option<&Table>,
+    after_table: &Table,
+    findings: &mut Vec<RiskFinding>,
+) {
+    let Some(before_table) = before_table else {
+        return;
+    };
+    let pk_columns = |table: &Table| -> Vec<String> {
+        table
+            .columns
+            .iter()
+            .filter(|c| c.is_primary_key)
+            .map(|c| c.name.to_ascii_lowercase())
+            .collect()
+    };
+    let after_pk_cols = pk_columns(after_table);
+    if after_pk_cols.is_empty() || same_column_set(&after_pk_cols, &pk_columns(before_table)) {
+        return;
+    }
+    let all_pre_existing = after_pk_cols.iter().all(|name| {
+        before_table
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(name))
+    });
+    if !all_pre_existing || already_unique_in(before_table, &after_pk_cols) {
+        return;
+    }
+
+    let columns = after_pk_cols.join(",");
+    let mut finding = RiskFinding::new(
+        ReviewRuleId::AddUniqueOnExisting,
+        ReviewSeverity::Warning,
+        format!(
+            "Primary key on ({columns}) is being added to existing table {}. Existing duplicate rows will fail the constraint.",
+            table_diff.table_name,
+        ),
+    )
+    .with_table(&after_table.stable_id, &table_diff.table_name)
+    .with_mitigation("Verify no duplicates exist or deduplicate before applying.");
+    if let [column] = after_pk_cols.as_slice() {
+        finding = finding.with_column(column);
+    }
+    findings.push(finding);
+}
+
+/// `risk/add-check-on-existing` — a table-level `CHECK` is added or its
+/// expression changes, or an existing column gains a column-level
+/// `CHECK`, on a table that already holds rows. Existing rows that
+/// violate the new condition fail the migration. Columns added in the
+/// same migration are skipped: their existing rows start out NULL (or at
+/// the declared default), which the author controls.
+fn check_add_check_on_existing(
+    table_diff: &TableDiff,
+    before_table: Option<&Table>,
+    after_table: &Table,
+    findings: &mut Vec<RiskFinding>,
+) {
+    if before_table.is_none() {
+        return;
+    }
+    let mitigation = "Verify existing rows satisfy the condition first; on PostgreSQL add the constraint NOT VALID and VALIDATE CONSTRAINT in a separate step.";
+    let finding = |expression: &str, name: Option<&str>| {
+        let label = name.map_or_else(
+            || format!("CHECK ({expression})"),
+            |name| format!("CHECK {name} ({expression})"),
+        );
+        RiskFinding::new(
+            ReviewRuleId::AddCheckOnExisting,
+            ReviewSeverity::Warning,
+            format!(
+                "{label} is being added to existing table {}. Existing rows that violate it will fail the migration.",
+                table_diff.table_name,
+            ),
+        )
+        .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_mitigation(mitigation)
+    };
+
+    for check_diff in &table_diff.check_diffs {
+        if check_diff.change_kind == ChangeKind::Removed {
+            continue;
+        }
+        if let Some(expression) = &check_diff.new_value {
+            findings.push(finding(expression, check_diff.name.as_deref()));
+        }
+    }
+
+    for column_diff in &table_diff.column_diffs {
+        if column_diff.change_kind != ChangeKind::Modified {
+            continue;
+        }
+        let (Some(old), Some(new)) = (&column_diff.old_value, &column_diff.new_value) else {
+            continue;
+        };
+        let old_checks: HashSet<String> = old
+            .semantics
+            .check_constraints
+            .iter()
+            .map(|check| normalize_sql_case(&check.expression))
+            .collect();
+        for check in &new.semantics.check_constraints {
+            if !old_checks.contains(&normalize_sql_case(&check.expression)) {
+                findings.push(
+                    finding(&check.expression, check.name.as_deref())
+                        .with_column(&column_diff.column_name),
+                );
+            }
+        }
+    }
 }
 
 /// Returns true when UNIQUE index `old` guarantees everything UNIQUE index
@@ -5640,5 +5769,136 @@ mod tests {
 
         let findings = run_all(&before, &after);
         assert_eq!(rule_count(&findings, ReviewRuleId::AddNotNullOnExisting), 1);
+    }
+
+    fn check(name: Option<&str>, expression: &str) -> crate::model::CheckConstraint {
+        crate::model::CheckConstraint {
+            name: name.map(Into::into),
+            expression: expression.into(),
+        }
+    }
+
+    #[test]
+    fn check_added_to_existing_table_is_reported() {
+        let base = table(
+            "items",
+            vec![
+                col("id", "int", false, true),
+                col("qty", "int", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = schema(vec![base.clone()]);
+
+        let mut table_check = base.clone();
+        table_check.check_constraints = vec![check(Some("qty_positive"), "qty > 0")];
+        let findings = run_all(&before, &schema(vec![table_check.clone()]));
+        let added: Vec<_> = findings
+            .iter()
+            .filter(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting)
+            .collect();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].severity, ReviewSeverity::Warning);
+        assert!(added[0].message.contains("CHECK qty_positive (qty > 0)"));
+
+        // Changing the expression re-validates every row.
+        let mut changed = table_check.clone();
+        changed.check_constraints[0].expression = "qty >= 10".into();
+        let findings = run_all(&schema(vec![table_check]), &schema(vec![changed]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddCheckOnExisting), 1);
+
+        // Column-level CHECK on an existing column.
+        let mut column_check = base.clone();
+        column_check.columns[1]
+            .semantics
+            .check_constraints
+            .push(check(None, "qty < 100"));
+        let findings = run_all(&before, &schema(vec![column_check]));
+        let finding = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting)
+            .expect("column CHECK must be reported");
+        assert_eq!(finding.column_name.as_deref(), Some("qty"));
+
+        // A new column with a CHECK holds no data yet.
+        let mut new_column = base;
+        let mut flag = col("flag", "int", true, false);
+        flag.semantics
+            .check_constraints
+            .push(check(None, "flag IN (0, 1)"));
+        new_column.columns.push(flag);
+        let findings = run_all(&before, &schema(vec![new_column]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddCheckOnExisting), 0);
+    }
+
+    #[test]
+    fn check_matching_its_generated_name_is_not_reported() {
+        let mut unnamed = table(
+            "items",
+            vec![col("qty", "int", true, false)],
+            vec![],
+            vec![],
+        );
+        unnamed.check_constraints = vec![check(None, "qty > 0")];
+        let mut named = unnamed.clone();
+        named.check_constraints = vec![check(Some("items_qty_check"), "QTY > 0")];
+
+        let findings = run_all(&schema(vec![unnamed]), &schema(vec![named]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddCheckOnExisting), 0);
+    }
+
+    #[test]
+    fn primary_key_on_existing_columns_is_reported_unless_already_unique() {
+        let base = table(
+            "users",
+            vec![
+                col("email", "text", false, false),
+                col("name", "text", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = schema(vec![base.clone()]);
+
+        let mut promoted = base.clone();
+        promoted.columns[0].is_primary_key = true;
+        let findings = run_all(&before, &schema(vec![promoted.clone()]));
+        let finding = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting)
+            .expect("PK on existing column must be reported");
+        assert_eq!(finding.column_name.as_deref(), Some("email"));
+
+        // Already guaranteed unique by a UNIQUE index.
+        let mut unique_before = base.clone();
+        unique_before.indexes = vec![index("users_email_key", &["email"], true)];
+        let mut unique_after = promoted;
+        unique_after.indexes = unique_before.indexes.clone();
+        let findings = run_all(&schema(vec![unique_before]), &schema(vec![unique_after]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+
+        // A new surrogate key column is filled by the migration.
+        let mut surrogate = base;
+        surrogate.columns.push(col("id", "BIGSERIAL", false, true));
+        let findings = run_all(&before, &schema(vec![surrogate]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+    }
+
+    #[test]
+    fn widening_a_primary_key_is_not_reported_as_new_uniqueness() {
+        let before_table = table(
+            "memberships",
+            vec![
+                col("user_id", "int", false, true),
+                col("org_id", "int", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let mut after_table = before_table.clone();
+        after_table.columns[1].is_primary_key = true;
+        let findings = run_all(&schema(vec![before_table]), &schema(vec![after_table]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
     }
 }
