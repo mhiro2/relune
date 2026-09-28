@@ -63,7 +63,8 @@ test-coverage: ## Run workspace Rust tests with coverage and write lcov.info.
 test-wasm: ## Run relune-wasm tests in Node.js.
 	cd crates/relune-wasm && wasm-pack test --node
 
-test-playground: ## Build the public WASM playground as a smoke test.
+test-playground: ## Run playground TypeScript tests and build the WASM playground as a smoke test.
+	cd playground && pnpm test
 	$(MAKE) build-playground
 
 test-large: ## Run large-schema layout regression tests in release mode.

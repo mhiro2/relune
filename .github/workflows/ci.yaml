@@ -109,8 +109,8 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - name: Install playground packages
         run: pnpm install --frozen-lockfile
-      - name: Build playground
-        run: make build-playground
+      - name: Test and build playground
+        run: make test-playground
 
   large-schema:
     runs-on: ubuntu-latest

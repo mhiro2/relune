@@ -9,318 +9,69 @@ import initWasm, {
   version,
 } from '../pkg/relune_wasm.js';
 import { createSqlEditor } from './editor.js';
-
-type ExampleId = 'simple-blog' | 'ecommerce' | 'multi-schema' | 'custom';
-type Theme = 'light' | 'dark';
-type LayoutAlgorithm = 'hierarchical' | 'force-directed';
-type LayoutDirection = 'top-to-bottom' | 'left-to-right' | 'right-to-left' | 'bottom-to-top';
-type EdgeStyle = 'curved' | 'orthogonal' | 'straight';
-type GroupBy = 'none' | 'schema' | 'prefix';
-type WorkbenchMode = 'render' | 'inspect' | 'export' | 'lint' | 'compare';
-type ExportFormat = 'schema-json' | 'graph-json' | 'layout-json' | 'mermaid' | 'd2' | 'dot';
-type CompareView = 'visual' | 'text' | 'markdown' | 'json' | 'review';
-type ReviewDialect = 'auto' | 'postgres' | 'mysql' | 'sqlite';
-type ViewpointId = string;
-type WasmSeverity = 'error' | 'warning' | 'info' | 'hint';
-
-type WasmDiagnosticCode = {
-  prefix: string;
-  number: number;
-};
-
-type WasmDiagnostic = {
-  severity: WasmSeverity;
-  code: WasmDiagnosticCode;
-  message: string;
-};
-
-type WasmDuration = {
-  secs: number;
-  nanos: number;
-};
-
-type WasmRenderStats = {
-  table_count: number;
-  column_count: number;
-  edge_count: number;
-  view_count: number;
-  parse_time: WasmDuration;
-  graph_time: WasmDuration;
-  layout_time: WasmDuration;
-  render_time: WasmDuration;
-  total_time: WasmDuration;
-};
-
-type WasmRenderResult = {
-  content: string;
-  diagnostics: WasmDiagnostic[];
-  stats: WasmRenderStats;
-};
-
-type SchemaStats = {
-  table_count: number;
-  column_count: number;
-  foreign_key_count: number;
-  view_count: number;
-};
-
-type TableSummary = {
-  name: string;
-  column_count: number;
-  foreign_key_count: number;
-  incoming_fk_count: number;
-  index_count: number;
-  has_primary_key: boolean;
-};
-
-type SchemaSummary = {
-  table_count: number;
-  column_count: number;
-  foreign_key_count: number;
-  index_count: number;
-  view_count: number;
-  enum_count: number;
-  tables_without_pk: number;
-  orphan_table_count: number;
-  tables: TableSummary[];
-};
-
-type ColumnDetails = {
-  name: string;
-  data_type: string;
-  nullable: boolean;
-  is_primary_key: boolean;
-  comment?: string | null;
-};
-
-type ForeignKeyDetails = {
-  name?: string | null;
-  from_columns: string[];
-  to_table: string;
-  to_columns: string[];
-  on_delete?: string | null;
-  on_update?: string | null;
-};
-
-type IndexDetails = {
-  name?: string | null;
-  columns: string[];
-  is_unique: boolean;
-};
-
-type TableDetails = {
-  name: string;
-  comment?: string | null;
-  columns: ColumnDetails[];
-  foreign_keys: ForeignKeyDetails[];
-  indexes: IndexDetails[];
-};
-
-type WasmInspectResult = {
-  summary: SchemaSummary;
-  table?: TableDetails | null;
-  diagnostics: WasmDiagnostic[];
-};
-
-type WasmExportResult = {
-  content: string;
-  diagnostics: WasmDiagnostic[];
-  stats: SchemaStats;
-};
-
-type LintStats = {
-  total: number;
-  errors: number;
-  warnings: number;
-  infos: number;
-  hints: number;
-};
-
-type LintIssue = {
-  rule_id: string;
-  category: string;
-  severity: WasmSeverity;
-  message: string;
-  table_id?: string | null;
-  table_name?: string | null;
-  column_name?: string | null;
-  hint?: string | null;
-};
-
-type WasmLintResult = {
-  issues: LintIssue[];
-  stats: LintStats;
-  diagnostics: WasmDiagnostic[];
-};
-
-type DiffSummary = {
-  tables_added: number;
-  tables_removed: number;
-  tables_modified: number;
-  columns_changed: number;
-  foreign_keys_changed: number;
-  indexes_changed: number;
-  views_added: number;
-  views_removed: number;
-  views_modified: number;
-  view_columns_changed: number;
-  view_definitions_changed: number;
-  enums_added: number;
-  enums_removed: number;
-  enums_modified: number;
-  enum_values_changed: number;
-};
-
-type TableDiff = {
-  table_name: string;
-  column_diffs: unknown[];
-  fk_diffs: unknown[];
-  index_diffs: unknown[];
-};
-
-type ViewDiff = {
-  view_name: string;
-  column_diffs: unknown[];
-};
-
-type EnumDiff = {
-  enum_name: string;
-  value_diffs: unknown[];
-};
-
-type SchemaDiff = {
-  added_tables: string[];
-  removed_tables: string[];
-  modified_tables: TableDiff[];
-  added_views: string[];
-  removed_views: string[];
-  modified_views: ViewDiff[];
-  added_enums: string[];
-  removed_enums: string[];
-  modified_enums: EnumDiff[];
-  summary: DiffSummary;
-};
-
-type WasmDiffResult = {
-  diff: SchemaDiff;
-  diagnostics: WasmDiagnostic[];
-  rendered?: string | null;
-  content?: string | null;
-};
-
-type ReviewSeverity = 'breaking' | 'caution' | 'warning' | 'info';
-
-type ReviewFinding = {
-  rule_id: string;
-  severity: ReviewSeverity;
-  message: string;
-  mitigation?: string | null;
-  table_id?: string | null;
-  table_name?: string | null;
-  column_name?: string | null;
-  fk_name?: string | null;
-  related_table_id?: string | null;
-};
-
-type ReviewSummary = {
-  breaking: number;
-  caution: number;
-  warning: number;
-  info: number;
-};
-
-type ReviewRuleMetadata = {
-  rule_id: string;
-  default_severity: ReviewSeverity;
-  description: string;
-};
-
-type ReviewInputCoverage = {
-  empty: boolean;
-  unsupported_constructs: number;
-};
-
-type WasmReviewResult = {
-  review: {
-    findings: ReviewFinding[];
-    suppressed: ReviewFinding[];
-    summary: ReviewSummary;
-    applied_rules: string[];
-  };
-  diagnostics: WasmDiagnostic[];
-  denied: boolean;
-  content?: string | null;
-  applied_rule_details: ReviewRuleMetadata[];
-  requested_dialect: ReviewDialect;
-  effective_dialect: ReviewDialect;
-  inputs: {
-    before: ReviewInputCoverage;
-    after: ReviewInputCoverage;
-  };
-};
-
-type WasmErrorShape = {
-  message: string;
-  code?: string;
-};
-
-type PersistedState = {
-  example: ExampleId;
-  mode: WorkbenchMode;
-  theme: Theme;
-  layout: LayoutAlgorithm;
-  direction: LayoutDirection;
-  edgeStyle: EdgeStyle;
-  viewpoint: ViewpointId;
-  groupBy: GroupBy;
-  focusTable: string;
-  depth: string;
-  includeTables: string;
-  excludeTables: string;
-  exportFormat: ExportFormat;
-  inspectTable: string;
-  lintRules: string;
-  compareView: CompareView;
-  compareReviewDialect: ReviewDialect;
-  sql: string;
-  compareBeforeSql: string;
-  compareAfterSql: string;
-};
-
-type ExampleDefinition = {
-  id: Exclude<ExampleId, 'custom'>;
-  label: string;
-  path: string;
-};
-
-type ViewpointDefinition = {
-  id: ViewpointId;
-  label: string;
-  description: string;
-  groupBy: GroupBy;
-  focusTable: string;
-  depth: number;
-  includeTables: readonly string[];
-  excludeTables: readonly string[];
-};
-
-type ManualViewState = {
-  groupBy: GroupBy;
-  focusTable: string;
-  depth: string;
-  includeTables: string;
-  excludeTables: string;
-};
-
-type ButtonAction = {
-  label: string;
-  run: () => void | Promise<void>;
-};
+import {
+  effectiveDialectNote,
+  escapeHtml,
+  exportFilename,
+  exportFormatLabel,
+  exportMimeType,
+  formatDiagnosticCode,
+  formatDuration,
+  formatFindingTarget,
+  inputCoverageNote,
+  severityEmoji,
+  severityRank,
+  totalDiffChanges,
+} from './format.js';
+import {
+  arraysEqual,
+  buildQueryString,
+  CUSTOM_EXAMPLE_ID,
+  DEFAULT_EXAMPLE_ID,
+  DEFAULT_STATE,
+  isWorkbenchMode,
+  MANUAL_VIEWPOINT_ID,
+  parsePositiveInteger,
+  parseQueryState,
+  parseStoredState,
+  serializePatterns,
+  splitPatterns,
+  toBuiltinExampleId,
+} from './state.js';
+import type {
+  ButtonAction,
+  CompareView,
+  EdgeStyle,
+  ExampleDefinition,
+  ExampleId,
+  ExportFormat,
+  GroupBy,
+  LayoutAlgorithm,
+  LayoutDirection,
+  LintIssue,
+  ManualViewState,
+  PersistedState,
+  ReviewDialect,
+  ReviewFinding,
+  ReviewSeverity,
+  SchemaDiff,
+  SchemaSummary,
+  TableDetails,
+  Theme,
+  ViewpointDefinition,
+  ViewpointId,
+  WasmDiagnostic,
+  WasmDiffResult,
+  WasmErrorShape,
+  WasmExportResult,
+  WasmInspectResult,
+  WasmLintResult,
+  WasmRenderResult,
+  WasmReviewResult,
+  WorkbenchMode,
+} from './types.js';
 
 const STORAGE_KEY = 'relune-schema-workbench:v1';
-const CUSTOM_EXAMPLE_ID = 'custom';
-const DEFAULT_EXAMPLE_ID: Exclude<ExampleId, 'custom'> = 'simple-blog';
-const MANUAL_VIEWPOINT_ID = '';
 const MANUAL_VIEWPOINT_LABEL = 'Manual controls';
 const SIDEBAR_DEFAULT = 380;
 
@@ -460,29 +211,6 @@ const MODE_META: Record<
       'Keep before and after separate, then inspect visual or structured changes without crowding the viewer mode.',
     actionLabel: 'Compare',
   },
-};
-
-const DEFAULT_STATE: PersistedState = {
-  example: DEFAULT_EXAMPLE_ID,
-  mode: 'render',
-  theme: 'light',
-  layout: 'hierarchical',
-  direction: 'top-to-bottom',
-  edgeStyle: 'curved',
-  viewpoint: MANUAL_VIEWPOINT_ID,
-  groupBy: 'none',
-  focusTable: '',
-  depth: '1',
-  includeTables: '',
-  excludeTables: '',
-  exportFormat: 'schema-json',
-  inspectTable: '',
-  lintRules: '',
-  compareView: 'visual',
-  compareReviewDialect: 'auto',
-  sql: '',
-  compareBeforeSql: '',
-  compareAfterSql: '',
 };
 
 const exampleSelect = getElement<HTMLSelectElement>('example-select');
@@ -661,10 +389,6 @@ function getSelectedViewpoint(): ViewpointDefinition | undefined {
   return findViewpoint(exampleSelect.value as ExampleId, viewpointSelect.value);
 }
 
-function serializePatterns(patterns: readonly string[]): string {
-  return patterns.join(', ');
-}
-
 function cloneManualViewState(state: Readonly<ManualViewState>): ManualViewState {
   return { ...state };
 }
@@ -738,10 +462,6 @@ function syncViewpointSelectionWithControls(): void {
   updateViewpointHint();
 }
 
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 async function loadExamples(): Promise<void> {
   const loadedExamples = await Promise.all(
     EXAMPLES.map(async (example) => {
@@ -759,8 +479,8 @@ async function loadExamples(): Promise<void> {
 }
 
 function restoreInitialState(): void {
-  const storedState = readStoredState();
-  const queryState = readQueryState();
+  const storedState = parseStoredState(localStorage.getItem(STORAGE_KEY));
+  const queryState = parseQueryState(window.location.search);
   const initialState: PersistedState = {
     ...DEFAULT_STATE,
     ...storedState,
@@ -1317,7 +1037,7 @@ async function runExportMode(currentSerial: number): Promise<void> {
     ['Views', `${result.stats.view_count}`],
   ]);
   renderDiagnostics(result.diagnostics);
-  showTextOutput(exportFormatLabel(), result.content);
+  showTextOutput(exportFormatLabel(selectedExportFormat()), result.content);
   configureActions({
     copy: {
       label: 'Copy output',
@@ -1325,10 +1045,15 @@ async function runExportMode(currentSerial: number): Promise<void> {
     },
     primary: {
       label: 'Download',
-      run: () => downloadText(exportFilename(), result.content, exportMimeType()),
+      run: () =>
+        downloadText(
+          exportFilename(selectedExportFormat()),
+          result.content,
+          exportMimeType(selectedExportFormat()),
+        ),
     },
   });
-  setStatus(`Exported ${exportFormatLabel()}`);
+  setStatus(`Exported ${exportFormatLabel(selectedExportFormat())}`);
 }
 
 async function runLintMode(currentSerial: number): Promise<void> {
@@ -1568,71 +1293,6 @@ function renderReviewPanel(result: WasmReviewResult): void {
   }
 }
 
-function effectiveDialectNote(requested: ReviewDialect, effective: ReviewDialect): string | null {
-  if (requested !== 'auto') {
-    return null;
-  }
-  if (effective === 'postgres' || effective === 'mysql') {
-    return `auto resolved to ${effective}; lock-risk review active.`;
-  }
-  if (effective === 'sqlite') {
-    return 'auto resolved to sqlite; lock-risk rules are inactive on this dialect.';
-  }
-  return 'Auto could not infer a single dialect; lock-risk rules are inactive.';
-}
-
-function inputCoverageNote(inputs: WasmReviewResult['inputs']): string | null {
-  const notes: string[] = [];
-  for (const [label, coverage] of [
-    ['before', inputs.before],
-    ['after', inputs.after],
-  ] as const) {
-    if (coverage.empty) {
-      notes.push(`the ${label} input produced no schema objects`);
-    }
-    const count = coverage.unsupported_constructs;
-    if (count > 0) {
-      notes.push(
-        `${count} unsupported SQL construct${count === 1 ? '' : 's'} in the ${label} input ${count === 1 ? 'was' : 'were'} skipped`,
-      );
-    }
-  }
-  if (notes.length === 0) {
-    return null;
-  }
-  return `Review coverage is incomplete: ${notes.join('; ')}. Missing findings do not mean the migration is safe.`;
-}
-
-function severityRank(severity: ReviewSeverity): number {
-  switch (severity) {
-    case 'breaking':
-      return 0;
-    case 'caution':
-      return 1;
-    case 'warning':
-      return 2;
-    case 'info':
-      return 3;
-    default:
-      return Number.MAX_SAFE_INTEGER;
-  }
-}
-
-function severityEmoji(severity: ReviewSeverity): string {
-  switch (severity) {
-    case 'breaking':
-      return '🔴';
-    case 'caution':
-      return '🟡';
-    case 'warning':
-      return '🟠';
-    case 'info':
-      return '⚪';
-    default:
-      return '';
-  }
-}
-
 function buildSeverityBadge(severity: ReviewSeverity, count: number): string {
   return `
     <span class="severity-badge severity-badge--${severity}">
@@ -1664,25 +1324,6 @@ function buildFindingCard(finding: ReviewFinding): string {
       ${mitigationMarkup}
     </li>
   `;
-}
-
-function formatFindingTarget(finding: ReviewFinding): string {
-  const table = finding.table_name ?? '';
-  const column = finding.column_name ?? '';
-  const fk = finding.fk_name ?? '';
-  if (table && column) {
-    return `${table}.${column}`;
-  }
-  if (table && fk) {
-    return `${table}.${fk}`;
-  }
-  if (table) {
-    return table;
-  }
-  if (fk) {
-    return fk;
-  }
-  return '(schema)';
 }
 
 function buildRenderRequest(format: 'html' | 'svg'): Record<string, unknown> {
@@ -2137,103 +1778,13 @@ function populateInspectTableOptions(tableNames: readonly string[], selectedTabl
   inspectTableSelect.value = selectedTable;
 }
 
-function splitPatterns(rawValue: string): string[] {
-  return rawValue
-    .split(',')
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+function selectedExportFormat(): ExportFormat {
+  return exportFormatSelect.value as ExportFormat;
 }
 
-function parsePositiveInteger(rawValue: string): number | undefined {
-  const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return undefined;
-  }
-  return parsed;
-}
-
-function formatDuration(duration: WasmDuration): string {
-  const millis = duration.secs * 1_000 + duration.nanos / 1_000_000;
-  if (millis >= 1_000) {
-    return `${(millis / 1_000).toFixed(2)} s`;
-  }
-  if (millis >= 10) {
-    return `${millis.toFixed(0)} ms`;
-  }
-  return `${millis.toFixed(1)} ms`;
-}
-
-function formatDiagnosticCode(diagnostic: WasmDiagnostic): string {
-  return `${diagnostic.code.prefix}${diagnostic.code.number.toString().padStart(3, '0')}`;
-}
-
-function totalDiffChanges(summary: DiffSummary): number {
-  return (
-    summary.tables_added +
-    summary.tables_removed +
-    summary.tables_modified +
-    summary.columns_changed +
-    summary.foreign_keys_changed +
-    summary.indexes_changed +
-    summary.views_added +
-    summary.views_removed +
-    summary.views_modified +
-    summary.view_columns_changed +
-    summary.view_definitions_changed +
-    summary.enums_added +
-    summary.enums_removed +
-    summary.enums_modified +
-    summary.enum_values_changed
-  );
-}
-
-function exportFormatLabel(): string {
-  switch (exportFormatSelect.value as ExportFormat) {
-    case 'schema-json':
-      return 'Schema JSON';
-    case 'graph-json':
-      return 'Graph JSON';
-    case 'layout-json':
-      return 'Layout JSON';
-    case 'mermaid':
-      return 'Mermaid';
-    case 'd2':
-      return 'D2';
-    case 'dot':
-      return 'DOT';
-    default:
-      return '';
-  }
-}
-
-function exportFilename(): string {
-  switch (exportFormatSelect.value as ExportFormat) {
-    case 'schema-json':
-      return 'relune-schema.json';
-    case 'graph-json':
-      return 'relune-graph.json';
-    case 'layout-json':
-      return 'relune-layout.json';
-    case 'mermaid':
-      return 'relune-diagram.mmd';
-    case 'd2':
-      return 'relune-diagram.d2';
-    case 'dot':
-      return 'relune-diagram.dot';
-    default:
-      return 'relune-export';
-  }
-}
-
-function exportMimeType(): string {
-  switch (exportFormatSelect.value as ExportFormat) {
-    case 'schema-json':
-    case 'graph-json':
-    case 'layout-json':
-      return 'application/json;charset=utf-8';
-    default:
-      return 'text/plain;charset=utf-8';
-  }
+function syncQueryString(query: string): void {
+  const nextUrl = query ? `?${query}` : window.location.pathname;
+  window.history.replaceState(null, '', nextUrl);
 }
 
 function setStatus(text: string): void {
@@ -2295,113 +1846,10 @@ async function copyText(content: string, successStatus: string): Promise<void> {
   setStatus(successStatus);
 }
 
-function readStoredState(): Partial<PersistedState> {
-  const rawValue = localStorage.getItem(STORAGE_KEY);
-  if (!rawValue) {
-    return {};
-  }
-
-  try {
-    return sanitizeState(JSON.parse(rawValue) as Partial<PersistedState>);
-  } catch {
-    return {};
-  }
-}
-
-function readQueryState(): Partial<PersistedState> {
-  const params = new URLSearchParams(window.location.search);
-  return sanitizeState({
-    example: (params.get('example') as ExampleId | null) ?? undefined,
-    mode: (params.get('mode') as WorkbenchMode | null) ?? undefined,
-    theme: (params.get('theme') as Theme | null) ?? undefined,
-    layout: (params.get('layout') as LayoutAlgorithm | null) ?? undefined,
-    direction: (params.get('direction') as LayoutDirection | null) ?? undefined,
-    edgeStyle: (params.get('edges') as EdgeStyle | null) ?? undefined,
-    viewpoint: params.get('viewpoint') ?? undefined,
-    groupBy: (params.get('group') as GroupBy | null) ?? undefined,
-    focusTable: params.get('focus') ?? undefined,
-    depth: params.get('depth') ?? undefined,
-    includeTables: params.get('include') ?? undefined,
-    excludeTables: params.get('exclude') ?? undefined,
-    exportFormat: (params.get('export') as ExportFormat | null) ?? undefined,
-    inspectTable: params.get('table') ?? undefined,
-    lintRules: params.get('rules') ?? undefined,
-    compareView: (params.get('compare') as CompareView | null) ?? undefined,
-    compareReviewDialect: (params.get('reviewDialect') as ReviewDialect | null) ?? undefined,
-  });
-}
-
-function sanitizeState(state: Partial<PersistedState>): Partial<PersistedState> {
-  const sanitized: Partial<PersistedState> = {};
-
-  if (isExampleId(state.example)) {
-    sanitized.example = state.example;
-  }
-  if (isWorkbenchMode(state.mode)) {
-    sanitized.mode = state.mode;
-  }
-  if (isTheme(state.theme)) {
-    sanitized.theme = state.theme;
-  }
-  if (isLayoutAlgorithm(state.layout)) {
-    sanitized.layout = state.layout;
-  }
-  if (isLayoutDirection(state.direction)) {
-    sanitized.direction = state.direction;
-  }
-  if (isEdgeStyle(state.edgeStyle)) {
-    sanitized.edgeStyle = state.edgeStyle;
-  }
-  if (typeof state.viewpoint === 'string') {
-    sanitized.viewpoint = state.viewpoint.trim();
-  }
-  if (isGroupBy(state.groupBy)) {
-    sanitized.groupBy = state.groupBy;
-  }
-  if (typeof state.focusTable === 'string') {
-    sanitized.focusTable = state.focusTable;
-  }
-  if (typeof state.depth === 'string') {
-    sanitized.depth = state.depth;
-  }
-  if (typeof state.includeTables === 'string') {
-    sanitized.includeTables = state.includeTables;
-  }
-  if (typeof state.excludeTables === 'string') {
-    sanitized.excludeTables = state.excludeTables;
-  }
-  if (isExportFormat(state.exportFormat)) {
-    sanitized.exportFormat = state.exportFormat;
-  }
-  if (typeof state.inspectTable === 'string') {
-    sanitized.inspectTable = state.inspectTable;
-  }
-  if (typeof state.lintRules === 'string') {
-    sanitized.lintRules = state.lintRules;
-  }
-  if (isCompareView(state.compareView)) {
-    sanitized.compareView = state.compareView;
-  }
-  if (isReviewDialect(state.compareReviewDialect)) {
-    sanitized.compareReviewDialect = state.compareReviewDialect;
-  }
-  if (typeof state.sql === 'string') {
-    sanitized.sql = state.sql;
-  }
-  if (typeof state.compareBeforeSql === 'string') {
-    sanitized.compareBeforeSql = state.compareBeforeSql;
-  }
-  if (typeof state.compareAfterSql === 'string') {
-    sanitized.compareAfterSql = state.compareAfterSql;
-  }
-
-  return sanitized;
-}
-
 function persistState(): void {
   const state = collectState();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  syncQueryString(state);
+  syncQueryString(buildQueryString(state));
 }
 
 function collectState(): PersistedState {
@@ -2429,133 +1877,11 @@ function collectState(): PersistedState {
   };
 }
 
-function syncQueryString(state: PersistedState): void {
-  const params = new URLSearchParams();
-  params.set('example', state.example);
-  params.set('mode', state.mode);
-  params.set('theme', state.theme);
-  params.set('layout', state.layout);
-  params.set('direction', state.direction);
-  params.set('edges', state.edgeStyle);
-  params.set('group', state.groupBy);
-
-  if (state.viewpoint) {
-    params.set('viewpoint', state.viewpoint);
-  }
-  if (state.focusTable) {
-    params.set('focus', state.focusTable);
-  }
-  if (state.depth && state.depth !== DEFAULT_STATE.depth) {
-    params.set('depth', state.depth);
-  }
-  if (state.includeTables) {
-    params.set('include', state.includeTables);
-  }
-  if (state.excludeTables) {
-    params.set('exclude', state.excludeTables);
-  }
-  if (state.mode === 'export') {
-    params.set('export', state.exportFormat);
-  }
-  if (state.mode === 'inspect' && state.inspectTable) {
-    params.set('table', state.inspectTable);
-  }
-  if (state.mode === 'lint' && state.lintRules) {
-    params.set('rules', state.lintRules);
-  }
-  if (state.mode === 'compare') {
-    params.set('compare', state.compareView);
-    if (
-      state.compareView === 'review' &&
-      state.compareReviewDialect !== DEFAULT_STATE.compareReviewDialect
-    ) {
-      params.set('reviewDialect', state.compareReviewDialect);
-    }
-  }
-
-  const nextQuery = params.toString();
-  const nextUrl = nextQuery ? `?${nextQuery}` : window.location.pathname;
-  window.history.replaceState(null, '', nextUrl);
-}
-
 function setActionButtonsDisabled(disabled: boolean): void {
   renderNowButton.disabled = disabled;
   copyOutputButton.disabled = disabled;
   downloadPrimaryButton.disabled = disabled;
   downloadSecondaryButton.disabled = disabled;
-}
-
-function isExampleId(value: unknown): value is ExampleId {
-  return (
-    value === 'simple-blog' ||
-    value === 'ecommerce' ||
-    value === 'multi-schema' ||
-    value === CUSTOM_EXAMPLE_ID
-  );
-}
-
-function isWorkbenchMode(value: unknown): value is WorkbenchMode {
-  return (
-    value === 'render' ||
-    value === 'inspect' ||
-    value === 'export' ||
-    value === 'lint' ||
-    value === 'compare'
-  );
-}
-
-function isTheme(value: unknown): value is Theme {
-  return value === 'light' || value === 'dark';
-}
-
-function isLayoutAlgorithm(value: unknown): value is LayoutAlgorithm {
-  return value === 'hierarchical' || value === 'force-directed';
-}
-
-function isLayoutDirection(value: unknown): value is LayoutDirection {
-  return (
-    value === 'top-to-bottom' ||
-    value === 'left-to-right' ||
-    value === 'right-to-left' ||
-    value === 'bottom-to-top'
-  );
-}
-
-function isEdgeStyle(value: unknown): value is EdgeStyle {
-  return value === 'curved' || value === 'orthogonal' || value === 'straight';
-}
-
-function isGroupBy(value: unknown): value is GroupBy {
-  return value === 'none' || value === 'schema' || value === 'prefix';
-}
-
-function isExportFormat(value: unknown): value is ExportFormat {
-  return (
-    value === 'schema-json' ||
-    value === 'graph-json' ||
-    value === 'layout-json' ||
-    value === 'mermaid' ||
-    value === 'd2' ||
-    value === 'dot'
-  );
-}
-
-function isCompareView(value: unknown): value is CompareView {
-  return (
-    value === 'visual' ||
-    value === 'text' ||
-    value === 'markdown' ||
-    value === 'json' ||
-    value === 'review'
-  );
-}
-
-function isReviewDialect(value: unknown): value is ReviewDialect {
-  return value === 'auto' || value === 'postgres' || value === 'mysql' || value === 'sqlite';
-}
-
-function toBuiltinExampleId(value: ExampleId): Exclude<ExampleId, 'custom'> {
-  return value === CUSTOM_EXAMPLE_ID ? DEFAULT_EXAMPLE_ID : value;
 }
 
 function applyTheme(theme: Theme): void {
@@ -2569,13 +1895,4 @@ function getElement<T extends HTMLElement>(id: string): T {
     throw new Error(`Missing element #${id}`);
   }
   return element as T;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
