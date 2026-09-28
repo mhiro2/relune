@@ -1901,20 +1901,26 @@ fn check_add_cascade_delete(
     findings.push(finding);
 }
 
-/// `risk/fk-without-index` — newly added FK lacks a supporting index.
+/// `risk/fk-without-index` — newly added FK, or an FK moved onto other
+/// referencing columns, lacks a supporting index.
 fn check_fk_without_index(
     table_diff: &TableDiff,
     fk_diff: &ForeignKeyDiff,
     after_table: &Table,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if fk_diff.change_kind != ChangeKind::Added {
-        return;
-    }
     let Some(new) = fk_diff.new_value.as_ref() else {
         return;
     };
-    if fk_columns_are_indexed(after_table, &new.from_columns) {
+    let qualifies = match fk_diff.change_kind {
+        ChangeKind::Added => true,
+        ChangeKind::Modified => fk_diff
+            .old_value
+            .as_ref()
+            .is_some_and(|old| !same_ordered_columns(&old.from_columns, &new.from_columns)),
+        ChangeKind::Removed => false,
+    };
+    if !qualifies || fk_columns_are_indexed(after_table, &new.from_columns) {
         return;
     }
 
@@ -1926,7 +1932,8 @@ fn check_fk_without_index(
         ReviewRuleId::FkWithoutIndex,
         ReviewSeverity::Info,
         format!(
-            "New FK {} on {} ({}) has no supporting index.",
+            "{} FK {} on {} ({}) has no supporting index.",
+            change_label(fk_diff.change_kind),
             label,
             table_diff.table_name,
             new.from_columns.join(","),
@@ -1946,7 +1953,8 @@ fn check_fk_without_index(
     findings.push(finding);
 }
 
-/// `risk/add-index-on-large-table` — index added on an existing table;
+/// `risk/add-index-on-large-table` — index added on an existing table,
+/// or an existing index changed (which drops and re-creates it);
 /// non-CONCURRENT / non-INPLACE builds block writes for the duration of
 /// the rebuild.
 fn check_add_index_on_large_table(
@@ -1956,7 +1964,7 @@ fn check_add_index_on_large_table(
     context: &RuleContext<'_>,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if index_diff.change_kind != ChangeKind::Added {
+    if index_diff.change_kind == ChangeKind::Removed {
         return;
     }
     // Skip newly added tables: an empty table cannot incur a problematic
@@ -1974,10 +1982,11 @@ fn check_add_index_on_large_table(
         .clone()
         .unwrap_or_else(|| format!("({})", new_columns.join(",")));
     let dialect = dialect_word(context.dialect);
+    let change = change_label(index_diff.change_kind);
     let (message, mitigation) = match context.dialect {
         EffectiveDialect::Postgres => (
             format!(
-                "New index {label} on existing table {} ({}) ({dialect}). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
+                "{change} index {label} on existing table {} ({}) ({dialect}). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
                 table_diff.table_name,
                 new_columns.join(","),
             ),
@@ -1985,7 +1994,7 @@ fn check_add_index_on_large_table(
         ),
         EffectiveDialect::Mysql => (
             format!(
-                "New index {label} on existing table {} ({}) ({dialect}). Default ALGORITHM=INPLACE may still block writes during rebuild on large tables.",
+                "{change} index {label} on existing table {} ({}) ({dialect}). Default ALGORITHM=INPLACE may still block writes during rebuild on large tables.",
                 table_diff.table_name,
                 new_columns.join(","),
             ),
@@ -2009,8 +2018,9 @@ fn check_add_index_on_large_table(
 }
 
 /// `risk/add-fk-on-existing` — FK added between two tables that both
-/// already existed; validation locks the referencing table while every
-/// existing row is checked.
+/// already existed, or an existing FK changed (neither dialect alters an
+/// FK in place, so it is dropped and re-created); validation locks the
+/// referencing table while every existing row is checked.
 fn check_add_fk_on_existing(
     table_diff: &TableDiff,
     fk_diff: &ForeignKeyDiff,
@@ -2018,7 +2028,7 @@ fn check_add_fk_on_existing(
     context: &RuleContext<'_>,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if fk_diff.change_kind != ChangeKind::Added {
+    if fk_diff.change_kind == ChangeKind::Removed {
         return;
     }
     // Owner table must exist in `before`; modified_tables guarantees this
@@ -2052,17 +2062,18 @@ fn check_add_fk_on_existing(
         .clone()
         .unwrap_or_else(|| format!("({})", new.from_columns.join(",")));
     let dialect = dialect_word(context.dialect);
+    let change = change_label(fk_diff.change_kind);
     let (message, mitigation) = match context.dialect {
         EffectiveDialect::Postgres => (
             format!(
-                "New FK {label} on existing table {} ({dialect}). Adding a FK validates all existing rows under SHARE ROW EXCLUSIVE lock.",
+                "{change} FK {label} on existing table {} ({dialect}). Adding a FK validates all existing rows under SHARE ROW EXCLUSIVE lock.",
                 table_diff.table_name,
             ),
             "Use ADD CONSTRAINT ... NOT VALID, then VALIDATE CONSTRAINT in a separate transaction.",
         ),
         EffectiveDialect::Mysql => (
             format!(
-                "New FK {label} on existing table {} ({dialect}). FK creation locks the referencing table while every existing row is checked against the parent.",
+                "{change} FK {label} on existing table {} ({dialect}). FK creation locks the referencing table while every existing row is checked against the parent.",
                 table_diff.table_name,
             ),
             "Schedule during low-traffic windows, or stage referencing rows so validation is fast.",
@@ -2230,6 +2241,18 @@ fn check_rewrite_table(
         .with_mitigation(mitigation);
         findings.push(finding);
     }
+}
+
+/// Leading word for findings about an added or a changed constraint.
+const fn change_label(kind: ChangeKind) -> &'static str {
+    match kind {
+        ChangeKind::Modified => "Changed",
+        ChangeKind::Added | ChangeKind::Removed => "New",
+    }
+}
+
+fn same_ordered_columns(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
 /// Lower-cased dialect label used by lock-risk finding messages.
@@ -5900,5 +5923,82 @@ mod tests {
         after_table.columns[1].is_primary_key = true;
         let findings = run_all(&schema(vec![before_table]), &schema(vec![after_table]));
         assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+    }
+
+    #[test]
+    fn changed_index_is_a_rebuild_on_an_existing_table() {
+        let mut before_table = table(
+            "users",
+            vec![
+                col("id", "int", false, true),
+                col("email", "text", true, false),
+            ],
+            vec![],
+            vec![index("idx_users_email", &["email"], false)],
+        );
+        before_table
+            .columns
+            .push(col("tenant_id", "int", true, false));
+        let mut after_table = before_table.clone();
+        after_table.indexes = vec![index("idx_users_email", &["tenant_id", "email"], false)];
+
+        let findings = run_with_dialect(
+            &schema(vec![before_table]),
+            &schema(vec![after_table]),
+            EffectiveDialect::Postgres,
+        );
+        let finding = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddIndexOnLargeTable)
+            .expect("changed index must be reported");
+        assert!(finding.message.starts_with("Changed index idx_users_email"));
+    }
+
+    #[test]
+    fn changed_fk_is_revalidated_and_checked_for_an_index() {
+        let users = table("users", vec![col("id", "int", false, true)], vec![], vec![]);
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "int", false, true),
+                col("user_id", "int", true, false),
+                col("buyer_id", "int", true, false),
+            ],
+            vec![fk(
+                "fk_user",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("idx_orders_user_id", &["user_id"], false)],
+        );
+        let before = schema(vec![users.clone(), orders.clone()]);
+
+        // Moved onto an unindexed column.
+        let mut moved = orders.clone();
+        moved.foreign_keys[0].from_columns = vec!["buyer_id".into()];
+        let findings = run_with_dialect(
+            &before,
+            &schema(vec![users.clone(), moved]),
+            EffectiveDialect::Postgres,
+        );
+        let missing_index = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::FkWithoutIndex)
+            .expect("moved FK without index must be reported");
+        assert!(missing_index.message.starts_with("Changed FK fk_user"));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddFkOnExisting), 1);
+
+        // Only the referential action changes: re-created, same columns.
+        let mut action_only = orders;
+        action_only.foreign_keys[0].on_delete = ReferentialAction::Restrict;
+        let findings = run_with_dialect(
+            &before,
+            &schema(vec![users, action_only]),
+            EffectiveDialect::Postgres,
+        );
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddFkOnExisting), 1);
+        assert_eq!(rule_count(&findings, ReviewRuleId::FkWithoutIndex), 0);
     }
 }
