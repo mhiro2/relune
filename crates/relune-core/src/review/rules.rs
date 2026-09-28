@@ -1024,7 +1024,13 @@ fn check_add_not_null_on_existing(
     }
 
     let triggered = match column_diff.change_kind {
-        ChangeKind::Added => column_diff.new_value.as_ref().is_some_and(|v| !v.nullable),
+        // A value the database fills in for existing rows (DEFAULT,
+        // identity, generated, auto-increment) satisfies the constraint.
+        ChangeKind::Added => column_diff
+            .new_value
+            .as_ref()
+            .is_some_and(|v| !v.nullable && !fills_existing_rows(v)),
+        // Existing NULLs still fail `SET NOT NULL`, whatever the default.
         ChangeKind::Modified => {
             let was_nullable = column_diff.old_value.as_ref().is_some_and(|v| v.nullable);
             let is_now_not_nullable = column_diff.new_value.as_ref().is_some_and(|v| !v.nullable);
@@ -1049,6 +1055,28 @@ fn check_add_not_null_on_existing(
         .with_column(&column_diff.column_name)
         .with_mitigation("Add as nullable, backfill, then ALTER to NOT NULL."),
     );
+}
+
+/// Returns true when adding `column` gives every existing row a non-NULL
+/// value: a non-NULL `DEFAULT`, an identity or generated definition, or an
+/// auto-increment / `SERIAL` type.
+fn fills_existing_rows(column: &crate::export::ColumnExport) -> bool {
+    let semantics = &column.semantics;
+    let has_default = semantics.default_expression.as_deref().is_some_and(|expr| {
+        // `DEFAULT NULL` (optionally cast, e.g. `NULL::text`) fills nothing.
+        let value = expr.split("::").next().unwrap_or(expr).trim();
+        let value = value.trim_start_matches('(').trim_end_matches(')').trim();
+        !value.eq_ignore_ascii_case("null")
+    });
+    let serial_type = matches!(
+        column.data_type.trim().to_ascii_lowercase().as_str(),
+        "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8"
+    );
+    has_default
+        || semantics.identity.is_some()
+        || semantics.generated.is_some()
+        || semantics.auto_increment
+        || serial_type
 }
 
 /// `risk/type-narrow` — column data type is being narrowed in a way
@@ -5562,5 +5590,55 @@ mod tests {
             .expect("PK drop must be reported");
         assert_eq!(drop.severity, ReviewSeverity::Breaking);
         assert_eq!(drop.fk_name.as_deref(), Some("fk_parent"));
+    }
+
+    #[test]
+    fn not_null_column_filled_by_the_database_is_not_reported() {
+        let base = table("users", vec![col("id", "int", false, true)], vec![], vec![]);
+        let before = schema(vec![base.clone()]);
+        let with_column = |column: Column| {
+            let mut after = base.clone();
+            after.columns.push(column);
+            schema(vec![after])
+        };
+
+        let mut defaulted = col("status", "text", false, false);
+        defaulted.semantics.default_expression = Some("'active'".into());
+        let mut identity = col("seq", "bigint", false, false);
+        identity.semantics.identity = Some(crate::model::IdentitySpec { always: true });
+        let mut generated = col("upper_id", "int", false, false);
+        generated.semantics.generated = Some(crate::model::GeneratedColumn {
+            expression: "id * 2".into(),
+            stored: true,
+        });
+        let mut auto_increment = col("n", "int", false, false);
+        auto_increment.semantics.auto_increment = true;
+        let serial = col("s", "BIGSERIAL", false, false);
+        for column in [defaulted, identity, generated, auto_increment, serial] {
+            let name = column.name.clone();
+            let findings = run_all(&before, &with_column(column));
+            assert_eq!(
+                rule_count(&findings, ReviewRuleId::AddNotNullOnExisting),
+                0,
+                "{name} is filled for existing rows"
+            );
+        }
+
+        let mut null_default = col("note", "text", false, false);
+        null_default.semantics.default_expression = Some("NULL::text".into());
+        let findings = run_all(&before, &with_column(null_default));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddNotNullOnExisting), 1);
+    }
+
+    #[test]
+    fn set_not_null_is_reported_even_with_a_default() {
+        let mut column = col("status", "text", true, false);
+        column.semantics.default_expression = Some("'active'".into());
+        let before = schema(vec![table("users", vec![column.clone()], vec![], vec![])]);
+        column.nullable = false;
+        let after = schema(vec![table("users", vec![column], vec![], vec![])]);
+
+        let findings = run_all(&before, &after);
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddNotNullOnExisting), 1);
     }
 }
