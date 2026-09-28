@@ -8,8 +8,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
-    CheckConstraint, Column, ColumnSemantics, Enum, ForeignKey, Index, IndexKey, Schema, Table,
-    View,
+    CheckConstraint, Column, ColumnSemantics, Enum, ForeignKey, Index, IndexKey, ReferentialAction,
+    Schema, Table, View, is_no_action,
 };
 
 /// Stable schema export format for JSON serialization.
@@ -121,17 +121,48 @@ pub struct ForeignKeyExport {
     pub to_table: String,
     /// Target column names.
     pub to_columns: Vec<String>,
-    /// ON DELETE action.
-    #[serde(default, skip_serializing_if = "is_export_no_action")]
-    pub on_delete: Option<String>,
-    /// ON UPDATE action.
-    #[serde(default, skip_serializing_if = "is_export_no_action")]
-    pub on_update: Option<String>,
+    /// ON DELETE action, written in its SQL spelling (`CASCADE`, `SET NULL`,
+    /// ...). Omitted for `NO ACTION`; an unknown value fails the import.
+    #[serde(
+        default,
+        skip_serializing_if = "is_no_action",
+        with = "referential_action_text"
+    )]
+    pub on_delete: ReferentialAction,
+    /// ON UPDATE action, in the same form as `on_delete`.
+    #[serde(
+        default,
+        skip_serializing_if = "is_no_action",
+        with = "referential_action_text"
+    )]
+    pub on_update: ReferentialAction,
 }
 
-#[allow(clippy::ref_option)] // serde skip_serializing_if requires &T
-fn is_export_no_action(action: &Option<String>) -> bool {
-    action.is_none() || action.as_deref() == Some("NO ACTION")
+/// Serializes a [`ReferentialAction`] as its SQL spelling and parses it back
+/// with [`ReferentialAction::from_str`](std::str::FromStr), so the export
+/// format keeps `"CASCADE"` / `"SET NULL"` rather than the model's
+/// `snake_case` names. `null` reads as `NO ACTION`.
+mod referential_action_text {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    use crate::model::ReferentialAction;
+
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde `with` requires &T
+    pub fn serialize<S: Serializer>(
+        action: &ReferentialAction,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(action)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<ReferentialAction, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map_or(Ok(ReferentialAction::NoAction), |value| {
+                value.parse().map_err(D::Error::custom)
+            })
+    }
 }
 
 /// Export format for an index.
@@ -274,24 +305,15 @@ fn export_column(col: &Column) -> ColumnExport {
 }
 
 /// Export a `ForeignKey` to the stable format.
-fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
-    use crate::model::ReferentialAction;
-
-    let to_action_str = |a: ReferentialAction| -> Option<String> {
-        match a {
-            ReferentialAction::NoAction => None,
-            other => Some(other.to_string()),
-        }
-    };
-
+pub(crate) fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
     ForeignKeyExport {
         name: fk.name.clone(),
         from_columns: fk.from_columns.clone(),
         to_schema: fk.to_schema.clone(),
         to_table: fk.to_table.clone(),
         to_columns: fk.to_columns.clone(),
-        on_delete: to_action_str(fk.on_delete),
-        on_update: to_action_str(fk.on_update),
+        on_delete: fk.on_delete,
+        on_update: fk.on_update,
     }
 }
 
@@ -501,33 +523,8 @@ fn import_fk(export: &ForeignKeyExport) -> ForeignKey {
         to_schema: export.to_schema.clone(),
         to_table: export.to_table.clone(),
         to_columns: export.to_columns.clone(),
-        on_delete: parse_referential_action(export.on_delete.as_deref()),
-        on_update: parse_referential_action(export.on_update.as_deref()),
-    }
-}
-
-fn parse_referential_action(action: Option<&str>) -> crate::model::ReferentialAction {
-    use crate::model::ReferentialAction;
-
-    let normalized = action.map(str::trim).filter(|s| !s.is_empty());
-    let normalized = normalized.map(str::to_ascii_uppercase);
-    let normalized = normalized.as_deref();
-
-    let stripped = normalized
-        .and_then(|value| value.strip_prefix("ON DELETE "))
-        .or_else(|| normalized.and_then(|value| value.strip_prefix("ON UPDATE ")))
-        .unwrap_or_else(|| normalized.unwrap_or(""));
-
-    if stripped.is_empty() || stripped == "NO ACTION" || stripped == "NOACTION" {
-        ReferentialAction::NoAction
-    } else {
-        match stripped {
-            "CASCADE" => ReferentialAction::Cascade,
-            "SET NULL" => ReferentialAction::SetNull,
-            "SET DEFAULT" => ReferentialAction::SetDefault,
-            "RESTRICT" => ReferentialAction::Restrict,
-            _ => ReferentialAction::NoAction,
-        }
+        on_delete: export.on_delete,
+        on_update: export.on_update,
     }
 }
 
@@ -823,20 +820,20 @@ mod tests {
 
         let export = roundtrip_schema(&schema);
         assert_eq!(
-            export.tables[1].foreign_keys[0].on_delete.as_deref(),
-            Some("CASCADE")
+            export.tables[1].foreign_keys[0].on_delete,
+            ReferentialAction::Cascade
         );
         assert_eq!(
-            export.tables[1].foreign_keys[0].on_update.as_deref(),
-            Some("SET NULL")
+            export.tables[1].foreign_keys[0].on_update,
+            ReferentialAction::SetNull
         );
         assert_eq!(
-            export.tables[2].foreign_keys[0].on_delete.as_deref(),
-            Some("RESTRICT")
+            export.tables[2].foreign_keys[0].on_delete,
+            ReferentialAction::Restrict
         );
         assert_eq!(
-            export.tables[2].foreign_keys[0].on_update.as_deref(),
-            Some("SET DEFAULT")
+            export.tables[2].foreign_keys[0].on_update,
+            ReferentialAction::SetDefault
         );
     }
 
@@ -982,81 +979,45 @@ mod tests {
         );
     }
 
+    fn foreign_key_json(on_delete: &str, on_update: &str) -> String {
+        format!(
+            r#"{{"name":"fk","from_columns":["account_id"],"to_table":"accounts","to_columns":["id"],"on_delete":{on_delete},"on_update":{on_update}}}"#
+        )
+    }
+
     #[test]
     fn test_import_normalizes_referential_action_strings() {
-        let export = SchemaExport::new(vec![
-            TableExport {
-                id: "public.accounts".to_string(),
-                schema: Some("public".to_string()),
-                name: "accounts".to_string(),
-                columns: vec![ColumnExport {
-                    name: "id".to_string(),
-                    data_type: "uuid".to_string(),
-                    nullable: false,
-                    primary_key: true,
-                    comment: None,
-                    enum_values: None,
-                    semantics: crate::model::ColumnSemantics::default(),
-                }],
-                foreign_keys: vec![],
-                primary_key_name: None,
-                comment: None,
-                check_constraints: Vec::new(),
-                indexes: vec![],
-            },
-            TableExport {
-                id: "public.sessions".to_string(),
-                schema: Some("public".to_string()),
-                name: "sessions".to_string(),
-                columns: vec![
-                    ColumnExport {
-                        name: "id".to_string(),
-                        data_type: "uuid".to_string(),
-                        nullable: false,
-                        primary_key: true,
-                        comment: None,
-                        enum_values: None,
-                        semantics: crate::model::ColumnSemantics::default(),
-                    },
-                    ColumnExport {
-                        name: "account_id".to_string(),
-                        data_type: "uuid".to_string(),
-                        nullable: false,
-                        primary_key: false,
-                        comment: None,
-                        enum_values: None,
-                        semantics: crate::model::ColumnSemantics::default(),
-                    },
-                ],
-                foreign_keys: vec![ForeignKeyExport {
-                    name: Some("fk_sessions_account".to_string()),
-                    from_columns: vec!["account_id".to_string()],
-                    to_schema: Some("public".to_string()),
-                    to_table: "accounts".to_string(),
-                    to_columns: vec!["id".to_string()],
-                    on_delete: Some(" on delete cascade ".to_string()),
-                    on_update: Some("set default".to_string()),
-                }],
-                indexes: vec![],
-                primary_key_name: None,
-                comment: None,
-                check_constraints: Vec::new(),
-            },
-        ]);
-
-        let schema = import_schema(&export).unwrap();
-        let fk = &schema.tables[1].foreign_keys[0];
+        let fk: ForeignKeyExport = serde_json::from_str(&foreign_key_json(
+            r#"" on delete cascade ""#,
+            r#""set_default""#,
+        ))
+        .unwrap();
         assert_eq!(fk.on_delete, ReferentialAction::Cascade);
         assert_eq!(fk.on_update, ReferentialAction::SetDefault);
 
-        let normalized = export_schema(&schema);
-        assert_eq!(
-            normalized.tables[1].foreign_keys[0].on_delete.as_deref(),
-            Some("CASCADE")
-        );
-        assert_eq!(
-            normalized.tables[1].foreign_keys[0].on_update.as_deref(),
-            Some("SET DEFAULT")
+        let fk: ForeignKeyExport =
+            serde_json::from_str(&foreign_key_json(r#""NO ACTION""#, "null")).unwrap();
+        assert_eq!(fk.on_delete, ReferentialAction::NoAction);
+        assert_eq!(fk.on_update, ReferentialAction::NoAction);
+
+        // Written back in the SQL spelling; NO ACTION is omitted.
+        let fk: ForeignKeyExport =
+            serde_json::from_str(&foreign_key_json(r#""set null""#, r#""""#)).unwrap();
+        let json = serde_json::to_value(&fk).unwrap();
+        assert_eq!(json["on_delete"], "SET NULL");
+        assert!(json.get("on_update").is_none());
+    }
+
+    #[test]
+    fn test_import_rejects_unknown_referential_action() {
+        let error =
+            serde_json::from_str::<ForeignKeyExport>(&foreign_key_json(r#""SET NOTHING""#, "null"))
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unknown referential action: SET NOTHING"),
+            "{error}"
         );
     }
 

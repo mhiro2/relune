@@ -12,7 +12,8 @@ use crate::diff::{
     ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff, normalize_sql_case,
 };
 use crate::model::{
-    Column, Enum, ForeignKey, ForeignKeyTargetResolution, Schema, Table, resolve_table_reference,
+    Column, Enum, ForeignKey, ForeignKeyTargetResolution, ReferentialAction, Schema, Table,
+    resolve_table_reference,
 };
 
 /// Runs every rule in `applied_rules` against the diff.
@@ -1855,13 +1856,12 @@ fn check_add_cascade_delete(
         ChangeKind::Added => fk_diff
             .new_value
             .as_ref()
-            .is_some_and(|v| v.on_delete.as_deref() == Some("CASCADE")),
+            .is_some_and(|v| v.on_delete == ReferentialAction::Cascade),
         ChangeKind::Modified => {
-            let old = fk_diff.old_value.as_ref();
-            let new = fk_diff.new_value.as_ref();
-            let was_cascade = old.is_some_and(|v| v.on_delete.as_deref() == Some("CASCADE"));
-            let is_cascade = new.is_some_and(|v| v.on_delete.as_deref() == Some("CASCADE"));
-            !was_cascade && is_cascade
+            let is_cascade = |v: Option<&crate::export::ForeignKeyExport>| {
+                v.is_some_and(|v| v.on_delete == ReferentialAction::Cascade)
+            };
+            !is_cascade(fk_diff.old_value.as_ref()) && is_cascade(fk_diff.new_value.as_ref())
         }
         ChangeKind::Removed => false,
     };

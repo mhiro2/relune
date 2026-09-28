@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::export::{ColumnExport, ForeignKeyExport, IndexExport};
+use crate::export::{ColumnExport, ForeignKeyExport, IndexExport, export_fk};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
 
 mod default_schema;
@@ -398,7 +398,7 @@ impl ForeignKeyDiff {
             name: fk.name.clone(),
             change_kind: ChangeKind::Added,
             old_value: None,
-            new_value: Some(Self::export_fk(fk)),
+            new_value: Some(export_fk(fk)),
         }
     }
 
@@ -408,7 +408,7 @@ impl ForeignKeyDiff {
         Self {
             name: fk.name.clone(),
             change_kind: ChangeKind::Removed,
-            old_value: Some(Self::export_fk(fk)),
+            old_value: Some(export_fk(fk)),
             new_value: None,
         }
     }
@@ -419,29 +419,8 @@ impl ForeignKeyDiff {
         Self {
             name: new_fk.name.clone(),
             change_kind: ChangeKind::Modified,
-            old_value: Some(Self::export_fk(old_fk)),
-            new_value: Some(Self::export_fk(new_fk)),
-        }
-    }
-
-    fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
-        use crate::model::ReferentialAction;
-
-        let to_action_str = |a: ReferentialAction| -> Option<String> {
-            match a {
-                ReferentialAction::NoAction => None,
-                other => Some(other.to_string()),
-            }
-        };
-
-        ForeignKeyExport {
-            name: fk.name.clone(),
-            from_columns: fk.from_columns.clone(),
-            to_schema: fk.to_schema.clone(),
-            to_table: fk.to_table.clone(),
-            to_columns: fk.to_columns.clone(),
-            on_delete: to_action_str(fk.on_delete),
-            on_update: to_action_str(fk.on_update),
+            old_value: Some(export_fk(old_fk)),
+            new_value: Some(export_fk(new_fk)),
         }
     }
 }
@@ -1864,7 +1843,7 @@ mod tests {
             .new_value
             .as_ref()
             .expect("modified FK should carry new value");
-        assert_eq!(new_value.on_delete.as_deref(), Some("CASCADE"));
+        assert_eq!(new_value.on_delete, ReferentialAction::Cascade);
     }
 
     #[test]

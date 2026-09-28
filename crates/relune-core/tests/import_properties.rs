@@ -12,7 +12,8 @@ use relune_core::export::{
 };
 use relune_core::{
     CheckConstraint, ColumnSemantics, EffectiveDialect, GeneratedColumn, IdentitySpec, IndexColumn,
-    IndexKey, NullsOrder, ReviewRuleId, Schema, SortOrder, diff_schemas, lint_schema, run_rules,
+    IndexKey, NullsOrder, ReferentialAction, ReviewRuleId, Schema, SortOrder, diff_schemas,
+    lint_schema, run_rules,
 };
 
 // Small pools so generated documents collide on names, differ only by case,
@@ -21,13 +22,12 @@ const NAMES: &[&str] = &["users", "Users", "posts", "tags", "", "a.b", "テー�
 const SCHEMAS: &[&str] = &["public", "auth", ""];
 const COLUMNS: &[&str] = &["id", "ID", "user_id", "name", "", "missing"];
 const TYPES: &[&str] = &["bigint", "int", "text", "varchar(10)", "numeric(10,2)", ""];
-const ACTIONS: &[&str] = &[
-    "CASCADE",
-    "set null",
-    " on delete restrict ",
-    "NO ACTION",
-    "BOGUS",
-    "",
+const ACTIONS: &[ReferentialAction] = &[
+    ReferentialAction::NoAction,
+    ReferentialAction::Restrict,
+    ReferentialAction::Cascade,
+    ReferentialAction::SetNull,
+    ReferentialAction::SetDefault,
 ];
 const VERSIONS: &[&str] = &["2.0.0", "2.9", "2", "1.0.0", "3.0.0", "x", ""];
 
@@ -114,8 +114,8 @@ fn foreign_key() -> impl Strategy<Value = ForeignKeyExport> {
         optional(SCHEMAS),
         text(NAMES),
         names(COLUMNS, 3),
-        optional(ACTIONS),
-        optional(ACTIONS),
+        select(ACTIONS),
+        select(ACTIONS),
     )
         .prop_map(
             |(name, from_columns, to_schema, to_table, to_columns, on_delete, on_update)| {
