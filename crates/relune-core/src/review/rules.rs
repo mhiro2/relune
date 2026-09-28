@@ -1258,7 +1258,7 @@ fn check_drop_pk_or_unique_column(
         return;
     }
 
-    let (severity, related_fk) = evaluate_drop_pk_severity(before_table, &before_pk_cols, context);
+    let (severity, related_fk) = evaluate_key_loss_severity(before_table, &before_pk_cols, context);
 
     let message = match (severity, &related_fk) {
         (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
@@ -1382,7 +1382,7 @@ fn check_drop_pk_or_unique_index(
     let is_full_unique = index_export_is_full_unique(old);
     let (severity, related_fk) = if is_full_unique {
         before_table.map_or((ReviewSeverity::Warning, None), |bt| {
-            evaluate_unique_loss_severity(bt, &lower_cols, context)
+            evaluate_key_loss_severity(bt, &lower_cols, context)
         })
     } else {
         (ReviewSeverity::Warning, None)
@@ -1466,7 +1466,7 @@ fn check_drop_pk_or_unique_widened(
         return;
     }
 
-    let (severity, related_fk) = evaluate_drop_pk_severity(before_table, &before_pk_cols, context);
+    let (severity, related_fk) = evaluate_key_loss_severity(before_table, &before_pk_cols, context);
 
     let message = match (severity, &related_fk) {
         (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
@@ -1504,31 +1504,14 @@ fn check_drop_pk_or_unique_widened(
     findings.push(finding);
 }
 
-/// Determine whether dropping the UNIQUE index over `unique_cols`
-/// breaks any incoming FK that references that exact column set.
-fn evaluate_unique_loss_severity(
-    before_table: &Table,
-    unique_cols: &[String],
-    context: &RuleContext<'_>,
-) -> (ReviewSeverity, Option<(String, String)>) {
-    evaluate_key_loss_severity(before_table, unique_cols, context, true)
-}
-
-fn evaluate_drop_pk_severity(
-    before_table: &Table,
-    before_pk_cols: &[String],
-    context: &RuleContext<'_>,
-) -> (ReviewSeverity, Option<(String, String)>) {
-    evaluate_key_loss_severity(before_table, before_pk_cols, context, false)
-}
-
-/// Returns `Breaking` plus the first surviving FK that references exactly
-/// `key_cols` on `before_table`, or `Warning` when none does.
+/// Severity of losing the primary key or UNIQUE guarantee over `key_cols`
+/// on `before_table`: `Breaking` plus the first surviving FK that
+/// references exactly that column set, or `Warning` when none does. A
+/// self-referencing FK (e.g. `parent_id -> id`) counts like any other.
 fn evaluate_key_loss_severity(
     before_table: &Table,
     key_cols: &[String],
     context: &RuleContext<'_>,
-    include_self_references: bool,
 ) -> (ReviewSeverity, Option<(String, String)>) {
     if key_cols.is_empty() {
         return (ReviewSeverity::Warning, None);
@@ -1538,10 +1521,7 @@ fn evaluate_key_loss_severity(
 
     for incoming in context.incoming_fks(before_table) {
         let (other_table, fk) = (incoming.owner, incoming.fk);
-        if incoming.removed
-            || context.is_removed_table(other_table)
-            || (!include_self_references && other_table.stable_id == before_table.stable_id)
-        {
+        if incoming.removed || context.is_removed_table(other_table) {
             continue;
         }
         let mut sorted_to: Vec<String> = fk
@@ -5551,5 +5531,36 @@ mod tests {
             .unwrap();
         assert_eq!(drop.table_id.as_deref(), Some("users"));
         assert_eq!(drop.table_name.as_deref(), Some("accounts"));
+    }
+
+    #[test]
+    fn dropping_pk_referenced_by_self_fk_is_breaking() {
+        let nodes = table(
+            "nodes",
+            vec![
+                col("id", "int", false, true),
+                col("parent_id", "int", true, false),
+            ],
+            vec![fk(
+                "fk_parent",
+                &["parent_id"],
+                "nodes",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = schema(vec![nodes.clone()]);
+        let mut after_nodes = nodes;
+        after_nodes.columns[0].is_primary_key = false;
+        let after = schema(vec![after_nodes]);
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("PK drop must be reported");
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.fk_name.as_deref(), Some("fk_parent"));
     }
 }
