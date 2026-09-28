@@ -8,7 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::{DialectScope, EffectiveDialect, ReviewRuleId, ReviewSeverity, RiskFinding};
 use crate::SqlDialect;
-use crate::diff::{ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff};
+use crate::diff::{
+    ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff, normalize_sql_case,
+};
 use crate::model::{
     Column, Enum, ForeignKey, ForeignKeyTargetResolution, Schema, Table, resolve_table_reference,
 };
@@ -1704,16 +1706,18 @@ fn unique_implies(old: &crate::export::IndexExport, new: &crate::export::IndexEx
             crate::model::IndexKey::Column(column) => {
                 (true, column.name.to_lowercase(), column.prefix_length)
             }
-            crate::model::IndexKey::Expression(expr) => (false, expr.to_lowercase(), None),
+            crate::model::IndexKey::Expression(expr) => (false, normalize_sql_case(expr), None),
         }
     }
 
     if !old.unique || old.key_parts.is_empty() {
         return false;
     }
-    // Compare predicates verbatim (modulo surrounding whitespace): lowercasing
-    // would conflate string literals such as `'A'` and `'a'`.
-    if old.predicate.as_deref().map(str::trim) != new.predicate.as_deref().map(str::trim) {
+    // Compare predicates the way the diff does: keyword case is ignored, but
+    // string literals such as `'A'` and `'a'` stay distinct.
+    if old.predicate.as_deref().map(normalize_sql_case)
+        != new.predicate.as_deref().map(normalize_sql_case)
+    {
         return false;
     }
     let new_parts: HashSet<_> = new.key_parts.iter().map(part_identity).collect();
