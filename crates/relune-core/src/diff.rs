@@ -47,27 +47,49 @@ fn effective_nulls_order(
 }
 
 /// Normalizes SQL text for comparison: trims it and lowercases everything
-/// outside quoted literals and quoted identifiers, so keyword and unquoted
-/// identifier case is ignored while a change inside `'Active'` or `"Name"`
-/// is still detected.
+/// outside quoted literals (`'...'`, `$$...$$`, `$tag$...$tag$`) and quoted
+/// identifiers (`"..."`), so keyword and unquoted identifier case is ignored
+/// while a change inside `'Active'` or `"Name"` is still detected.
 pub(crate) fn normalize_sql_case(text: &str) -> String {
+    let text = text.trim();
     let mut normalized = String::with_capacity(text.len());
-    let mut quote: Option<char> = None;
-    for ch in text.trim().chars() {
-        match quote {
-            // A doubled quote (`''`) closes and immediately reopens the
-            // literal, so toggling per quote character handles escapes.
-            Some(open) if ch == open => quote = None,
-            Some(_) => {}
-            None if ch == '\'' || ch == '"' => quote = Some(ch),
-            None => {
-                normalized.extend(ch.to_lowercase());
-                continue;
-            }
+    let mut rest = text;
+    while let Some(ch) = rest.chars().next() {
+        let quoted_len = match ch {
+            // A doubled quote (`''`) reads as two adjacent quoted runs, which
+            // keeps the escaped quote verbatim as well.
+            '\'' | '"' => Some(rest[1..].find(ch).map_or(rest.len(), |end| end + 2)),
+            '$' => dollar_quote_tag(rest).map(|tag| {
+                rest[tag.len()..]
+                    .find(tag)
+                    .map_or(rest.len(), |end| end + 2 * tag.len())
+            }),
+            _ => None,
         }
-        normalized.push(ch);
+        .unwrap_or(0);
+        if quoted_len > 0 {
+            normalized.push_str(&rest[..quoted_len]);
+            rest = &rest[quoted_len..];
+        } else {
+            normalized.extend(ch.to_lowercase());
+            rest = &rest[ch.len_utf8()..];
+        }
     }
     normalized
+}
+
+/// Returns the opening tag (`$$` or `$name$`) when `text` starts a
+/// `PostgreSQL` dollar-quoted literal. A positional parameter such as `$1`
+/// is not a tag.
+fn dollar_quote_tag(text: &str) -> Option<&str> {
+    let body = text.strip_prefix('$')?;
+    let end = body.find('$')?;
+    let name = &body[..end];
+    let valid = name
+        .chars()
+        .enumerate()
+        .all(|(index, ch)| ch == '_' || ch.is_alphabetic() || (index > 0 && ch.is_ascii_digit()));
+    valid.then(|| &text[..end + 2])
 }
 
 /// Items of one kind (foreign keys, indexes, checks) matched between two
@@ -2557,6 +2579,10 @@ mod tests {
         assert_eq!(
             normalize_sql_case(" WHERE \"Kind\" = 'It''s A' AND X IS NULL "),
             "where \"Kind\" = 'It''s A' and x is null"
+        );
+        assert_eq!(
+            normalize_sql_case("S = $$Active$$ OR S = $t$It's$t$ OR N = $1"),
+            "s = $$Active$$ or s = $t$It's$t$ or n = $1"
         );
     }
 }
