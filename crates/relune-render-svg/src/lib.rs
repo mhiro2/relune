@@ -1097,6 +1097,29 @@ mod tests {
     }
 
     #[test]
+    fn test_render_svg_replaces_control_characters_forbidden_in_xml() {
+        let name = "bad\u{1}name\u{1b}";
+        let mut graph = single_node_graph();
+        graph.nodes[0].id = name.to_string();
+        graph.nodes[0].label = name.to_string();
+        graph.nodes[0].columns[1] = column(name, name, true, relation_flags(false, false, false));
+
+        let svg = render_svg(
+            &graph,
+            SvgRenderOptions {
+                show_tooltips: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            !svg.chars()
+                .any(|ch| ch < ' ' && !matches!(ch, '\t' | '\n' | '\r'))
+        );
+        assert!(svg.contains("bad\u{fffd}name\u{fffd}"));
+    }
+
+    #[test]
     fn test_render_svg_with_dark_theme() {
         let graph = single_node_graph();
         let options = SvgRenderOptions {
