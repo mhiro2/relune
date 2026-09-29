@@ -53,7 +53,7 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 582816,
+      "bytes": 582826,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
