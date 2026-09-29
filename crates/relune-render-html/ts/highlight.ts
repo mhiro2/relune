@@ -1,13 +1,11 @@
 import { createEdgeParticles } from './edge_particles';
 import { computeHoverPreview, computeNeighborHighlights } from './highlight_actions';
 import {
-  applyHoverPreviewClasses,
-  applySelectedHighlightClasses,
-  clearHighlightClasses,
+  createHighlightPainter,
+  createObjectBrowser,
   hideHoverPopover,
   renderDrawer,
   renderHoverPopover,
-  renderObjectBrowser,
   type DrawerElements,
   type ObjectBrowserItem,
   type HoverPopoverElements,
@@ -98,14 +96,19 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const runtime = getViewerRuntime();
     const edgeParticles = createEdgeParticles(svgRoot);
 
-    const getNodes = (): NodeListOf<Element> =>
-      svgRoot.querySelectorAll('.node[data-id], .table-node[data-table-id]');
+    // Index the diagram once; hover and selection then touch only the
+    // elements they change instead of re-querying the whole SVG.
+    const nodesById = new Map<string, Element>();
+    svgRoot.querySelectorAll('.node[data-id], .table-node[data-table-id]').forEach((node) => {
+      const id = node.getAttribute('data-id') ?? node.getAttribute('data-table-id');
+      if (id !== null && !nodesById.has(id)) nodesById.set(id, node);
+    });
+    const painter = createHighlightPainter({
+      nodesById,
+      edges: Array.from(svgRoot.querySelectorAll('.edge')),
+    });
 
-    const getNodeId = (node: Element): string | null =>
-      node.getAttribute('data-id') ?? node.getAttribute('data-table-id');
-
-    const findNode = (nodeId: string): Element | undefined =>
-      Array.from(getNodes()).find((candidate) => getNodeId(candidate) === nodeId);
+    const findNode = (nodeId: string): Element | undefined => nodesById.get(nodeId);
 
     const hoverPopoverPosition = (node: Element): PopoverPosition => {
       const anchor = node.querySelector('.table-body') ?? node;
@@ -136,12 +139,27 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
     // ── Object browser sync ───────────────────────────────────────────────
 
+    const objectBrowser =
+      objectBrowserList instanceof HTMLElement &&
+      objectBrowserCount instanceof HTMLElement &&
+      objectBrowserEmpty instanceof HTMLElement
+        ? createObjectBrowser(
+            objectBrowserList,
+            objectBrowserCount,
+            objectBrowserEmpty,
+            (tableId) => {
+              if (state.selectedNode === tableId) {
+                runtime.selection?.clear();
+              } else {
+                runtime.selection?.select(tableId);
+                centerNodeInViewport(tableId);
+              }
+            },
+          )
+        : null;
+
     const syncObjectBrowser = (): void => {
-      if (
-        !(objectBrowserList instanceof HTMLElement) ||
-        !(objectBrowserCount instanceof HTMLElement) ||
-        !(objectBrowserEmpty instanceof HTMLElement)
-      ) {
+      if (objectBrowser === null) {
         return;
       }
 
@@ -168,21 +186,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           };
         });
 
-      renderObjectBrowser(
-        items,
-        tables.length,
-        objectBrowserList,
-        objectBrowserCount,
-        objectBrowserEmpty,
-        (tableId) => {
-          if (state.selectedNode === tableId) {
-            runtime.selection?.clear();
-          } else {
-            runtime.selection?.select(tableId);
-            centerNodeInViewport(tableId);
-          }
-        },
-      );
+      objectBrowser.render(items, tables.length);
     };
 
     // ── Traversal depth toggle ─────────────────────────────────────────
@@ -200,14 +204,15 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       const depth = Number(target.dataset['depth']);
       if (depth >= 1 && depth <= 2 && depth !== state.traversalDepth) {
         state.traversalDepth = depth;
-        renderInteraction();
+        renderHighlight();
       }
     });
 
     // ── Selection / highlight orchestration ────────────────────────────────
 
-    const renderInteraction = (): void => {
-      clearHighlightClasses(svgRoot, getNodes);
+    /** Repaints highlight classes, the drawer, and the hover popover. */
+    const renderHighlight = (): void => {
+      painter.clear();
       hideHoverPopover(hoverEls);
 
       if (state.selectedNode !== null) {
@@ -216,7 +221,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           state,
           state.traversalDepth,
         );
-        applySelectedHighlightClasses(svgRoot, getNodes, getNodeId, highlight);
+        painter.applySelected(highlight);
         renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
         traversalEl?.removeAttribute('hidden');
         syncTraversalButtons();
@@ -227,7 +232,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           const hoveredNode = findNode(state.hoveredNode);
           if (hoveredNode !== undefined) {
             const preview = computeHoverPreview(state.hoveredNode, state);
-            applyHoverPreviewClasses(svgRoot, getNodes, getNodeId, preview);
+            painter.applyHoverPreview(preview);
             renderHoverPopover(
               state.tableById.get(state.hoveredNode),
               hoverEls,
@@ -239,6 +244,11 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         }
       }
       edgeParticles.sync();
+    };
+
+    /** Full refresh for changes that also affect the object browser. */
+    const renderInteraction = (): void => {
+      renderHighlight();
       syncObjectBrowser();
     };
 
@@ -264,32 +274,29 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         return;
       }
       state.hoveredNode = null;
-      renderInteraction();
+      renderHighlight();
     };
 
     // ── Node event listeners ──────────────────────────────────────────────
 
-    getNodes().forEach((node) => {
-      const nodeId = getNodeId(node);
-
+    // Hovering only changes highlight classes and the popover, so it skips
+    // rebuilding the object browser.
+    nodesById.forEach((node, nodeId) => {
       node.addEventListener('mouseenter', () => {
         if (state.selectedNode !== null) return;
-        if (nodeId !== null) {
-          state.hoveredNode = nodeId;
-          renderInteraction();
-        }
+        state.hoveredNode = nodeId;
+        renderHighlight();
       });
 
       node.addEventListener('mouseleave', () => {
         if (state.selectedNode === null && state.hoveredNode === nodeId) {
           state.hoveredNode = null;
-          renderInteraction();
+          renderHighlight();
         }
       });
 
       node.addEventListener('click', (event: Event) => {
         event.stopPropagation();
-        if (nodeId === null) return;
 
         if (state.selectedNode === nodeId) {
           setSelectedNode(null);
@@ -329,7 +336,8 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       syncObjectBrowser();
     };
 
-    searchInput?.addEventListener('input', handleVisibilityStateChange);
+    // Search reports through the debounced `relune:search-changed` event
+    // rather than raw input, so typing does not rebuild the browser per key.
     document.addEventListener('relune:filters-changed', handleVisibilityStateChange);
     document.addEventListener('relune:search-changed', handleVisibilityStateChange);
     document.addEventListener('relune:groups-changed', handleVisibilityStateChange);
