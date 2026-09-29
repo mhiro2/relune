@@ -1,4 +1,5 @@
-import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
+import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { matchesTableQuery } from './search_actions';
 import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './viewer_api';
 
 {
@@ -64,26 +65,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     );
   }
 
-  function matchesMetadataSearch(table: TableMetadata, query: string): boolean {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (normalizedQuery === '') {
-      return false;
-    }
-    const searchable = [
-      tableDisplayName(table),
-      table.id,
-      table.table_name,
-      table.schema_name ?? '',
-      table.kind,
-      ...(table.columns ?? []).flatMap((column) => [column.name, column.data_type ?? '']),
-    ]
-      .join('\n')
-      .toLowerCase();
-    return searchable.includes(normalizedQuery);
-  }
-
   function hasMetadataSearchMatch(query: string): boolean {
-    return tables.some((table) => matchesMetadataSearch(table, query));
+    return query.trim() !== '' && tables.some((table) => matchesTableQuery(table, query));
   }
 
   // ---------------------------------------------------------------------------

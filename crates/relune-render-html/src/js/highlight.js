@@ -93,15 +93,6 @@
   function computeHoverPreview(nodeId, state) {
     return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
   }
-  function matchesBrowserQuery(table, query) {
-    const needle = query.trim().toLowerCase();
-    if (needle === "") {
-      return true;
-    }
-    return table.id.toLowerCase().includes(needle) || table.label.toLowerCase().includes(needle) || table.table_name.toLowerCase().includes(needle) || table.columns.some(
-      (column) => column.name.toLowerCase().includes(needle) || column.data_type.toLowerCase().includes(needle)
-    );
-  }
 
   // ts/metadata.ts
   var METADATA_ELEMENT_ID = "relune-metadata";
@@ -517,6 +508,16 @@
     };
   }
 
+  // ts/search_actions.ts
+  function matchesTableQuery(table, query) {
+    const needle = query.trim().toLowerCase();
+    if (needle === "") {
+      return true;
+    }
+    const includes = (value) => (value ?? "").toLowerCase().includes(needle);
+    return includes(tableDisplayName(table)) || includes(table.id) || includes(table.table_name) || includes(table.schema_name) || table.columns.some((column) => includes(column.name) || includes(column.data_type));
+  }
+
   // ts/viewer_api.ts
   var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
   var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
@@ -653,7 +654,7 @@
           return;
         }
         const query = searchInput instanceof HTMLInputElement ? searchInput.value : "";
-        const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
+        const visibleTables = tables.filter((table) => matchesTableQuery(table, query));
         const filterMode = runtime.filters?.getMode() ?? "dim";
         const isHideOrFocus = filterMode === "hide" || filterMode === "focus";
         const items = visibleTables.filter((table) => {

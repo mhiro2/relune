@@ -1,9 +1,5 @@
 import { createEdgeParticles } from './edge_particles';
-import {
-  computeHoverPreview,
-  computeNeighborHighlights,
-  matchesBrowserQuery,
-} from './highlight_actions';
+import { computeHoverPreview, computeNeighborHighlights } from './highlight_actions';
 import {
   applyHoverPreviewClasses,
   applySelectedHighlightClasses,
@@ -19,6 +15,7 @@ import {
 } from './highlight_dom';
 import { createHighlightState } from './highlight_state';
 import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { matchesTableQuery } from './search_actions';
 import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
 {
@@ -149,7 +146,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       }
 
       const query = searchInput instanceof HTMLInputElement ? searchInput.value : '';
-      const visibleTables = tables.filter((table) => matchesBrowserQuery(table, query));
+      const visibleTables = tables.filter((table) => matchesTableQuery(table, query));
 
       const filterMode = runtime.filters?.getMode() ?? 'dim';
       const isHideOrFocus = filterMode === 'hide' || filterMode === 'focus';

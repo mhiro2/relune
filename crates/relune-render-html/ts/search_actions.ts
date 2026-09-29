@@ -1,32 +1,51 @@
+import { tableDisplayName, type TableMetadata } from './metadata';
+
 export interface SearchMatch {
   node: Element;
   matches: boolean;
 }
 
+/**
+ * Whether a table matches a search query by name, schema, or column name / type.
+ *
+ * This is the single matcher behind the search box, the object browser, and
+ * URL restoration, so all three agree on what a query finds. It reads the
+ * embedded metadata rather than the SVG text, which also carries tooltips,
+ * badge labels, and kind captions.
+ */
+export function matchesTableQuery(table: TableMetadata, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (needle === '') {
+    return true;
+  }
+  const includes = (value: string | null | undefined): boolean =>
+    (value ?? '').toLowerCase().includes(needle);
+
+  return (
+    includes(tableDisplayName(table)) ||
+    includes(table.id) ||
+    includes(table.table_name) ||
+    includes(table.schema_name) ||
+    table.columns.some((column) => includes(column.name) || includes(column.data_type))
+  );
+}
+
 export function computeSearchMatches(
   nodes: NodeListOf<Element>,
-  tableNames: Record<string, string>,
+  tablesById: ReadonlyMap<string, TableMetadata>,
   query: string,
 ): { results: SearchMatch[]; matchCount: number; total: number } {
-  const q = query.toLowerCase().trim();
+  const needle = query.trim().toLowerCase();
   const results: SearchMatch[] = [];
   let matchCount = 0;
 
   nodes.forEach((node) => {
-    if (q === '') {
-      results.push({ node, matches: true });
-      matchCount += 1;
-      return;
-    }
-
     const tableId = node.getAttribute('data-id') ?? node.getAttribute('data-table-id') ?? '';
-    const tableName = tableNames[tableId] ?? tableId;
-    const nodeText = node.textContent?.toLowerCase() ?? '';
-
+    const table = tablesById.get(tableId);
     const matches =
-      tableName.toLowerCase().includes(q) ||
-      tableId.toLowerCase().includes(q) ||
-      nodeText.includes(q);
+      table === undefined
+        ? tableId.toLowerCase().includes(needle)
+        : matchesTableQuery(table, query);
 
     results.push({ node, matches });
     if (matches) matchCount += 1;

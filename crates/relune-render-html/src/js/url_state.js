@@ -18,6 +18,16 @@
     return table.label || table.table_name || table.id;
   }
 
+  // ts/search_actions.ts
+  function matchesTableQuery(table, query) {
+    const needle = query.trim().toLowerCase();
+    if (needle === "") {
+      return true;
+    }
+    const includes = (value) => (value ?? "").toLowerCase().includes(needle);
+    return includes(tableDisplayName(table)) || includes(table.id) || includes(table.table_name) || includes(table.schema_name) || table.columns.some((column) => includes(column.name) || includes(column.data_type));
+  }
+
   // ts/viewer_api.ts
   var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
   var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
@@ -66,22 +76,8 @@
       return Math.max(extent * MAX_VIEWPORT_SCALE * 4, MIN_VIEWPORT_PAN_LIMIT);
     }, hasValidViewportState2 = function(scale, panX, panY) {
       return Number.isFinite(scale) && Number.isFinite(panX) && Number.isFinite(panY) && scale >= MIN_VIEWPORT_SCALE && scale <= MAX_VIEWPORT_SCALE && Math.abs(panX) <= maxViewportPanMagnitude2() && Math.abs(panY) <= maxViewportPanMagnitude2();
-    }, matchesMetadataSearch2 = function(table, query) {
-      const normalizedQuery = query.trim().toLowerCase();
-      if (normalizedQuery === "") {
-        return false;
-      }
-      const searchable = [
-        tableDisplayName(table),
-        table.id,
-        table.table_name,
-        table.schema_name ?? "",
-        table.kind,
-        ...(table.columns ?? []).flatMap((column) => [column.name, column.data_type ?? ""])
-      ].join("\n").toLowerCase();
-      return searchable.includes(normalizedQuery);
     }, hasMetadataSearchMatch2 = function(query) {
-      return tables.some((table) => matchesMetadataSearch2(table, query));
+      return query.trim() !== "" && tables.some((table) => matchesTableQuery(table, query));
     }, scheduleWrite2 = function() {
       if (writeTimer !== null) {
         clearTimeout(writeTimer);
@@ -220,7 +216,7 @@
       }
       return modules;
     };
-    readHash = readHash2, maxViewportPanMagnitude = maxViewportPanMagnitude2, hasValidViewportState = hasValidViewportState2, matchesMetadataSearch = matchesMetadataSearch2, hasMetadataSearchMatch = hasMetadataSearchMatch2, scheduleWrite = scheduleWrite2, scheduleDiscreteWrite = scheduleDiscreteWrite2, buildHashParams = buildHashParams2, writeHash = writeHash2, restoreFromHash = restoreFromHash2, expectedViewerModules = expectedViewerModules2;
+    readHash = readHash2, maxViewportPanMagnitude = maxViewportPanMagnitude2, hasValidViewportState = hasValidViewportState2, hasMetadataSearchMatch = hasMetadataSearchMatch2, scheduleWrite = scheduleWrite2, scheduleDiscreteWrite = scheduleDiscreteWrite2, buildHashParams = buildHashParams2, writeHash = writeHash2, restoreFromHash = restoreFromHash2, expectedViewerModules = expectedViewerModules2;
     const runtime = getViewerRuntime();
     const metadata = parseReluneMetadata();
     const tables = metadata?.tables ?? [];
@@ -270,7 +266,6 @@
   var readHash;
   var maxViewportPanMagnitude;
   var hasValidViewportState;
-  var matchesMetadataSearch;
   var hasMetadataSearchMatch;
   var scheduleWrite;
   var scheduleDiscreteWrite;
