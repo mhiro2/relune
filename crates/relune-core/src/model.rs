@@ -787,6 +787,37 @@ impl fmt::Display for ReferentialAction {
     }
 }
 
+impl std::str::FromStr for ReferentialAction {
+    type Err = String;
+
+    /// Parses the SQL spelling (`CASCADE`, `SET NULL`, ...) case-insensitively,
+    /// optionally prefixed with `ON DELETE` / `ON UPDATE` and with `_` in place
+    /// of spaces. An empty value means `NO ACTION`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let normalized = s
+            .trim()
+            .to_ascii_uppercase()
+            .replace('_', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let action = normalized
+            .strip_prefix("ON DELETE ")
+            .or_else(|| normalized.strip_prefix("ON UPDATE "))
+            .unwrap_or(&normalized);
+        match action {
+            "" | "NO ACTION" | "NOACTION" => Ok(Self::NoAction),
+            "RESTRICT" => Ok(Self::Restrict),
+            "CASCADE" => Ok(Self::Cascade),
+            "SET NULL" => Ok(Self::SetNull),
+            "SET DEFAULT" => Ok(Self::SetDefault),
+            _ => Err(format!(
+                "unknown referential action: {s}. Expected: NO ACTION, RESTRICT, CASCADE, SET NULL, SET DEFAULT"
+            )),
+        }
+    }
+}
+
 /// A foreign key constraint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignKey {
@@ -810,7 +841,7 @@ pub struct ForeignKey {
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if requires &T
-fn is_no_action(action: &ReferentialAction) -> bool {
+pub(crate) fn is_no_action(action: &ReferentialAction) -> bool {
     *action == ReferentialAction::NoAction
 }
 

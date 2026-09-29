@@ -8,9 +8,12 @@ use std::collections::{HashMap, HashSet};
 
 use super::{DialectScope, EffectiveDialect, ReviewRuleId, ReviewSeverity, RiskFinding};
 use crate::SqlDialect;
-use crate::diff::{ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff};
+use crate::diff::{
+    ChangeKind, ColumnDiff, ForeignKeyDiff, IndexDiff, SchemaDiff, TableDiff, normalize_sql_case,
+};
 use crate::model::{
-    Column, Enum, ForeignKey, ForeignKeyTargetResolution, Schema, Table, resolve_table_reference,
+    Column, Enum, ForeignKey, ForeignKeyTargetResolution, ReferentialAction, Schema, Table,
+    resolve_table_reference,
 };
 
 /// Runs every rule in `applied_rules` against the diff.
@@ -39,10 +42,10 @@ pub fn run_rules(
     let selected: HashSet<ReviewRuleId> = applied_rules.iter().copied().collect();
 
     for table_diff in &diff.modified_tables {
-        let Some(after_table) = context.find_after_table(&table_diff.table_name) else {
+        let Some(after_table) = context.after_table(&table_diff.stable_id) else {
             continue;
         };
-        let before_table = context.find_before_table(&table_diff.table_name);
+        let before_table = context.before_table(&table_diff.stable_id);
 
         for column_diff in &table_diff.column_diffs {
             if context.rule_active(ReviewRuleId::DropColumn, &selected) {
@@ -124,6 +127,13 @@ pub fn run_rules(
             }
         }
 
+        if context.rule_active(ReviewRuleId::AddUniqueOnExisting, &selected) {
+            check_add_pk_on_existing(table_diff, before_table, after_table, &mut findings);
+        }
+        if context.rule_active(ReviewRuleId::AddCheckOnExisting, &selected) {
+            check_add_check_on_existing(table_diff, before_table, after_table, &mut findings);
+        }
+
         if context.rule_active(ReviewRuleId::DropPkOrUnique, &selected) {
             check_drop_pk_or_unique_widened(
                 table_diff,
@@ -174,20 +184,34 @@ struct RuleContext<'a> {
     before: &'a Schema,
     after: &'a Schema,
     /// Lower-cased `schema.table` (or bare `table`) → table in `before`.
-    /// Replaces the per-rule linear scan over `before.tables`. Built
-    /// once at `RuleContext::build` and shared across every rule.
+    /// Only used to resolve `SchemaDiff::removed_tables`, which carries
+    /// display names.
     before_by_qname: HashMap<String, &'a Table>,
-    /// Lower-cased qualified name → table in `after`. Same shape as
-    /// `before_by_qname`.
-    after_by_qname: HashMap<String, &'a Table>,
+    /// `stable_id` → table in `before`. The diff pairs tables by this id,
+    /// so it finds the `before` side even when a table was renamed.
+    before_by_id: HashMap<&'a str, &'a Table>,
+    /// `stable_id` → table in `after`.
+    after_by_id: HashMap<&'a str, &'a Table>,
+    /// FKs in `before` grouped by the `stable_id` of the table they
+    /// reference, resolved once instead of per rule and per change.
+    incoming: HashMap<&'a str, Vec<IncomingFk<'a>>>,
     /// Set of FK names + (table, columns) that are removed by this diff.
     /// Used to decide whether a referenced column / table is being
     /// "intentionally" disconnected at the same time.
     removed_fks: HashSet<RemovedFk>,
-    /// Set of table qualified names removed by this diff (lower-cased).
-    removed_tables: HashSet<String>,
+    /// `stable_id`s of the tables removed by this diff.
+    removed_tables: HashSet<&'a str>,
     /// Effective dialect used to gate lock-risk rules.
     dialect: EffectiveDialect,
+}
+
+/// An FK in `before` together with the table that owns it.
+struct IncomingFk<'a> {
+    owner: &'a Table,
+    fk: &'a ForeignKey,
+    /// Whether this diff removes the FK (directly, by changing its shape,
+    /// or by dropping its owner table).
+    removed: bool,
 }
 
 /// Build a lower-cased `qualified_name` → `&Table` lookup for one side of
@@ -204,10 +228,19 @@ fn index_tables_by_qname(schema: &Schema) -> HashMap<String, &Table> {
     map
 }
 
+/// Build a `stable_id` → `&Table` lookup; the first occurrence wins.
+fn index_tables_by_id(schema: &Schema) -> HashMap<&str, &Table> {
+    let mut map = HashMap::with_capacity(schema.tables.len());
+    for table in &schema.tables {
+        map.entry(table.stable_id.as_str()).or_insert(table);
+    }
+    map
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RemovedFk {
-    /// Lower-cased qualified name of the table that owns the FK.
-    table_name: String,
+    /// `stable_id` of the table that owns the FK.
+    table_id: String,
     /// Optional FK constraint name (lower-cased).
     fk_name: Option<String>,
     /// Lower-cased ordered tuple of `(from_column, to_column)` pairs.
@@ -220,6 +253,42 @@ struct RemovedFk {
     to_table: String,
 }
 
+impl RemovedFk {
+    fn new(
+        owner_id: &str,
+        owner_schema: Option<&str>,
+        fk_name: Option<&str>,
+        from_columns: &[String],
+        to_columns: &[String],
+        to_schema: Option<&str>,
+        to_table: &str,
+    ) -> Self {
+        Self {
+            table_id: owner_id.to_string(),
+            fk_name: fk_name.map(str::to_lowercase),
+            column_pairs: from_columns
+                .iter()
+                .zip(to_columns)
+                .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
+                .collect(),
+            to_schema: to_schema.or(owner_schema).map(str::to_ascii_lowercase),
+            to_table: to_table.to_lowercase(),
+        }
+    }
+
+    fn of_fk(owner: &Table, fk: &ForeignKey) -> Self {
+        Self::new(
+            &owner.stable_id,
+            owner.schema_name.as_deref(),
+            fk.name.as_deref(),
+            &fk.from_columns,
+            &fk.to_columns,
+            fk.to_schema.as_deref(),
+            &fk.to_table,
+        )
+    }
+}
+
 impl<'a> RuleContext<'a> {
     fn build(
         diff: &SchemaDiff,
@@ -228,20 +297,19 @@ impl<'a> RuleContext<'a> {
         dialect: EffectiveDialect,
     ) -> Self {
         let before_by_qname = index_tables_by_qname(before);
-        let after_by_qname = index_tables_by_qname(after);
-        let lookup_owner_schema = |qname: &str| -> Option<String> {
-            let key = qname.to_ascii_lowercase();
-            before_by_qname
-                .get(&key)
-                .or_else(|| after_by_qname.get(&key))
-                .and_then(|t| t.schema_name.clone())
-        };
+        let before_by_id = index_tables_by_id(before);
+        let after_by_id = index_tables_by_id(after);
 
         let mut removed_fks: HashSet<RemovedFk> = HashSet::new();
         for table_diff in &diff.modified_tables {
+            let id = table_diff.stable_id.as_str();
+            let before_owner = before_by_id.get(id).copied();
+            let after_owner = after_by_id.get(id).copied();
             // Owner schema lets us treat `REFERENCES users` and
             // `REFERENCES <owner_schema>.users` as the same shape.
-            let owner_schema = lookup_owner_schema(&table_diff.table_name);
+            let owner_schema = before_owner
+                .or(after_owner)
+                .and_then(|t| t.schema_name.as_deref());
             for fk_diff in &table_diff.fk_diffs {
                 // The "old shape" of an FK is gone in `after` only when its
                 // column pairs or target table actually moved. A `Modified`
@@ -254,13 +322,7 @@ impl<'a> RuleContext<'a> {
                     ChangeKind::Modified => {
                         match (fk_diff.old_value.as_ref(), fk_diff.new_value.as_ref()) {
                             (Some(old), Some(new))
-                                if fk_shape_changed(
-                                    old,
-                                    new,
-                                    owner_schema.as_deref(),
-                                    before,
-                                    after,
-                                ) =>
+                                if fk_shape_changed(old, new, owner_schema, before, after) =>
                             {
                                 Some(old)
                             }
@@ -278,58 +340,59 @@ impl<'a> RuleContext<'a> {
                     // surviving reference.
                     if fk_shape_survives_in_after(
                         old,
-                        &table_diff.table_name,
-                        owner_schema.as_deref(),
+                        before_owner,
+                        after_owner,
+                        owner_schema,
                         before,
                         after,
                     ) {
                         continue;
                     }
-                    removed_fks.insert(RemovedFk {
-                        table_name: table_diff.table_name.to_lowercase(),
-                        fk_name: old.name.as_ref().map(|n| n.to_lowercase()),
-                        column_pairs: old
-                            .from_columns
-                            .iter()
-                            .zip(old.to_columns.iter())
-                            .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
-                            .collect(),
-                        to_schema: old
-                            .to_schema
-                            .as_deref()
-                            .or(owner_schema.as_deref())
-                            .map(str::to_ascii_lowercase),
-                        to_table: old.to_table.to_lowercase(),
-                    });
+                    removed_fks.insert(RemovedFk::new(
+                        id,
+                        owner_schema,
+                        old.name.as_deref(),
+                        &old.from_columns,
+                        &old.to_columns,
+                        old.to_schema.as_deref(),
+                        &old.to_table,
+                    ));
                 }
             }
         }
         // FKs that vanish because their owning table is removed should
         // also be considered "removed" for cross-table accounting.
-        let removed_table_qnames: HashSet<String> = diff
+        let removed_tables: HashSet<&'a str> = diff
             .removed_tables
             .iter()
-            .map(|t| t.to_lowercase())
+            .filter_map(|name| before_by_qname.get(&name.to_ascii_lowercase()))
+            .map(|table| table.stable_id.as_str())
             .collect();
         for table in &before.tables {
-            if removed_table_qnames.contains(&table.qualified_name().to_lowercase()) {
+            if removed_tables.contains(table.stable_id.as_str()) {
                 for fk in &table.foreign_keys {
-                    removed_fks.insert(RemovedFk {
-                        table_name: table.qualified_name().to_lowercase(),
-                        fk_name: fk.name.as_ref().map(|n| n.to_lowercase()),
-                        column_pairs: fk
-                            .from_columns
-                            .iter()
-                            .zip(fk.to_columns.iter())
-                            .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
-                            .collect(),
-                        to_schema: fk
-                            .to_schema
-                            .as_deref()
-                            .or(table.schema_name.as_deref())
-                            .map(str::to_ascii_lowercase),
-                        to_table: fk.to_table.to_lowercase(),
-                    });
+                    removed_fks.insert(RemovedFk::of_fk(table, fk));
+                }
+            }
+        }
+
+        let mut incoming: HashMap<&'a str, Vec<IncomingFk<'a>>> = HashMap::new();
+        for owner in &before.tables {
+            for fk in &owner.foreign_keys {
+                if let ForeignKeyTargetResolution::Found(target) = resolve_table_reference(
+                    before,
+                    owner.schema_name.as_deref(),
+                    fk.to_schema.as_deref(),
+                    &fk.to_table,
+                ) {
+                    incoming
+                        .entry(target.stable_id.as_str())
+                        .or_default()
+                        .push(IncomingFk {
+                            owner,
+                            fk,
+                            removed: removed_fks.contains(&RemovedFk::of_fk(owner, fk)),
+                        });
                 }
             }
         }
@@ -338,9 +401,11 @@ impl<'a> RuleContext<'a> {
             before,
             after,
             before_by_qname,
-            after_by_qname,
+            before_by_id,
+            after_by_id,
+            incoming,
             removed_fks,
-            removed_tables: removed_table_qnames,
+            removed_tables,
             dialect,
         }
     }
@@ -366,58 +431,37 @@ impl<'a> RuleContext<'a> {
         }
     }
 
-    fn find_before_table(&self, qualified_name: &str) -> Option<&'a Table> {
+    fn before_table(&self, stable_id: &str) -> Option<&'a Table> {
+        self.before_by_id.get(stable_id).copied()
+    }
+
+    fn after_table(&self, stable_id: &str) -> Option<&'a Table> {
+        self.after_by_id.get(stable_id).copied()
+    }
+
+    /// Finds a removed table in `before` by the display name that
+    /// `SchemaDiff::removed_tables` carries.
+    fn removed_table(&self, qualified_name: &str) -> Option<&'a Table> {
         self.before_by_qname
             .get(&qualified_name.to_ascii_lowercase())
             .copied()
     }
 
-    /// Finds the `before` counterpart of an `after` table the same way
-    /// the diff pairs them: by `stable_id` first, then by name.
-    fn find_before_table_of(&self, after_table: &Table) -> Option<&'a Table> {
-        self.before
-            .tables
-            .iter()
-            .find(|t| t.stable_id == after_table.stable_id)
-            .or_else(|| self.find_before_table(&after_table.qualified_name()))
+    fn is_removed_table(&self, table: &Table) -> bool {
+        self.removed_tables.contains(table.stable_id.as_str())
     }
 
-    fn find_after_table(&self, qualified_name: &str) -> Option<&'a Table> {
-        self.after_by_qname
-            .get(&qualified_name.to_ascii_lowercase())
-            .copied()
+    /// FKs in `before` that reference `target`, including self-references.
+    fn incoming_fks(&self, target: &Table) -> &[IncomingFk<'a>] {
+        self.incoming
+            .get(target.stable_id.as_str())
+            .map_or(&[], Vec::as_slice)
     }
 
-    /// Returns true if the FK on `table` is removed in this diff (either
+    /// Returns true if the FK on `owner` is removed in this diff (either
     /// directly or because the owning table was dropped).
-    fn fk_is_removed(&self, owning_table_qname: &str, fk: &ForeignKey) -> bool {
-        // Normalize the FK's target schema against the owner's schema so
-        // an unqualified `REFERENCES users` from `public.orders` only
-        // matches the corresponding `RemovedFk` for `public.users`, not a
-        // homonym in another schema.
-        let owner_key = owning_table_qname.to_ascii_lowercase();
-        let owner_schema = self
-            .before_by_qname
-            .get(&owner_key)
-            .or_else(|| self.after_by_qname.get(&owner_key))
-            .and_then(|t| t.schema_name.as_deref());
-        let key = RemovedFk {
-            table_name: owning_table_qname.to_lowercase(),
-            fk_name: fk.name.as_ref().map(|n| n.to_lowercase()),
-            column_pairs: fk
-                .from_columns
-                .iter()
-                .zip(fk.to_columns.iter())
-                .map(|(f, t)| (f.to_lowercase(), t.to_lowercase()))
-                .collect(),
-            to_schema: fk
-                .to_schema
-                .as_deref()
-                .or(owner_schema)
-                .map(str::to_ascii_lowercase),
-            to_table: fk.to_table.to_lowercase(),
-        };
-        self.removed_fks.contains(&key)
+    fn fk_is_removed(&self, owner: &Table, fk: &ForeignKey) -> bool {
+        self.removed_fks.contains(&RemovedFk::of_fk(owner, fk))
     }
 }
 
@@ -431,16 +475,13 @@ impl<'a> RuleContext<'a> {
 /// and the dropped FK is a genuine loss).
 fn fk_shape_survives_in_after(
     removed: &crate::export::ForeignKeyExport,
-    owner_qname: &str,
+    before_owner: Option<&Table>,
+    after_owner: Option<&Table>,
     owner_schema: Option<&str>,
     before: &Schema,
     after: &Schema,
 ) -> bool {
-    let Some(after_owner) = after
-        .tables
-        .iter()
-        .find(|t| t.qualified_name().eq_ignore_ascii_case(owner_qname))
-    else {
+    let Some(after_owner) = after_owner else {
         return false;
     };
     let removed_target = resolve_table_id(
@@ -479,16 +520,12 @@ fn fk_shape_survives_in_after(
             .zip(removed_pairs.iter())
             .all(|((f, t), (rf, rt))| f.eq_ignore_ascii_case(rf) && t.eq_ignore_ascii_case(rt))
     };
-    let before_count = before
-        .tables
-        .iter()
-        .find(|t| t.qualified_name().eq_ignore_ascii_case(owner_qname))
-        .map_or(0, |t| {
-            t.foreign_keys
-                .iter()
-                .filter(|fk| shape_matches(fk, before, &removed_target))
-                .count()
-        });
+    let before_count = before_owner.map_or(0, |t| {
+        t.foreign_keys
+            .iter()
+            .filter(|fk| shape_matches(fk, before, &removed_target))
+            .count()
+    });
     let after_count = after_owner
         .foreign_keys
         .iter()
@@ -504,8 +541,8 @@ fn fk_shape_survives_in_after(
 /// reference.
 ///
 /// Comparison goes through [`resolve_table_id`] using the same
-/// owner-schema-preferred + bare-name fallback policy that
-/// [`fk_targets_table`] uses, so an unqualified `REFERENCES users`
+/// owner-schema-preferred + bare-name fallback policy as the incoming-FK
+/// index, so an unqualified `REFERENCES users`
 /// that resolves to `auth.users` via fallback is treated as the same
 /// shape when the FK is later spelled `REFERENCES auth.users`. The
 /// `before` / `after` schemas are used to resolve the old/new sides
@@ -611,7 +648,7 @@ fn check_drop_column(
 /// independent of whether any FK references the table.
 fn check_drop_table(diff: &SchemaDiff, context: &RuleContext<'_>, findings: &mut Vec<RiskFinding>) {
     for removed in &diff.removed_tables {
-        let Some(removed_table) = context.find_before_table(removed) else {
+        let Some(removed_table) = context.removed_table(removed) else {
             continue;
         };
         let removed_qname = removed_table.qualified_name();
@@ -732,7 +769,7 @@ fn check_drop_named_enum_value(
         let enum_qname = enum_type.qualified_name();
 
         for after_table in &context.after.tables {
-            let Some(before_table) = context.find_before_table_of(after_table) else {
+            let Some(before_table) = context.before_table(&after_table.stable_id) else {
                 continue;
             };
             for column in &after_table.columns {
@@ -846,7 +883,6 @@ fn check_drop_column_referenced(
         return;
     };
 
-    let column_lower = column_diff.column_name.to_ascii_lowercase();
     let before_qname = before_table.qualified_name();
 
     // Outgoing FKs: the dropped column appears in `from_columns`.
@@ -858,7 +894,7 @@ fn check_drop_column_referenced(
         {
             continue;
         }
-        if context.fk_is_removed(&before_qname, fk) {
+        if context.fk_is_removed(before_table, fk) {
             continue;
         }
         let related = resolve_table_id(
@@ -891,62 +927,47 @@ fn check_drop_column_referenced(
 
     // Incoming FKs across the schema (including self-references on the
     // same table): something references the dropped column as a FK target.
-    for other_table in &context.before.tables {
-        let is_same_table = other_table
-            .qualified_name()
-            .eq_ignore_ascii_case(&before_qname);
-        for fk in &other_table.foreign_keys {
-            // Resolve target name to detect references to before_table.
-            if !fk_targets_table(
-                fk,
-                before_table,
-                context.before,
-                other_table.schema_name.as_deref(),
-            ) {
-                continue;
-            }
-            if !fk
+    for incoming in context.incoming_fks(before_table) {
+        let (other_table, fk) = (incoming.owner, incoming.fk);
+        if incoming.removed
+            || !fk
                 .to_columns
                 .iter()
-                .any(|c| c.eq_ignore_ascii_case(&column_lower))
-            {
-                continue;
-            }
-            // For same-table FKs, the outgoing-FK loop above already
-            // emits a finding when the dropped column is in
-            // `from_columns`. Avoid double-reporting that case here.
-            if is_same_table
-                && fk
-                    .from_columns
-                    .iter()
-                    .any(|c| c.eq_ignore_ascii_case(&column_diff.column_name))
-            {
-                continue;
-            }
-            let other_qname = other_table.qualified_name();
-            if context.fk_is_removed(&other_qname, fk) {
-                continue;
-            }
-            let mut finding = RiskFinding::new(
-                ReviewRuleId::DropColumnReferenced,
-                ReviewSeverity::Breaking,
-                format!(
-                    "Column {}.{} is referenced by FK {} on {}. Dropping it will fail.",
-                    before_qname,
-                    column_diff.column_name,
-                    fk_label_short(fk),
-                    other_qname,
-                ),
-            )
-            .with_table(&before_table.stable_id, &before_qname)
-            .with_column(&column_diff.column_name)
-            .with_related_table(&other_table.stable_id)
-            .with_mitigation("Drop or update the referencing FK in the same migration.");
-            if let Some(name) = &fk.name {
-                finding = finding.with_fk_name(name);
-            }
-            findings.push(finding);
+                .any(|c| c.eq_ignore_ascii_case(&column_diff.column_name))
+        {
+            continue;
         }
+        // For same-table FKs, the outgoing-FK loop above already emits a
+        // finding when the dropped column is in `from_columns`. Avoid
+        // double-reporting that case here.
+        if other_table.stable_id == before_table.stable_id
+            && fk
+                .from_columns
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(&column_diff.column_name))
+        {
+            continue;
+        }
+        let other_qname = other_table.qualified_name();
+        let mut finding = RiskFinding::new(
+            ReviewRuleId::DropColumnReferenced,
+            ReviewSeverity::Breaking,
+            format!(
+                "Column {}.{} is referenced by FK {} on {}. Dropping it will fail.",
+                before_qname,
+                column_diff.column_name,
+                fk_label_short(fk),
+                other_qname,
+            ),
+        )
+        .with_table(&before_table.stable_id, &before_qname)
+        .with_column(&column_diff.column_name)
+        .with_related_table(&other_table.stable_id)
+        .with_mitigation("Drop or update the referencing FK in the same migration.");
+        if let Some(name) = &fk.name {
+            finding = finding.with_fk_name(name);
+        }
+        findings.push(finding);
     }
     let _ = table_diff;
 }
@@ -959,61 +980,39 @@ fn check_drop_table_referenced(
     findings: &mut Vec<RiskFinding>,
 ) {
     for removed in &diff.removed_tables {
-        let Some(removed_table) = context
-            .before
-            .tables
-            .iter()
-            .find(|t| t.qualified_name().eq_ignore_ascii_case(removed))
-        else {
+        let Some(removed_table) = context.removed_table(removed) else {
             continue;
         };
         let removed_qname = removed_table.qualified_name();
 
-        for other_table in &context.before.tables {
-            if other_table
-                .qualified_name()
-                .eq_ignore_ascii_case(&removed_qname)
+        for incoming in context.incoming_fks(removed_table) {
+            let (other_table, fk) = (incoming.owner, incoming.fk);
+            // Self-references and FKs whose owner is dropped as well go away
+            // together with the table.
+            if incoming.removed
+                || other_table.stable_id == removed_table.stable_id
+                || context.is_removed_table(other_table)
             {
                 continue;
             }
-            // Skip if the referencing table is itself being dropped.
-            if context
-                .removed_tables
-                .contains(&other_table.qualified_name().to_lowercase())
-            {
-                continue;
+            let other_qname = other_table.qualified_name();
+            let mut finding = RiskFinding::new(
+                ReviewRuleId::DropTableReferenced,
+                ReviewSeverity::Breaking,
+                format!(
+                    "Table {} is referenced by FK {} on {}. Dropping it will fail.",
+                    removed_qname,
+                    fk_label_short(fk),
+                    other_qname,
+                ),
+            )
+            .with_table(&removed_table.stable_id, &removed_qname)
+            .with_related_table(&other_table.stable_id)
+            .with_mitigation("Drop or repoint the referencing FKs in the same migration.");
+            if let Some(name) = &fk.name {
+                finding = finding.with_fk_name(name);
             }
-            for fk in &other_table.foreign_keys {
-                if !fk_targets_table(
-                    fk,
-                    removed_table,
-                    context.before,
-                    other_table.schema_name.as_deref(),
-                ) {
-                    continue;
-                }
-                let other_qname = other_table.qualified_name();
-                if context.fk_is_removed(&other_qname, fk) {
-                    continue;
-                }
-                let mut finding = RiskFinding::new(
-                    ReviewRuleId::DropTableReferenced,
-                    ReviewSeverity::Breaking,
-                    format!(
-                        "Table {} is referenced by FK {} on {}. Dropping it will fail.",
-                        removed_qname,
-                        fk_label_short(fk),
-                        other_qname,
-                    ),
-                )
-                .with_table(&removed_table.stable_id, &removed_qname)
-                .with_related_table(&other_table.stable_id)
-                .with_mitigation("Drop or repoint the referencing FKs in the same migration.");
-                if let Some(name) = &fk.name {
-                    finding = finding.with_fk_name(name);
-                }
-                findings.push(finding);
-            }
+            findings.push(finding);
         }
     }
 }
@@ -1033,7 +1032,13 @@ fn check_add_not_null_on_existing(
     }
 
     let triggered = match column_diff.change_kind {
-        ChangeKind::Added => column_diff.new_value.as_ref().is_some_and(|v| !v.nullable),
+        // A value the database fills in for existing rows (DEFAULT,
+        // identity, generated, auto-increment) satisfies the constraint.
+        ChangeKind::Added => column_diff
+            .new_value
+            .as_ref()
+            .is_some_and(|v| !v.nullable && !fills_existing_rows(v)),
+        // Existing NULLs still fail `SET NOT NULL`, whatever the default.
         ChangeKind::Modified => {
             let was_nullable = column_diff.old_value.as_ref().is_some_and(|v| v.nullable);
             let is_now_not_nullable = column_diff.new_value.as_ref().is_some_and(|v| !v.nullable);
@@ -1058,6 +1063,33 @@ fn check_add_not_null_on_existing(
         .with_column(&column_diff.column_name)
         .with_mitigation("Add as nullable, backfill, then ALTER to NOT NULL."),
     );
+}
+
+/// Returns true when adding `column` gives every existing row a non-NULL
+/// value: a non-NULL `DEFAULT`, an identity or generated definition, or an
+/// auto-increment / `SERIAL` type.
+fn fills_existing_rows(column: &crate::export::ColumnExport) -> bool {
+    let semantics = &column.semantics;
+    let has_default = semantics.default_expression.as_deref().is_some_and(|expr| {
+        // `DEFAULT NULL` (optionally cast, e.g. `NULL::text`) fills nothing.
+        let value = expr.split("::").next().unwrap_or(expr).trim();
+        let value = value.trim_start_matches('(').trim_end_matches(')').trim();
+        !value.eq_ignore_ascii_case("null")
+    });
+    has_default
+        || semantics.generated.is_some()
+        || generates_distinct_values(&column.data_type, semantics)
+}
+
+/// Returns true when the database numbers a column's rows itself (identity,
+/// auto-increment, or a `SERIAL` type), so every row gets a distinct value.
+fn generates_distinct_values(data_type: &str, semantics: &crate::model::ColumnSemantics) -> bool {
+    semantics.identity.is_some()
+        || semantics.auto_increment
+        || matches!(
+            data_type.trim().to_ascii_lowercase().as_str(),
+            "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8"
+        )
 }
 
 /// `risk/type-narrow` — column data type is being narrowed in a way
@@ -1267,7 +1299,7 @@ fn check_drop_pk_or_unique_column(
         return;
     }
 
-    let (severity, related_fk) = evaluate_drop_pk_severity(before_table, &before_pk_cols, context);
+    let (severity, related_fk) = evaluate_key_loss_severity(before_table, &before_pk_cols, context);
 
     let message = match (severity, &related_fk) {
         (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
@@ -1391,7 +1423,7 @@ fn check_drop_pk_or_unique_index(
     let is_full_unique = index_export_is_full_unique(old);
     let (severity, related_fk) = if is_full_unique {
         before_table.map_or((ReviewSeverity::Warning, None), |bt| {
-            evaluate_unique_loss_severity(bt, &lower_cols, context)
+            evaluate_key_loss_severity(bt, &lower_cols, context)
         })
     } else {
         (ReviewSeverity::Warning, None)
@@ -1475,7 +1507,7 @@ fn check_drop_pk_or_unique_widened(
         return;
     }
 
-    let (severity, related_fk) = evaluate_drop_pk_severity(before_table, &before_pk_cols, context);
+    let (severity, related_fk) = evaluate_key_loss_severity(before_table, &before_pk_cols, context);
 
     let message = match (severity, &related_fk) {
         (ReviewSeverity::Breaking, Some((other_qname, fk_label))) => format!(
@@ -1513,105 +1545,37 @@ fn check_drop_pk_or_unique_widened(
     findings.push(finding);
 }
 
-/// Determine whether dropping the UNIQUE index over `unique_cols`
-/// breaks any incoming FK that references that exact column set.
-fn evaluate_unique_loss_severity(
+/// Severity of losing the primary key or UNIQUE guarantee over `key_cols`
+/// on `before_table`: `Breaking` plus the first surviving FK that
+/// references exactly that column set, or `Warning` when none does. A
+/// self-referencing FK (e.g. `parent_id -> id`) counts like any other.
+fn evaluate_key_loss_severity(
     before_table: &Table,
-    unique_cols: &[String],
+    key_cols: &[String],
     context: &RuleContext<'_>,
 ) -> (ReviewSeverity, Option<(String, String)>) {
-    if unique_cols.is_empty() {
+    if key_cols.is_empty() {
         return (ReviewSeverity::Warning, None);
     }
-    let mut sorted_unique = unique_cols.to_vec();
-    sorted_unique.sort();
+    let mut sorted_key = key_cols.to_vec();
+    sorted_key.sort();
 
-    for other_table in &context.before.tables {
-        if context
-            .removed_tables
-            .contains(&other_table.qualified_name().to_lowercase())
-        {
+    for incoming in context.incoming_fks(before_table) {
+        let (other_table, fk) = (incoming.owner, incoming.fk);
+        if incoming.removed || context.is_removed_table(other_table) {
             continue;
         }
-        for fk in &other_table.foreign_keys {
-            if !fk_targets_table(
-                fk,
-                before_table,
-                context.before,
-                other_table.schema_name.as_deref(),
-            ) {
-                continue;
-            }
-            let other_qname = other_table.qualified_name();
-            if context.fk_is_removed(&other_qname, fk) {
-                continue;
-            }
-            let mut sorted_to: Vec<String> = fk
-                .to_columns
-                .iter()
-                .map(|c| c.to_ascii_lowercase())
-                .collect();
-            sorted_to.sort();
-            if sorted_to == sorted_unique {
-                return (
-                    ReviewSeverity::Breaking,
-                    Some((other_qname, fk_label_short(fk))),
-                );
-            }
-        }
-    }
-    (ReviewSeverity::Warning, None)
-}
-
-fn evaluate_drop_pk_severity(
-    before_table: &Table,
-    before_pk_cols: &[String],
-    context: &RuleContext<'_>,
-) -> (ReviewSeverity, Option<(String, String)>) {
-    if before_pk_cols.is_empty() {
-        return (ReviewSeverity::Warning, None);
-    }
-    let mut sorted_pk = before_pk_cols.to_vec();
-    sorted_pk.sort();
-
-    for other_table in &context.before.tables {
-        if other_table
-            .qualified_name()
-            .eq_ignore_ascii_case(&before_table.qualified_name())
-        {
-            continue;
-        }
-        if context
-            .removed_tables
-            .contains(&other_table.qualified_name().to_lowercase())
-        {
-            continue;
-        }
-        for fk in &other_table.foreign_keys {
-            if !fk_targets_table(
-                fk,
-                before_table,
-                context.before,
-                other_table.schema_name.as_deref(),
-            ) {
-                continue;
-            }
-            let other_qname = other_table.qualified_name();
-            if context.fk_is_removed(&other_qname, fk) {
-                continue;
-            }
-            let mut sorted_to: Vec<String> = fk
-                .to_columns
-                .iter()
-                .map(|c| c.to_ascii_lowercase())
-                .collect();
-            sorted_to.sort();
-            if sorted_to == sorted_pk {
-                return (
-                    ReviewSeverity::Breaking,
-                    Some((other_qname, fk_label_short(fk))),
-                );
-            }
+        let mut sorted_to: Vec<String> = fk
+            .to_columns
+            .iter()
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        sorted_to.sort();
+        if sorted_to == sorted_key {
+            return (
+                ReviewSeverity::Breaking,
+                Some((other_table.qualified_name(), fk_label_short(fk))),
+            );
         }
     }
     (ReviewSeverity::Warning, None)
@@ -1695,6 +1659,143 @@ fn check_add_unique_on_existing(
     );
 }
 
+/// `risk/add-unique-on-existing` (primary key path) — the primary key of
+/// an existing table moves onto columns that already hold data and were
+/// not guaranteed unique before, e.g. `ADD PRIMARY KEY (email)` or a PK
+/// rotated from `id` to `email`. Existing duplicate rows fail it.
+///
+/// Columns added in the same migration give every existing row the same
+/// value, so they add no uniqueness and only the pre-existing PK columns
+/// are judged. A new column the database numbers itself (identity,
+/// auto-increment, `SERIAL`) makes every key distinct, so the PK is skipped;
+/// so is a PK made only of new columns, whose rows are the migration's own.
+fn check_add_pk_on_existing(
+    table_diff: &TableDiff,
+    before_table: Option<&Table>,
+    after_table: &Table,
+    findings: &mut Vec<RiskFinding>,
+) {
+    let Some(before_table) = before_table else {
+        return;
+    };
+    let pk_columns = |table: &Table| -> Vec<String> {
+        table
+            .columns
+            .iter()
+            .filter(|c| c.is_primary_key)
+            .map(|c| c.name.to_ascii_lowercase())
+            .collect()
+    };
+    let after_pk_cols = pk_columns(after_table);
+    if after_pk_cols.is_empty() || same_column_set(&after_pk_cols, &pk_columns(before_table)) {
+        return;
+    }
+    let existed_before = |name: &String| {
+        before_table
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(name))
+    };
+    let numbered_new_column = after_table.columns.iter().any(|c| {
+        c.is_primary_key
+            && !existed_before(&c.name.to_ascii_lowercase())
+            && generates_distinct_values(&c.data_type, &c.semantics)
+    });
+    let pre_existing: Vec<String> = after_pk_cols
+        .iter()
+        .filter(|name| existed_before(name))
+        .cloned()
+        .collect();
+    if numbered_new_column
+        || pre_existing.is_empty()
+        || already_unique_in(before_table, &pre_existing)
+    {
+        return;
+    }
+
+    let columns = after_pk_cols.join(",");
+    let mut finding = RiskFinding::new(
+        ReviewRuleId::AddUniqueOnExisting,
+        ReviewSeverity::Warning,
+        format!(
+            "Primary key on ({columns}) is being added to existing table {}. Existing duplicate rows will fail the constraint.",
+            table_diff.table_name,
+        ),
+    )
+    .with_table(&after_table.stable_id, &table_diff.table_name)
+    .with_mitigation("Verify no duplicates exist or deduplicate before applying.");
+    if let [column] = after_pk_cols.as_slice() {
+        finding = finding.with_column(column);
+    }
+    findings.push(finding);
+}
+
+/// `risk/add-check-on-existing` — a table-level `CHECK` is added or its
+/// expression changes, or an existing column gains a column-level
+/// `CHECK`, on a table that already holds rows. Existing rows that
+/// violate the new condition fail the migration. Columns added in the
+/// same migration are skipped: their existing rows start out NULL (or at
+/// the declared default), which the author controls.
+fn check_add_check_on_existing(
+    table_diff: &TableDiff,
+    before_table: Option<&Table>,
+    after_table: &Table,
+    findings: &mut Vec<RiskFinding>,
+) {
+    if before_table.is_none() {
+        return;
+    }
+    let mitigation = "Verify existing rows satisfy the condition first; on PostgreSQL add the constraint NOT VALID and VALIDATE CONSTRAINT in a separate step.";
+    let finding = |expression: &str, name: Option<&str>| {
+        let label = name.map_or_else(
+            || format!("CHECK ({expression})"),
+            |name| format!("CHECK {name} ({expression})"),
+        );
+        RiskFinding::new(
+            ReviewRuleId::AddCheckOnExisting,
+            ReviewSeverity::Warning,
+            format!(
+                "{label} is being added to existing table {}. Existing rows that violate it will fail the migration.",
+                table_diff.table_name,
+            ),
+        )
+        .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_mitigation(mitigation)
+    };
+
+    for check_diff in &table_diff.check_diffs {
+        if check_diff.change_kind == ChangeKind::Removed {
+            continue;
+        }
+        if let Some(expression) = &check_diff.new_value {
+            findings.push(finding(expression, check_diff.name.as_deref()));
+        }
+    }
+
+    for column_diff in &table_diff.column_diffs {
+        if column_diff.change_kind != ChangeKind::Modified {
+            continue;
+        }
+        let (Some(old), Some(new)) = (&column_diff.old_value, &column_diff.new_value) else {
+            continue;
+        };
+        let old_checks: HashSet<String> = old
+            .semantics
+            .check_constraints
+            .iter()
+            .map(|check| normalize_sql_case(&check.expression))
+            .collect();
+        for check in &new.semantics.check_constraints {
+            if !old_checks.contains(&normalize_sql_case(&check.expression)) {
+                findings.push(
+                    finding(&check.expression, check.name.as_deref())
+                        .with_column(&column_diff.column_name),
+                );
+            }
+        }
+    }
+}
+
 /// Returns true when UNIQUE index `old` guarantees everything UNIQUE index
 /// `new` requires: same predicate, and every key part of `old` also appears
 /// in `new` (uniqueness on a subset implies uniqueness on a superset).
@@ -1704,16 +1805,18 @@ fn unique_implies(old: &crate::export::IndexExport, new: &crate::export::IndexEx
             crate::model::IndexKey::Column(column) => {
                 (true, column.name.to_lowercase(), column.prefix_length)
             }
-            crate::model::IndexKey::Expression(expr) => (false, expr.to_lowercase(), None),
+            crate::model::IndexKey::Expression(expr) => (false, normalize_sql_case(expr), None),
         }
     }
 
     if !old.unique || old.key_parts.is_empty() {
         return false;
     }
-    // Compare predicates verbatim (modulo surrounding whitespace): lowercasing
-    // would conflate string literals such as `'A'` and `'a'`.
-    if old.predicate.as_deref().map(str::trim) != new.predicate.as_deref().map(str::trim) {
+    // Compare predicates the way the diff does: keyword case is ignored, but
+    // string literals such as `'A'` and `'a'` stay distinct.
+    if old.predicate.as_deref().map(normalize_sql_case)
+        != new.predicate.as_deref().map(normalize_sql_case)
+    {
         return false;
     }
     let new_parts: HashSet<_> = new.key_parts.iter().map(part_identity).collect();
@@ -1773,13 +1876,12 @@ fn check_add_cascade_delete(
         ChangeKind::Added => fk_diff
             .new_value
             .as_ref()
-            .is_some_and(|v| v.on_delete.as_deref() == Some("CASCADE")),
+            .is_some_and(|v| v.on_delete == ReferentialAction::Cascade),
         ChangeKind::Modified => {
-            let old = fk_diff.old_value.as_ref();
-            let new = fk_diff.new_value.as_ref();
-            let was_cascade = old.is_some_and(|v| v.on_delete.as_deref() == Some("CASCADE"));
-            let is_cascade = new.is_some_and(|v| v.on_delete.as_deref() == Some("CASCADE"));
-            !was_cascade && is_cascade
+            let is_cascade = |v: Option<&crate::export::ForeignKeyExport>| {
+                v.is_some_and(|v| v.on_delete == ReferentialAction::Cascade)
+            };
+            !is_cascade(fk_diff.old_value.as_ref()) && is_cascade(fk_diff.new_value.as_ref())
         }
         ChangeKind::Removed => false,
     };
@@ -1819,20 +1921,26 @@ fn check_add_cascade_delete(
     findings.push(finding);
 }
 
-/// `risk/fk-without-index` — newly added FK lacks a supporting index.
+/// `risk/fk-without-index` — newly added FK, or an FK moved onto other
+/// referencing columns, lacks a supporting index.
 fn check_fk_without_index(
     table_diff: &TableDiff,
     fk_diff: &ForeignKeyDiff,
     after_table: &Table,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if fk_diff.change_kind != ChangeKind::Added {
-        return;
-    }
     let Some(new) = fk_diff.new_value.as_ref() else {
         return;
     };
-    if fk_columns_are_indexed(after_table, &new.from_columns) {
+    let qualifies = match fk_diff.change_kind {
+        ChangeKind::Added => true,
+        ChangeKind::Modified => fk_diff
+            .old_value
+            .as_ref()
+            .is_some_and(|old| !same_ordered_columns(&old.from_columns, &new.from_columns)),
+        ChangeKind::Removed => false,
+    };
+    if !qualifies || fk_columns_are_indexed(after_table, &new.from_columns) {
         return;
     }
 
@@ -1844,7 +1952,8 @@ fn check_fk_without_index(
         ReviewRuleId::FkWithoutIndex,
         ReviewSeverity::Info,
         format!(
-            "New FK {} on {} ({}) has no supporting index.",
+            "{} FK {} on {} ({}) has no supporting index.",
+            change_label(fk_diff.change_kind),
             label,
             table_diff.table_name,
             new.from_columns.join(","),
@@ -1864,7 +1973,8 @@ fn check_fk_without_index(
     findings.push(finding);
 }
 
-/// `risk/add-index-on-large-table` — index added on an existing table;
+/// `risk/add-index-on-large-table` — index added on an existing table,
+/// or an existing index changed (which drops and re-creates it);
 /// non-CONCURRENT / non-INPLACE builds block writes for the duration of
 /// the rebuild.
 fn check_add_index_on_large_table(
@@ -1874,12 +1984,12 @@ fn check_add_index_on_large_table(
     context: &RuleContext<'_>,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if index_diff.change_kind != ChangeKind::Added {
+    if index_diff.change_kind == ChangeKind::Removed {
         return;
     }
     // Skip newly added tables: an empty table cannot incur a problematic
     // long lock during index build.
-    if context.find_before_table(&table_diff.table_name).is_none() {
+    if context.before_table(&table_diff.stable_id).is_none() {
         return;
     }
     let Some(new) = index_diff.new_value.as_ref() else {
@@ -1892,10 +2002,11 @@ fn check_add_index_on_large_table(
         .clone()
         .unwrap_or_else(|| format!("({})", new_columns.join(",")));
     let dialect = dialect_word(context.dialect);
+    let change = change_label(index_diff.change_kind);
     let (message, mitigation) = match context.dialect {
         EffectiveDialect::Postgres => (
             format!(
-                "New index {label} on existing table {} ({}) ({dialect}). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
+                "{change} index {label} on existing table {} ({}) ({dialect}). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
                 table_diff.table_name,
                 new_columns.join(","),
             ),
@@ -1903,7 +2014,7 @@ fn check_add_index_on_large_table(
         ),
         EffectiveDialect::Mysql => (
             format!(
-                "New index {label} on existing table {} ({}) ({dialect}). Default ALGORITHM=INPLACE may still block writes during rebuild on large tables.",
+                "{change} index {label} on existing table {} ({}) ({dialect}). Default ALGORITHM=INPLACE may still block writes during rebuild on large tables.",
                 table_diff.table_name,
                 new_columns.join(","),
             ),
@@ -1927,8 +2038,9 @@ fn check_add_index_on_large_table(
 }
 
 /// `risk/add-fk-on-existing` — FK added between two tables that both
-/// already existed; validation locks the referencing table while every
-/// existing row is checked.
+/// already existed, or an existing FK changed (neither dialect alters an
+/// FK in place, so it is dropped and re-created); validation locks the
+/// referencing table while every existing row is checked.
 fn check_add_fk_on_existing(
     table_diff: &TableDiff,
     fk_diff: &ForeignKeyDiff,
@@ -1936,12 +2048,12 @@ fn check_add_fk_on_existing(
     context: &RuleContext<'_>,
     findings: &mut Vec<RiskFinding>,
 ) {
-    if fk_diff.change_kind != ChangeKind::Added {
+    if fk_diff.change_kind == ChangeKind::Removed {
         return;
     }
     // Owner table must exist in `before`; modified_tables guarantees this
     // because newly created tables go to `added_tables` instead.
-    if context.find_before_table(&table_diff.table_name).is_none() {
+    if context.before_table(&table_diff.stable_id).is_none() {
         return;
     }
     let Some(new) = fk_diff.new_value.as_ref() else {
@@ -1961,12 +2073,7 @@ fn check_add_fk_on_existing(
     ) else {
         return;
     };
-    if !context
-        .before
-        .tables
-        .iter()
-        .any(|t| t.stable_id == target_id)
-    {
+    if context.before_table(&target_id).is_none() {
         return;
     }
 
@@ -1975,17 +2082,18 @@ fn check_add_fk_on_existing(
         .clone()
         .unwrap_or_else(|| format!("({})", new.from_columns.join(",")));
     let dialect = dialect_word(context.dialect);
+    let change = change_label(fk_diff.change_kind);
     let (message, mitigation) = match context.dialect {
         EffectiveDialect::Postgres => (
             format!(
-                "New FK {label} on existing table {} ({dialect}). Adding a FK validates all existing rows under SHARE ROW EXCLUSIVE lock.",
+                "{change} FK {label} on existing table {} ({dialect}). Adding a FK validates all existing rows under SHARE ROW EXCLUSIVE lock.",
                 table_diff.table_name,
             ),
             "Use ADD CONSTRAINT ... NOT VALID, then VALIDATE CONSTRAINT in a separate transaction.",
         ),
         EffectiveDialect::Mysql => (
             format!(
-                "New FK {label} on existing table {} ({dialect}). FK creation locks the referencing table while every existing row is checked against the parent.",
+                "{change} FK {label} on existing table {} ({dialect}). FK creation locks the referencing table while every existing row is checked against the parent.",
                 table_diff.table_name,
             ),
             "Schedule during low-traffic windows, or stage referencing rows so validation is fast.",
@@ -2155,6 +2263,18 @@ fn check_rewrite_table(
     }
 }
 
+/// Leading word for findings about an added or a changed constraint.
+const fn change_label(kind: ChangeKind) -> &'static str {
+    match kind {
+        ChangeKind::Modified => "Changed",
+        ChangeKind::Added | ChangeKind::Removed => "New",
+    }
+}
+
+fn same_ordered_columns(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
+}
+
 /// Lower-cased dialect label used by lock-risk finding messages.
 const fn dialect_word(dialect: EffectiveDialect) -> &'static str {
     match dialect {
@@ -2226,21 +2346,6 @@ fn index_covers_prefix(idx: &crate::model::Index, fk_cols: &[String]) -> bool {
         .iter()
         .zip(fk_cols.iter())
         .all(|(slot, fk)| slot.is_some_and(|name| name.eq_ignore_ascii_case(fk)))
-}
-
-/// Decide whether `fk` (owned by a table in `owner_schema`) references
-/// `target`, using the same resolution as schema validation and lint
-/// ([`resolve_table_reference`]).
-fn fk_targets_table(
-    fk: &ForeignKey,
-    target: &Table,
-    schema: &Schema,
-    owner_schema: Option<&str>,
-) -> bool {
-    matches!(
-        resolve_table_reference(schema, owner_schema, fk.to_schema.as_deref(), &fk.to_table),
-        ForeignKeyTargetResolution::Found(table) if table.stable_id == target.stable_id
-    )
 }
 
 /// Resolve the stable id of the table referenced as
@@ -2356,6 +2461,18 @@ mod tests {
             ReviewRuleId::all_rules(),
             EffectiveDialect::Auto,
         )
+    }
+
+    fn schema(tables: Vec<Table>) -> Schema {
+        Schema {
+            tables,
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    fn rule_count(findings: &[RiskFinding], rule: ReviewRuleId) -> usize {
+        findings.iter().filter(|f| f.rule_id == rule).count()
     }
 
     fn run_with_dialect(
@@ -5567,5 +5684,350 @@ mod tests {
                 .all(|f| f.rule_id != ReviewRuleId::RewriteTable),
             "rewrite-table is MySQL-only; got {findings:?}"
         );
+    }
+
+    #[test]
+    fn renamed_table_is_paired_by_stable_id() {
+        // Schema JSON keeps the id while the display name changes; the rules
+        // must still find the `before` side and see the dropped columns.
+        let users = table(
+            "users",
+            vec![
+                col("id", "int", false, true),
+                col("email", "text", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "int", false, true),
+                col("user_id", "int", false, false),
+            ],
+            vec![fk(
+                "fk_user",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = schema(vec![users.clone(), orders.clone()]);
+
+        let mut accounts = users;
+        accounts.name = "accounts".into();
+        accounts.columns.retain(|c| c.name != "email");
+        accounts.columns.push(col("tenant_id", "int", false, false));
+        let after = schema(vec![accounts, orders]);
+
+        let findings = run_all(&before, &after);
+        assert_eq!(rule_count(&findings, ReviewRuleId::DropColumn), 1);
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddNotNullOnExisting), 1);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropColumn)
+            .unwrap();
+        assert_eq!(drop.table_id.as_deref(), Some("users"));
+        assert_eq!(drop.table_name.as_deref(), Some("accounts"));
+    }
+
+    #[test]
+    fn dropping_pk_referenced_by_self_fk_is_breaking() {
+        let nodes = table(
+            "nodes",
+            vec![
+                col("id", "int", false, true),
+                col("parent_id", "int", true, false),
+            ],
+            vec![fk(
+                "fk_parent",
+                &["parent_id"],
+                "nodes",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![],
+        );
+        let before = schema(vec![nodes.clone()]);
+        let mut after_nodes = nodes;
+        after_nodes.columns[0].is_primary_key = false;
+        let after = schema(vec![after_nodes]);
+
+        let findings = run_all(&before, &after);
+        let drop = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
+            .expect("PK drop must be reported");
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.fk_name.as_deref(), Some("fk_parent"));
+    }
+
+    #[test]
+    fn not_null_column_filled_by_the_database_is_not_reported() {
+        let base = table("users", vec![col("id", "int", false, true)], vec![], vec![]);
+        let before = schema(vec![base.clone()]);
+        let with_column = |column: Column| {
+            let mut after = base.clone();
+            after.columns.push(column);
+            schema(vec![after])
+        };
+
+        let mut defaulted = col("status", "text", false, false);
+        defaulted.semantics.default_expression = Some("'active'".into());
+        let mut identity = col("seq", "bigint", false, false);
+        identity.semantics.identity = Some(crate::model::IdentitySpec { always: true });
+        let mut generated = col("upper_id", "int", false, false);
+        generated.semantics.generated = Some(crate::model::GeneratedColumn {
+            expression: "id * 2".into(),
+            stored: true,
+        });
+        let mut auto_increment = col("n", "int", false, false);
+        auto_increment.semantics.auto_increment = true;
+        let serial = col("s", "BIGSERIAL", false, false);
+        for column in [defaulted, identity, generated, auto_increment, serial] {
+            let name = column.name.clone();
+            let findings = run_all(&before, &with_column(column));
+            assert_eq!(
+                rule_count(&findings, ReviewRuleId::AddNotNullOnExisting),
+                0,
+                "{name} is filled for existing rows"
+            );
+        }
+
+        let mut null_default = col("note", "text", false, false);
+        null_default.semantics.default_expression = Some("NULL::text".into());
+        let findings = run_all(&before, &with_column(null_default));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddNotNullOnExisting), 1);
+    }
+
+    #[test]
+    fn set_not_null_is_reported_even_with_a_default() {
+        let mut column = col("status", "text", true, false);
+        column.semantics.default_expression = Some("'active'".into());
+        let before = schema(vec![table("users", vec![column.clone()], vec![], vec![])]);
+        column.nullable = false;
+        let after = schema(vec![table("users", vec![column], vec![], vec![])]);
+
+        let findings = run_all(&before, &after);
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddNotNullOnExisting), 1);
+    }
+
+    fn check(name: Option<&str>, expression: &str) -> crate::model::CheckConstraint {
+        crate::model::CheckConstraint {
+            name: name.map(Into::into),
+            expression: expression.into(),
+        }
+    }
+
+    #[test]
+    fn check_added_to_existing_table_is_reported() {
+        let base = table(
+            "items",
+            vec![
+                col("id", "int", false, true),
+                col("qty", "int", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = schema(vec![base.clone()]);
+
+        let mut table_check = base.clone();
+        table_check.check_constraints = vec![check(Some("qty_positive"), "qty > 0")];
+        let findings = run_all(&before, &schema(vec![table_check.clone()]));
+        let added: Vec<_> = findings
+            .iter()
+            .filter(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting)
+            .collect();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].severity, ReviewSeverity::Warning);
+        assert!(added[0].message.contains("CHECK qty_positive (qty > 0)"));
+
+        // Changing the expression re-validates every row.
+        let mut changed = table_check.clone();
+        changed.check_constraints[0].expression = "qty >= 10".into();
+        let findings = run_all(&schema(vec![table_check]), &schema(vec![changed]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddCheckOnExisting), 1);
+
+        // Column-level CHECK on an existing column.
+        let mut column_check = base.clone();
+        column_check.columns[1]
+            .semantics
+            .check_constraints
+            .push(check(None, "qty < 100"));
+        let findings = run_all(&before, &schema(vec![column_check]));
+        let finding = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting)
+            .expect("column CHECK must be reported");
+        assert_eq!(finding.column_name.as_deref(), Some("qty"));
+
+        // A new column with a CHECK holds no data yet.
+        let mut new_column = base;
+        let mut flag = col("flag", "int", true, false);
+        flag.semantics
+            .check_constraints
+            .push(check(None, "flag IN (0, 1)"));
+        new_column.columns.push(flag);
+        let findings = run_all(&before, &schema(vec![new_column]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddCheckOnExisting), 0);
+    }
+
+    #[test]
+    fn check_matching_its_generated_name_is_not_reported() {
+        let mut unnamed = table(
+            "items",
+            vec![col("qty", "int", true, false)],
+            vec![],
+            vec![],
+        );
+        unnamed.check_constraints = vec![check(None, "qty > 0")];
+        let mut named = unnamed.clone();
+        named.check_constraints = vec![check(Some("items_qty_check"), "QTY > 0")];
+
+        let findings = run_all(&schema(vec![unnamed]), &schema(vec![named]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddCheckOnExisting), 0);
+    }
+
+    #[test]
+    fn primary_key_on_existing_columns_is_reported_unless_already_unique() {
+        let base = table(
+            "users",
+            vec![
+                col("email", "text", false, false),
+                col("name", "text", true, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let before = schema(vec![base.clone()]);
+
+        let mut promoted = base.clone();
+        promoted.columns[0].is_primary_key = true;
+        let findings = run_all(&before, &schema(vec![promoted.clone()]));
+        let finding = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddUniqueOnExisting)
+            .expect("PK on existing column must be reported");
+        assert_eq!(finding.column_name.as_deref(), Some("email"));
+
+        // Already guaranteed unique by a UNIQUE index.
+        let mut unique_before = base.clone();
+        unique_before.indexes = vec![index("users_email_key", &["email"], true)];
+        let mut unique_after = promoted;
+        unique_after.indexes = unique_before.indexes.clone();
+        let findings = run_all(&schema(vec![unique_before]), &schema(vec![unique_after]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+
+        // A new surrogate key column is numbered by the database.
+        let mut surrogate = base.clone();
+        surrogate.columns.push(col("id", "BIGSERIAL", false, true));
+        let findings = run_all(&before, &schema(vec![surrogate]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+
+        // A new constant-default column adds no uniqueness to (email).
+        let mut constant = base;
+        constant.columns[0].is_primary_key = true;
+        let mut tenant = col("tenant_id", "int", false, true);
+        tenant.semantics.default_expression = Some("1".into());
+        constant.columns.push(tenant);
+        let findings = run_all(&before, &schema(vec![constant]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 1);
+    }
+
+    #[test]
+    fn widening_a_primary_key_is_not_reported_as_new_uniqueness() {
+        let before_table = table(
+            "memberships",
+            vec![
+                col("user_id", "int", false, true),
+                col("org_id", "int", false, false),
+            ],
+            vec![],
+            vec![],
+        );
+        let mut after_table = before_table.clone();
+        after_table.columns[1].is_primary_key = true;
+        let findings = run_all(&schema(vec![before_table]), &schema(vec![after_table]));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddUniqueOnExisting), 0);
+    }
+
+    #[test]
+    fn changed_index_is_a_rebuild_on_an_existing_table() {
+        let mut before_table = table(
+            "users",
+            vec![
+                col("id", "int", false, true),
+                col("email", "text", true, false),
+            ],
+            vec![],
+            vec![index("idx_users_email", &["email"], false)],
+        );
+        before_table
+            .columns
+            .push(col("tenant_id", "int", true, false));
+        let mut after_table = before_table.clone();
+        after_table.indexes = vec![index("idx_users_email", &["tenant_id", "email"], false)];
+
+        let findings = run_with_dialect(
+            &schema(vec![before_table]),
+            &schema(vec![after_table]),
+            EffectiveDialect::Postgres,
+        );
+        let finding = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddIndexOnLargeTable)
+            .expect("changed index must be reported");
+        assert!(finding.message.starts_with("Changed index idx_users_email"));
+    }
+
+    #[test]
+    fn changed_fk_is_revalidated_and_checked_for_an_index() {
+        let users = table("users", vec![col("id", "int", false, true)], vec![], vec![]);
+        let orders = table(
+            "orders",
+            vec![
+                col("id", "int", false, true),
+                col("user_id", "int", true, false),
+                col("buyer_id", "int", true, false),
+            ],
+            vec![fk(
+                "fk_user",
+                &["user_id"],
+                "users",
+                &["id"],
+                ReferentialAction::NoAction,
+            )],
+            vec![index("idx_orders_user_id", &["user_id"], false)],
+        );
+        let before = schema(vec![users.clone(), orders.clone()]);
+
+        // Moved onto an unindexed column.
+        let mut moved = orders.clone();
+        moved.foreign_keys[0].from_columns = vec!["buyer_id".into()];
+        let findings = run_with_dialect(
+            &before,
+            &schema(vec![users.clone(), moved]),
+            EffectiveDialect::Postgres,
+        );
+        let missing_index = findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::FkWithoutIndex)
+            .expect("moved FK without index must be reported");
+        assert!(missing_index.message.starts_with("Changed FK fk_user"));
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddFkOnExisting), 1);
+
+        // Only the referential action changes: re-created, same columns.
+        let mut action_only = orders;
+        action_only.foreign_keys[0].on_delete = ReferentialAction::Restrict;
+        let findings = run_with_dialect(
+            &before,
+            &schema(vec![users, action_only]),
+            EffectiveDialect::Postgres,
+        );
+        assert_eq!(rule_count(&findings, ReviewRuleId::AddFkOnExisting), 1);
+        assert_eq!(rule_count(&findings, ReviewRuleId::FkWithoutIndex), 0);
     }
 }

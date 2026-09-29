@@ -6,9 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::export::{ColumnExport, ForeignKeyExport, IndexExport};
+use crate::export::{ColumnExport, ForeignKeyExport, IndexExport, export_fk};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
 
 mod default_schema;
@@ -44,6 +44,110 @@ fn effective_nulls_order(
         SortOrder::Asc => NullsOrder::Last,
         SortOrder::Desc => NullsOrder::First,
     })
+}
+
+/// Normalizes SQL text for comparison: trims it and lowercases everything
+/// outside quoted literals (`'...'`, `$$...$$`, `$tag$...$tag$`) and quoted
+/// identifiers (`"..."`), so keyword and unquoted identifier case is ignored
+/// while a change inside `'Active'` or `"Name"` is still detected.
+pub(crate) fn normalize_sql_case(text: &str) -> String {
+    let text = text.trim();
+    let mut normalized = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(ch) = rest.chars().next() {
+        let quoted_len = match ch {
+            // A doubled quote (`''`) reads as two adjacent quoted runs, which
+            // keeps the escaped quote verbatim as well.
+            '\'' | '"' => Some(rest[1..].find(ch).map_or(rest.len(), |end| end + 2)),
+            '$' => dollar_quote_tag(rest).map(|tag| {
+                rest[tag.len()..]
+                    .find(tag)
+                    .map_or(rest.len(), |end| end + 2 * tag.len())
+            }),
+            _ => None,
+        }
+        .unwrap_or(0);
+        if quoted_len > 0 {
+            normalized.push_str(&rest[..quoted_len]);
+            rest = &rest[quoted_len..];
+        } else {
+            normalized.extend(ch.to_lowercase());
+            rest = &rest[ch.len_utf8()..];
+        }
+    }
+    normalized
+}
+
+/// Returns the opening tag (`$$` or `$name$`) when `text` starts a
+/// `PostgreSQL` dollar-quoted literal. A positional parameter such as `$1`
+/// is not a tag.
+fn dollar_quote_tag(text: &str) -> Option<&str> {
+    let body = text.strip_prefix('$')?;
+    let end = body.find('$')?;
+    let name = &body[..end];
+    let valid = name
+        .chars()
+        .enumerate()
+        .all(|(index, ch)| ch == '_' || ch.is_alphabetic() || (index > 0 && ch.is_ascii_digit()));
+    valid.then(|| &text[..end + 2])
+}
+
+/// Items of one kind (foreign keys, indexes, checks) matched between two
+/// tables.
+struct MatchedItems<'a, T> {
+    removed: Vec<&'a T>,
+    added: Vec<&'a T>,
+    paired: Vec<(&'a T, &'a T)>,
+}
+
+/// Matches `old` and `new` items by `key`, then pairs leftover items whose
+/// `shape` matches when at least one side is unnamed.
+///
+/// The second pass lets an unnamed constraint written in DDL match the same
+/// constraint under the name the database generated for it (e.g.
+/// `orders_user_id_fkey`), instead of reporting a drop and a re-create. Two
+/// named items are never paired by shape, so a rename stays visible. Every
+/// list follows key order, so the output is deterministic.
+fn match_items<'a, T, K: Ord>(
+    old: &'a [T],
+    new: &'a [T],
+    key: impl Fn(&'a T) -> K,
+    shape: impl Fn(&'a T) -> K,
+    is_named: impl Fn(&T) -> bool,
+) -> MatchedItems<'a, T> {
+    let old_map: BTreeMap<K, &T> = old.iter().map(|item| (key(item), item)).collect();
+    let new_map: BTreeMap<K, &T> = new.iter().map(|item| (key(item), item)).collect();
+
+    let mut removed = Vec::new();
+    let mut paired = Vec::new();
+    for (item_key, old_item) in &old_map {
+        match new_map.get(item_key) {
+            Some(new_item) => paired.push((*old_item, *new_item)),
+            None => removed.push(*old_item),
+        }
+    }
+    let mut added: Vec<&T> = new_map
+        .iter()
+        .filter(|(item_key, _)| !old_map.contains_key(*item_key))
+        .map(|(_, item)| *item)
+        .collect();
+
+    removed.retain(|old_item| {
+        let old_shape = shape(old_item);
+        let Some(position) = added.iter().position(|new_item| {
+            (!is_named(old_item) || !is_named(new_item)) && shape(new_item) == old_shape
+        }) else {
+            return true;
+        };
+        paired.push((*old_item, added.remove(position)));
+        false
+    });
+
+    MatchedItems {
+        removed,
+        added,
+        paired,
+    }
 }
 
 /// The kind of change detected in a diff.
@@ -316,7 +420,7 @@ impl ForeignKeyDiff {
             name: fk.name.clone(),
             change_kind: ChangeKind::Added,
             old_value: None,
-            new_value: Some(Self::export_fk(fk)),
+            new_value: Some(export_fk(fk)),
         }
     }
 
@@ -326,7 +430,7 @@ impl ForeignKeyDiff {
         Self {
             name: fk.name.clone(),
             change_kind: ChangeKind::Removed,
-            old_value: Some(Self::export_fk(fk)),
+            old_value: Some(export_fk(fk)),
             new_value: None,
         }
     }
@@ -337,29 +441,8 @@ impl ForeignKeyDiff {
         Self {
             name: new_fk.name.clone(),
             change_kind: ChangeKind::Modified,
-            old_value: Some(Self::export_fk(old_fk)),
-            new_value: Some(Self::export_fk(new_fk)),
-        }
-    }
-
-    fn export_fk(fk: &ForeignKey) -> ForeignKeyExport {
-        use crate::model::ReferentialAction;
-
-        let to_action_str = |a: ReferentialAction| -> Option<String> {
-            match a {
-                ReferentialAction::NoAction => None,
-                other => Some(other.to_string()),
-            }
-        };
-
-        ForeignKeyExport {
-            name: fk.name.clone(),
-            from_columns: fk.from_columns.clone(),
-            to_schema: fk.to_schema.clone(),
-            to_table: fk.to_table.clone(),
-            to_columns: fk.to_columns.clone(),
-            on_delete: to_action_str(fk.on_delete),
-            on_update: to_action_str(fk.on_update),
+            old_value: Some(export_fk(old_fk)),
+            new_value: Some(export_fk(new_fk)),
         }
     }
 }
@@ -432,6 +515,10 @@ pub struct CheckConstraintDiff {
 /// Diff for a single table between two schemas.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TableDiff {
+    /// Stable identifier of the table (matches `Table::stable_id`). Tables
+    /// are paired across the two schemas by this id, so it also locates the
+    /// `before` side of a table whose name changed.
+    pub stable_id: String,
     /// Table name (qualified with schema if applicable).
     pub table_name: String,
     /// Kind of change.
@@ -453,6 +540,7 @@ impl TableDiff {
     #[must_use]
     pub fn added(table: &Table) -> Self {
         Self {
+            stable_id: table.stable_id.clone(),
             table_name: table.qualified_name(),
             change_kind: ChangeKind::Added,
             column_diffs: table.columns.iter().map(ColumnDiff::added).collect(),
@@ -479,6 +567,7 @@ impl TableDiff {
     #[must_use]
     pub fn removed(table: &Table) -> Self {
         Self {
+            stable_id: table.stable_id.clone(),
             table_name: table.qualified_name(),
             change_kind: ChangeKind::Removed,
             column_diffs: table.columns.iter().map(ColumnDiff::removed).collect(),
@@ -513,6 +602,7 @@ impl TableDiff {
         );
 
         Self {
+            stable_id: new_table.stable_id.clone(),
             table_name: new_table.qualified_name(),
             change_kind: ChangeKind::Modified,
             column_diffs,
@@ -526,104 +616,92 @@ impl TableDiff {
         old_checks: &[crate::model::CheckConstraint],
         new_checks: &[crate::model::CheckConstraint],
     ) -> Vec<CheckConstraintDiff> {
-        // Key by name when present; otherwise by the (lowercased) expression so
+        // Key by name when present; otherwise by the normalized expression so
         // that an unnamed check keeps its identity across before/after.
         fn key(check: &crate::model::CheckConstraint) -> String {
             match &check.name {
                 Some(name) if !name.is_empty() => format!("n:{name}"),
-                _ => format!("e:{}", check.expression.to_lowercase()),
+                _ => shape(check),
             }
         }
+        fn shape(check: &crate::model::CheckConstraint) -> String {
+            format!("e:{}", normalize_sql_case(&check.expression))
+        }
 
-        let old_map: HashMap<String, &crate::model::CheckConstraint> =
-            old_checks.iter().map(|c| (key(c), c)).collect();
-        let new_map: HashMap<String, &crate::model::CheckConstraint> =
-            new_checks.iter().map(|c| (key(c), c)).collect();
-        let old_keys: BTreeSet<&String> = old_map.keys().collect();
-        let new_keys: BTreeSet<&String> = new_map.keys().collect();
+        let matched = match_items(old_checks, new_checks, key, shape, |check| {
+            check.name.as_ref().is_some_and(|name| !name.is_empty())
+        });
 
-        let mut diffs = Vec::new();
-        for k in old_keys.difference(&new_keys) {
-            let c = old_map[k.as_str()];
-            diffs.push(CheckConstraintDiff {
+        let mut diffs: Vec<CheckConstraintDiff> = matched
+            .removed
+            .into_iter()
+            .map(|c| CheckConstraintDiff {
                 name: c.name.clone(),
                 change_kind: ChangeKind::Removed,
                 old_value: Some(c.expression.clone()),
                 new_value: None,
-            });
-        }
-        for k in new_keys.difference(&old_keys) {
-            let c = new_map[k.as_str()];
-            diffs.push(CheckConstraintDiff {
-                name: c.name.clone(),
-                change_kind: ChangeKind::Added,
-                old_value: None,
-                new_value: Some(c.expression.clone()),
-            });
-        }
-        for k in old_keys.intersection(&new_keys) {
-            let old_c = old_map[k.as_str()];
-            let new_c = new_map[k.as_str()];
-            if old_c.expression != new_c.expression {
-                diffs.push(CheckConstraintDiff {
+            })
+            .collect();
+        diffs.extend(matched.added.into_iter().map(|c| CheckConstraintDiff {
+            name: c.name.clone(),
+            change_kind: ChangeKind::Added,
+            old_value: None,
+            new_value: Some(c.expression.clone()),
+        }));
+        diffs.extend(
+            matched
+                .paired
+                .into_iter()
+                .filter(|(old_c, new_c)| {
+                    normalize_sql_case(&old_c.expression) != normalize_sql_case(&new_c.expression)
+                })
+                .map(|(old_c, new_c)| CheckConstraintDiff {
                     name: new_c.name.clone(),
                     change_kind: ChangeKind::Modified,
                     old_value: Some(old_c.expression.clone()),
                     new_value: Some(new_c.expression.clone()),
-                });
-            }
-        }
+                }),
+        );
         diffs
     }
 
     fn diff_foreign_keys(old_fks: &[ForeignKey], new_fks: &[ForeignKey]) -> Vec<ForeignKeyDiff> {
-        let old_map: HashMap<String, &ForeignKey> =
-            old_fks.iter().map(|fk| (Self::fk_key(fk), fk)).collect();
-        let new_map: HashMap<String, &ForeignKey> =
-            new_fks.iter().map(|fk| (Self::fk_key(fk), fk)).collect();
+        let matched = match_items(old_fks, new_fks, Self::fk_key, Self::fk_shape_key, |fk| {
+            fk.name.is_some()
+        });
 
-        let old_keys: BTreeSet<&String> = old_map.keys().collect();
-        let new_keys: BTreeSet<&String> = new_map.keys().collect();
-
-        let mut diffs = Vec::new();
-
-        // Removed FKs
-        for key in old_keys.difference(&new_keys) {
-            diffs.push(ForeignKeyDiff::removed(old_map[*key]));
-        }
-
-        // Added FKs
-        for key in new_keys.difference(&old_keys) {
-            diffs.push(ForeignKeyDiff::added(new_map[*key]));
-        }
-
-        // Modified FKs
-        for key in old_keys.intersection(&new_keys) {
-            let old_fk = old_map[*key];
-            let new_fk = new_map[*key];
-            if Self::fks_differ(old_fk, new_fk) {
-                diffs.push(ForeignKeyDiff::modified(old_fk, new_fk));
-            }
-        }
-
+        let mut diffs: Vec<ForeignKeyDiff> = matched
+            .removed
+            .into_iter()
+            .map(ForeignKeyDiff::removed)
+            .collect();
+        diffs.extend(matched.added.into_iter().map(ForeignKeyDiff::added));
+        diffs.extend(
+            matched
+                .paired
+                .into_iter()
+                .filter(|(old_fk, new_fk)| Self::fks_differ(old_fk, new_fk))
+                .map(|(old_fk, new_fk)| ForeignKeyDiff::modified(old_fk, new_fk)),
+        );
         diffs
     }
 
     fn fk_key(fk: &ForeignKey) -> String {
-        // Keep unnamed FK identity stable without relying on ambiguous separators.
-        if let Some(name) = &fk.name {
-            name.clone()
-        } else {
-            // Lowercase the target schema/table so case-only differences do not
-            // split one logical FK into spurious add/remove pairs (column names
-            // are already lowercased in `fk_column_pairs`).
-            let to_schema = fk.to_schema.as_ref().map(|s| s.to_lowercase());
-            let mut key = String::new();
-            Self::push_key_option(&mut key, to_schema.as_deref());
-            Self::push_key_part(&mut key, &fk.to_table.to_lowercase());
-            Self::push_key_pairs(&mut key, &Self::fk_column_pairs(fk));
-            key
-        }
+        fk.name.clone().unwrap_or_else(|| Self::fk_shape_key(fk))
+    }
+
+    /// Name-independent identity of an FK: its target and column pairs.
+    fn fk_shape_key(fk: &ForeignKey) -> String {
+        // Keep the key unambiguous without relying on separators. Lowercase
+        // the target schema/table so case-only differences do not split one
+        // logical FK into spurious add/remove pairs (column names are already
+        // lowercased in `fk_column_pairs`).
+        let to_schema = fk.to_schema.as_ref().map(|s| s.to_lowercase());
+        let mut key = String::new();
+        Self::push_key_option(&mut key, to_schema.as_deref());
+        Self::push_key_part(&mut key, &fk.to_table.to_lowercase());
+        Self::push_key_pairs(&mut key, &Self::fk_column_pairs(fk));
+        key
     }
 
     fn push_key_option(key: &mut String, value: Option<&str>) {
@@ -688,63 +766,55 @@ impl TableDiff {
         old_indexes: &[crate::model::Index],
         new_indexes: &[crate::model::Index],
     ) -> Vec<IndexDiff> {
-        let old_map: HashMap<Cow<'_, str>, &crate::model::Index> = old_indexes
-            .iter()
-            .map(|idx| (Self::index_key(idx), idx))
+        let matched = match_items(
+            old_indexes,
+            new_indexes,
+            Self::index_key,
+            |idx| Cow::Owned(Self::index_shape_key(idx)),
+            |idx| idx.name.as_ref().is_some_and(|name| !name.is_empty()),
+        );
+
+        let mut diffs: Vec<IndexDiff> = matched
+            .removed
+            .into_iter()
+            .map(IndexDiff::removed)
             .collect();
-        let new_map: HashMap<Cow<'_, str>, &crate::model::Index> = new_indexes
-            .iter()
-            .map(|idx| (Self::index_key(idx), idx))
-            .collect();
-
-        let old_keys: BTreeSet<&Cow<'_, str>> = old_map.keys().collect();
-        let new_keys: BTreeSet<&Cow<'_, str>> = new_map.keys().collect();
-
-        let mut diffs = Vec::new();
-
-        // Removed indexes
-        for key in old_keys.difference(&new_keys) {
-            diffs.push(IndexDiff::removed(old_map[*key]));
-        }
-
-        // Added indexes
-        for key in new_keys.difference(&old_keys) {
-            diffs.push(IndexDiff::added(new_map[*key]));
-        }
-
-        // Modified indexes
-        for key in old_keys.intersection(&new_keys) {
-            let old_idx = old_map[*key];
-            let new_idx = new_map[*key];
-            if Self::indexes_differ(old_idx, new_idx) {
-                diffs.push(IndexDiff::modified(old_idx, new_idx));
-            }
-        }
-
+        diffs.extend(matched.added.into_iter().map(IndexDiff::added));
+        diffs.extend(
+            matched
+                .paired
+                .into_iter()
+                .filter(|(old_idx, new_idx)| Self::indexes_differ(old_idx, new_idx))
+                .map(|(old_idx, new_idx)| IndexDiff::modified(old_idx, new_idx)),
+        );
         diffs
     }
 
     fn index_key(idx: &crate::model::Index) -> Cow<'_, str> {
         match &idx.name {
             Some(name) if !name.is_empty() => Cow::Borrowed(name),
-            // Build an unambiguous key for unnamed indexes by length-prefixing
-            // each lowercased key part. A naive `_`-join collides on boundary
-            // cases such as `["a_b", "c"]` vs `["a", "b_c"]`. Column and
-            // expression parts are tagged so a column named like an expression
-            // does not collide with a genuine expression part.
-            _ => {
-                let mut key = String::from("idx_");
-                for part in &idx.key_parts {
-                    let (tag, text) = match part {
-                        crate::model::IndexKey::Column(column) => ("c", column.name.to_lowercase()),
-                        crate::model::IndexKey::Expression(expr) => ("e", expr.to_lowercase()),
-                    };
-                    key.push_str(tag);
-                    Self::push_key_part(&mut key, &text);
-                }
-                Cow::Owned(key)
-            }
+            _ => Cow::Owned(Self::index_shape_key(idx)),
         }
+    }
+
+    /// Name-independent identity of an index: its ordered key parts.
+    ///
+    /// Built unambiguously by length-prefixing each normalized key part. A
+    /// naive `_`-join collides on boundary cases such as `["a_b", "c"]` vs
+    /// `["a", "b_c"]`. Column and expression parts are tagged so a column
+    /// named like an expression does not collide with a genuine expression
+    /// part.
+    fn index_shape_key(idx: &crate::model::Index) -> String {
+        let mut key = String::from("idx_");
+        for part in &idx.key_parts {
+            let (tag, text) = match part {
+                crate::model::IndexKey::Column(column) => ("c", column.name.to_lowercase()),
+                crate::model::IndexKey::Expression(expr) => ("e", normalize_sql_case(expr)),
+            };
+            key.push_str(tag);
+            Self::push_key_part(&mut key, &text);
+        }
+        key
     }
 
     fn indexes_differ(a: &crate::model::Index, b: &crate::model::Index) -> bool {
@@ -755,7 +825,7 @@ impl TableDiff {
     fn index_scalar_signature(idx: &crate::model::Index) -> IndexScalarSignature {
         (
             idx.is_unique,
-            idx.predicate.as_ref().map(|p| p.to_lowercase()),
+            idx.predicate.as_deref().map(normalize_sql_case),
             idx.included_columns
                 .iter()
                 .map(|c| c.to_lowercase())
@@ -789,7 +859,9 @@ impl TableDiff {
                             != effective_nulls_order(y.order, y.nulls)
                         || x.prefix_length != y.prefix_length
                 }
-                (IndexKey::Expression(x), IndexKey::Expression(y)) => !x.eq_ignore_ascii_case(y),
+                (IndexKey::Expression(x), IndexKey::Expression(y)) => {
+                    normalize_sql_case(x) != normalize_sql_case(y)
+                }
                 // A column part and an expression part are never the same key.
                 _ => true,
             })
@@ -1793,7 +1865,7 @@ mod tests {
             .new_value
             .as_ref()
             .expect("modified FK should carry new value");
-        assert_eq!(new_value.on_delete.as_deref(), Some("CASCADE"));
+        assert_eq!(new_value.on_delete, ReferentialAction::Cascade);
     }
 
     #[test]
@@ -2389,5 +2461,128 @@ mod tests {
         for _ in 0..32 {
             assert_eq!(diff_schemas(&before, &after), first);
         }
+    }
+
+    fn single_table_schema(table: Table) -> Schema {
+        Schema {
+            tables: vec![table],
+            views: vec![],
+            enums: vec![],
+        }
+    }
+
+    #[test]
+    fn unnamed_fk_matches_its_generated_name_by_shape() {
+        let before = create_test_table(
+            "orders",
+            vec![("user_id", "int", false, false)],
+            vec![("", vec!["user_id"], "users", vec!["id"])],
+        );
+        let mut after = create_test_table(
+            "orders",
+            vec![("user_id", "int", false, false)],
+            vec![("orders_user_id_fkey", vec!["user_id"], "users", vec!["id"])],
+        );
+        let diff = diff_schemas(
+            &single_table_schema(before.clone()),
+            &single_table_schema(after.clone()),
+        );
+        assert!(
+            diff.is_empty(),
+            "same-shape FK must not be re-created: {diff:?}"
+        );
+
+        // A real attribute change on the paired FK is still reported, once.
+        after.foreign_keys[0].on_delete = ReferentialAction::Cascade;
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        let fk_diffs = &diff.modified_tables[0].fk_diffs;
+        assert_eq!(fk_diffs.len(), 1);
+        assert_eq!(fk_diffs[0].change_kind, ChangeKind::Modified);
+        assert_eq!(fk_diffs[0].name.as_deref(), Some("orders_user_id_fkey"));
+    }
+
+    #[test]
+    fn renamed_fk_with_both_names_is_not_paired_by_shape() {
+        let before = create_test_table(
+            "orders",
+            vec![("user_id", "int", false, false)],
+            vec![("fk_old", vec!["user_id"], "users", vec!["id"])],
+        );
+        let after = create_test_table(
+            "orders",
+            vec![("user_id", "int", false, false)],
+            vec![("fk_new", vec!["user_id"], "users", vec!["id"])],
+        );
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        let kinds: Vec<ChangeKind> = diff.modified_tables[0]
+            .fk_diffs
+            .iter()
+            .map(|fk| fk.change_kind)
+            .collect();
+        assert_eq!(kinds, vec![ChangeKind::Removed, ChangeKind::Added]);
+    }
+
+    #[test]
+    fn unnamed_index_matches_its_generated_name_by_shape() {
+        let mut before = create_test_table("users", vec![("email", "text", false, false)], vec![]);
+        before.indexes = vec![crate::model::Index::from_columns(
+            None,
+            vec!["email".to_string()],
+            true,
+        )];
+        let mut after = before.clone();
+        after.indexes[0].name = Some("users_email_key".to_string());
+
+        let diff = diff_schemas(
+            &single_table_schema(before.clone()),
+            &single_table_schema(after.clone()),
+        );
+        assert!(
+            diff.is_empty(),
+            "same-shape index must not be re-created: {diff:?}"
+        );
+
+        after.indexes[0].is_unique = false;
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        let index_diffs = &diff.modified_tables[0].index_diffs;
+        assert_eq!(index_diffs.len(), 1);
+        assert_eq!(index_diffs[0].change_kind, ChangeKind::Modified);
+    }
+
+    #[test]
+    fn index_predicate_literal_case_change_is_detected() {
+        let mut before = create_test_table("t", vec![("status", "text", false, false)], vec![]);
+        before.indexes = vec![crate::model::Index::from_columns(
+            Some("idx_status".to_string()),
+            vec!["status".to_string()],
+            false,
+        )];
+        before.indexes[0].predicate = Some("status = 'Active'".to_string());
+        let mut after = before.clone();
+        after.indexes[0].predicate = Some("STATUS = 'active'".to_string());
+
+        let diff = diff_schemas(
+            &single_table_schema(before.clone()),
+            &single_table_schema(after),
+        );
+        assert_eq!(diff.summary.indexes_changed, 1);
+
+        // Keyword and unquoted identifier case alone is not a change.
+        let mut after = before.clone();
+        after.indexes[0].predicate = Some(" STATUS = 'Active' ".to_string());
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn normalize_sql_case_keeps_quoted_text() {
+        assert_eq!(
+            normalize_sql_case(" WHERE \"Kind\" = 'It''s A' AND X IS NULL "),
+            "where \"Kind\" = 'It''s A' and x is null"
+        );
+        assert_eq!(
+            normalize_sql_case("S = $$Active$$ OR S = $t$It's$t$ OR N = $1"),
+            "s = $$Active$$ or s = $t$It's$t$ or n = $1"
+        );
     }
 }

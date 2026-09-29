@@ -263,6 +263,8 @@ pub enum ReviewRuleId {
     DropPkOrUnique,
     /// Adding a UNIQUE constraint to a column on an existing table.
     AddUniqueOnExisting,
+    /// Adding or changing a CHECK constraint on an existing table.
+    AddCheckOnExisting,
     /// Adding `ON DELETE CASCADE` to a foreign key.
     AddCascadeDelete,
     /// New foreign key without a supporting index.
@@ -315,6 +317,7 @@ impl ReviewRuleId {
             Self::TypeNarrow,
             Self::DropPkOrUnique,
             Self::AddUniqueOnExisting,
+            Self::AddCheckOnExisting,
             Self::AddCascadeDelete,
             Self::FkWithoutIndex,
             // Lock-risk rules. Append-only so the listing order stays
@@ -339,6 +342,7 @@ impl ReviewRuleId {
             Self::TypeNarrow => "risk/type-narrow",
             Self::DropPkOrUnique => "risk/drop-pk-or-unique",
             Self::AddUniqueOnExisting => "risk/add-unique-on-existing",
+            Self::AddCheckOnExisting => "risk/add-check-on-existing",
             Self::AddCascadeDelete => "risk/add-cascade-delete",
             Self::FkWithoutIndex => "risk/fk-without-index",
             Self::AddIndexOnLargeTable => "risk/add-index-on-large-table",
@@ -369,7 +373,10 @@ impl ReviewRuleId {
             }
             Self::DropPkOrUnique => "Primary key or unique constraint is being dropped",
             Self::AddUniqueOnExisting => {
-                "UNIQUE added or tightened on an existing table; existing duplicates will fail"
+                "UNIQUE or PRIMARY KEY added or tightened on an existing table; existing duplicates will fail"
+            }
+            Self::AddCheckOnExisting => {
+                "CHECK added or changed on an existing table; existing rows may violate it"
             }
             Self::AddCascadeDelete => "Foreign key now uses ON DELETE CASCADE",
             Self::FkWithoutIndex => "New foreign key has no supporting index",
@@ -403,6 +410,7 @@ impl ReviewRuleId {
             | Self::TypeNarrow => ReviewSeverity::Breaking,
             Self::AddNotNullOnExisting
             | Self::AddUniqueOnExisting
+            | Self::AddCheckOnExisting
             | Self::AddCascadeDelete
             | Self::DropPkOrUnique => ReviewSeverity::Warning,
             Self::FkWithoutIndex => ReviewSeverity::Info,
@@ -435,6 +443,7 @@ impl ReviewRuleId {
             | Self::TypeNarrow
             | Self::DropPkOrUnique
             | Self::AddUniqueOnExisting
+            | Self::AddCheckOnExisting
             | Self::AddCascadeDelete
             | Self::FkWithoutIndex => DialectScope::Any,
             Self::AddIndexOnLargeTable | Self::AddFkOnExisting | Self::AlterColumnType => {
@@ -859,6 +868,7 @@ mod tests {
             ReviewRuleId::TypeNarrow,
             ReviewRuleId::DropPkOrUnique,
             ReviewRuleId::AddUniqueOnExisting,
+            ReviewRuleId::AddCheckOnExisting,
             ReviewRuleId::AddCascadeDelete,
             ReviewRuleId::FkWithoutIndex,
         ] {
