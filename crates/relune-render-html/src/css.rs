@@ -894,16 +894,13 @@ pub(crate) fn build_css(
       filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.48));
     }
 
-    .edge.highlighted-neighbor .edge-glow-path {
-      opacity: 0.92;
+    .edge.highlighted-neighbor .edge-path,
+    .edge.hover-preview-edge .edge-path {
+      filter: drop-shadow(0 0 4px var(--accent-color));
     }
 
     .edge.highlighted-neighbor .edge-particles {
       opacity: 0.92;
-    }
-
-    .edge.hover-preview-edge .edge-glow-path {
-      opacity: 0.76;
     }
 
     .edge.hover-preview-edge .edge-particles {

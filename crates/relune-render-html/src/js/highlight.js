@@ -1,5 +1,46 @@
 "use strict";
 (() => {
+  // ts/edge_particles.ts
+  var EMPHASIS_CLASSES = ["highlighted-neighbor", "hover-preview-edge"];
+  function createEdgeParticles(svgRoot) {
+    const edges = /* @__PURE__ */ new Map();
+    const hovered = /* @__PURE__ */ new Set();
+    const running = /* @__PURE__ */ new Set();
+    const syncEdge = (edge, motion) => {
+      const active = hovered.has(edge) || EMPHASIS_CLASSES.some((name) => edge.classList.contains(name));
+      if (active === running.has(edge)) return;
+      if (active) {
+        running.add(edge);
+        motion.beginElement?.();
+      } else {
+        running.delete(edge);
+        motion.endElement?.();
+      }
+    };
+    svgRoot.querySelectorAll(".edge").forEach((edge) => {
+      const motion = edge.querySelector("animateMotion");
+      if (motion === null) return;
+      motion.setAttribute("begin", "indefinite");
+      motion.removeAttribute("end");
+      edges.set(edge, motion);
+      edge.addEventListener("mouseenter", () => {
+        hovered.add(edge);
+        syncEdge(edge, motion);
+      });
+      edge.addEventListener("mouseleave", () => {
+        hovered.delete(edge);
+        syncEdge(edge, motion);
+      });
+    });
+    return {
+      sync() {
+        edges.forEach((motion, edge) => {
+          syncEdge(edge, motion);
+        });
+      }
+    };
+  }
+
   // ts/highlight_actions.ts
   function collectNeighborhood(nodeId, state, depth = 1) {
     const neighborIds = /* @__PURE__ */ new Set();
@@ -579,6 +620,7 @@
     })();
     if (svgRoot && drawerEls && hoverEls) {
       const runtime = getViewerRuntime();
+      const edgeParticles = createEdgeParticles(svgRoot);
       const getNodes = () => svgRoot.querySelectorAll(".node[data-id], .table-node[data-table-id]");
       const getNodeId = (node) => node.getAttribute("data-id") ?? node.getAttribute("data-table-id");
       const findNode = (nodeId) => Array.from(getNodes()).find((candidate) => getNodeId(candidate) === nodeId);
@@ -690,6 +732,7 @@
             }
           }
         }
+        edgeParticles.sync();
         syncObjectBrowser();
       };
       const setSelectedNode = (tableId) => {

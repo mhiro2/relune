@@ -169,13 +169,18 @@ pub(crate) fn render_severity_badge(
 // Column text width
 // ---------------------------------------------------------------------------
 
+/// Number of PK / FK / IX badges drawn at the right edge of a column row.
+fn column_badge_count(column: &relune_layout::PositionedColumn) -> usize {
+    usize::from(column.flags.relation.is_indexed)
+        + usize::from(column.flags.relation.is_foreign_key)
+        + usize::from(column.flags.relation.is_primary_key)
+}
+
 pub(crate) fn column_text_width(
     node: &relune_layout::PositionedNode,
     column: &relune_layout::PositionedColumn,
 ) -> f32 {
-    let icon_slots = usize::from(column.flags.relation.is_indexed)
-        + usize::from(column.flags.relation.is_foreign_key)
-        + usize::from(column.flags.relation.is_primary_key);
+    let icon_slots = column_badge_count(column);
     if icon_slots == 0 {
         (node.width - 20.0).max(18.0)
     } else {
@@ -288,9 +293,7 @@ pub(crate) fn render_node_internal(
     // Gradient transition from header to body — eliminates the hard underlay band
     write!(
         out,
-        r#"<defs><linearGradient id="header-fade-{index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{}" stop-opacity="0.38"/><stop offset="100%" stop-color="{}" stop-opacity="0"/></linearGradient></defs><rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{index})"/>"#,
-        node_style.header_fill,
-        node_style.header_fill,
+        r#"<rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{kind})"/>"#,
         node.x,
         node.y + 16.0,
         node.width
@@ -328,6 +331,23 @@ pub(crate) fn render_node_internal(
         )?;
     }
 
+    // Columns only differ in clip width by how many badges they carry, so one
+    // node-height clip per badge count replaces a clip per column.
+    let mut clipped_badge_counts = [false; 4];
+    for column in &node.columns {
+        let badge_count = column_badge_count(column);
+        if !std::mem::replace(&mut clipped_badge_counts[badge_count], true) {
+            write!(
+                out,
+                r#"<clipPath id="node-{index}-columns-{badge_count}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}"/></clipPath>"#,
+                node.x + 10.0,
+                node.y,
+                column_text_width(node, column),
+                node.height
+            )?;
+        }
+    }
+
     let mut line_y = node.y + 46.0;
     for (column_index, column) in node.columns.iter().enumerate() {
         write!(
@@ -355,12 +375,10 @@ pub(crate) fn render_node_internal(
         };
         write!(
             out,
-            r#"<clipPath id="node-{index}-column-{column_index}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-column-{column_index}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>"#,
-            node.x + 10.0,
-            line_y - 12.5,
-            column_text_width(node, column),
+            r#"<text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-columns-{}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>"#,
             node.x + 10.0,
             line_y,
+            column_badge_count(column),
             if column.flags.nullable {
                 colors.text_muted
             } else {

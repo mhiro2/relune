@@ -5,7 +5,7 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{EdgeKind, layout::RouteStyle};
+use relune_core::{EdgeKind, NodeKind, layout::RouteStyle};
 
 pub mod edge;
 mod error;
@@ -251,11 +251,10 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
         out,
         r"<defs>
 <style>
-.edge-glow-path,
 .edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
 .edge-particle {{ fill: {glow_particle}; }}
-.edge:hover .edge-glow-path,
 .edge:hover .edge-particles {{ opacity: 0.92; }}
+.edge:hover .edge-path {{ filter: drop-shadow(0 0 4px {glow_color}); }}
 .edge:hover .edge-path,
 .edge:hover .crow-inline {{ stroke: {glow_color}; }}
 .node:hover .table-body {{ stroke-width: 2.1px; }}
@@ -285,9 +284,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
 <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
-<filter id="edge-glow" x="-50%" y="-50%" width="200%" height="200%">
-<feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="{}"/>
-</filter>
 <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
 <path d="M1,1 L9,5 L1,9" fill="none" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>
@@ -308,15 +304,23 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <marker id="cardinality-one-many" markerWidth="26" markerHeight="18" refX="23" refY="9" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
 <path d="M2 2 L2 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
 <path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
-</marker>
-</defs>"#,
+</marker>"#,
         colors.canvas_base,
         colors.canvas_dot,
         colors.canvas_dot,
         colors.node_shadow,
         colors.node_shadow,
-        colors.glow_color
     )?;
+    for kind in [NodeKind::Table, NodeKind::View, NodeKind::Enum] {
+        let header_fill = node::node_style(kind, colors).header_fill;
+        write!(
+            out,
+            r#"
+<linearGradient id="header-fade-{}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{header_fill}" stop-opacity="0.38"/><stop offset="100%" stop-color="{header_fill}" stop-opacity="0"/></linearGradient>"#,
+            node::node_kind_name(kind)
+        )?;
+    }
+    out.push_str("\n</defs>");
     Ok(())
 }
 
@@ -367,7 +371,7 @@ fn render_edge_internal(
 
     write!(
         out,
-        r#"<g class="edge edge-kind-{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
+        r#"<g id="edge-{index}" class="edge edge-kind-{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
         severity_class,
         escape_attribute(&edge.from),
@@ -401,7 +405,6 @@ fn render_edge_internal(
     };
 
     // Render the path with CSS class and data attributes
-    let glow = colors.glow_color;
     let marker_attrs = if use_inline_markers {
         "" // Inline markers are drawn separately below.
     } else {
@@ -411,9 +414,7 @@ fn render_edge_internal(
         Some(stroke_dasharray) => {
             write!(
                 out,
-                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} stroke-dasharray="{}" pathLength="100"/>"#,
-                escape_attribute(&path_d),
-                options.stroke_width + 2.0,
+                r#"<path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} stroke-dasharray="{}" pathLength="100"/>"#,
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
@@ -425,9 +426,7 @@ fn render_edge_internal(
         None => {
             write!(
                 out,
-                r#"<path class="edge-glow-path" d="{}" stroke="{glow}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0" filter="url(#edge-glow)"/><path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} pathLength="100" />"#,
-                escape_attribute(&path_d),
-                options.stroke_width + 2.0,
+                r#"<path id="edge-path-{}" class="edge-path" d="{}" stroke="{}" stroke-width="{:.1}" fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"{} pathLength="100"/>"#,
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
@@ -437,13 +436,13 @@ fn render_edge_internal(
         }
     }
 
+    // The particle only runs while the edge is hovered, so idle diagrams keep
+    // no animation timers alive.
     if edge.kind == EdgeKind::ForeignKey {
-        out.push_str(r#"<g class="edge-particles" opacity="0">"#);
         write!(
             out,
-            r##"<circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle><circle class="edge-particle" r="1.8" opacity="0.72"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle>"##
+            r##"<g class="edge-particles" opacity="0"><circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" begin="edge-{index}.mouseenter" end="edge-{index}.mouseleave" repeatCount="indefinite" fill="freeze" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle></g>"##
         )?;
-        out.push_str("</g>");
     }
 
     // For curved FK edges, draw Crow's Foot symbols as inline SVG
@@ -799,7 +798,37 @@ mod tests {
         assert!(svg.contains("<rect"));
         assert!(svg.contains("<text"));
         assert!(svg.contains("node-0-header-clip"));
-        assert!(svg.contains("node-0-column-0-clip"));
+        // One clip per badge count: `id` carries the PK badge, `name` none.
+        assert_eq!(svg.matches("<clipPath id=\"node-0-columns-").count(), 2);
+        assert_eq!(svg.matches("url(#node-0-columns-1-clip)").count(), 1);
+        assert_eq!(svg.matches("url(#node-0-columns-0-clip)").count(), 1);
+    }
+
+    #[test]
+    fn test_render_svg_shares_per_kind_defs_and_emits_one_path_per_edge() {
+        let graph = multi_node_graph();
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+
+        assert_eq!(svg.matches("<linearGradient id=\"header-fade-").count(), 3);
+        assert_eq!(
+            svg.matches(r#"fill="url(#header-fade-table)""#).count(),
+            graph.nodes.len()
+        );
+        assert_eq!(
+            svg.matches("<path id=\"edge-path-").count(),
+            graph.edges.len()
+        );
+        assert!(!svg.contains("edge-glow-path"));
+    }
+
+    #[test]
+    fn test_render_svg_runs_fk_particles_only_while_hovered() {
+        let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
+
+        assert!(svg.contains(r#"<g id="edge-0" class="edge edge-kind-foreign-key""#));
+        assert_eq!(svg.matches("<animateMotion").count(), 1);
+        assert!(svg.contains(r#"begin="edge-0.mouseenter" end="edge-0.mouseleave""#));
+        assert!(!svg.contains("begin=\"-"));
     }
 
     #[test]

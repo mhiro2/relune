@@ -1,3 +1,4 @@
+import { createEdgeParticles } from './edge_particles';
 import {
   computeHoverPreview,
   computeNeighborHighlights,
@@ -98,6 +99,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
   if (svgRoot && drawerEls && hoverEls) {
     const runtime = getViewerRuntime();
+    const edgeParticles = createEdgeParticles(svgRoot);
 
     const getNodes = (): NodeListOf<Element> =>
       svgRoot.querySelectorAll('.node[data-id], .table-node[data-table-id]');
@@ -239,6 +241,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           }
         }
       }
+      edgeParticles.sync();
       syncObjectBrowser();
     };
 
