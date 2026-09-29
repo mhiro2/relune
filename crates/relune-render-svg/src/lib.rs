@@ -1142,6 +1142,24 @@ mod tests {
     }
 
     #[test]
+    fn test_column_separators_sit_between_rows_of_each_node() {
+        // The first node previously got no separators and every later node got
+        // one above its first column.
+        let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
+        let per_node: Vec<usize> = svg
+            .split("<g class=\"table-node")
+            .skip(1)
+            .map(|node| node.matches("class=\"column-separator\"").count())
+            .collect();
+        let expected: Vec<usize> = multi_node_graph()
+            .nodes
+            .iter()
+            .map(|node| node.columns.len().saturating_sub(1))
+            .collect();
+        assert_eq!(per_node, expected);
+    }
+
+    #[test]
     fn test_render_svg_with_empty_columns() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {

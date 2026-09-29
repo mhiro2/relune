@@ -336,7 +336,7 @@ pub(crate) fn render_node_internal(
             escape_attribute(&column.name),
             column.flags.nullable
         )?;
-        if index > 0 {
+        if column_index > 0 {
             let separator_y = line_y - 12.0;
             write!(
                 out,
