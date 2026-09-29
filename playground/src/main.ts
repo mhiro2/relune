@@ -34,9 +34,11 @@ import {
   parsePositiveInteger,
   parseQueryState,
   parseStoredState,
+  readStorage,
   serializePatterns,
   splitPatterns,
   toBuiltinExampleId,
+  writeStorage,
 } from './state.js';
 import type {
   ButtonAction,
@@ -479,7 +481,7 @@ async function loadExamples(): Promise<void> {
 }
 
 function restoreInitialState(): void {
-  const storedState = parseStoredState(localStorage.getItem(STORAGE_KEY));
+  const storedState = parseStoredState(readStorage(() => localStorage, STORAGE_KEY));
   const queryState = parseQueryState(window.location.search);
   const initialState: PersistedState = {
     ...DEFAULT_STATE,
@@ -1848,7 +1850,7 @@ async function copyText(content: string, successStatus: string): Promise<void> {
 
 function persistState(): void {
   const state = collectState();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeStorage(() => localStorage, STORAGE_KEY, JSON.stringify(state));
   syncQueryString(buildQueryString(state));
 }
 

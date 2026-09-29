@@ -62,6 +62,30 @@ export function parsePositiveInteger(rawValue: string): number | undefined {
   return parsed;
 }
 
+/**
+ * Reads a storage key, treating storage that is blocked (a `SecurityError`
+ * from privacy settings or sandboxed frames) as empty.
+ */
+export function readStorage(getStorage: () => Storage, key: string): string | null {
+  try {
+    return getStorage().getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes a storage key on a best-effort basis, so a full quota or blocked
+ * storage never interrupts rendering.
+ */
+export function writeStorage(getStorage: () => Storage, key: string, value: string): void {
+  try {
+    getStorage().setItem(key, value);
+  } catch {
+    // Persistence is optional; the query string still carries the settings.
+  }
+}
+
 /** Parses the persisted localStorage payload, dropping anything malformed. */
 export function parseStoredState(rawValue: string | null): Partial<PersistedState> {
   if (!rawValue) {
