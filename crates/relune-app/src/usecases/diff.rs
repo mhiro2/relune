@@ -1047,6 +1047,7 @@ fn annotate_modified_table(
             change_indicator(col.change_kind),
             col.column_name
         ));
+        overlay.set_column_change(stable_id, &col.column_name, col.change_kind);
     }
     for fk in &table_diff.fk_diffs {
         let name = fk.name.as_deref().unwrap_or("unnamed FK");
@@ -1120,6 +1121,7 @@ fn annotate_modified_view(overlay: &mut DiagramOverlay, view_id: &str, view_diff
             change_indicator(column.change_kind),
             column.column_name
         ));
+        overlay.set_column_change(view_id, &column.column_name, column.change_kind);
     }
     if view_diff.definition_changed() {
         details.push("~ definition".to_string());
@@ -1142,6 +1144,10 @@ fn annotate_modified_view(overlay: &mut DiagramOverlay, view_id: &str, view_diff
 }
 
 fn annotate_modified_enum(overlay: &mut DiagramOverlay, enum_id: &str, enum_diff: &EnumDiff) {
+    // Enum nodes list their values as columns.
+    for value_diff in &enum_diff.value_diffs {
+        overlay.set_column_change(enum_id, &value_diff.value, value_diff.change_kind);
+    }
     let details = enum_diff
         .value_diffs
         .iter()
@@ -1607,8 +1613,20 @@ mod tests {
         let view_overlay = overlay.node("active_users").expect("view overlay");
         assert_eq!(view_overlay.max_severity(), Some(OverlaySeverity::Warning));
 
+        assert_eq!(
+            view_overlay.column_changes,
+            std::collections::BTreeMap::from([("status".to_string(), ChangeKind::Removed)])
+        );
+
         let enum_overlay = overlay.node("status").expect("enum overlay");
         assert_eq!(enum_overlay.max_severity(), Some(OverlaySeverity::Warning));
+        assert_eq!(
+            enum_overlay.column_changes,
+            std::collections::BTreeMap::from([
+                ("draft".to_string(), ChangeKind::Modified),
+                ("published".to_string(), ChangeKind::Modified),
+            ])
+        );
     }
 
     #[test]
@@ -1648,6 +1666,31 @@ mod tests {
             Some("diff-modified")
         );
         assert_eq!(node.annotations[0].severity, OverlaySeverity::Warning);
+    }
+
+    #[test]
+    fn test_build_diff_overlay_records_column_changes_apart_from_same_named_index() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY, email TEXT);";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY, email VARCHAR(255), name TEXT);\n\
+            CREATE INDEX id ON users (email);\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let node = overlay.node("users").expect("should have users overlay");
+        assert_eq!(
+            node.column_changes,
+            std::collections::BTreeMap::from([
+                ("email".to_string(), ChangeKind::Modified),
+                ("name".to_string(), ChangeKind::Added),
+            ])
+        );
     }
 
     #[test]
