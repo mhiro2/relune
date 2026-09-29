@@ -65,6 +65,19 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     );
   }
 
+  // List values are written as repeated parameters (`ft=a&ft=b`) rather than
+  // joined with a separator, since column types such as `numeric(10,2)` and
+  // quoted table names can contain any character.
+  function appendList(params: URLSearchParams, param: string, values: readonly string[]): void {
+    for (const value of values) {
+      params.append(param, value);
+    }
+  }
+
+  function readList(params: URLSearchParams, param: string): string[] {
+    return params.getAll(param).filter((value) => value !== '');
+  }
+
   function hasMetadataSearchMatch(query: string): boolean {
     return query.trim() !== '' && tables.some((table) => matchesTableQuery(table, query));
   }
@@ -110,10 +123,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     }
 
     for (const { param, facetId } of FACET_PARAMS) {
-      const selection = runtime.filters?.getFacetSelection(facetId as any) ?? [];
-      if (selection.length > 0) {
-        params.set(param, selection.join(','));
-      }
+      appendList(params, param, runtime.filters?.getFacetSelection(facetId as any) ?? []);
     }
 
     const filterMode = runtime.filters?.getMode();
@@ -121,15 +131,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       params.set(PARAM_FILTER_MODE, filterMode);
     }
 
-    const hiddenGroups = runtime.groups?.getHiddenGroups() ?? [];
-    if (hiddenGroups.length > 0) {
-      params.set(PARAM_HIDDEN_GROUPS, hiddenGroups.join(','));
-    }
-
-    const collapsed = runtime.collapse?.getCollapsed() ?? [];
-    if (collapsed.length > 0) {
-      params.set(PARAM_COLLAPSED, collapsed.join(','));
-    }
+    appendList(params, PARAM_HIDDEN_GROUPS, runtime.groups?.getHiddenGroups() ?? []);
+    appendList(params, PARAM_COLLAPSED, runtime.collapse?.getCollapsed() ?? []);
 
     if (runtime.minimap?.isHidden() === false) {
       params.set(PARAM_MINIMAP_VISIBLE, '1');
@@ -199,31 +202,21 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
 
     // Restore facet selections
     for (const { param, facetId } of FACET_PARAMS) {
-      const raw = params.get(param);
-      if (raw !== null && raw !== '') {
-        const values = raw.split(',').filter((v) => v !== '');
-        if (values.length > 0) {
-          runtime.filters?.setFacetSelection(facetId as any, values);
-        }
+      const values = readList(params, param);
+      if (values.length > 0) {
+        runtime.filters?.setFacetSelection(facetId as any, values);
       }
     }
 
     // Restore hidden groups
-    const hgRaw = params.get(PARAM_HIDDEN_GROUPS);
-    if (hgRaw !== null && hgRaw !== '') {
-      const hiddenGroups = hgRaw.split(',').filter((g) => g !== '');
-      for (const groupId of hiddenGroups) {
-        runtime.groups?.setVisibility(groupId, false);
-      }
+    for (const groupId of readList(params, PARAM_HIDDEN_GROUPS)) {
+      runtime.groups?.setVisibility(groupId, false);
     }
 
     // Restore collapsed tables
-    const collapsedRaw = params.get(PARAM_COLLAPSED);
-    if (collapsedRaw !== null && collapsedRaw !== '') {
-      const collapsed = collapsedRaw.split(',').filter((id) => id !== '' && tableIds.has(id));
-      if (collapsed.length > 0) {
-        runtime.collapse?.setCollapsed(collapsed);
-      }
+    const collapsed = readList(params, PARAM_COLLAPSED).filter((id) => tableIds.has(id));
+    if (collapsed.length > 0) {
+      runtime.collapse?.setCollapsed(collapsed);
     }
 
     // Restore selected table (last, so it can center on restored viewport scale)
