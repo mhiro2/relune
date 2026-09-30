@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use relune_core::ChangeKind;
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -49,6 +50,9 @@ pub struct Annotation {
 pub struct NodeOverlay {
     /// Annotations on this node.
     pub annotations: Vec<Annotation>,
+    /// Diff status of individual columns, keyed by column name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub column_changes: BTreeMap<String, ChangeKind>,
 }
 
 impl NodeOverlay {
@@ -201,6 +205,20 @@ impl DiagramOverlay {
             .or_default()
             .annotations
             .push(annotation);
+    }
+
+    /// Record the diff status of a node's column, creating the entry if needed.
+    pub fn set_column_change(
+        &mut self,
+        node_id: impl Into<String>,
+        column: impl Into<String>,
+        change: ChangeKind,
+    ) {
+        self.nodes
+            .entry(node_id.into())
+            .or_default()
+            .column_changes
+            .insert(column.into(), change);
     }
 
     /// Add an annotation to an edge, creating the entry if needed.

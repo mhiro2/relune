@@ -1,5 +1,5 @@
 import { syncEdgeDimming } from './edge_filters';
-import { parseReluneMetadata, tableDisplayName, type TableMetadata } from './metadata';
+import { parseReluneMetadata, type TableMetadata } from './metadata';
 import { computeSearchMatches } from './search_actions';
 import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
@@ -13,10 +13,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const metadata = parseReluneMetadata();
     const tables: TableMetadata[] = metadata?.tables ?? [];
 
-    const tableNames: Record<string, string> = {};
-    for (const table of tables) {
-      tableNames[table.id] = tableDisplayName(table);
-    }
+    const tablesById = new Map(tables.map((table) => [table.id, table]));
 
     const performSearch = (query: string): void => {
       const q = query.toLowerCase().trim();
@@ -40,7 +37,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
       searchClear?.classList.add('visible');
 
-      const { results, matchCount, total } = computeSearchMatches(nodes, tableNames, query);
+      const { results, matchCount, total } = computeSearchMatches(nodes, tablesById, query);
       for (const { node, matches } of results) {
         if (matches) {
           node.classList.remove('dimmed-by-search');

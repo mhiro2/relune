@@ -164,7 +164,7 @@ describe('restoring state from the URL hash', () => {
     history.replaceState(
       null,
       '',
-      '/diagram.html#q=email&t=public.posts&s=1.5000&x=-20.0&y=10.0&fs=public&ft=text,varchar&fm=focus&hg=g-public&c=public.users&mv=1',
+      '/diagram.html#q=email&t=public.posts&s=1.5000&x=-20.0&y=10.0&fs=public&ft=text&ft=numeric%2810%2C2%29&fm=focus&hg=g-public&c=public.users&mv=1',
     );
     await loadUrlState();
     // Nothing is restored until the modules the page provides report ready.
@@ -176,7 +176,7 @@ describe('restoring state from the URL hash', () => {
     expect(state.mode).toBe('focus');
     expect(Object.fromEntries(state.facets)).toEqual({
       schema: ['public'],
-      columnType: ['text', 'varchar'],
+      columnType: ['text', 'numeric(10,2)'],
     });
     expect(state.hiddenGroups).toEqual(['g-public']);
     expect(state.collapsed).toEqual(['public.users']);
@@ -190,7 +190,7 @@ describe('restoring state from the URL hash', () => {
     history.replaceState(
       null,
       '',
-      '/diagram.html#q=invoices&t=public.missing&s=9&x=0&y=0&fm=bogus&c=public.missing,public.posts',
+      '/diagram.html#q=invoices&t=public.missing&s=9&x=0&y=0&fm=bogus&c=public.missing&c=public.posts',
     );
     await loadUrlState();
 
@@ -245,6 +245,7 @@ describe('writing state to the URL hash', () => {
     state.selected = 'public.users';
     state.viewport = { scale: 1.25, panX: 12.34, panY: -5 };
     state.facets.set('kind', ['table', 'view']);
+    state.facets.set('columnType', ['numeric(10,2)']);
     state.mode = 'hide';
     state.hiddenGroups = ['g-public'];
     state.collapsed = ['public.posts'];
@@ -256,7 +257,7 @@ describe('writing state to the URL hash', () => {
     vi.advanceTimersByTime(300);
     expect(push).toHaveBeenCalledOnce();
     expect(location.hash).toBe(
-      '#q=user&t=public.users&s=1.2500&x=12.3&y=-5.0&fk=table%2Cview&fm=hide&hg=g-public&c=public.posts&mv=1',
+      '#q=user&t=public.users&s=1.2500&x=12.3&y=-5.0&fk=table&fk=view&ft=numeric%2810%2C2%29&fm=hide&hg=g-public&c=public.posts&mv=1',
     );
   });
 

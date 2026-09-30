@@ -1,5 +1,4 @@
 import type { HighlightState } from './highlight_state';
-import type { TableMetadata } from './metadata';
 
 interface HighlightNeighborhood {
   neighborIds: Set<string>;
@@ -87,22 +86,4 @@ export function computeNeighborHighlights(
 
 export function computeHoverPreview(nodeId: string, state: HighlightState): HoverPreview {
   return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
-}
-
-export function matchesBrowserQuery(table: TableMetadata, query: string): boolean {
-  const needle = query.trim().toLowerCase();
-  if (needle === '') {
-    return true;
-  }
-
-  return (
-    table.id.toLowerCase().includes(needle) ||
-    table.label.toLowerCase().includes(needle) ||
-    table.table_name.toLowerCase().includes(needle) ||
-    table.columns.some(
-      (column) =>
-        column.name.toLowerCase().includes(needle) ||
-        column.data_type.toLowerCase().includes(needle),
-    )
-  );
 }

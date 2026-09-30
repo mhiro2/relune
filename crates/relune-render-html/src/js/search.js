@@ -43,20 +43,22 @@
   }
 
   // ts/search_actions.ts
-  function computeSearchMatches(nodes, tableNames, query) {
-    const q = query.toLowerCase().trim();
+  function matchesTableQuery(table, query) {
+    const needle = query.trim().toLowerCase();
+    if (needle === "") {
+      return true;
+    }
+    const includes = (value) => (value ?? "").toLowerCase().includes(needle);
+    return includes(tableDisplayName(table)) || includes(table.id) || includes(table.table_name) || includes(table.schema_name) || table.columns.some((column) => includes(column.name) || includes(column.data_type));
+  }
+  function computeSearchMatches(nodes, tablesById, query) {
+    const needle = query.trim().toLowerCase();
     const results = [];
     let matchCount = 0;
     nodes.forEach((node) => {
-      if (q === "") {
-        results.push({ node, matches: true });
-        matchCount += 1;
-        return;
-      }
       const tableId = node.getAttribute("data-id") ?? node.getAttribute("data-table-id") ?? "";
-      const tableName = tableNames[tableId] ?? tableId;
-      const nodeText = node.textContent?.toLowerCase() ?? "";
-      const matches = tableName.toLowerCase().includes(q) || tableId.toLowerCase().includes(q) || nodeText.includes(q);
+      const table = tablesById.get(tableId);
+      const matches = table === void 0 ? tableId.toLowerCase().includes(needle) : matchesTableQuery(table, query);
       results.push({ node, matches });
       if (matches) matchCount += 1;
     });
@@ -119,10 +121,7 @@
       const runtime = getViewerRuntime();
       const metadata = parseReluneMetadata();
       const tables = metadata?.tables ?? [];
-      const tableNames = {};
-      for (const table of tables) {
-        tableNames[table.id] = tableDisplayName(table);
-      }
+      const tablesById = new Map(tables.map((table) => [table.id, table]));
       const performSearch = (query) => {
         const q = query.toLowerCase().trim();
         const nodes = svgRoot.querySelectorAll(".node");
@@ -142,7 +141,7 @@
           return;
         }
         searchClear?.classList.add("visible");
-        const { results, matchCount, total } = computeSearchMatches(nodes, tableNames, query);
+        const { results, matchCount, total } = computeSearchMatches(nodes, tablesById, query);
         for (const { node, matches } of results) {
           if (matches) {
             node.classList.remove("dimmed-by-search");

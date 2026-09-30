@@ -7,10 +7,12 @@ import {
   parsePositiveInteger,
   parseQueryState,
   parseStoredState,
+  readStorage,
   sanitizeState,
   serializePatterns,
   splitPatterns,
   toBuiltinExampleId,
+  writeStorage,
 } from './state';
 import type { PersistedState } from './types';
 
@@ -233,5 +235,37 @@ describe('toBuiltinExampleId', () => {
   it('maps the custom example onto the default built-in one', () => {
     expect(toBuiltinExampleId('custom')).toBe('simple-blog');
     expect(toBuiltinExampleId('ecommerce')).toBe('ecommerce');
+  });
+});
+
+describe('readStorage / writeStorage', () => {
+  const blocked = (): Storage => {
+    throw new DOMException('The operation is insecure.', 'SecurityError');
+  };
+  const full = {
+    getItem: () => 'saved',
+    setItem: () => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    },
+  } as unknown as Storage;
+
+  it('passes values through working storage', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    } as unknown as Storage;
+    writeStorage(() => storage, 'k', 'v');
+    expect(readStorage(() => storage, 'k')).toBe('v');
+  });
+
+  it('treats blocked storage as empty and unwritable', () => {
+    expect(readStorage(blocked, 'k')).toBeNull();
+    expect(() => writeStorage(blocked, 'k', 'v')).not.toThrow();
+  });
+
+  it('ignores a write that exceeds the quota', () => {
+    expect(readStorage(() => full, 'k')).toBe('saved');
+    expect(() => writeStorage(() => full, 'k', 'v')).not.toThrow();
   });
 });

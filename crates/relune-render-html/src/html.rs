@@ -690,7 +690,7 @@ mod tests {
 
         assert!(html.contains("computeNeighborHighlights"));
         assert!(html.contains("computeHoverPreview"));
-        assert!(html.contains("clearHighlightClasses"));
+        assert!(html.contains("createHighlightPainter"));
         assert!(html.contains("renderHoverPopover"));
         assert!(html.contains("hoveredNode"));
         assert!(html.contains("inboundMap"));

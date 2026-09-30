@@ -133,12 +133,6 @@ pub fn build_metadata_with_overlay(
                 .map(|no| annotations_to_issues(&no.annotations))
                 .unwrap_or_default();
             let diff_kind = node_overlay.and_then(|no| extract_diff_kind(&no.annotations));
-            // Build per-column diff_kind map from the table-level diff hint
-            let column_diff_kinds = diff_kind
-                .as_deref()
-                .and(node_overlay)
-                .map(|no| extract_column_diff_kinds(&no.annotations))
-                .unwrap_or_default();
             TableMetadata {
                 id: node.id.clone(),
                 label: node.label.clone(),
@@ -149,7 +143,9 @@ pub fn build_metadata_with_overlay(
                     .columns
                     .iter()
                     .map(|c| {
-                        let col_diff = column_diff_kinds.get(c.name.as_str()).copied();
+                        let col_diff = node_overlay
+                            .and_then(|no| no.column_changes.get(&c.name))
+                            .copied();
                         ColumnMetadata {
                             name: c.name.clone(),
                             data_type: c.data_type.clone(),
@@ -157,7 +153,7 @@ pub fn build_metadata_with_overlay(
                             is_primary_key: c.is_primary_key,
                             is_foreign_key: c.is_foreign_key,
                             is_indexed: c.is_indexed,
-                            diff_kind: col_diff.map(ToString::to_string),
+                            diff_kind: col_diff.map(|change| change.to_string()),
                         }
                     })
                     .collect(),
@@ -226,34 +222,6 @@ fn extract_diff_kind(annotations: &[relune_layout::overlay::Annotation]) -> Opti
             _ => None,
         })
     })
-}
-
-/// Parse per-column diff kinds from the hint of a `diff-modified` annotation.
-///
-/// The hint format is: `"+ col_a, - col_b, ~ col_c"`.
-fn extract_column_diff_kinds(
-    annotations: &[relune_layout::overlay::Annotation],
-) -> std::collections::HashMap<&str, &str> {
-    let mut map = std::collections::HashMap::new();
-    for annotation in annotations {
-        if annotation.rule_id.as_deref() != Some("diff-modified") {
-            continue;
-        }
-        let Some(ref hint) = annotation.hint else {
-            continue;
-        };
-        for part in hint.split(", ") {
-            let part = part.trim();
-            if let Some(name) = part.strip_prefix("+ ") {
-                map.insert(name, "added");
-            } else if let Some(name) = part.strip_prefix("- ") {
-                map.insert(name, "removed");
-            } else if let Some(name) = part.strip_prefix("~ ") {
-                map.insert(name, "modified");
-            }
-        }
-    }
-    map
 }
 
 fn annotations_to_issues(annotations: &[relune_layout::overlay::Annotation]) -> Vec<IssueMetadata> {
@@ -490,6 +458,34 @@ mod tests {
         assert_eq!(edge.issues.len(), 1);
         assert_eq!(edge.issues[0].severity, "info");
         assert_eq!(edge.issues[0].message, "Missing index on FK");
+    }
+
+    #[test]
+    fn test_metadata_column_diff_kind_comes_from_column_changes() {
+        let graph = create_test_graph();
+        let mut overlay = DiagramOverlay::new();
+        // An index that shares the column's name shows up in the summary hint
+        // but must not mark the column itself as changed.
+        overlay.add_node_annotation(
+            "users",
+            relune_layout::Annotation {
+                severity: relune_layout::OverlaySeverity::Warning,
+                message: "Modified (1 changes)".to_string(),
+                hint: Some("+ id".to_string()),
+                rule_id: Some("diff-modified".to_string()),
+            },
+        );
+
+        let metadata = build_metadata_with_overlay(&graph, Some(&overlay));
+        assert_eq!(metadata.tables[0].diff_kind.as_deref(), Some("modified"));
+        assert_eq!(metadata.tables[0].columns[0].diff_kind, None);
+
+        overlay.set_column_change("users", "id", relune_core::ChangeKind::Modified);
+        let metadata = build_metadata_with_overlay(&graph, Some(&overlay));
+        assert_eq!(
+            metadata.tables[0].columns[0].diff_kind.as_deref(),
+            Some("modified")
+        );
     }
 
     #[test]

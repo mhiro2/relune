@@ -10,6 +10,11 @@ import { getViewerRuntime, isEditableTarget } from './viewer_api';
       }
       return;
     }
+    // Leave Cmd/Ctrl/Alt chords (find, zoom, window management) to the
+    // browser and OS; Shift stays allowed because `+` and `F` need it.
+    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+      return;
+    }
 
     switch (event.key) {
       case '/':
@@ -33,11 +38,6 @@ import { getViewerRuntime, isEditableTarget } from './viewer_api';
         break;
       case 'm':
       case 'M':
-        // Skip when a modifier is held (Cmd+M, Ctrl+M, Alt+M) so we don't
-        // shadow OS- or browser-owned shortcuts.
-        if (event.ctrlKey || event.metaKey || event.altKey) {
-          break;
-        }
         event.preventDefault();
         if (runtime.minimap !== undefined) {
           runtime.minimap.setHidden(!runtime.minimap.isHidden());

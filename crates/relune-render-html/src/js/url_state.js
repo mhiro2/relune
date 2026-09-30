@@ -18,6 +18,16 @@
     return table.label || table.table_name || table.id;
   }
 
+  // ts/search_actions.ts
+  function matchesTableQuery(table, query) {
+    const needle = query.trim().toLowerCase();
+    if (needle === "") {
+      return true;
+    }
+    const includes = (value) => (value ?? "").toLowerCase().includes(needle);
+    return includes(tableDisplayName(table)) || includes(table.id) || includes(table.table_name) || includes(table.schema_name) || table.columns.some((column) => includes(column.name) || includes(column.data_type));
+  }
+
   // ts/viewer_api.ts
   var VIEWER_RUNTIME_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.runtime");
   var VIEWER_READY_MODULES_KEY = /* @__PURE__ */ Symbol.for("relune.viewer.ready_modules");
@@ -66,22 +76,14 @@
       return Math.max(extent * MAX_VIEWPORT_SCALE * 4, MIN_VIEWPORT_PAN_LIMIT);
     }, hasValidViewportState2 = function(scale, panX, panY) {
       return Number.isFinite(scale) && Number.isFinite(panX) && Number.isFinite(panY) && scale >= MIN_VIEWPORT_SCALE && scale <= MAX_VIEWPORT_SCALE && Math.abs(panX) <= maxViewportPanMagnitude2() && Math.abs(panY) <= maxViewportPanMagnitude2();
-    }, matchesMetadataSearch2 = function(table, query) {
-      const normalizedQuery = query.trim().toLowerCase();
-      if (normalizedQuery === "") {
-        return false;
+    }, appendList2 = function(params, param, values) {
+      for (const value of values) {
+        params.append(param, value);
       }
-      const searchable = [
-        tableDisplayName(table),
-        table.id,
-        table.table_name,
-        table.schema_name ?? "",
-        table.kind,
-        ...(table.columns ?? []).flatMap((column) => [column.name, column.data_type ?? ""])
-      ].join("\n").toLowerCase();
-      return searchable.includes(normalizedQuery);
+    }, readList2 = function(params, param) {
+      return params.getAll(param).filter((value) => value !== "");
     }, hasMetadataSearchMatch2 = function(query) {
-      return tables.some((table) => matchesMetadataSearch2(table, query));
+      return query.trim() !== "" && tables.some((table) => matchesTableQuery(table, query));
     }, scheduleWrite2 = function() {
       if (writeTimer !== null) {
         clearTimeout(writeTimer);
@@ -107,23 +109,14 @@
         params.set(PARAM_PAN_Y, viewport.panY.toFixed(1));
       }
       for (const { param, facetId } of FACET_PARAMS) {
-        const selection = runtime.filters?.getFacetSelection(facetId) ?? [];
-        if (selection.length > 0) {
-          params.set(param, selection.join(","));
-        }
+        appendList2(params, param, runtime.filters?.getFacetSelection(facetId) ?? []);
       }
       const filterMode = runtime.filters?.getMode();
       if (filterMode !== void 0 && filterMode !== "dim") {
         params.set(PARAM_FILTER_MODE, filterMode);
       }
-      const hiddenGroups = runtime.groups?.getHiddenGroups() ?? [];
-      if (hiddenGroups.length > 0) {
-        params.set(PARAM_HIDDEN_GROUPS, hiddenGroups.join(","));
-      }
-      const collapsed = runtime.collapse?.getCollapsed() ?? [];
-      if (collapsed.length > 0) {
-        params.set(PARAM_COLLAPSED, collapsed.join(","));
-      }
+      appendList2(params, PARAM_HIDDEN_GROUPS, runtime.groups?.getHiddenGroups() ?? []);
+      appendList2(params, PARAM_COLLAPSED, runtime.collapse?.getCollapsed() ?? []);
       if (runtime.minimap?.isHidden() === false) {
         params.set(PARAM_MINIMAP_VISIBLE, "1");
       }
@@ -169,27 +162,17 @@
         runtime.filters?.setMode(fmRaw);
       }
       for (const { param, facetId } of FACET_PARAMS) {
-        const raw = params.get(param);
-        if (raw !== null && raw !== "") {
-          const values = raw.split(",").filter((v) => v !== "");
-          if (values.length > 0) {
-            runtime.filters?.setFacetSelection(facetId, values);
-          }
+        const values = readList2(params, param);
+        if (values.length > 0) {
+          runtime.filters?.setFacetSelection(facetId, values);
         }
       }
-      const hgRaw = params.get(PARAM_HIDDEN_GROUPS);
-      if (hgRaw !== null && hgRaw !== "") {
-        const hiddenGroups = hgRaw.split(",").filter((g) => g !== "");
-        for (const groupId of hiddenGroups) {
-          runtime.groups?.setVisibility(groupId, false);
-        }
+      for (const groupId of readList2(params, PARAM_HIDDEN_GROUPS)) {
+        runtime.groups?.setVisibility(groupId, false);
       }
-      const collapsedRaw = params.get(PARAM_COLLAPSED);
-      if (collapsedRaw !== null && collapsedRaw !== "") {
-        const collapsed = collapsedRaw.split(",").filter((id) => id !== "" && tableIds.has(id));
-        if (collapsed.length > 0) {
-          runtime.collapse?.setCollapsed(collapsed);
-        }
+      const collapsed = readList2(params, PARAM_COLLAPSED).filter((id) => tableIds.has(id));
+      if (collapsed.length > 0) {
+        runtime.collapse?.setCollapsed(collapsed);
       }
       const table = params.get(PARAM_TABLE);
       if (table !== null && table !== "" && tableIds.has(table)) {
@@ -220,7 +203,7 @@
       }
       return modules;
     };
-    readHash = readHash2, maxViewportPanMagnitude = maxViewportPanMagnitude2, hasValidViewportState = hasValidViewportState2, matchesMetadataSearch = matchesMetadataSearch2, hasMetadataSearchMatch = hasMetadataSearchMatch2, scheduleWrite = scheduleWrite2, scheduleDiscreteWrite = scheduleDiscreteWrite2, buildHashParams = buildHashParams2, writeHash = writeHash2, restoreFromHash = restoreFromHash2, expectedViewerModules = expectedViewerModules2;
+    readHash = readHash2, maxViewportPanMagnitude = maxViewportPanMagnitude2, hasValidViewportState = hasValidViewportState2, appendList = appendList2, readList = readList2, hasMetadataSearchMatch = hasMetadataSearchMatch2, scheduleWrite = scheduleWrite2, scheduleDiscreteWrite = scheduleDiscreteWrite2, buildHashParams = buildHashParams2, writeHash = writeHash2, restoreFromHash = restoreFromHash2, expectedViewerModules = expectedViewerModules2;
     const runtime = getViewerRuntime();
     const metadata = parseReluneMetadata();
     const tables = metadata?.tables ?? [];
@@ -270,7 +253,8 @@
   var readHash;
   var maxViewportPanMagnitude;
   var hasValidViewportState;
-  var matchesMetadataSearch;
+  var appendList;
+  var readList;
   var hasMetadataSearchMatch;
   var scheduleWrite;
   var scheduleDiscreteWrite;

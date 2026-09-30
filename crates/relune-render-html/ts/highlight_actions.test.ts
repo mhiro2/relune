@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  computeHoverPreview,
-  computeNeighborHighlights,
-  matchesBrowserQuery,
-} from './highlight_actions';
+import { computeHoverPreview, computeNeighborHighlights } from './highlight_actions';
 import { createHighlightState } from './highlight_state';
-import { column, edge, table } from './test_fixtures';
+import { edge, table } from './test_fixtures';
 
 // users <- posts <- comments -> users, plus tags <- post_tags -> posts
 const tables = ['users', 'posts', 'comments', 'tags', 'post_tags'].map((id) => table(id));
@@ -87,24 +83,5 @@ describe('computeHoverPreview', () => {
     expect(preview.hoveredId).toBe('tags');
     expect([...preview.neighborIds]).toEqual(['post_tags']);
     expect([...preview.connectedEdgeIndices]).toEqual([4]);
-  });
-});
-
-describe('matchesBrowserQuery', () => {
-  const users = table('public.users', {
-    label: 'Users',
-    table_name: 'users',
-    columns: [column('email', 'citext')],
-  });
-
-  it('matches ids, labels, table names, columns and column types', () => {
-    for (const query of ['public.', 'USERS', 'email', 'citext', '  Email  ']) {
-      expect(matchesBrowserQuery(users, query)).toBe(true);
-    }
-    expect(matchesBrowserQuery(users, 'orders')).toBe(false);
-  });
-
-  it('treats a blank query as matching everything', () => {
-    expect(matchesBrowserQuery(users, '   ')).toBe(true);
   });
 });

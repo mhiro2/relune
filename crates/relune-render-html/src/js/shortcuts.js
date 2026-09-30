@@ -26,6 +26,9 @@
         }
         return;
       }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+        return;
+      }
       switch (event.key) {
         case "/":
           event.preventDefault();
@@ -48,9 +51,6 @@
           break;
         case "m":
         case "M":
-          if (event.ctrlKey || event.metaKey || event.altKey) {
-            break;
-          }
           event.preventDefault();
           if (runtime.minimap !== void 0) {
             runtime.minimap.setHidden(!runtime.minimap.isHidden());

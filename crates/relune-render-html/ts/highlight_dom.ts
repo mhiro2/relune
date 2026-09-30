@@ -54,84 +54,112 @@ function metricCard(label: string, value: string): HTMLDivElement {
 
 // ── SVG highlight classes ───────────────────────────────────────────────────
 
-export type NodeQuery = () => NodeListOf<Element>;
-export type NodeIdFn = (node: Element) => string | null;
+/** Diagram elements indexed once, so highlighting never re-queries the SVG. */
+export interface HighlightTargets {
+  nodesById: ReadonlyMap<string, Element>;
+  /** Edge elements in metadata order, matching `connectedEdgeIndices`. */
+  edges: readonly Element[];
+}
 
-const SELECTED_NODE_CLASSES = [
+export interface HighlightPainter {
+  clear(): void;
+  applySelected(highlight: NeighborHighlight): void;
+  applyHoverPreview(preview: HoverPreview): void;
+}
+
+const HIGHLIGHT_CLASSES = [
   'highlighted-neighbor',
   'dimmed-by-highlight',
   'selected-node',
   'inbound',
   'outbound',
-];
-const HOVER_NODE_CLASSES = [
   'hover-preview-node',
   'hover-preview-neighbor',
   'hover-inbound',
   'hover-outbound',
+  'hover-preview-edge',
 ];
 
-export function clearHighlightClasses(svgRoot: Element, getNodes: NodeQuery): void {
-  getNodes().forEach((node) => {
-    node.classList.remove(...SELECTED_NODE_CLASSES, ...HOVER_NODE_CLASSES);
-  });
-  svgRoot.querySelectorAll('.edge').forEach((edge) => {
-    edge.classList.remove('highlighted-neighbor', 'dimmed-by-highlight', 'hover-preview-edge');
-  });
-}
+/**
+ * Applies highlight classes and remembers which elements it touched, so
+ * clearing a hover preview only visits the hovered neighborhood instead of
+ * every node and edge in the diagram.
+ */
+export function createHighlightPainter(targets: HighlightTargets): HighlightPainter {
+  const touched = new Set<Element>();
+  const mark = (element: Element, ...classes: string[]): void => {
+    element.classList.add(...classes);
+    touched.add(element);
+  };
+  const directionClasses = (
+    id: string,
+    inbound: ReadonlySet<string>,
+    outbound: ReadonlySet<string>,
+    [inboundClass, outboundClass]: [string, string],
+  ): string[] => {
+    const isInbound = inbound.has(id);
+    const isOutbound = outbound.has(id);
+    if (isInbound && !isOutbound) return [inboundClass];
+    if (isOutbound && !isInbound) return [outboundClass];
+    return [];
+  };
 
-export function applySelectedHighlightClasses(
-  svgRoot: Element,
-  getNodes: NodeQuery,
-  getNodeId: NodeIdFn,
-  highlight: NeighborHighlight,
-): void {
-  getNodes().forEach((node) => {
-    const id = getNodeId(node);
-    if (id === highlight.selectedId) {
-      node.classList.add('selected-node');
-      node.classList.remove('dimmed-by-highlight');
-    } else if (id !== null && highlight.neighborIds.has(id)) {
-      node.classList.add('highlighted-neighbor');
-      const isInbound = highlight.inboundNodeIds.has(id);
-      const isOutbound = highlight.outboundNodeIds.has(id);
-      node.classList.toggle('inbound', isInbound && !isOutbound);
-      node.classList.toggle('outbound', isOutbound && !isInbound);
-      node.classList.remove('dimmed-by-highlight');
-    } else {
-      node.classList.add('dimmed-by-highlight');
-      node.classList.remove('highlighted-neighbor', 'selected-node', 'inbound', 'outbound');
-    }
-  });
+  return {
+    clear(): void {
+      for (const element of touched) {
+        element.classList.remove(...HIGHLIGHT_CLASSES);
+      }
+      touched.clear();
+    },
 
-  svgRoot.querySelectorAll('.edge').forEach((edgeElement, index) => {
-    edgeElement.classList.toggle('highlighted-neighbor', highlight.connectedEdgeIndices.has(index));
-    edgeElement.classList.toggle('dimmed-by-highlight', !highlight.connectedEdgeIndices.has(index));
-  });
-}
+    applySelected(highlight: NeighborHighlight): void {
+      targets.nodesById.forEach((node, id) => {
+        if (id === highlight.selectedId) {
+          mark(node, 'selected-node');
+        } else if (highlight.neighborIds.has(id)) {
+          mark(
+            node,
+            'highlighted-neighbor',
+            ...directionClasses(id, highlight.inboundNodeIds, highlight.outboundNodeIds, [
+              'inbound',
+              'outbound',
+            ]),
+          );
+        } else {
+          mark(node, 'dimmed-by-highlight');
+        }
+      });
+      targets.edges.forEach((edge, index) => {
+        mark(
+          edge,
+          highlight.connectedEdgeIndices.has(index)
+            ? 'highlighted-neighbor'
+            : 'dimmed-by-highlight',
+        );
+      });
+    },
 
-export function applyHoverPreviewClasses(
-  svgRoot: Element,
-  getNodes: NodeQuery,
-  getNodeId: NodeIdFn,
-  preview: HoverPreview,
-): void {
-  getNodes().forEach((node) => {
-    const id = getNodeId(node);
-    if (id === preview.hoveredId) {
-      node.classList.add('hover-preview-node');
-    } else if (id !== null && preview.neighborIds.has(id)) {
-      node.classList.add('hover-preview-neighbor');
-      const isInbound = preview.inboundNodeIds.has(id);
-      const isOutbound = preview.outboundNodeIds.has(id);
-      node.classList.toggle('hover-inbound', isInbound && !isOutbound);
-      node.classList.toggle('hover-outbound', isOutbound && !isInbound);
-    }
-  });
-
-  svgRoot.querySelectorAll('.edge').forEach((edgeElement, index) => {
-    edgeElement.classList.toggle('hover-preview-edge', preview.connectedEdgeIndices.has(index));
-  });
+    applyHoverPreview(preview: HoverPreview): void {
+      const hovered = targets.nodesById.get(preview.hoveredId);
+      if (hovered !== undefined) mark(hovered, 'hover-preview-node');
+      for (const id of preview.neighborIds) {
+        const node = targets.nodesById.get(id);
+        if (node === undefined) continue;
+        mark(
+          node,
+          'hover-preview-neighbor',
+          ...directionClasses(id, preview.inboundNodeIds, preview.outboundNodeIds, [
+            'hover-inbound',
+            'hover-outbound',
+          ]),
+        );
+      }
+      for (const index of preview.connectedEdgeIndices) {
+        const edge = targets.edges[index];
+        if (edge !== undefined) mark(edge, 'hover-preview-edge');
+      }
+    },
+  };
 }
 
 // ── Detail drawer ───────────────────────────────────────────────────────────
@@ -489,47 +517,59 @@ export interface ObjectBrowserItem {
   isHiddenByGroup: boolean;
 }
 
-export function renderObjectBrowser(
-  items: ObjectBrowserItem[],
-  totalCount: number,
+export interface ObjectBrowser {
+  /** Shows `items` in order, reusing each table's button across renders. */
+  render(items: ObjectBrowserItem[], totalCount: number): void;
+}
+
+export function createObjectBrowser(
   listEl: HTMLElement,
   countEl: HTMLElement,
   emptyEl: HTMLElement,
   onSelect: (tableId: string) => void,
-): void {
-  listEl.replaceChildren();
-  countEl.textContent = `${items.length}/${totalCount}`;
-  emptyEl.toggleAttribute('hidden', items.length > 0);
-
-  for (const item of items) {
-    const button = buildObjectBrowserButton(item, onSelect);
-    listEl.appendChild(button);
-  }
+): ObjectBrowser {
+  const buttons = new Map<string, HTMLButtonElement>();
+  return {
+    render(items: ObjectBrowserItem[], totalCount: number): void {
+      countEl.textContent = `${items.length}/${totalCount}`;
+      emptyEl.toggleAttribute('hidden', items.length > 0);
+      listEl.replaceChildren(
+        ...items.map((item) => {
+          let button = buttons.get(item.table.id);
+          if (button === undefined) {
+            button = buildObjectBrowserButton(item.table, onSelect);
+            buttons.set(item.table.id, button);
+          }
+          button.classList.toggle('selected', item.isSelected);
+          button.classList.toggle('filtered-out', item.isDimmedBySearch || item.isExcludedByFilter);
+          button.classList.toggle('hidden-item', item.isHiddenByGroup);
+          return button;
+        }),
+      );
+    },
+  };
 }
 
 function buildObjectBrowserButton(
-  item: ObjectBrowserItem,
+  table: TableMetadata,
   onSelect: (tableId: string) => void,
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'object-browser-item';
-  button.classList.toggle('selected', item.isSelected);
-  button.classList.toggle('filtered-out', item.isDimmedBySearch || item.isExcludedByFilter);
-  button.classList.toggle('hidden-item', item.isHiddenByGroup);
 
   const header = document.createElement('div');
   header.className = 'object-browser-item-header';
 
   const name = document.createElement('span');
   name.className = 'object-browser-item-name';
-  name.textContent = item.table.label || item.table.table_name || item.table.id;
+  name.textContent = table.label || table.table_name || table.id;
 
   const kind = document.createElement('span');
   kind.className = 'object-browser-kind';
-  kind.textContent = item.table.kind;
+  kind.textContent = table.kind;
 
-  const tableIssues = item.table.issues ?? [];
+  const tableIssues = table.issues ?? [];
   if (tableIssues.length > 0) {
     const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
     const maxSeverity = tableIssues.reduce((max, issue) => {
@@ -552,16 +592,16 @@ function buildObjectBrowserButton(
   meta.className = 'object-browser-item-meta';
 
   const counts = document.createElement('span');
-  counts.textContent = `${item.table.columns.length} cols`;
+  counts.textContent = `${table.columns.length} cols`;
 
   const relations = document.createElement('span');
-  relations.textContent = `${item.table.inbound_count} in / ${item.table.outbound_count} out`;
+  relations.textContent = `${table.inbound_count} in / ${table.outbound_count} out`;
 
   meta.append(counts, relations);
   button.append(header, meta);
 
   button.addEventListener('click', () => {
-    onSelect(item.table.id);
+    onSelect(table.id);
   });
 
   return button;
