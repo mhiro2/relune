@@ -511,6 +511,7 @@ mod tests {
     use crate::layout::{
         ColumnFlags, ColumnRelationFlags, LayoutConfig, PositionedColumn, PositionedNode,
     };
+    use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT};
     use crate::route::AttachmentSide;
     use relune_core::{EdgeKind, LayoutDirection, layout::Cardinality};
 
@@ -798,7 +799,7 @@ mod tests {
     ) -> PositionedNode {
         // Match the default node_padding (8) and the shared header/column metrics.
         #[allow(clippy::cast_precision_loss)]
-        let height = (columns.len() as f32).mul_add(18.0, 16.0 + 32.0);
+        let height = (columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, 16.0 + NODE_HEADER_HEIGHT);
         PositionedNode {
             id: id.to_string(),
             label: id.to_string(),

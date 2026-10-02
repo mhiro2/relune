@@ -464,7 +464,7 @@ fn render_edge_internal(
         let label_width = estimate_edge_label_width(&edge.label);
         write!(
             out,
-            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="18" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
+            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="{EDGE_LABEL_HEIGHT}" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
             label_width.mul_add(-0.5, label_x),
             label_y - 12.0,
             label_width,
@@ -609,7 +609,7 @@ const fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
 use escape::{escape_attribute, escape_text};
 use markers::edge_marker_attributes;
 use node::node_label_background;
-use relune_layout::metrics::estimate_edge_label_width;
+use relune_layout::metrics::{EDGE_LABEL_HEIGHT, estimate_edge_label_width};
 
 #[cfg(test)]
 mod tests {
