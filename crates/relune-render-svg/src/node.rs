@@ -3,6 +3,12 @@
 use std::fmt::{self, Write};
 
 use relune_core::NodeKind;
+use relune_layout::metrics::{
+    COLUMN_BADGE_HEIGHT, COLUMN_BADGE_PITCH, COLUMN_BADGE_RIGHT_INSET, COLUMN_BADGE_WIDTH,
+    NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT, NODE_CORNER_RADIUS, NODE_FIRST_COLUMN_BASELINE,
+    NODE_HEADER_BASELINE, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE,
+    NODE_TEXT_INSET, column_badge_reserve, column_display_text,
+};
 use unicode_width::UnicodeWidthChar;
 
 use crate::escape::{escape_attribute, escape_text};
@@ -118,7 +124,7 @@ fn render_column_badge(
 ) -> fmt::Result {
     write!(
         out,
-        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="20" height="13" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
+        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="{COLUMN_BADGE_WIDTH}" height="{COLUMN_BADGE_HEIGHT}" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
         x + 2.5,
         y + 9.5,
     )
@@ -180,16 +186,13 @@ pub(crate) fn column_text_width(
     node: &relune_layout::PositionedNode,
     column: &relune_layout::PositionedColumn,
 ) -> f32 {
-    let icon_slots = column_badge_count(column);
-    if icon_slots == 0 {
-        (node.width - 20.0).max(18.0)
+    let badge_count = column_badge_count(column);
+    let right_reserve = if badge_count == 0 {
+        NODE_TEXT_INSET
     } else {
-        // Badges start at node.width - 22, spaced 24px apart (left edge to left edge).
-        // Reserve space for all badges plus a small gap before the leftmost one.
-        #[allow(clippy::cast_precision_loss)] // Icon counts are tiny and only affect text clipping.
-        let badge_area = (icon_slots as f32 - 1.0).mul_add(24.0, 28.0);
-        (node.width - 10.0 - badge_area).max(18.0)
-    }
+        column_badge_reserve(badge_count)
+    };
+    (node.width - NODE_TEXT_INSET - right_reserve).max(18.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -282,12 +285,12 @@ pub(crate) fn render_node_internal(
 
     write!(
         out,
-        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="{}" stroke="{}" stroke-width="{}" filter="url(#node-shadow)"/>"#,
+        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}" stroke="{}" stroke-width="{}" filter="url(#node-shadow)"/>"#,
         node.x, node.y, node.width, node.height, node_style.body_fill, stroke_color, stroke_width
     )?;
     write!(
         out,
-        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="32" rx="16" ry="16" fill="{}"/>"#,
+        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="{NODE_HEADER_HEIGHT}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}"/>"#,
         node.x, node.y, node.width, node_style.header_fill
     )?;
     // Gradient transition from header to body — eliminates the hard underlay band
@@ -300,20 +303,20 @@ pub(crate) fn render_node_internal(
     )?;
     write!(
         out,
-        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="13" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
-        node.x + 10.0,
+        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_HEADER_FONT_SIZE}" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
+        node.x + NODE_TEXT_INSET,
         node.y + 8.0,
-        (node.width - 54.0).max(40.0),
-        node.x + 10.0,
-        node.y + 21.0,
+        (node.width - NODE_TEXT_INSET - NODE_KIND_LABEL_RESERVE).max(40.0),
+        node.x + NODE_TEXT_INSET,
+        node.y + NODE_HEADER_BASELINE,
         colors.text_primary,
         escape_text(&node.label)
     )?;
     write!(
         out,
         r#"<text class="table-kind" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="9" font-weight="600" text-anchor="end" letter-spacing="0.12em" fill="{}">{}</text>"#,
-        node.x + node.width - 10.0,
-        node.y + 21.0,
+        node.x + node.width - NODE_TEXT_INSET,
+        node.y + NODE_HEADER_BASELINE,
         colors.text_muted,
         escape_text(&kind.to_ascii_uppercase())
     )?;
@@ -340,7 +343,7 @@ pub(crate) fn render_node_internal(
             write!(
                 out,
                 r#"<clipPath id="node-{index}-columns-{badge_count}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}"/></clipPath>"#,
-                node.x + 10.0,
+                node.x + NODE_TEXT_INSET,
                 node.y,
                 column_text_width(node, column),
                 node.height
@@ -348,7 +351,7 @@ pub(crate) fn render_node_internal(
         }
     }
 
-    let mut line_y = node.y + 46.0;
+    let mut line_y = node.y + NODE_FIRST_COLUMN_BASELINE;
     for (column_index, column) in node.columns.iter().enumerate() {
         write!(
             out,
@@ -361,9 +364,9 @@ pub(crate) fn render_node_internal(
             write!(
                 out,
                 r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.38" stroke-width="1"/>"#,
-                node.x + 10.0,
+                node.x + NODE_TEXT_INSET,
                 separator_y,
-                node.x + node.width - 10.0,
+                node.x + node.width - NODE_TEXT_INSET,
                 separator_y,
                 node_style.separator
             )?;
@@ -375,8 +378,8 @@ pub(crate) fn render_node_internal(
         };
         write!(
             out,
-            r#"<text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-columns-{}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11.5" fill="{}"{}>"#,
-            node.x + 10.0,
+            r#"<text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-columns-{}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_COLUMN_FONT_SIZE}" fill="{}"{}>"#,
+            node.x + NODE_TEXT_INSET,
             line_y,
             column_badge_count(column),
             if column.flags.nullable {
@@ -386,39 +389,32 @@ pub(crate) fn render_node_internal(
             },
             font_style,
         )?;
-        if node.kind == NodeKind::Enum {
-            write!(out, "• {}", escape_text(&column.name))?;
-        } else if column.data_type.is_empty() {
-            write!(out, "{}", escape_text(&column.name))?;
-        } else {
-            write!(
-                out,
-                "{}: {}",
-                escape_text(&column.name),
-                escape_text(&column.data_type)
-            )?;
-        }
+        out.push_str(&escape_text(&column_display_text(
+            node.kind,
+            &column.name,
+            &column.data_type,
+        )));
         out.push_str("</text>");
 
-        let mut icon_x = node.x + node.width - 22.0;
+        let mut icon_x = node.x + node.width - COLUMN_BADGE_RIGHT_INSET;
         if column.flags.relation.is_indexed {
             render_idx_indicator(out, icon_x, line_y - 9.0)?;
-            icon_x -= 24.0;
+            icon_x -= COLUMN_BADGE_PITCH;
         }
         if column.flags.relation.is_foreign_key {
             render_fk_indicator(out, icon_x, line_y - 9.0)?;
-            icon_x -= 24.0;
+            icon_x -= COLUMN_BADGE_PITCH;
         }
         if column.flags.relation.is_primary_key {
             render_pk_indicator(out, icon_x, line_y - 8.5)?;
         }
 
         out.push_str("</g>");
-        line_y += 18.0;
+        line_y += NODE_COLUMN_HEIGHT;
     }
     write!(
         out,
-        r#"<rect class="type-filter-overlay" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="16" ry="16" fill="url(#type-filter-hatch)" opacity="0"/>"#,
+        r#"<rect class="type-filter-overlay" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="url(#type-filter-hatch)" opacity="0"/>"#,
         node.x, node.y, node.width, node.height
     )?;
     out.push_str("</g>");

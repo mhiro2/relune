@@ -20,7 +20,7 @@ mod theme;
 
 pub use edge::{EdgeRenderOptions, render_edge};
 pub use error::SvgRenderError;
-pub use geometry::{Point, Rect, clamp, compute_column_y, compute_node_height, lerp};
+pub use geometry::{Point, Rect, clamp, compute_column_y, lerp};
 pub use group::{render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
 pub use options::SvgRenderOptions;

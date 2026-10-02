@@ -6,6 +6,7 @@ use relune_core::LayoutDirection;
 
 use crate::graph::LayoutGraph;
 use crate::layout::{LayoutConfig, PositionedNode};
+use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT};
 use crate::route::AttachmentSide;
 
 /// Base gap between parallel self-loop edges.
@@ -239,10 +240,9 @@ pub(crate) fn column_y_offset_from_center(
     };
     let center_y = node.height / 2.0;
     #[allow(clippy::cast_precision_loss)]
-    let column_y = (col_index as f32).mul_add(
-        config.column_height,
-        config.node_padding + config.header_height,
-    ) + config.column_height / 2.0;
+    let column_y = (col_index as f32)
+        .mul_add(NODE_COLUMN_HEIGHT, config.node_padding + NODE_HEADER_HEIGHT)
+        + NODE_COLUMN_HEIGHT / 2.0;
     let offset = column_y - center_y;
     let max_offset = (center_y - 4.0).max(0.0);
     offset.clamp(-max_offset, max_offset)
@@ -796,7 +796,7 @@ mod tests {
         width: f32,
         columns: &[&str],
     ) -> PositionedNode {
-        // Match LayoutConfig defaults: node_padding=8, header_height=32, column_height=18.
+        // Match the default node_padding (8) and the shared header/column metrics.
         #[allow(clippy::cast_precision_loss)]
         let height = (columns.len() as f32).mul_add(18.0, 16.0 + 32.0);
         PositionedNode {

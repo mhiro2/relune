@@ -9,6 +9,7 @@ pub mod diagram_export;
 pub mod focus;
 pub mod graph;
 pub mod layout;
+pub mod metrics;
 pub mod order;
 pub mod overlay;
 pub mod port;

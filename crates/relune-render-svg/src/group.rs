@@ -3,6 +3,9 @@
 use std::fmt::{self, Write};
 
 use relune_layout::PositionedGroup;
+use relune_layout::metrics::{
+    GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING_EM,
+};
 
 use crate::theme::ThemeColors;
 
@@ -71,8 +74,8 @@ pub fn render_group_label(
     if !group.label.is_empty() {
         write!(
             out,
-            r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em" fill="{}">{}</text>"#,
-            group.x + 12.0,
+            r#"<text class="group-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="{GROUP_LABEL_FONT_SIZE}" font-weight="700" letter-spacing="{GROUP_LABEL_LETTER_SPACING_EM}em" fill="{}">{}</text>"#,
+            group.x + GROUP_LABEL_INSET,
             group.y + 22.0,
             colors.text_secondary,
             escape_text(&group.label)

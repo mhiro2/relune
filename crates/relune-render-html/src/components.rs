@@ -211,3 +211,28 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
 "#,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use relune_layout::metrics::{
+        NODE_FIRST_COLUMN_BASELINE, NODE_KIND_LABEL_RESERVE, NODE_TEXT_INSET,
+    };
+
+    /// The collapse controller positions its overlays with copies of the node
+    /// metrics; this keeps those copies in step with the Rust definitions.
+    #[test]
+    fn collapse_dom_mirrors_node_metrics() {
+        let source = include_str!("../ts/collapse_dom.ts");
+        for (name, value) in [
+            ("KIND_LABEL_RESERVE", NODE_KIND_LABEL_RESERVE),
+            ("FIRST_ROW_BASELINE", NODE_FIRST_COLUMN_BASELINE),
+            ("TEXT_INSET", NODE_TEXT_INSET),
+        ] {
+            let declaration = format!("const {name} = {value};");
+            assert!(
+                source.contains(&declaration),
+                "ts/collapse_dom.ts must declare `{declaration}`"
+            );
+        }
+    }
+}

@@ -4,10 +4,11 @@
   var SVG_NS = "http://www.w3.org/2000/svg";
   var HEADER_SELECTOR = ".table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator";
   var KIND_LABEL_RESERVE = 44;
+  var FIRST_ROW_BASELINE = 46;
+  var TEXT_INSET = 10;
   var INDICATOR_WIDTH = 16;
   var INDICATOR_GAP = 4;
   var MIN_NAME_CLIP_WIDTH = 24;
-  var FIRST_ROW_BASELINE = 46;
   var EXPANDED_GLYPH = "\u25BE";
   var COLLAPSED_GLYPH = "\u25B8";
   function numericAttribute(el, name) {
@@ -50,7 +51,9 @@
     shrinkNameClip(node);
     if (columnCount > 0) {
       const label = `${columnCount} ${columnCount === 1 ? "column" : "columns"} hidden`;
-      node.appendChild(createSvgText("column-count-badge", x + 10, y + FIRST_ROW_BASELINE, label));
+      node.appendChild(
+        createSvgText("column-count-badge", x + TEXT_INSET, y + FIRST_ROW_BASELINE, label)
+      );
     }
     return indicator;
   }
