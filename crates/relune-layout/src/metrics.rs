@@ -48,6 +48,11 @@ pub const GROUP_LABEL_LETTER_SPACING_EM: f32 = 0.12;
 /// Letter spacing of the group label, in pixels.
 pub const GROUP_LABEL_LETTER_SPACING: f32 = GROUP_LABEL_FONT_SIZE * GROUP_LABEL_LETTER_SPACING_EM;
 
+/// Height of the edge label pill.
+pub const EDGE_LABEL_HEIGHT: f32 = 18.0;
+/// Horizontal padding inside the edge label pill, both sides combined.
+pub const EDGE_LABEL_PADDING: f32 = 18.0;
+
 /// Horizontal space a column row reserves at its right end for `badge_count`
 /// badges, including the gap before the leftmost one.
 #[must_use]
@@ -101,6 +106,23 @@ pub fn estimate_text_width(text: &str, font_size: f32) -> f32 {
         .sum()
 }
 
+/// Estimates the width of an edge label pill, including its padding.
+///
+/// The renderer sizes the pill with this value and the layout engine uses
+/// it for label obstacles, so wide (CJK) and zero-width characters count
+/// the same on both sides.
+#[must_use]
+pub fn estimate_edge_label_width(text: &str) -> f32 {
+    text.chars()
+        .map(|ch| match ch.width_cjk().or_else(|| ch.width()) {
+            Some(0) | None => 0.0,
+            Some(1) => 6.4,
+            Some(_) => 12.8,
+        })
+        .sum::<f32>()
+        + EDGE_LABEL_PADDING
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +132,20 @@ mod tests {
         assert!(column_badge_reserve(0).abs() < f32::EPSILON);
         assert!((column_badge_reserve(1) - 28.0).abs() < f32::EPSILON);
         assert!((column_badge_reserve(3) - 76.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn edge_label_width_counts_wide_characters_double() {
+        let ascii = estimate_edge_label_width("ab");
+        let cjk = estimate_edge_label_width("漢");
+        assert!((ascii - cjk).abs() < f32::EPSILON);
+        assert!(estimate_edge_label_width("users_テーブル") > estimate_edge_label_width("users"));
+    }
+
+    #[test]
+    fn edge_label_width_ignores_zero_width_characters() {
+        let plain = estimate_edge_label_width("e");
+        let combined = estimate_edge_label_width("e\u{301}");
+        assert!((plain - combined).abs() < f32::EPSILON);
     }
 }

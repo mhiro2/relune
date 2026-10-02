@@ -17,6 +17,8 @@ use geometry::{polyline_midpoint, simplify_orthogonal_path};
 use relune_core::LayoutDirection;
 use relune_core::layout::{EdgeRoute, RouteStyle};
 
+use crate::metrics::estimate_edge_label_width;
+
 /// Outward offset (in pixels) applied to attachment points so that edge
 /// endpoints and markers sit slightly outside the node border rather than
 /// overlapping it.
@@ -30,17 +32,11 @@ pub const LABEL_HALF_H: f32 = 10.0;
 
 /// Estimate the half-width of a label bounding box from its text content.
 ///
-/// Mirrors the character-width heuristic used by the SVG renderer
-/// (`estimate_label_width` in relune-render-svg) so that the layout engine's
-/// obstacle rectangles match the actual rendered label size.
+/// Uses the same estimate the SVG renderer sizes label pills with, so the
+/// layout engine's obstacle rectangles match the rendered label.
 #[must_use]
 pub fn estimate_label_half_width(text: &str) -> f32 {
-    let char_width: f32 = text
-        .chars()
-        .map(|ch| if ch.is_ascii() { 6.4 } else { 10.0 })
-        .sum();
-    // The SVG renderer adds 18px padding; half of the total width is the half-extent.
-    (char_width + 18.0) * 0.5
+    estimate_edge_label_width(text) * 0.5
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

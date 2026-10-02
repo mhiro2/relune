@@ -9,7 +9,6 @@ use relune_layout::metrics::{
     NODE_HEADER_BASELINE, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE,
     NODE_TEXT_INSET, column_badge_reserve, column_display_text,
 };
-use unicode_width::UnicodeWidthChar;
 
 use crate::escape::{escape_attribute, escape_text};
 use crate::theme::ThemeColors;
@@ -89,21 +88,6 @@ pub(crate) const fn node_label_background(colors: &ThemeColors) -> &'static str 
     } else {
         "#111827"
     }
-}
-
-// ---------------------------------------------------------------------------
-// Label width estimation
-// ---------------------------------------------------------------------------
-
-pub(crate) fn estimate_label_width(text: &str) -> f32 {
-    text.chars()
-        .map(|ch| match ch.width_cjk().or_else(|| ch.width()) {
-            Some(0) | None => 0.0,
-            Some(1) => 6.4,
-            Some(_) => 12.8,
-        })
-        .sum::<f32>()
-        + 18.0
 }
 
 // ---------------------------------------------------------------------------
