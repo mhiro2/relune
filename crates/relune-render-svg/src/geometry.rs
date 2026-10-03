@@ -143,20 +143,6 @@ impl Rect {
     }
 }
 
-/// Computes the total height of a node based on the number of columns.
-///
-/// # Arguments
-/// * `column_count` - The number of columns in the node
-/// * `column_height` - The height of each column row
-///
-/// # Returns
-/// The total height including header (42px) and bottom padding (16px)
-#[must_use]
-#[allow(clippy::cast_precision_loss)]
-pub fn compute_node_height(column_count: usize, column_height: f32) -> f32 {
-    (column_count as f32).mul_add(column_height, 42.0) + 16.0
-}
-
 /// Computes the y position for a column at the given index.
 ///
 /// # Arguments
@@ -215,12 +201,5 @@ mod tests {
         let rect = Rect::new(10.0, 10.0, 100.0, 50.0);
         assert!(rect.contains_point(&Point::new(50.0, 30.0)));
         assert!(!rect.contains_point(&Point::new(5.0, 30.0)));
-    }
-
-    #[test]
-    fn test_compute_node_height() {
-        // Header: 42px, 5 columns * 18px = 90px, bottom padding: 16px
-        let height = compute_node_height(5, 18.0);
-        assert!((height - 148.0).abs() < 0.001);
     }
 }

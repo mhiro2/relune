@@ -20,7 +20,7 @@ mod theme;
 
 pub use edge::{EdgeRenderOptions, render_edge};
 pub use error::SvgRenderError;
-pub use geometry::{Point, Rect, clamp, compute_column_y, compute_node_height, lerp};
+pub use geometry::{Point, Rect, clamp, compute_column_y, lerp};
 pub use group::{render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
 pub use options::SvgRenderOptions;
@@ -461,10 +461,10 @@ fn render_edge_internal(
     if options.show_labels && !edge.label.is_empty() {
         let label_x = edge.label_x;
         let label_y = edge.label_y;
-        let label_width = estimate_label_width(&edge.label);
+        let label_width = estimate_edge_label_width(&edge.label);
         write!(
             out,
-            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="18" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
+            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="{EDGE_LABEL_HEIGHT}" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
             label_width.mul_add(-0.5, label_x),
             label_y - 12.0,
             label_width,
@@ -608,7 +608,8 @@ const fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
 
 use escape::{escape_attribute, escape_text};
 use markers::edge_marker_attributes;
-use node::{estimate_label_width, node_label_background};
+use node::node_label_background;
+use relune_layout::metrics::{EDGE_LABEL_HEIGHT, estimate_edge_label_width};
 
 #[cfg(test)]
 mod tests {
@@ -1899,21 +1900,6 @@ mod tests {
         let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
 
         assert!(estimated >= svg.len());
-    }
-
-    #[test]
-    fn test_estimate_label_width_cjk_wider_than_ascii() {
-        let ascii_width = estimate_label_width("abcd");
-        let cjk_width = estimate_label_width("漢字表示");
-        // CJK characters (full-width) should produce a wider estimate
-        assert!(cjk_width > ascii_width);
-    }
-
-    #[test]
-    fn test_estimate_label_width_mixed_script() {
-        let ascii_only = estimate_label_width("users");
-        let mixed = estimate_label_width("users_テーブル");
-        assert!(mixed > ascii_only);
     }
 
     #[test]

@@ -65,7 +65,7 @@ Relune is a **reusable schema graph engine** with multiple delivery surfaces (CL
 | Crate | Role |
 |-------|------|
 | `relune-core` | Normalized schema model, graph construction, filters, lint, diff, review, shared types |
-| `relune-layout` | Hierarchical and force-directed layout, edge routing, overlay annotations, text diagram export (Mermaid, D2, DOT) |
+| `relune-layout` | Hierarchical and force-directed layout, edge routing, overlay annotations, text diagram export (Mermaid, D2, DOT), node card metrics shared with renderers (`metrics`) |
 | `relune-parser-sql` | DDL → `Schema` (PostgreSQL, MySQL, SQLite; auto-detection) |
 | `relune-introspect` | Live DB metadata → `Schema` (PostgreSQL, MySQL/MariaDB, SQLite; native builds only) |
 | `relune-render-theme` | Shared theme palette and render-facing theme DTOs used by SVG and HTML renderers |

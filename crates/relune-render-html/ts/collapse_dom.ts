@@ -4,14 +4,19 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const HEADER_SELECTOR =
   '.table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator';
 
-// The SVG renderer ends the table-name clip 44px before the node's right edge,
-// leaving that space for the right-aligned kind label.
+// Node geometry mirrored from `relune_layout::metrics`; a Rust test in
+// relune-render-html keeps these values in sync.
+// The SVG renderer ends the table-name clip this far before the node's right
+// edge, leaving that space for the right-aligned kind label.
 const KIND_LABEL_RESERVE = 44;
+// Baseline of the first column row, relative to the node top.
+const FIRST_ROW_BASELINE = 46;
+// Horizontal inset of node text from the node's left edge.
+const TEXT_INSET = 10;
+
 const INDICATOR_WIDTH = 16;
 const INDICATOR_GAP = 4;
 const MIN_NAME_CLIP_WIDTH = 24;
-// Baseline of the first column row, relative to the node top.
-const FIRST_ROW_BASELINE = 46;
 
 const EXPANDED_GLYPH = '▾';
 const COLLAPSED_GLYPH = '▸';
@@ -79,7 +84,9 @@ function decorateTable(node: Element, header: Element, columnCount: number): SVG
 
   if (columnCount > 0) {
     const label = `${columnCount} ${columnCount === 1 ? 'column' : 'columns'} hidden`;
-    node.appendChild(createSvgText('column-count-badge', x + 10, y + FIRST_ROW_BASELINE, label));
+    node.appendChild(
+      createSvgText('column-count-badge', x + TEXT_INSET, y + FIRST_ROW_BASELINE, label),
+    );
   }
 
   return indicator;

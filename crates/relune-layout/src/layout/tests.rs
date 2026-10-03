@@ -14,13 +14,14 @@ use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
     resolve_force_overlaps, rows_from_primary_bands,
 };
-use super::spacing::{
-    COLUMN_FONT_SIZE, build_positioned_node, estimate_node_height, estimate_text_width,
-    fit_canvas_to_content,
-};
+use super::spacing::{build_positioned_node, estimate_node_height, fit_canvas_to_content};
 use super::*;
 use crate::channel::ChannelCandidateClass;
 use crate::graph::{LayoutEdge, LayoutGraph};
+use crate::metrics::{
+    GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
+    NODE_HEADER_HEIGHT, estimate_text_width,
+};
 use crate::port::{RegularPortAssignment, column_y_offset_from_center};
 use crate::route::{
     AttachmentSide, BORDER_OUTSET, ChannelAxis, LABEL_HALF_H, Rect, estimate_label_half_width,
@@ -1367,10 +1368,9 @@ fn test_column_y_offset_from_center_basic() {
 
     // user_id is column index 1.
     let offset = column_y_offset_from_center(&node, &["user_id".to_string()], &config);
-    let expected_col_y = 1.0f32.mul_add(
-        config.column_height,
-        config.node_padding + config.header_height,
-    ) + config.column_height / 2.0;
+    let expected_col_y = 1.0f32
+        .mul_add(NODE_COLUMN_HEIGHT, config.node_padding + NODE_HEADER_HEIGHT)
+        + NODE_COLUMN_HEIGHT / 2.0;
     let expected = expected_col_y - node.height / 2.0;
     assert!(
         (offset - expected).abs() < 0.01,
@@ -1779,8 +1779,8 @@ fn test_single_node_force_directed() {
 
 #[test]
 fn test_estimate_text_width_counts_cjk_as_wider_than_ascii() {
-    let ascii = estimate_text_width("users", COLUMN_FONT_SIZE);
-    let cjk = estimate_text_width("利用者", COLUMN_FONT_SIZE);
+    let ascii = estimate_text_width("users", NODE_COLUMN_FONT_SIZE);
+    let cjk = estimate_text_width("利用者", NODE_COLUMN_FONT_SIZE);
 
     assert!(cjk > ascii);
 }
@@ -3761,8 +3761,8 @@ fn canvas_fits_group_labels_wider_than_their_group() {
     }];
     let (width, _) = fit_canvas_to_content(140.0, 100.0, &mut [], &mut [], &mut groups);
 
-    let label_width = estimate_text_width(&groups[0].label, 11.0);
-    assert!(width >= groups[0].x + 12.0 + label_width);
+    let label_width = estimate_text_width(&groups[0].label, GROUP_LABEL_FONT_SIZE);
+    assert!(width >= groups[0].x + GROUP_LABEL_INSET + label_width);
 }
 
 mod layout_properties {

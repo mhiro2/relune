@@ -61,10 +61,6 @@ pub struct LayoutConfig {
     pub vertical_spacing: f32,
     /// Node width.
     pub node_width: f32,
-    /// Height per column row.
-    pub column_height: f32,
-    /// Header height.
-    pub header_height: f32,
     /// Padding inside nodes.
     pub node_padding: f32,
     /// Layout direction.
@@ -96,8 +92,6 @@ impl Default for LayoutConfig {
             horizontal_spacing: 320.0,
             vertical_spacing: 160.0,
             node_width: 260.0,
-            column_height: 18.0,
-            header_height: 32.0,
             node_padding: 8.0,
             direction: LayoutDirection::TopToBottom,
             edge_style: RouteStyle::Orthogonal,
@@ -120,8 +114,6 @@ impl LayoutConfig {
         validate_positive("horizontal_spacing", self.horizontal_spacing, &mut issues);
         validate_positive("vertical_spacing", self.vertical_spacing, &mut issues);
         validate_positive("node_width", self.node_width, &mut issues);
-        validate_positive("column_height", self.column_height, &mut issues);
-        validate_positive("header_height", self.header_height, &mut issues);
         validate_non_negative("node_padding", self.node_padding, &mut issues);
         validate_positive(
             "compaction.min_horizontal_spacing",

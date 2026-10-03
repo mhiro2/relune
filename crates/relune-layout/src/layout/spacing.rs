@@ -1,23 +1,24 @@
 //! Node sizing, text width estimation, bounds, and shared rendering helpers.
 
-use relune_core::{LayoutDirection, NodeKind};
-use unicode_width::UnicodeWidthChar;
+use relune_core::LayoutDirection;
 
 use super::spatial::BBox;
 use super::{
     ColumnFlags, ColumnRelationFlags, LayoutConfig, NodeSize, PositionedColumn, PositionedEdge,
     PositionedGroup, PositionedNode,
 };
+use crate::metrics::{
+    GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING, NODE_COLUMN_FONT_SIZE,
+    NODE_COLUMN_HEIGHT, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE,
+    NODE_TEXT_INSET, column_badge_reserve, column_display_text, estimate_text_width,
+};
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
-/// Node header font size used for width estimation.
-const HEADER_FONT_SIZE: f32 = 13.0;
-/// Node column font size used for width estimation.
-pub(super) const COLUMN_FONT_SIZE: f32 = 11.5;
 /// Lower bound factor applied to configured node width.
 const MIN_NODE_WIDTH_FACTOR: f32 = 0.72;
-/// Extra right-side space for the kind label ("TABLE"/"VIEW"/"ENUM") in the header.
-const HEADER_KIND_LABEL_RESERVE: f32 = 48.0;
+/// Header width kept for the kind label, with a little slack beyond the
+/// renderer's table-name clip so names are not cut at the estimate's edge.
+const HEADER_KIND_LABEL_RESERVE: f32 = NODE_KIND_LABEL_RESERVE + 4.0;
 
 pub(super) fn build_positioned_node(
     node: &crate::graph::LayoutNode,
@@ -78,7 +79,7 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
     let minimum_width = (config.node_width * MIN_NODE_WIDTH_FACTOR).max(160.0);
     let header_width = config
         .node_padding
-        .mul_add(2.0, estimate_text_width(&node.label, HEADER_FONT_SIZE))
+        .mul_add(2.0, estimate_text_width(&node.label, NODE_HEADER_FONT_SIZE))
         + HEADER_KIND_LABEL_RESERVE;
     if !config.show_columns {
         return header_width.max(minimum_width).ceil();
@@ -88,23 +89,17 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
         .columns
         .iter()
         .map(|column| {
-            let text = display_column_text(node.kind, &column.name, &column.data_type);
-            let text_px = estimate_text_width(&text, COLUMN_FONT_SIZE);
-            let icon_slots = usize::from(column.is_indexed)
+            let text = column_display_text(node.kind, &column.name, &column.data_type);
+            let text_px = estimate_text_width(&text, NODE_COLUMN_FONT_SIZE);
+            let badge_count = usize::from(column.is_indexed)
                 + usize::from(column.is_foreign_key)
                 + usize::from(column.is_primary_key);
-            #[allow(clippy::cast_precision_loss)] // Icon counts are tiny layout values.
-            let badge_reserve = if icon_slots > 0 {
-                (icon_slots as f32 - 1.0).mul_add(24.0, 28.0)
-            } else {
-                0.0
-            };
-            text_px + badge_reserve
+            text_px + column_badge_reserve(badge_count)
         })
         .fold(0.0, f32::max);
 
     header_width
-        .max(config.node_padding.mul_add(2.0, column_width) + 10.0)
+        .max(config.node_padding.mul_add(2.0, column_width) + NODE_TEXT_INSET)
         .max(minimum_width)
         .ceil()
 }
@@ -114,16 +109,13 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
 #[allow(clippy::missing_const_for_fn)] // This helper stays non-const to avoid over-constraining floating-point layout code.
 pub(super) fn estimate_node_height(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
     if !config.show_columns {
-        return config
-            .node_padding
-            .mul_add(2.0, config.header_height)
-            .ceil();
+        return config.node_padding.mul_add(2.0, NODE_HEADER_HEIGHT).ceil();
     }
     config
         .node_padding
         .mul_add(
             2.0,
-            (node.columns.len() as f32).mul_add(config.column_height, config.header_height),
+            (node.columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT),
         )
         .ceil()
 }
@@ -170,11 +162,6 @@ pub(super) fn mirror_positioned_nodes_for_direction(
 const CANVAS_MARKER_PAD: f32 = 24.0;
 /// Room kept around edge labels.
 const CANVAS_LABEL_PAD: f32 = 4.0;
-/// Group label geometry used by renderers: inset from the group's left edge,
-/// font size, and letter spacing (0.12em).
-const GROUP_LABEL_INSET: f32 = 12.0;
-const GROUP_LABEL_FONT_SIZE: f32 = 11.0;
-const GROUP_LABEL_LETTER_SPACING: f32 = GROUP_LABEL_FONT_SIZE * 0.12;
 
 /// Fits the canvas to everything that is drawn: nodes, groups, edge routes
 /// (bypass lanes, self-loops and markers) and edge labels.
@@ -287,35 +274,4 @@ fn translate_drawing(
             }
         }
     }
-}
-
-pub(super) fn display_column_text(kind: NodeKind, name: &str, data_type: &str) -> String {
-    if kind == NodeKind::Enum {
-        format!("• {name}")
-    } else if data_type.is_empty() {
-        name.to_string()
-    } else {
-        format!("{name}: {data_type}")
-    }
-}
-
-pub(super) fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    text.chars()
-        .map(|ch| {
-            let width_factor = match ch {
-                'A'..='Z' => 0.72,
-                'a'..='z' | '0'..='9' => 0.62,
-                '_' | '-' | '.' | ':' | ',' | '(' | ')' | '[' | ']' | ' ' => 0.38,
-                _ if ch.is_ascii_punctuation() => 0.52,
-                _ if ch.is_ascii() => 0.62,
-                _ => match ch.width_cjk().or_else(|| ch.width()) {
-                    Some(0) => 0.0,
-                    Some(1) => 0.94,
-                    Some(_) => 1.12,
-                    None => 1.0,
-                },
-            };
-            font_size * width_factor
-        })
-        .sum()
 }

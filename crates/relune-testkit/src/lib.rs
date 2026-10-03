@@ -10,7 +10,7 @@ use relune_core::{
     Column, ColumnId, Enum, ForeignKey, Index, LayoutDirection, ReferentialAction, Schema, Table,
     TableId, View,
 };
-use relune_layout::route::LABEL_HALF_H;
+use relune_layout::route::{LABEL_HALF_H, estimate_label_half_width};
 use relune_layout::{PositionedEdge, PositionedGraph, PositionedNode};
 use relune_render_svg::{EdgeRenderOptions, edge::rendered_path_points};
 
@@ -810,14 +810,6 @@ fn label_boxes_overlap(left: &PositionedEdge, right: &PositionedEdge) -> bool {
         && left.label_x - left_half_width < right.label_x + right_half_width
         && left.label_y + LABEL_HALF_H > right.label_y - LABEL_HALF_H
         && left.label_y - LABEL_HALF_H < right.label_y + LABEL_HALF_H
-}
-
-fn estimate_label_half_width(text: &str) -> f32 {
-    let char_width: f32 = text
-        .chars()
-        .map(|ch| if ch.is_ascii() { 6.4 } else { 10.0 })
-        .sum();
-    (char_width + 18.0) * 0.5
 }
 
 fn assert_route_monotonicity(graph: &PositionedGraph, direction: LayoutDirection) {
