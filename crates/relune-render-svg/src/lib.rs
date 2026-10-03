@@ -1935,6 +1935,7 @@ mod snapshot_tests {
             "broken_input.sql" => include_str!("../../../fixtures/sql/broken_input.sql"),
             "cyclic_fk.sql" => include_str!("../../../fixtures/sql/cyclic_fk.sql"),
             "join_heavy.sql" => include_str!("../../../fixtures/sql/join_heavy.sql"),
+            "card_stress.sql" => include_str!("../../../fixtures/sql/card_stress.sql"),
             _ => panic!("Unknown fixture: {name}"),
         }
     }
@@ -2042,6 +2043,19 @@ mod snapshot_tests {
             prepend_module_to_snapshot => false,
         }, {
             insta::assert_snapshot!("join_heavy", svg);
+        });
+    }
+
+    #[test]
+    fn test_snapshot_card_stress() {
+        let sql = read_fixture("card_stress.sql");
+        let svg = process_fixture_to_svg(sql).expect("Failed to process card_stress.sql");
+
+        insta::with_settings!({
+            snapshot_path => "snapshots",
+            prepend_module_to_snapshot => false,
+        }, {
+            insta::assert_snapshot!("card_stress", svg);
         });
     }
 }
