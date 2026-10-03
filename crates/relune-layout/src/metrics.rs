@@ -13,8 +13,12 @@ pub const NODE_HEADER_HEIGHT: f32 = 32.0;
 pub const NODE_COLUMN_HEIGHT: f32 = 18.0;
 /// Baseline of the table name, measured from the node top.
 pub const NODE_HEADER_BASELINE: f32 = 21.0;
+/// Top of the first column row, measured from the node top.
+pub const NODE_FIRST_ROW_TOP: f32 = 34.0;
+/// Baseline of column text, measured from the top of its row.
+pub const NODE_ROW_BASELINE: f32 = 12.0;
 /// Baseline of the first column row, measured from the node top.
-pub const NODE_FIRST_COLUMN_BASELINE: f32 = 46.0;
+pub const NODE_FIRST_COLUMN_BASELINE: f32 = NODE_FIRST_ROW_TOP + NODE_ROW_BASELINE;
 /// Horizontal inset of header and column text from the node edges.
 pub const NODE_TEXT_INSET: f32 = 10.0;
 /// Corner radius of the node body and header.
@@ -52,6 +56,15 @@ pub const GROUP_LABEL_LETTER_SPACING: f32 = GROUP_LABEL_FONT_SIZE * GROUP_LABEL_
 pub const EDGE_LABEL_HEIGHT: f32 = 18.0;
 /// Horizontal padding inside the edge label pill, both sides combined.
 pub const EDGE_LABEL_PADDING: f32 = 18.0;
+
+/// Vertical center of column row `index`, measured from the node top.
+///
+/// Edge ports attach here so a relationship line meets the row it refers to.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // Column indices are small layout values.
+pub fn column_row_center(index: usize) -> f32 {
+    (index as f32).mul_add(NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP) + NODE_COLUMN_HEIGHT / 2.0
+}
 
 /// Horizontal space a column row reserves at its right end for `badge_count`
 /// badges, including the gap before the leftmost one.
