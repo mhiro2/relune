@@ -20,7 +20,7 @@ use crate::channel::ChannelCandidateClass;
 use crate::graph::{LayoutEdge, LayoutGraph};
 use crate::metrics::{
     GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
-    NODE_HEADER_HEIGHT, estimate_text_width,
+    NODE_FIRST_ROW_TOP, estimate_text_width,
 };
 use crate::port::{RegularPortAssignment, column_y_offset_from_center};
 use crate::route::{
@@ -1367,10 +1367,9 @@ fn test_column_y_offset_from_center_basic() {
     };
 
     // user_id is column index 1.
-    let offset = column_y_offset_from_center(&node, &["user_id".to_string()], &config);
-    let expected_col_y = 1.0f32
-        .mul_add(NODE_COLUMN_HEIGHT, config.node_padding + NODE_HEADER_HEIGHT)
-        + NODE_COLUMN_HEIGHT / 2.0;
+    let offset = column_y_offset_from_center(&node, &["user_id".to_string()]);
+    // The port sits on the rendered row center, not below the node padding.
+    let expected_col_y = NODE_COLUMN_HEIGHT.mul_add(1.5, NODE_FIRST_ROW_TOP);
     let expected = expected_col_y - node.height / 2.0;
     assert!(
         (offset - expected).abs() < 0.01,
@@ -1381,7 +1380,6 @@ fn test_column_y_offset_from_center_basic() {
 #[test]
 #[allow(clippy::float_cmp)]
 fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
-    let config = LayoutConfig::default();
     let empty_node = PositionedNode {
         id: "t".to_string(),
         label: "t".to_string(),
@@ -1398,11 +1396,11 @@ fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
 
     // No columns in node → 0 (center).
     assert_eq!(
-        column_y_offset_from_center(&empty_node, &["user_id".to_string()], &config),
+        column_y_offset_from_center(&empty_node, &["user_id".to_string()]),
         0.0
     );
     // Empty edge columns → 0 (center).
-    assert_eq!(column_y_offset_from_center(&empty_node, &[], &config), 0.0);
+    assert_eq!(column_y_offset_from_center(&empty_node, &[]), 0.0);
 
     let node_with_col = PositionedNode {
         columns: vec![PositionedColumn {
@@ -1422,7 +1420,7 @@ fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
     };
     // Column not found → 0 (center).
     assert_eq!(
-        column_y_offset_from_center(&node_with_col, &["nonexistent".to_string()], &config),
+        column_y_offset_from_center(&node_with_col, &["nonexistent".to_string()]),
         0.0
     );
 }
