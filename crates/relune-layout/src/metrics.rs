@@ -23,8 +23,13 @@ pub const NODE_FIRST_COLUMN_BASELINE: f32 = NODE_FIRST_ROW_TOP + NODE_ROW_BASELI
 pub const NODE_ROWS_BOTTOM_PADDING: f32 = 6.0;
 /// Horizontal inset of header and column content from the node edges.
 pub const NODE_TEXT_INSET: f32 = 12.0;
-/// Corner radius of the node body and header.
-pub const NODE_CORNER_RADIUS: f32 = 16.0;
+/// Corner radius of the node card.
+pub const NODE_CORNER_RADIUS: f32 = 6.0;
+/// Side length of the square kind mark before the table name.
+pub const NODE_KIND_MARK_SIZE: f32 = 8.0;
+/// Distance from the header's left content edge to the table name, past
+/// the kind mark.
+pub const NODE_HEADER_NAME_OFFSET: f32 = NODE_KIND_MARK_SIZE + 7.0;
 /// Space kept between the table-name clip and the node's right edge for the
 /// right-aligned kind label ("TABLE"/"VIEW"/"ENUM").
 pub const NODE_KIND_LABEL_RESERVE: f32 = 48.0;

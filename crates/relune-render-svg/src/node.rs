@@ -7,8 +7,8 @@ use relune_layout::metrics::{
     COLUMN_BADGE_HEIGHT, COLUMN_BADGE_WIDTH, COLUMN_NULLABLE_GAP, COLUMN_NULLABLE_MARKER,
     COLUMN_NULLABLE_SLOT_WIDTH, ColumnSlots, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
     NODE_CORNER_RADIUS, NODE_DETAIL_FONT_SIZE, NODE_FIRST_ROW_TOP, NODE_HEADER_BASELINE,
-    NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE, NODE_ROW_BASELINE,
-    NODE_TEXT_INSET,
+    NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
+    NODE_KIND_MARK_SIZE, NODE_ROW_BASELINE, NODE_TEXT_INSET,
 };
 
 use crate::escape::{escape_attribute, escape_text};
@@ -18,12 +18,6 @@ use crate::{is_light_theme, overlay_severity_color, overlay_severity_label};
 // ---------------------------------------------------------------------------
 // Node style
 // ---------------------------------------------------------------------------
-
-pub(crate) struct NodeStyle {
-    pub body_fill: &'static str,
-    pub header_fill: &'static str,
-    pub stroke: &'static str,
-}
 
 pub(crate) const fn node_kind_name(kind: NodeKind) -> &'static str {
     match kind {
@@ -41,38 +35,16 @@ pub(crate) const fn node_kind_label(kind: NodeKind) -> &'static str {
     }
 }
 
-pub(crate) const fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyle {
+/// Color of the small kind mark in a node header, the only place a card
+/// carries its kind's hue.
+pub(crate) const fn node_kind_accent(kind: NodeKind, colors: &ThemeColors) -> &'static str {
     match (kind, is_light_theme(colors)) {
-        (NodeKind::Table, false) => NodeStyle {
-            body_fill: "#151926",
-            header_fill: "#8b5e1a",
-            stroke: "#fbbf24",
-        },
-        (NodeKind::Table, true) => NodeStyle {
-            body_fill: "#fffaf0",
-            header_fill: "#f59e0b",
-            stroke: "#d97706",
-        },
-        (NodeKind::View, false) => NodeStyle {
-            body_fill: "#10232a",
-            header_fill: "#0f766e",
-            stroke: "#2dd4bf",
-        },
-        (NodeKind::View, true) => NodeStyle {
-            body_fill: "#f0fdfa",
-            header_fill: "#14b8a6",
-            stroke: "#0f766e",
-        },
-        (NodeKind::Enum, false) => NodeStyle {
-            body_fill: "#241533",
-            header_fill: "#7c3aed",
-            stroke: "#c084fc",
-        },
-        (NodeKind::Enum, true) => NodeStyle {
-            body_fill: "#faf5ff",
-            header_fill: "#a855f7",
-            stroke: "#7e22ce",
-        },
+        (NodeKind::Table, false) => "#fb923c",
+        (NodeKind::Table, true) => "#ea580c",
+        (NodeKind::View, false) => "#2dd4bf",
+        (NodeKind::View, true) => "#0d9488",
+        (NodeKind::Enum, false) => "#c084fc",
+        (NodeKind::Enum, true) => "#9333ea",
     }
 }
 
@@ -88,36 +60,70 @@ pub(crate) const fn node_label_background(colors: &ThemeColors) -> &'static str 
 // Column badges (PK / FK / IX)
 // ---------------------------------------------------------------------------
 
-/// Unified column-metadata badge renderer.
-///
-/// All indicators share the same rounded-rect + label form-factor so they are
-/// instantly distinguishable at a glance regardless of density.
-fn render_column_badge(
+/// Colors of one column badge.
+#[derive(Clone, Copy)]
+pub(crate) struct BadgeStyle {
+    fill: &'static str,
+    fill_opacity: f32,
+    text: &'static str,
+}
+
+/// Column badge kinds, ordered by how much a reader relies on them.
+#[derive(Clone, Copy)]
+pub(crate) enum ColumnBadge {
+    PrimaryKey,
+    ForeignKey,
+    Index,
+}
+
+impl ColumnBadge {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::PrimaryKey => "PK",
+            Self::ForeignKey => "FK",
+            Self::Index => "IX",
+        }
+    }
+
+    /// PK is a solid neutral chip, FK a blue tint, IX a quiet grey tint, so
+    /// the badges step down in weight without borrowing kind or state hues.
+    const fn style(self, colors: &ThemeColors) -> BadgeStyle {
+        let (fill, fill_opacity, text) = match (self, is_light_theme(colors)) {
+            (Self::PrimaryKey, false) => ("#cbd5e1", 1.0, "#0f172a"),
+            (Self::PrimaryKey, true) => ("#334155", 1.0, "#ffffff"),
+            (Self::ForeignKey, false) => ("#38bdf8", 0.18, "#7dd3fc"),
+            (Self::ForeignKey, true) => ("#0284c7", 0.12, "#075985"),
+            (Self::Index, false) => ("#94a3b8", 0.16, "#cbd5e1"),
+            (Self::Index, true) => ("#64748b", 0.12, "#334155"),
+        };
+        BadgeStyle {
+            fill,
+            fill_opacity,
+            text,
+        }
+    }
+}
+
+/// Draws one PK / FK / IX badge with its top-left corner at (`x`, `y`).
+pub(crate) fn render_column_badge(
     out: &mut String,
     x: f32,
     y: f32,
-    label: &str,
-    bg: &str,
-    fg: &str,
+    badge: ColumnBadge,
+    colors: &ThemeColors,
 ) -> fmt::Result {
+    let BadgeStyle {
+        fill,
+        fill_opacity,
+        text,
+    } = badge.style(colors);
     write!(
         out,
-        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="{COLUMN_BADGE_WIDTH}" height="{COLUMN_BADGE_HEIGHT}" rx="3.5" fill="{bg}" fill-opacity="0.18"/><text x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" letter-spacing="0.04em" fill="{fg}">{label}</text>"#,
-        x + 2.5,
+        r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="{COLUMN_BADGE_WIDTH}" height="{COLUMN_BADGE_HEIGHT}" rx="3" fill="{fill}" fill-opacity="{fill_opacity}"/><text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" fill="{text}">{}</text>"#,
+        x + COLUMN_BADGE_WIDTH / 2.0,
         y + 9.5,
+        badge.label(),
     )
-}
-
-pub(crate) fn render_pk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    render_column_badge(out, x, y, "PK", "#fbbf24", "#fbbf24")
-}
-
-pub(crate) fn render_fk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    render_column_badge(out, x, y, "FK", "#38bdf8", "#38bdf8")
-}
-
-pub(crate) fn render_idx_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    render_column_badge(out, x, y, "IX", "#f59e0b", "#f59e0b")
 }
 
 // ---------------------------------------------------------------------------
@@ -207,13 +213,21 @@ fn render_column_row(
         column.flags.nullable
     )?;
     if relation.is_primary_key {
-        render_pk_indicator(out, geometry.key_x, badge_y)?;
+        render_column_badge(
+            out,
+            geometry.key_x,
+            badge_y,
+            ColumnBadge::PrimaryKey,
+            colors,
+        )?;
     }
     if relation.is_foreign_key {
-        render_fk_indicator(
+        render_column_badge(
             out,
             geometry.key_x + geometry.slots.foreign_key_offset(),
             badge_y,
+            ColumnBadge::ForeignKey,
+            colors,
         )?;
     }
     write!(
@@ -241,7 +255,7 @@ fn render_column_row(
         )?;
     }
     if relation.is_indexed {
-        render_idx_indicator(out, geometry.index_x, badge_y)?;
+        render_column_badge(out, geometry.index_x, badge_y, ColumnBadge::Index, colors)?;
     }
     out.push_str("</g>");
     Ok(())
@@ -263,7 +277,6 @@ pub(crate) fn render_node_internal(
     overlay: Option<&relune_layout::NodeOverlay>,
 ) -> fmt::Result {
     let kind = node_kind_name(node.kind);
-    let node_style = node_style(node.kind, colors);
     let node_label = node_kind_label(node.kind);
     let max_severity = overlay.and_then(relune_layout::NodeOverlay::max_severity);
 
@@ -331,35 +344,54 @@ pub(crate) fn render_node_internal(
 
     // Node border: override stroke color when overlay severity is present
     let (stroke_color, stroke_width) = match max_severity {
-        Some(severity) => (overlay_severity_color(severity, colors), "2.4"),
-        None => (node_style.stroke, "1.6"),
+        Some(severity) => (overlay_severity_color(severity, colors), "2"),
+        None => (colors.node_stroke, "1"),
     };
 
     write!(
         out,
-        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}" stroke="{}" stroke-width="{}" filter="url(#node-shadow)"/>"#,
-        node.x, node.y, node.width, node.height, node_style.body_fill, stroke_color, stroke_width
+        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}" stroke="{stroke_color}" stroke-width="{stroke_width}"/>"#,
+        node.x, node.y, node.width, node.height, colors.node_fill
     )?;
+    // The header tint is clipped to the card's rounded shape, inset so it
+    // never covers the border.
     write!(
         out,
-        r#"<rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="{NODE_HEADER_HEIGHT}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}"/>"#,
-        node.x, node.y, node.width, node_style.header_fill
-    )?;
-    // Gradient transition from header to body — eliminates the hard underlay band
-    write!(
-        out,
-        r#"<rect class="table-header-fade" x="{:.1}" y="{:.1}" width="{:.1}" height="16" fill="url(#header-fade-{kind})"/>"#,
+        r#"<clipPath id="node-{index}-card-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}"/></clipPath><rect class="table-header" x="{:.1}" y="{:.1}" width="{:.1}" height="{NODE_HEADER_HEIGHT}" clip-path="url(#node-{index}-card-clip)" fill="{}"/>"#,
+        node.x + 0.5,
+        node.y + 0.5,
+        node.width - 1.0,
+        node.height - 1.0,
+        NODE_CORNER_RADIUS - 0.5,
         node.x,
-        node.y + 16.0,
-        node.width
+        node.y,
+        node.width,
+        colors.header_fill
     )?;
+    if !node.columns.is_empty() {
+        write!(
+            out,
+            r#"<line class="table-header-divider" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.6" stroke-width="1"/>"#,
+            node.x,
+            node.y + NODE_HEADER_HEIGHT,
+            node.x + node.width,
+            node.y + NODE_HEADER_HEIGHT,
+            colors.node_stroke
+        )?;
+    }
     write!(
         out,
-        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{NODE_HEADER_HEIGHT}"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_HEADER_FONT_SIZE}" font-weight="700" fill="{}">{}</text>"#,
+        r#"<rect class="table-kind-mark" x="{:.1}" y="{:.1}" width="{NODE_KIND_MARK_SIZE}" height="{NODE_KIND_MARK_SIZE}" rx="2" fill="{}"/>"#,
         node.x + NODE_TEXT_INSET,
+        node.y + (NODE_HEADER_HEIGHT - NODE_KIND_MARK_SIZE) / 2.0,
+        node_kind_accent(node.kind, colors)
+    )?;
+    let name_x = node.x + NODE_TEXT_INSET + NODE_HEADER_NAME_OFFSET;
+    write!(
+        out,
+        r#"<clipPath id="node-{index}-header-clip"><rect x="{name_x:.1}" y="{:.1}" width="{:.1}" height="{NODE_HEADER_HEIGHT}"/></clipPath><text class="table-name" x="{name_x:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_HEADER_FONT_SIZE}" font-weight="700" fill="{}">{}</text>"#,
         node.y,
-        (node.width - NODE_TEXT_INSET - NODE_KIND_LABEL_RESERVE).max(40.0),
-        node.x + NODE_TEXT_INSET,
+        (node.x + node.width - NODE_KIND_LABEL_RESERVE - name_x).max(40.0),
         node.y + NODE_HEADER_BASELINE,
         colors.text_primary,
         escape_text(&node.label)

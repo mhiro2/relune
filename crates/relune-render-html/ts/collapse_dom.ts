@@ -2,7 +2,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // Elements that make up the table header; clicking any of them toggles the table.
 const HEADER_SELECTOR =
-  '.table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator';
+  '.table-header, .table-kind-mark, .table-name, .table-kind, .collapse-indicator';
 
 // Node geometry mirrored from `relune_layout::metrics`; a Rust test in
 // relune-render-html keeps these values in sync.

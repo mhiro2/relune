@@ -678,7 +678,7 @@ pub(crate) fn build_css(
         r"
     /* Table collapse styles */
     .table-node .table-header,
-    .table-node .table-header-fade,
+    .table-node .table-kind-mark,
     .table-node .table-name,
     .table-node .table-kind,
     .table-node .collapse-indicator {

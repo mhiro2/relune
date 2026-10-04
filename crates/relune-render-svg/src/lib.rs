@@ -5,7 +5,7 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{EdgeKind, NodeKind, layout::RouteStyle};
+use relune_core::{EdgeKind, layout::RouteStyle};
 
 pub mod edge;
 mod error;
@@ -241,10 +241,10 @@ fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usiz
 }
 
 fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
-    let (shadow_dy, shadow_blur, hatch_color) = if is_light_theme(colors) {
-        ("2", "5", "#cbd5e1")
+    let hatch_color = if is_light_theme(colors) {
+        "#cbd5e1"
     } else {
-        ("4", "8", "#334155")
+        "#334155"
     };
 
     write!(
@@ -257,7 +257,7 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 .edge:hover .edge-path {{ filter: drop-shadow(0 0 4px {glow_color}); }}
 .edge:hover .edge-path,
 .edge:hover .crow-inline {{ stroke: {glow_color}; }}
-.node:hover .table-body {{ stroke-width: 2.1px; }}
+.node:hover .table-body {{ stroke-width: 1.6px; }}
 .group-box,
 .group-band,
 .group-divider,
@@ -278,9 +278,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <rect width="8" height="8" fill="transparent"/>
 <rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
 </pattern>
-<filter id="node-shadow" x="-20%" y="-20%" width="140%" height="150%">
-<feDropShadow dx="0" dy="{shadow_dy}" stdDeviation="{shadow_blur}" flood-color="{}"/>
-</filter>
 <filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
 <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
@@ -305,21 +302,8 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <path d="M2 2 L2 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
 <path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>"#,
-        colors.canvas_base,
-        colors.canvas_dot,
-        colors.canvas_dot,
-        colors.node_shadow,
-        colors.node_shadow,
+        colors.canvas_base, colors.canvas_dot, colors.canvas_dot, colors.group_shadow,
     )?;
-    for kind in [NodeKind::Table, NodeKind::View, NodeKind::Enum] {
-        let header_fill = node::node_style(kind, colors).header_fill;
-        write!(
-            out,
-            r#"
-<linearGradient id="header-fade-{}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{header_fill}" stop-opacity="0.38"/><stop offset="100%" stop-color="{header_fill}" stop-opacity="0"/></linearGradient>"#,
-            node::node_kind_name(kind)
-        )?;
-    }
     out.push_str("\n</defs>");
     Ok(())
 }
@@ -815,9 +799,10 @@ mod tests {
         let graph = multi_node_graph();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        assert_eq!(svg.matches("<linearGradient id=\"header-fade-").count(), 3);
+        assert!(!svg.contains("header-fade"));
+        assert!(!svg.contains("node-shadow"));
         assert_eq!(
-            svg.matches(r#"fill="url(#header-fade-table)""#).count(),
+            svg.matches(r#"class="table-kind-mark""#).count(),
             graph.nodes.len()
         );
         assert_eq!(
@@ -1166,7 +1151,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
-        assert!(svg.contains("#151926"));
+        assert!(svg.contains(r##"fill="#161b26""##));
         assert!(svg.contains("edge-particles"));
     }
 
@@ -1181,8 +1166,9 @@ mod tests {
 
         // Light theme background
         assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill
-        assert!(svg.contains("#fffaf0"));
+        // Light theme node fill and table kind mark
+        assert!(svg.contains(r##"fill="#ffffff""##));
+        assert!(svg.contains(r##"fill="#ea580c""##));
     }
 
     #[test]
@@ -1761,7 +1747,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
-        assert!(svg.contains("#151926"));
+        assert!(svg.contains(r##"fill="#161b26""##));
     }
 
     #[test]
@@ -1775,8 +1761,9 @@ mod tests {
 
         // Light theme background
         assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill
-        assert!(svg.contains("#fffaf0"));
+        // Light theme node fill and table kind mark
+        assert!(svg.contains(r##"fill="#ffffff""##));
+        assert!(svg.contains(r##"fill="#ea580c""##));
     }
 
     #[test]
@@ -1784,9 +1771,11 @@ mod tests {
         let graph = layout_graph_with_groups();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        // Group box should have rounded corners
-        assert!(svg.contains("rx=\"16\""));
-        assert!(svg.contains("ry=\"16\""));
+        // Group boxes keep their large radius; node cards use a small one.
+        assert!(svg.contains(r#"class="group-box" x="#));
+        assert!(svg.contains("rx=\"20\""));
+        assert!(svg.contains(r#"class="table-body""#));
+        assert!(svg.contains("rx=\"6\" ry=\"6\""));
     }
 
     #[test]
