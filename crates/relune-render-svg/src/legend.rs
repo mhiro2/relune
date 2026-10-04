@@ -4,15 +4,13 @@ use std::fmt::{self, Write};
 
 use relune_core::model::SchemaStats;
 
+use relune_layout::metrics::{COLUMN_BADGE_HEIGHT, COLUMN_NULLABLE_MARKER};
+
+use crate::node::{ColumnBadge, render_column_badge};
 use crate::theme::ThemeColors;
 
-// Legend indicator colors (matching node cards)
-const PK_STROKE: &str = "#fbbf24";
-const FK_COLOR: &str = "#3b82f6";
-const IDX_COLOR: &str = "#f59e0b";
-const NULLABLE_TEXT: &str = "#64748b";
-
-/// Renders a legend block showing PK, FK, IDX indicators and nullable style.
+/// Renders a legend block showing the PK, FK, and IX badges and the nullable
+/// marker exactly as node cards draw them.
 /// Optionally includes statistics if provided.
 ///
 /// # Arguments
@@ -50,22 +48,23 @@ pub fn render_legend(
         cursor_x, baseline_y, theme.text_primary
     )?;
     cursor_x += 84.0;
-    render_legend_pk_indicator(out, cursor_x, baseline_y - 8.0)?;
-    cursor_x += 16.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Primary key", theme)?;
-    cursor_x += 82.0;
-    render_legend_fk_indicator(out, cursor_x, baseline_y - 7.0)?;
-    cursor_x += 22.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Foreign key", theme)?;
-    cursor_x += 84.0;
-    render_legend_idx_indicator(out, cursor_x, baseline_y - 8.0)?;
-    cursor_x += 16.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Indexed", theme)?;
-    cursor_x += 62.0;
+    let badge_y = baseline_y - COLUMN_BADGE_HEIGHT + 3.5;
+    for (badge, label, advance) in [
+        (ColumnBadge::PrimaryKey, "Primary key", 104.0),
+        (ColumnBadge::ForeignKey, "Foreign key", 104.0),
+        (ColumnBadge::Index, "Indexed", 84.0),
+    ] {
+        render_column_badge(out, cursor_x, badge_y, badge, theme)?;
+        render_legend_item_label(out, cursor_x + 24.0, baseline_y, label, theme)?;
+        cursor_x += advance;
+    }
     write!(
         out,
-        r#"<text class="legend-nullable" x="{cursor_x:.1}" y="{baseline_y:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11" font-style="italic" fill="{NULLABLE_TEXT}">nullable</text>"#
+        r#"<text class="legend-nullable" x="{:.1}" y="{baseline_y:.1}" text-anchor="middle" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" font-weight="700" fill="{}">{COLUMN_NULLABLE_MARKER}</text>"#,
+        cursor_x + 9.0,
+        theme.text_muted
     )?;
+    render_legend_item_label(out, cursor_x + 24.0, baseline_y, "Nullable", theme)?;
 
     if let Some(stats) = stats {
         let stats_x = legend_x + legend_width - 144.0;
@@ -88,36 +87,6 @@ pub fn render_legend(
 
     out.push_str("</g>");
     Ok(())
-}
-
-/// Renders a small key icon for the legend.
-fn render_legend_pk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    write!(
-        out,
-        r#"<path class="legend-pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="{PK_STROKE}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"#,
-        x,
-        y + 3.2,
-        x + 3.2,
-        y + 3.2
-    )
-}
-
-/// Renders a small link indicator for the legend.
-fn render_legend_fk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    write!(
-        out,
-        r#"<path class="legend-fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" stroke="{FK_COLOR}" stroke-width="1.5" fill="none" stroke-linecap="round"/>"#,
-        x,
-        y + 3.4
-    )
-}
-
-/// Renders a small bolt indicator for the legend.
-fn render_legend_idx_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    write!(
-        out,
-        r#"<path class="legend-idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="{IDX_COLOR}"/>"#
-    )
 }
 
 fn render_legend_item_label(
@@ -150,27 +119,7 @@ mod tests {
     }
 
     fn test_theme_colors() -> ThemeColors {
-        ThemeColors {
-            background: "#0c0f1a",
-            canvas_base: "#0c0f1a",
-            canvas_dot: "#151928",
-            foreground: "#e2e8f0",
-            node_fill: "#111827",
-            node_stroke: "#334155",
-            header_fill: "#1e293b",
-            text_primary: "#e2e8f0",
-            text_secondary: "#cbd5e1",
-            text_muted: "#94a3b8",
-            edge_stroke: "#64748b",
-            arrow_fill: "#64748b",
-            node_shadow: "rgba(0, 0, 0, 0.5)",
-            group_fill: "#0f172acc",
-            group_band_fill: "#172036",
-            group_stroke: "#334155",
-            glow_color: "#f59e0b",
-            glow_particle: "#fbbf24",
-            is_light: false,
-        }
+        crate::theme::get_colors(crate::theme::Theme::Dark)
     }
 
     #[test]
@@ -186,7 +135,8 @@ mod tests {
         assert!(out.contains("Primary key"));
         assert!(out.contains("Foreign key"));
         assert!(out.contains("Indexed"));
-        assert!(out.contains("nullable"));
+        assert!(out.contains("Nullable"));
+        assert_eq!(out.matches(r#"class="col-badge""#).count(), 3);
         assert!(!out.contains("tables ·"));
     }
 

@@ -47,13 +47,13 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 384306,
+      "bytes": 384052,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 25216,
+      "bytes": 25014,
       "edge_groups": 18,
       "node_groups": 3
     }
