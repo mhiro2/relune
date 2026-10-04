@@ -263,7 +263,7 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 .group-divider,
 .group-label {{ pointer-events: none; }}
 </style>",
-        glow_color = colors.glow_color,
+        glow_color = colors.accent_color,
         glow_particle = colors.glow_particle,
     )?;
     write!(

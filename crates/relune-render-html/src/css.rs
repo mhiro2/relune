@@ -14,12 +14,8 @@ pub(crate) fn build_css(
     enable_highlight: bool,
 ) -> String {
     let colors = get_colors(theme);
-    let accent_color = colors.glow_color;
-    // Blue-grey, so selection never reads as a table kind or a warning.
-    let selection_color = match theme {
-        Theme::Dark => "#93a8c9",
-        Theme::Light => "#4a6285",
-    };
+    let accent_color = colors.accent_color;
+    let selection_color = colors.selection_color;
     let (viewer_bg, panel_bg, panel_border, panel_shadow, accent_soft, grid_dot, grid_line) =
         match theme {
             Theme::Dark => (
