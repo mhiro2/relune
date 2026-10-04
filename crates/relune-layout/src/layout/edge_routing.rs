@@ -28,6 +28,10 @@ use super::{
 
 /// Clearance target used while scoring obstacle-aware channel candidates.
 const ROUTE_CLEARANCE_TARGET: f32 = 14.0;
+/// Obstacle inflation for the hard intersection check. The segment test
+/// ignores a rectangle's outer 2px; this cancels most of that so a channel
+/// running just inside a node's edge still counts as crossing it.
+pub(super) const HARD_OBSTACLE_PADDING: f32 = 1.5;
 /// Maximum gap between nearby channel candidates that may share one visual bundle.
 const BUNDLE_CHANNEL_TOLERANCE: f32 = 36.0;
 /// Distance used to preserve endpoint approach direction while entering a bypass channel.
@@ -882,7 +886,7 @@ fn bundled_route_is_valid(
         })
         .collect::<Vec<_>>();
 
-    route_obstacle_hit_count(route, &obstacles, 0.0) == 0
+    route_obstacle_hit_count(route, &obstacles, HARD_OBSTACLE_PADDING) == 0
 }
 
 #[allow(clippy::cast_precision_loss)] // Bundle clusters stay tiny and only affect visual interpolation.
@@ -1465,9 +1469,13 @@ fn score_channel_candidate(
     // Obstacles farther than the clearance target neither intersect the route
     // nor add a clearance penalty, so only nearby nodes are scored.
     let obstacles = obstacles.near_route(route, ROUTE_CLEARANCE_TARGET);
-    let hard_constraint_violations = clipped_u16(route_obstacle_hit_count(route, &obstacles, 0.0))
-        + route_primary_direction_violations(route, direction, source_rank, target_rank)
-        + endpoint_side_violations(route, source_side, target_side);
+    let hard_constraint_violations =
+        clipped_u16(route_obstacle_hit_count(
+            route,
+            &obstacles,
+            HARD_OBSTACLE_PADDING,
+        )) + route_primary_direction_violations(route, direction, source_rank, target_rank)
+            + endpoint_side_violations(route, source_side, target_side);
 
     ChannelCandidateScore {
         hard_constraint_violations,
