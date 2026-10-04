@@ -886,18 +886,27 @@
           emitViewerEvent("relune:node-selected", { nodeId: tableId });
         }
       };
+      let relationOrigin = null;
       const setSelectedEdge = (edgeIndex, focusCard = false) => {
         const hadTable = state.selectedNode !== null;
         state.selectedNode = null;
         state.selectedEdge = edgeIndex;
         state.hoveredNode = null;
+        relationOrigin = null;
         renderInteraction();
         if (hadTable) emitViewerEvent("relune:node-cleared", void 0);
         if (focusCard && edgeIndex !== null) relationEls?.card.focus();
       };
       const selectRelation = (edge, focusCard = false) => {
         const index = state.edges.indexOf(edge);
-        if (index >= 0) setSelectedEdge(index, focusCard);
+        if (index < 0) return;
+        const origin = state.selectedNode;
+        setSelectedEdge(index, focusCard);
+        relationOrigin = origin;
+      };
+      const openTableDrawer = (tableId) => {
+        navigateToTable(tableId);
+        drawerEls.drawer.focus();
       };
       const clearHoverPreview = () => {
         if (state.selectedNode !== null || state.hoveredNode === null) {
@@ -940,7 +949,7 @@
       });
       const openRelationEnd = (end) => {
         const edge = state.selectedEdge === null ? void 0 : state.edges[state.selectedEdge];
-        if (edge !== void 0) navigateToTable(edge[end]);
+        if (edge !== void 0) openTableDrawer(edge[end]);
       };
       relationEls?.openFrom.addEventListener("click", () => {
         openRelationEnd("from");
@@ -949,7 +958,11 @@
         openRelationEnd("to");
       });
       document.getElementById("relation-card-close")?.addEventListener("click", () => {
-        setSelectedEdge(null);
+        if (relationOrigin !== null) {
+          openTableDrawer(relationOrigin);
+        } else {
+          setSelectedEdge(null);
+        }
       });
       drawerClose?.addEventListener("click", () => {
         setSelectedNode(null);
