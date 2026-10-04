@@ -691,6 +691,17 @@ mod tests {
     }
 
     #[test]
+    fn test_edge_labels_show_only_for_emphasized_lines() {
+        let css = build_css(Theme::Dark, false, false, false, true);
+
+        assert!(css.contains(
+            ".canvas svg .edge-label,\n    .canvas svg .edge-label-pill {\n      opacity: 0;"
+        ));
+        assert!(css.contains(".canvas svg .edge.selected-edge .edge-label,"));
+        assert!(css.contains(".canvas svg .edge:hover .edge-label,"));
+    }
+
+    #[test]
     fn test_highlight_css_not_included_when_disabled() {
         let css = build_css(Theme::Light, false, false, false, false);
 

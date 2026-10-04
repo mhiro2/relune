@@ -1615,6 +1615,27 @@ pub(crate) fn build_css(
       cursor: pointer;
     }
 
+    /* Line labels stay out of the overview and appear only for the lines a
+       reader is looking at; the relation card carries the full mapping. */
+    .canvas svg .edge-label,
+    .canvas svg .edge-label-pill {
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .canvas svg .edge:hover .edge-label,
+    .canvas svg .edge:hover .edge-label-pill,
+    .canvas svg .edge:focus-visible .edge-label,
+    .canvas svg .edge:focus-visible .edge-label-pill,
+    .canvas svg .edge.hover-preview-edge .edge-label,
+    .canvas svg .edge.hover-preview-edge .edge-label-pill,
+    .canvas svg .edge.highlighted-neighbor .edge-label,
+    .canvas svg .edge.highlighted-neighbor .edge-label-pill,
+    .canvas svg .edge.selected-edge .edge-label,
+    .canvas svg .edge.selected-edge .edge-label-pill {
+      opacity: 1;
+    }
+
     .type-filter-overlay {
       pointer-events: none;
     }
