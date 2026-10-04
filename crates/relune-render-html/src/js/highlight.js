@@ -65,7 +65,12 @@
   }
   function relationColumnPairs(edge) {
     const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
-    if (pairCount === 0) return [`${edge.from} \u2192 ${edge.to}`];
+    if (pairCount === 0) {
+      if (edge.from_columns.length > 0) {
+        return edge.from_columns.map((column) => `${edge.from}.${column} \u2192 ${edge.to}`);
+      }
+      return [`${edge.from} \u2192 ${edge.to}`];
+    }
     return edge.from_columns.slice(0, pairCount).map((column, index) => `${edge.from}.${column} \u2192 ${edge.to}.${edge.to_columns[index]}`);
   }
 
