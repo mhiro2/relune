@@ -4,10 +4,11 @@ use std::fmt::{self, Write};
 
 use relune_core::NodeKind;
 use relune_layout::metrics::{
-    COLUMN_BADGE_HEIGHT, COLUMN_BADGE_PITCH, COLUMN_BADGE_RIGHT_INSET, COLUMN_BADGE_WIDTH,
-    NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT, NODE_CORNER_RADIUS, NODE_FIRST_COLUMN_BASELINE,
-    NODE_HEADER_BASELINE, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE,
-    NODE_TEXT_INSET, column_badge_reserve, column_display_text,
+    COLUMN_BADGE_HEIGHT, COLUMN_BADGE_WIDTH, COLUMN_NULLABLE_GAP, COLUMN_NULLABLE_MARKER,
+    COLUMN_NULLABLE_SLOT_WIDTH, ColumnSlots, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
+    NODE_CORNER_RADIUS, NODE_DETAIL_FONT_SIZE, NODE_FIRST_ROW_TOP, NODE_HEADER_BASELINE,
+    NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE, NODE_ROW_BASELINE,
+    NODE_TEXT_INSET,
 };
 
 use crate::escape::{escape_attribute, escape_text};
@@ -22,7 +23,6 @@ pub(crate) struct NodeStyle {
     pub body_fill: &'static str,
     pub header_fill: &'static str,
     pub stroke: &'static str,
-    pub separator: &'static str,
 }
 
 pub(crate) const fn node_kind_name(kind: NodeKind) -> &'static str {
@@ -47,37 +47,31 @@ pub(crate) const fn node_style(kind: NodeKind, colors: &ThemeColors) -> NodeStyl
             body_fill: "#151926",
             header_fill: "#8b5e1a",
             stroke: "#fbbf24",
-            separator: "#4a3415",
         },
         (NodeKind::Table, true) => NodeStyle {
             body_fill: "#fffaf0",
             header_fill: "#f59e0b",
             stroke: "#d97706",
-            separator: "#fed7aa",
         },
         (NodeKind::View, false) => NodeStyle {
             body_fill: "#10232a",
             header_fill: "#0f766e",
             stroke: "#2dd4bf",
-            separator: "#134e4a",
         },
         (NodeKind::View, true) => NodeStyle {
             body_fill: "#f0fdfa",
             header_fill: "#14b8a6",
             stroke: "#0f766e",
-            separator: "#99f6e4",
         },
         (NodeKind::Enum, false) => NodeStyle {
             body_fill: "#241533",
             header_fill: "#7c3aed",
             stroke: "#c084fc",
-            separator: "#4c1d95",
         },
         (NodeKind::Enum, true) => NodeStyle {
             body_fill: "#faf5ff",
             header_fill: "#a855f7",
             stroke: "#7e22ce",
-            separator: "#e9d5ff",
         },
     }
 }
@@ -156,27 +150,101 @@ pub(crate) fn render_severity_badge(
 }
 
 // ---------------------------------------------------------------------------
-// Column text width
+// Column rows
 // ---------------------------------------------------------------------------
 
-/// Number of PK / FK / IX badges drawn at the right edge of a column row.
-fn column_badge_count(column: &relune_layout::PositionedColumn) -> usize {
-    usize::from(column.flags.relation.is_indexed)
-        + usize::from(column.flags.relation.is_foreign_key)
-        + usize::from(column.flags.relation.is_primary_key)
+/// Horizontal positions shared by every column row of one node.
+struct RowGeometry {
+    /// Left edge of the key badges.
+    key_x: f32,
+    /// Left edge of the column name.
+    name_x: f32,
+    /// Right edge of the right-aligned type.
+    type_end_x: f32,
+    /// Left edge of the IX badge.
+    index_x: f32,
+    slots: ColumnSlots,
 }
 
-pub(crate) fn column_text_width(
-    node: &relune_layout::PositionedNode,
+impl RowGeometry {
+    fn new(node: &relune_layout::PositionedNode) -> Self {
+        let slots = ColumnSlots::of(node.columns.iter().map(|column| &column.flags));
+        let key_x = node.x + NODE_TEXT_INSET;
+        let content_end = node.x + node.width - NODE_TEXT_INSET;
+        let index_x = content_end - COLUMN_BADGE_WIDTH;
+        let nullable_reserve = if slots.nullable {
+            COLUMN_NULLABLE_SLOT_WIDTH
+        } else {
+            0.0
+        };
+        let index_reserve = slots.trailing_reserve() - nullable_reserve;
+        Self {
+            key_x,
+            name_x: key_x + slots.key_gutter(),
+            type_end_x: content_end - index_reserve - nullable_reserve,
+            index_x,
+            slots,
+        }
+    }
+}
+
+fn render_column_row(
+    out: &mut String,
     column: &relune_layout::PositionedColumn,
-) -> f32 {
-    let badge_count = column_badge_count(column);
-    let right_reserve = if badge_count == 0 {
-        NODE_TEXT_INSET
-    } else {
-        column_badge_reserve(badge_count)
-    };
-    (node.width - NODE_TEXT_INSET - right_reserve).max(18.0)
+    geometry: &RowGeometry,
+    row_top: f32,
+    clip_id: &str,
+    colors: &ThemeColors,
+) -> fmt::Result {
+    let baseline = row_top + NODE_ROW_BASELINE;
+    let badge_y = row_top + (NODE_COLUMN_HEIGHT - COLUMN_BADGE_HEIGHT) / 2.0;
+    let relation = &column.flags.relation;
+
+    write!(
+        out,
+        r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
+        escape_attribute(&column.name),
+        column.flags.nullable
+    )?;
+    if relation.is_primary_key {
+        render_pk_indicator(out, geometry.key_x, badge_y)?;
+    }
+    if relation.is_foreign_key {
+        render_fk_indicator(
+            out,
+            geometry.key_x + geometry.slots.foreign_key_offset(),
+            badge_y,
+        )?;
+    }
+    write!(
+        out,
+        r#"<text class="column-name" x="{:.1}" y="{baseline:.1}" clip-path="url(#{clip_id})" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_COLUMN_FONT_SIZE}" fill="{}">{}</text>"#,
+        geometry.name_x,
+        colors.text_secondary,
+        escape_text(&column.name)
+    )?;
+    if !column.data_type.is_empty() {
+        write!(
+            out,
+            r#"<text class="column-type" x="{:.1}" y="{baseline:.1}" clip-path="url(#{clip_id})" text-anchor="end" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_DETAIL_FONT_SIZE}" fill="{}">{}</text>"#,
+            geometry.type_end_x,
+            colors.text_muted,
+            escape_text(&column.data_type)
+        )?;
+    }
+    if column.flags.nullable {
+        write!(
+            out,
+            r#"<text class="column-nullable" x="{:.1}" y="{baseline:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_DETAIL_FONT_SIZE}" fill="{}">{COLUMN_NULLABLE_MARKER}</text>"#,
+            geometry.type_end_x + COLUMN_NULLABLE_GAP,
+            colors.text_muted,
+        )?;
+    }
+    if relation.is_indexed {
+        render_idx_indicator(out, geometry.index_x, badge_y)?;
+    }
+    out.push_str("</g>");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -287,9 +355,9 @@ pub(crate) fn render_node_internal(
     )?;
     write!(
         out,
-        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="16"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_HEADER_FONT_SIZE}" font-weight="700" letter-spacing="0.02em" fill="{}">{}</text>"#,
+        r#"<clipPath id="node-{index}-header-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{NODE_HEADER_HEIGHT}"/></clipPath><text class="table-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-header-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_HEADER_FONT_SIZE}" font-weight="700" fill="{}">{}</text>"#,
         node.x + NODE_TEXT_INSET,
-        node.y + 8.0,
+        node.y,
         (node.width - NODE_TEXT_INSET - NODE_KIND_LABEL_RESERVE).max(40.0),
         node.x + NODE_TEXT_INSET,
         node.y + NODE_HEADER_BASELINE,
@@ -318,83 +386,24 @@ pub(crate) fn render_node_internal(
         )?;
     }
 
-    // Columns only differ in clip width by how many badges they carry, so one
-    // node-height clip per badge count replaces a clip per column.
-    let mut clipped_badge_counts = [false; 4];
-    for column in &node.columns {
-        let badge_count = column_badge_count(column);
-        if !std::mem::replace(&mut clipped_badge_counts[badge_count], true) {
-            write!(
-                out,
-                r#"<clipPath id="node-{index}-columns-{badge_count}-clip"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}"/></clipPath>"#,
-                node.x + NODE_TEXT_INSET,
-                node.y,
-                column_text_width(node, column),
-                node.height
-            )?;
-        }
-    }
-
-    let mut line_y = node.y + NODE_FIRST_COLUMN_BASELINE;
-    for (column_index, column) in node.columns.iter().enumerate() {
+    if !node.columns.is_empty() {
+        let geometry = RowGeometry::new(node);
+        // Names and types share one clip so neither can spill past the
+        // node's trailing marks, whatever the font actually measures.
+        let clip_id = format!("node-{index}-columns-clip");
         write!(
             out,
-            r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
-            escape_attribute(&column.name),
-            column.flags.nullable
+            r#"<clipPath id="{clip_id}"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}"/></clipPath>"#,
+            geometry.name_x,
+            node.y,
+            (geometry.type_end_x - geometry.name_x).max(0.0),
+            node.height
         )?;
-        if column_index > 0 {
-            let separator_y = line_y - 12.0;
-            write!(
-                out,
-                r#"<line class="column-separator" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.38" stroke-width="1"/>"#,
-                node.x + NODE_TEXT_INSET,
-                separator_y,
-                node.x + node.width - NODE_TEXT_INSET,
-                separator_y,
-                node_style.separator
-            )?;
+        let mut row_top = node.y + NODE_FIRST_ROW_TOP;
+        for column in &node.columns {
+            render_column_row(out, column, &geometry, row_top, &clip_id, colors)?;
+            row_top += NODE_COLUMN_HEIGHT;
         }
-        let font_style = if column.flags.nullable {
-            r#" font-style="italic""#
-        } else {
-            ""
-        };
-        write!(
-            out,
-            r#"<text class="column-name" x="{:.1}" y="{:.1}" clip-path="url(#node-{index}-columns-{}-clip)" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_COLUMN_FONT_SIZE}" fill="{}"{}>"#,
-            node.x + NODE_TEXT_INSET,
-            line_y,
-            column_badge_count(column),
-            if column.flags.nullable {
-                colors.text_muted
-            } else {
-                colors.text_secondary
-            },
-            font_style,
-        )?;
-        out.push_str(&escape_text(&column_display_text(
-            node.kind,
-            &column.name,
-            &column.data_type,
-        )));
-        out.push_str("</text>");
-
-        let mut icon_x = node.x + node.width - COLUMN_BADGE_RIGHT_INSET;
-        if column.flags.relation.is_indexed {
-            render_idx_indicator(out, icon_x, line_y - 9.0)?;
-            icon_x -= COLUMN_BADGE_PITCH;
-        }
-        if column.flags.relation.is_foreign_key {
-            render_fk_indicator(out, icon_x, line_y - 9.0)?;
-            icon_x -= COLUMN_BADGE_PITCH;
-        }
-        if column.flags.relation.is_primary_key {
-            render_pk_indicator(out, icon_x, line_y - 8.5)?;
-        }
-
-        out.push_str("</g>");
-        line_y += NODE_COLUMN_HEIGHT;
     }
     write!(
         out,

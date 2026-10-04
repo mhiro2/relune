@@ -758,7 +758,7 @@ fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_y() {
 }
 
 #[test]
-fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_x() {
+fn force_prefix_grouped_layout_keeps_groups_in_a_band_disjoint_on_x() {
     use relune_core::{GroupingSpec, GroupingStrategy};
 
     let schema = make_prefix_grouping_schema();
@@ -777,11 +777,16 @@ fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_x() {
 
     for (i, a) in positioned.groups.iter().enumerate() {
         for b in positioned.groups.iter().skip(i + 1) {
+            // Packing places groups side by side within a band and may start
+            // a new band below, so groups only need disjoint X ranges when
+            // they share Y.
+            let shares_band = a.y < b.y + b.height && b.y < a.y + a.height;
             let overlap = a.x < b.x + b.width && b.x < a.x + a.width;
             assert!(
-                !overlap,
+                !(shares_band && overlap),
                 "force-grouped prefix layout produced overlapping X ranges for {} and {}",
-                a.id, b.id
+                a.id,
+                b.id
             );
         }
     }

@@ -11,17 +11,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              1112.0,
-              150.78900146484375
+              1180.0,
+              166.74200439453125
             ],
             [
-              1112.0,
-              99.0
+              1180.0,
+              105.0
             ]
           ],
           "end": [
-            970.0,
-            99.0
+            1038.0,
+            105.0
           ],
           "from": "comments",
           "from_columns": [
@@ -29,17 +29,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1112.0,
-          "label_y": 124.8949966430664,
+          "label_x": 1180.0,
+          "label_y": 135.87100219726563,
           "nullable": false,
           "route_label_position": [
-            1112.0,
-            124.8949966430664
+            1180.0,
+            135.87100219726563
           ],
           "source_side": "west",
           "start": [
-            1254.0,
-            150.78900146484375
+            1322.0,
+            166.74200439453125
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -52,25 +52,25 @@ expression: snapshot
         {
           "control_points": [
             [
-              1228.0,
-              136.78900146484375
+              1296.0,
+              152.74200439453125
             ],
             [
-              1228.0,
+              1296.0,
               32.0
             ],
             [
-              375.0,
+              413.0,
               32.0
             ],
             [
-              375.0,
-              118.8949966430664
+              413.0,
+              130.87100219726563
             ]
           ],
           "end": [
-            349.0,
-            118.8949966430664
+            387.0,
+            130.87100219726563
           ],
           "from": "comments",
           "from_columns": [
@@ -78,17 +78,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 810.447021484375,
+          "label_x": 865.4359741210938,
           "label_y": 32.0,
           "nullable": false,
           "route_label_position": [
-            810.447021484375,
+            865.4359741210938,
             32.0
           ],
           "source_side": "west",
           "start": [
-            1254.0,
-            136.78900146484375
+            1322.0,
+            152.74200439453125
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -101,17 +101,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              491.0,
-              117.0
+              529.0,
+              127.0
             ],
             [
-              491.0,
-              132.89500427246094
+              529.0,
+              144.87100219726563
             ]
           ],
           "end": [
-            349.0,
-            132.89500427246094
+            387.0,
+            144.87100219726563
           ],
           "from": "posts",
           "from_columns": [
@@ -119,17 +119,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 491.0,
-          "label_y": 124.9469985961914,
+          "label_x": 529.0,
+          "label_y": 135.93600463867188,
           "nullable": false,
           "route_label_position": [
-            491.0,
-            124.9469985961914
+            529.0,
+            135.93600463867188
           ],
           "source_side": "west",
           "start": [
-            633.0,
-            117.0
+            671.0,
+            127.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -145,41 +145,41 @@ expression: snapshot
           "column_count": 5,
           "group_index": null,
           "has_self_loop": false,
-          "height": 138.0,
+          "height": 154.0,
           "id": "comments",
           "kind": "Table",
-          "width": 291.0,
-          "x": 1256.0,
-          "y": 73.78900146484375
+          "width": 349.0,
+          "x": 1324.0,
+          "y": 77.74199676513672
         },
         {
           "column_count": 7,
           "group_index": null,
           "has_self_loop": false,
-          "height": 174.0,
+          "height": 198.0,
           "id": "posts",
           "kind": "Table",
-          "width": 333.0,
-          "x": 635.0,
+          "width": 363.0,
+          "x": 673.0,
           "y": 56.0
         },
         {
           "column_count": 4,
           "group_index": null,
           "has_self_loop": false,
-          "height": 120.0,
+          "height": 132.0,
           "id": "users",
           "kind": "Table",
-          "width": 291.0,
+          "width": 329.0,
           "x": 56.0,
-          "y": 82.8949966430664
+          "y": 88.87100219726563
         }
       ],
       "summary": {
         "edge_count": 3,
-        "height": 286.0,
+        "height": 310.0,
         "node_count": 3,
-        "width": 1603.0
+        "width": 1729.0
       }
     },
     "orthogonal": {
@@ -187,17 +187,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              1112.0,
-              150.78900146484375
+              1180.0,
+              166.74200439453125
             ],
             [
-              1112.0,
-              99.0
+              1180.0,
+              105.0
             ]
           ],
           "end": [
-            970.0,
-            99.0
+            1038.0,
+            105.0
           ],
           "from": "comments",
           "from_columns": [
@@ -205,17 +205,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1112.0,
-          "label_y": 124.8949966430664,
+          "label_x": 1180.0,
+          "label_y": 135.87100219726563,
           "nullable": false,
           "route_label_position": [
-            1112.0,
-            124.8949966430664
+            1180.0,
+            135.87100219726563
           ],
           "source_side": "west",
           "start": [
-            1254.0,
-            150.78900146484375
+            1322.0,
+            166.74200439453125
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -228,25 +228,25 @@ expression: snapshot
         {
           "control_points": [
             [
-              1228.0,
-              136.78900146484375
+              1296.0,
+              152.74200439453125
             ],
             [
-              1228.0,
+              1296.0,
               32.0
             ],
             [
-              375.0,
+              413.0,
               32.0
             ],
             [
-              375.0,
-              118.8949966430664
+              413.0,
+              130.87100219726563
             ]
           ],
           "end": [
-            349.0,
-            118.8949966430664
+            387.0,
+            130.87100219726563
           ],
           "from": "comments",
           "from_columns": [
@@ -254,17 +254,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 810.447021484375,
+          "label_x": 865.4359741210938,
           "label_y": 32.0,
           "nullable": false,
           "route_label_position": [
-            810.447021484375,
+            865.4359741210938,
             32.0
           ],
           "source_side": "west",
           "start": [
-            1254.0,
-            136.78900146484375
+            1322.0,
+            152.74200439453125
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -277,17 +277,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              491.0,
-              117.0
+              529.0,
+              127.0
             ],
             [
-              491.0,
-              132.89500427246094
+              529.0,
+              144.87100219726563
             ]
           ],
           "end": [
-            349.0,
-            132.89500427246094
+            387.0,
+            144.87100219726563
           ],
           "from": "posts",
           "from_columns": [
@@ -295,17 +295,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 491.0,
-          "label_y": 124.9469985961914,
+          "label_x": 529.0,
+          "label_y": 135.93600463867188,
           "nullable": false,
           "route_label_position": [
-            491.0,
-            124.9469985961914
+            529.0,
+            135.93600463867188
           ],
           "source_side": "west",
           "start": [
-            633.0,
-            117.0
+            671.0,
+            127.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -321,41 +321,41 @@ expression: snapshot
           "column_count": 5,
           "group_index": null,
           "has_self_loop": false,
-          "height": 138.0,
+          "height": 154.0,
           "id": "comments",
           "kind": "Table",
-          "width": 291.0,
-          "x": 1256.0,
-          "y": 73.78900146484375
+          "width": 349.0,
+          "x": 1324.0,
+          "y": 77.74199676513672
         },
         {
           "column_count": 7,
           "group_index": null,
           "has_self_loop": false,
-          "height": 174.0,
+          "height": 198.0,
           "id": "posts",
           "kind": "Table",
-          "width": 333.0,
-          "x": 635.0,
+          "width": 363.0,
+          "x": 673.0,
           "y": 56.0
         },
         {
           "column_count": 4,
           "group_index": null,
           "has_self_loop": false,
-          "height": 120.0,
+          "height": 132.0,
           "id": "users",
           "kind": "Table",
-          "width": 291.0,
+          "width": 329.0,
           "x": 56.0,
-          "y": 82.8949966430664
+          "y": 88.87100219726563
         }
       ],
       "summary": {
         "edge_count": 3,
-        "height": 286.0,
+        "height": 310.0,
         "node_count": 3,
-        "width": 1603.0
+        "width": 1729.0
       }
     },
     "straight": {
@@ -363,8 +363,8 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            970.0,
-            99.0
+            1038.0,
+            105.0
           ],
           "from": "comments",
           "from_columns": [
@@ -372,17 +372,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 1043.1529541015625,
-          "label_y": 100.14199829101563,
+          "label_x": 1109.0,
+          "label_y": 120.43599700927734,
           "nullable": false,
           "route_label_position": [
-            1112.0,
-            124.8949966430664
+            1180.0,
+            135.87100219726563
           ],
           "source_side": "west",
           "start": [
-            1254.0,
-            150.78900146484375
+            1322.0,
+            166.74200439453125
           ],
           "style": "Straight",
           "target_cardinality": "One",
@@ -395,8 +395,8 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            349.0,
-            118.8949966430664
+            387.0,
+            130.87100219726563
           ],
           "from": "comments",
           "from_columns": [
@@ -404,17 +404,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 1027.512939453125,
-          "label_y": 144.31300354003906,
+          "label_x": 1088.25,
+          "label_y": 147.2740020751953,
           "nullable": false,
           "route_label_position": [
-            801.5,
-            127.84200286865234
+            854.5,
+            141.8070068359375
           ],
           "source_side": "west",
           "start": [
-            1254.0,
-            136.78900146484375
+            1322.0,
+            152.74200439453125
           ],
           "style": "Straight",
           "target_cardinality": "One",
@@ -427,8 +427,8 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            349.0,
-            132.89500427246094
+            387.0,
+            144.87100219726563
           ],
           "from": "posts",
           "from_columns": [
@@ -436,17 +436,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 421.34100341796875,
-          "label_y": 152.88299560546875,
+          "label_x": 459.5069885253906,
+          "label_y": 164.3560028076172,
           "nullable": false,
           "route_label_position": [
-            491.0,
-            124.9469985961914
+            529.0,
+            135.93600463867188
           ],
           "source_side": "west",
           "start": [
-            633.0,
-            117.0
+            671.0,
+            127.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
@@ -462,41 +462,41 @@ expression: snapshot
           "column_count": 5,
           "group_index": null,
           "has_self_loop": false,
-          "height": 138.0,
+          "height": 154.0,
           "id": "comments",
           "kind": "Table",
-          "width": 291.0,
-          "x": 1256.0,
-          "y": 73.78900146484375
+          "width": 349.0,
+          "x": 1324.0,
+          "y": 77.74199676513672
         },
         {
           "column_count": 7,
           "group_index": null,
           "has_self_loop": false,
-          "height": 174.0,
+          "height": 198.0,
           "id": "posts",
           "kind": "Table",
-          "width": 333.0,
-          "x": 635.0,
+          "width": 363.0,
+          "x": 673.0,
           "y": 56.0
         },
         {
           "column_count": 4,
           "group_index": null,
           "has_self_loop": false,
-          "height": 120.0,
+          "height": 132.0,
           "id": "users",
           "kind": "Table",
-          "width": 291.0,
+          "width": 329.0,
           "x": 56.0,
-          "y": 82.8949966430664
+          "y": 88.87100219726563
         }
       ],
       "summary": {
         "edge_count": 3,
-        "height": 286.0,
+        "height": 310.0,
         "node_count": 3,
-        "width": 1603.0
+        "width": 1729.0
       }
     }
   }

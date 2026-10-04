@@ -3,9 +3,9 @@
   // ts/collapse_dom.ts
   var SVG_NS = "http://www.w3.org/2000/svg";
   var HEADER_SELECTOR = ".table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator";
-  var KIND_LABEL_RESERVE = 44;
-  var FIRST_ROW_BASELINE = 46;
-  var TEXT_INSET = 10;
+  var KIND_LABEL_RESERVE = 48;
+  var FIRST_ROW_BASELINE = 53;
+  var TEXT_INSET = 12;
   var INDICATOR_WIDTH = 16;
   var INDICATOR_GAP = 4;
   var MIN_NAME_CLIP_WIDTH = 24;
