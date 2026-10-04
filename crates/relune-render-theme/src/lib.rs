@@ -57,8 +57,6 @@ pub struct ThemeColors {
     /// Blue-grey outline for selected and highlighted diagram elements, kept
     /// apart from kind marks and review severities.
     pub selection_color: &'static str,
-    /// Color of the FK flow particle shown on hovered edges.
-    pub glow_particle: &'static str,
     /// Whether this is a light theme (used for conditional rendering).
     pub is_light: bool,
 }
@@ -86,7 +84,6 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_stroke: "#334155",
             accent_color: "#f59e0b",
             selection_color: "#93a8c9",
-            glow_particle: "#fbbf24",
             is_light: false,
         },
         Theme::Light => ThemeColors {
@@ -108,7 +105,6 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_stroke: "#cbd5e1",
             accent_color: "#d97706",
             selection_color: "#4a6285",
-            glow_particle: "#f59e0b",
             is_light: true,
         },
     }
