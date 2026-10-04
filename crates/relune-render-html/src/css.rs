@@ -858,16 +858,10 @@ pub(crate) fn build_css(
     }
 
     .edge.highlighted-neighbor .edge-path,
-    .edge.hover-preview-edge .edge-path {
-      filter: drop-shadow(0 0 4px var(--accent-color));
-    }
-
-    .edge.highlighted-neighbor .edge-particles {
-      opacity: 0.92;
-    }
-
-    .edge.hover-preview-edge .edge-particles {
-      opacity: 0.72;
+    .edge.highlighted-neighbor .crow-inline,
+    .edge.hover-preview-edge .edge-path,
+    .edge.hover-preview-edge .crow-inline {
+      stroke: var(--selection-color);
     }
 
     @media (max-width: 960px) {

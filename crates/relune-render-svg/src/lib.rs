@@ -251,20 +251,15 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
         out,
         r"<defs>
 <style>
-.edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
-.edge-particle {{ fill: {glow_particle}; }}
-.edge:hover .edge-particles {{ opacity: 0.92; }}
-.edge:hover .edge-path {{ filter: drop-shadow(0 0 4px {glow_color}); }}
 .edge:hover .edge-path,
-.edge:hover .crow-inline {{ stroke: {glow_color}; }}
+.edge:hover .crow-inline {{ stroke: {hover_color}; }}
 .node:hover .table-body {{ stroke-width: 1.6px; }}
 .group-box,
 .group-band,
 .group-divider,
 .group-label {{ pointer-events: none; }}
 </style>",
-        glow_color = colors.accent_color,
-        glow_particle = colors.glow_particle,
+        hover_color = colors.selection_color,
     )?;
     write!(
         out,
@@ -418,15 +413,6 @@ fn render_edge_internal(
                 marker_attrs,
             )?;
         }
-    }
-
-    // The particle only runs while the edge is hovered, so idle diagrams keep
-    // no animation timers alive.
-    if edge.kind == EdgeKind::ForeignKey {
-        write!(
-            out,
-            r##"<g class="edge-particles" opacity="0"><circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" begin="edge-{index}.mouseenter" end="edge-{index}.mouseleave" repeatCount="indefinite" fill="freeze" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle></g>"##
-        )?;
     }
 
     // For curved FK edges, draw Crow's Foot symbols as inline SVG
@@ -813,13 +799,15 @@ mod tests {
     }
 
     #[test]
-    fn test_render_svg_runs_fk_particles_only_while_hovered() {
+    fn test_render_svg_edges_have_no_glow_or_particles() {
         let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
 
         assert!(svg.contains(r#"<g id="edge-0" class="edge edge-kind-foreign-key""#));
-        assert_eq!(svg.matches("<animateMotion").count(), 1);
-        assert!(svg.contains(r#"begin="edge-0.mouseenter" end="edge-0.mouseleave""#));
-        assert!(!svg.contains("begin=\"-"));
+        assert!(!svg.contains("<animateMotion"));
+        assert!(!svg.contains("edge-particle"));
+        assert!(!svg.contains("drop-shadow"));
+        // Hover recolours the line in the selection colour instead.
+        assert!(svg.contains(".edge:hover .crow-inline { stroke: #93a8c9; }"));
     }
 
     #[test]
@@ -1152,7 +1140,6 @@ mod tests {
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
         assert!(svg.contains(r##"fill="#161b26""##));
-        assert!(svg.contains("edge-particles"));
     }
 
     #[test]

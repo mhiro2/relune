@@ -1,4 +1,3 @@
-import { createEdgeParticles } from './edge_particles';
 import { computeHoverPreview, computeNeighborHighlights } from './highlight_actions';
 import {
   createHighlightPainter,
@@ -94,7 +93,6 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
   if (svgRoot && drawerEls && hoverEls) {
     const runtime = getViewerRuntime();
-    const edgeParticles = createEdgeParticles(svgRoot);
 
     // Index the diagram once; hover and selection then touch only the
     // elements they change instead of re-querying the whole SVG.
@@ -243,7 +241,6 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           }
         }
       }
-      edgeParticles.sync();
     };
 
     /** Full refresh for changes that also affect the object browser. */
