@@ -52,9 +52,12 @@ pub struct ThemeColors {
     pub group_band_fill: &'static str,
     /// Group border stroke.
     pub group_stroke: &'static str,
-    /// Accent glow color used for hover/highlight effects on edges and nodes.
-    pub glow_color: &'static str,
-    /// Secondary glow particle color (slightly lighter than `glow_color`).
+    /// Accent color for viewer controls and edge hover feedback.
+    pub accent_color: &'static str,
+    /// Blue-grey outline for selected and highlighted diagram elements, kept
+    /// apart from kind marks and review severities.
+    pub selection_color: &'static str,
+    /// Color of the FK flow particle shown on hovered edges.
     pub glow_particle: &'static str,
     /// Whether this is a light theme (used for conditional rendering).
     pub is_light: bool,
@@ -81,7 +84,8 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_fill: "#0f172acc",
             group_band_fill: "#172036",
             group_stroke: "#334155",
-            glow_color: "#f59e0b",
+            accent_color: "#f59e0b",
+            selection_color: "#93a8c9",
             glow_particle: "#fbbf24",
             is_light: false,
         },
@@ -102,7 +106,8 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_fill: "#ffffffd9",
             group_band_fill: "#eef2ff",
             group_stroke: "#cbd5e1",
-            glow_color: "#d97706",
+            accent_color: "#d97706",
+            selection_color: "#4a6285",
             glow_particle: "#f59e0b",
             is_light: true,
         },
