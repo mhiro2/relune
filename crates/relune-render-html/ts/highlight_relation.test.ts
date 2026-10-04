@@ -57,6 +57,14 @@ describe('relationColumnPairs', () => {
     ]);
   });
 
+  it('keeps the source column of an enum reference', () => {
+    const enumRef = edge('orders', 'order_status', {
+      kind: 'enum_reference',
+      from_columns: ['status'],
+    });
+    expect(relationColumnPairs(enumRef)).toEqual(['orders.status → order_status']);
+  });
+
   it('falls back to the table pair when columns are unknown', () => {
     expect(relationColumnPairs(edges[1] as (typeof edges)[number])).toEqual([
       'tags → warehouse_bins',
