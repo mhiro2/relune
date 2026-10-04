@@ -1,4 +1,9 @@
-import type { HoverPreview, NeighborHighlight } from './highlight_actions';
+import {
+  relationColumnPairs,
+  type HoverPreview,
+  type NeighborHighlight,
+  type RelationHighlight,
+} from './highlight_actions';
 import type { HighlightState } from './highlight_state';
 import {
   tableDisplayName,
@@ -54,6 +59,15 @@ function metricCard(label: string, value: string): HTMLDivElement {
 
 // ── SVG highlight classes ───────────────────────────────────────────────────
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+// Node geometry mirrored from `relune_layout::metrics`; a Rust test in
+// relune-render-html keeps these values in sync.
+// Height of one column row.
+const ROW_HEIGHT = 22;
+// Baseline of column text, measured from the top of its row.
+const ROW_BASELINE = 15;
+const PORT_RADIUS = 3.5;
+
 /** Diagram elements indexed once, so highlighting never re-queries the SVG. */
 export interface HighlightTargets {
   nodesById: ReadonlyMap<string, Element>;
@@ -65,6 +79,8 @@ export interface HighlightPainter {
   clear(): void;
   applySelected(highlight: NeighborHighlight): void;
   applyHoverPreview(preview: HoverPreview): void;
+  /** Emphasizes one relationship: its path, ports, endpoint tables, and columns. */
+  applyRelation(relation: RelationHighlight): void;
 }
 
 const HIGHLIGHT_CLASSES = [
@@ -78,7 +94,33 @@ const HIGHLIGHT_CLASSES = [
   'hover-inbound',
   'hover-outbound',
   'hover-preview-edge',
+  'selected-edge',
+  'relation-endpoint',
+  'relation-column',
 ];
+
+function svgElement(name: string, className: string, attributes: Record<string, number>): Element {
+  const element = document.createElementNS(SVG_NS, name);
+  element.setAttribute('class', className);
+  for (const [key, value] of Object.entries(attributes)) {
+    element.setAttribute(key, String(value));
+  }
+  return element;
+}
+
+function numericAttribute(element: Element | null | undefined, name: string): number {
+  return Number.parseFloat(element?.getAttribute(name) ?? '') || 0;
+}
+
+/** First and last points of an SVG path's `d` attribute. */
+export function pathEndpoints(d: string): [[number, number], [number, number]] | null {
+  const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+  if (numbers.length < 4) return null;
+  return [
+    [numbers[0] ?? 0, numbers[1] ?? 0],
+    [numbers[numbers.length - 2] ?? 0, numbers[numbers.length - 1] ?? 0],
+  ];
+}
 
 /**
  * Applies highlight classes and remembers which elements it touched, so
@@ -87,9 +129,37 @@ const HIGHLIGHT_CLASSES = [
  */
 export function createHighlightPainter(targets: HighlightTargets): HighlightPainter {
   const touched = new Set<Element>();
+  // Bands and ports drawn for a selected relationship, removed on clear.
+  const decorations: Element[] = [];
   const mark = (element: Element, ...classes: string[]): void => {
     element.classList.add(...classes);
     touched.add(element);
+  };
+  const markColumns = (nodeId: string, columns: readonly string[]): void => {
+    const node = targets.nodesById.get(nodeId);
+    if (node === undefined || columns.length === 0) return;
+    const body = node.querySelector('.table-body');
+    node.querySelectorAll('.column-row').forEach((row) => {
+      if (!columns.includes(row.getAttribute('data-column-name') ?? '')) return;
+      mark(row, 'relation-column');
+      const band = svgElement('rect', 'relation-column-band', {
+        x: numericAttribute(body, 'x') + 1,
+        y: numericAttribute(row.querySelector('.column-name'), 'y') - ROW_BASELINE,
+        width: Math.max(numericAttribute(body, 'width') - 2, 0),
+        height: ROW_HEIGHT,
+      });
+      row.prepend(band);
+      decorations.push(band);
+    });
+  };
+  const markPorts = (edge: Element): void => {
+    const endpoints = pathEndpoints(edge.querySelector('.edge-path')?.getAttribute('d') ?? '');
+    if (endpoints === null) return;
+    for (const [cx, cy] of endpoints) {
+      const port = svgElement('circle', 'relation-port', { cx, cy, r: PORT_RADIUS });
+      edge.append(port);
+      decorations.push(port);
+    }
   };
   const directionClasses = (
     id: string,
@@ -110,6 +180,24 @@ export function createHighlightPainter(targets: HighlightTargets): HighlightPain
         element.classList.remove(...HIGHLIGHT_CLASSES);
       }
       touched.clear();
+      for (const decoration of decorations) {
+        decoration.remove();
+      }
+      decorations.length = 0;
+    },
+
+    applyRelation(relation: RelationHighlight): void {
+      targets.nodesById.forEach((node, id) => {
+        const isEndpoint = id === relation.fromId || id === relation.toId;
+        mark(node, isEndpoint ? 'relation-endpoint' : 'dimmed-by-highlight');
+      });
+      targets.edges.forEach((edge, index) => {
+        mark(edge, index === relation.edgeIndex ? 'selected-edge' : 'dimmed-by-highlight');
+      });
+      markColumns(relation.fromId, relation.fromColumns);
+      markColumns(relation.toId, relation.toColumns);
+      const selected = targets.edges[relation.edgeIndex];
+      if (selected !== undefined) markPorts(selected);
     },
 
     applySelected(highlight: NeighborHighlight): void {
@@ -162,6 +250,54 @@ export function createHighlightPainter(targets: HighlightTargets): HighlightPain
   };
 }
 
+// ── Relation card ───────────────────────────────────────────────────────────
+
+export interface RelationCardElements {
+  card: HTMLElement;
+  kind: HTMLElement;
+  title: HTMLElement;
+  name: HTMLElement;
+  pairs: HTMLElement;
+  openFrom: HTMLButtonElement;
+  openTo: HTMLButtonElement;
+}
+
+const RELATION_KIND_LABELS: Record<EdgeMetadata['kind'], string> = {
+  foreign_key: 'Foreign key',
+  enum_reference: 'Enum reference',
+  view_dependency: 'View dependency',
+};
+
+/** Shows the selected relationship's column mapping, or hides the card. */
+export function renderRelationCard(
+  edge: EdgeMetadata | undefined,
+  tableById: Map<string, TableMetadata>,
+  elements: RelationCardElements,
+): void {
+  if (edge === undefined) {
+    elements.card.setAttribute('hidden', '');
+    clearChildren(elements.pairs);
+    return;
+  }
+  const label = (id: string): string => {
+    const table = tableById.get(id);
+    return table === undefined ? id : tableDisplayName(table);
+  };
+  elements.card.removeAttribute('hidden');
+  elements.kind.textContent = RELATION_KIND_LABELS[edge.kind] ?? edge.kind;
+  elements.title.textContent = `${label(edge.from)} → ${label(edge.to)}`;
+  elements.name.textContent = edge.name ?? '';
+  elements.name.toggleAttribute('hidden', edge.name == null || edge.name === '');
+  clearChildren(elements.pairs);
+  for (const pair of relationColumnPairs(edge)) {
+    const item = document.createElement('li');
+    item.textContent = pair;
+    elements.pairs.appendChild(item);
+  }
+  elements.openFrom.textContent = `Open ${label(edge.from)}`;
+  elements.openTo.textContent = `Open ${label(edge.to)}`;
+}
+
 // ── Detail drawer ───────────────────────────────────────────────────────────
 
 export interface DrawerElements {
@@ -197,7 +333,7 @@ export function renderDrawer(
   table: TableMetadata | undefined,
   state: HighlightState,
   elements: DrawerElements,
-  onNavigate?: (tableId: string) => void,
+  onSelectRelation?: (edge: EdgeMetadata) => void,
 ): void {
   if (table === undefined) {
     elements.drawer.setAttribute('hidden', '');
@@ -259,7 +395,7 @@ export function renderDrawer(
     elements.relationsEmpty.setAttribute('hidden', '');
     for (const relation of relations) {
       elements.relations.appendChild(
-        buildRelationElement(relation.edge, relation.node, state.tableById, onNavigate),
+        buildRelationElement(relation.edge, relation.node, state.tableById, onSelectRelation),
       );
     }
   }
@@ -393,7 +529,7 @@ function buildRelationElement(
   edge: EdgeMetadata,
   targetNodeId: string,
   tableById: Map<string, TableMetadata>,
-  onNavigate?: (tableId: string) => void,
+  onSelectRelation?: (edge: EdgeMetadata) => void,
 ): HTMLElement {
   const targetTable = tableById.get(targetNodeId);
   const targetName = targetTable?.label ?? targetNodeId;
@@ -410,12 +546,13 @@ function buildRelationElement(
       : '';
   meta.textContent = `${edge.kind} · ${targetName}${columnMap}`;
 
-  if (onNavigate) {
+  if (onSelectRelation) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'detail-relation detail-relation-navigable';
+    btn.setAttribute('aria-label', `Show relationship ${relationColumnPairs(edge).join(', ')}`);
     btn.addEventListener('click', () => {
-      onNavigate(targetNodeId);
+      onSelectRelation(edge);
     });
     btn.append(label, meta);
     return btn;

@@ -155,6 +155,30 @@ pub(crate) fn build_hover_popover_html() -> String {
     .to_string()
 }
 
+/// Build the relation card that shows the selected relationship's column
+/// mapping. It is a live region, so the mapping is announced when a
+/// relationship is chosen from the keyboard.
+#[allow(clippy::needless_raw_string_hashes)]
+pub(crate) fn build_relation_card_html() -> String {
+    r#"  <aside class="relation-card" id="relation-card" tabindex="-1" role="region" aria-labelledby="relation-card-title" aria-live="polite" hidden>
+    <div class="relation-card-header">
+      <div>
+        <p class="relation-card-kicker" id="relation-card-kind">Relationship</p>
+        <h2 class="relation-card-title" id="relation-card-title">Relationship</h2>
+      </div>
+      <button type="button" class="relation-card-close" id="relation-card-close" aria-label="Clear relationship">&times;</button>
+    </div>
+    <p class="relation-card-name" id="relation-card-name" hidden></p>
+    <ul class="relation-card-pairs" id="relation-card-pairs"></ul>
+    <div class="relation-card-actions">
+      <button type="button" class="relation-card-open" id="relation-card-open-from">Open source</button>
+      <button type="button" class="relation-card-open" id="relation-card-open-to">Open target</button>
+    </div>
+  </aside>
+"#
+    .to_string()
+}
+
 /// Build the search panel HTML structure.
 #[allow(clippy::needless_raw_string_hashes)]
 pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
@@ -215,8 +239,8 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
 #[cfg(test)]
 mod tests {
     use relune_layout::metrics::{
-        NODE_COLLAPSE_CONTROL_RESERVE, NODE_FIRST_COLUMN_BASELINE, NODE_KIND_LABEL_RESERVE,
-        NODE_TEXT_INSET,
+        NODE_COLLAPSE_CONTROL_RESERVE, NODE_COLUMN_HEIGHT, NODE_FIRST_COLUMN_BASELINE,
+        NODE_KIND_LABEL_RESERVE, NODE_ROW_BASELINE, NODE_TEXT_INSET,
     };
 
     /// The collapse controller positions its overlays with copies of the node
@@ -241,5 +265,22 @@ mod tests {
         assert!(source.contains(&format!("const INDICATOR_WIDTH = {width};")));
         assert!(source.contains(&format!("const INDICATOR_GAP = {gap};")));
         assert!((gap.mul_add(2.0, width) - NODE_COLLAPSE_CONTROL_RESERVE).abs() < f32::EPSILON);
+    }
+
+    /// The highlight painter draws column bands from copies of the row
+    /// metrics; this keeps those copies in step with the Rust definitions.
+    #[test]
+    fn highlight_dom_mirrors_row_metrics() {
+        let source = include_str!("../ts/highlight_dom.ts");
+        for (name, value) in [
+            ("ROW_HEIGHT", NODE_COLUMN_HEIGHT),
+            ("ROW_BASELINE", NODE_ROW_BASELINE),
+        ] {
+            let declaration = format!("const {name} = {value};");
+            assert!(
+                source.contains(&declaration),
+                "ts/highlight_dom.ts must declare `{declaration}`"
+            );
+        }
     }
 }

@@ -6,8 +6,8 @@ use crate::components::{
     build_collapse_js, build_detail_drawer_html, build_filter_engine_js,
     build_filter_reset_bar_html, build_group_panel_html, build_group_toggle_js, build_highlight_js,
     build_hover_popover_html, build_load_motion_js, build_minimap_js, build_pan_zoom_js,
-    build_search_js, build_search_panel_html, build_shortcuts_js, build_url_state_js,
-    build_viewer_controls_html,
+    build_relation_card_html, build_search_js, build_search_panel_html, build_shortcuts_js,
+    build_url_state_js, build_viewer_controls_html,
 };
 use crate::css::build_css;
 use crate::options::HtmlRenderOptions;
@@ -152,6 +152,12 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         None
     };
 
+    let relation_card = if options.enable_highlight {
+        Some(build_relation_card_html())
+    } else {
+        None
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -170,6 +176,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 {filter_reset_bar}
 {group_panel}
 {hover_popover}
+{relation_card}
 {detail_drawer}
 {viewer_controls}
   <div class="container">
@@ -192,6 +199,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         filter_reset_bar = filter_reset_bar.unwrap_or_default(),
         group_panel = group_panel.unwrap_or_default(),
         hover_popover = hover_popover.unwrap_or_default(),
+        relation_card = relation_card.unwrap_or_default(),
         detail_drawer = detail_drawer.unwrap_or_default(),
         viewer_controls = viewer_controls.unwrap_or_default(),
         css = css,
@@ -628,6 +636,17 @@ mod tests {
         assert!(html.contains(r#"id="hover-popover-title""#));
         assert!(html.contains(r#"id="hover-popover-metrics""#));
         assert!(html.contains(r#"id="hover-popover-badges""#));
+    }
+
+    #[test]
+    fn test_build_relation_card_html() {
+        let html = build_relation_card_html();
+
+        assert!(html.contains(r#"id="relation-card""#));
+        assert!(html.contains(r#"aria-live="polite""#));
+        assert!(html.contains(r#"id="relation-card-pairs""#));
+        assert!(html.contains(r#"id="relation-card-open-from""#));
+        assert!(html.contains(r#"id="relation-card-open-to""#));
     }
 
     #[test]

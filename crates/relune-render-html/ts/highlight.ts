@@ -1,17 +1,23 @@
-import { computeHoverPreview, computeNeighborHighlights } from './highlight_actions';
+import {
+  computeHoverPreview,
+  computeNeighborHighlights,
+  computeRelationHighlight,
+} from './highlight_actions';
 import {
   createHighlightPainter,
   createObjectBrowser,
   hideHoverPopover,
   renderDrawer,
   renderHoverPopover,
+  renderRelationCard,
   type DrawerElements,
+  type RelationCardElements,
   type ObjectBrowserItem,
   type HoverPopoverElements,
   type PopoverPosition,
 } from './highlight_dom';
 import { createHighlightState } from './highlight_state';
-import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { parseReluneMetadata, type EdgeMetadata, type TableMetadata } from './metadata';
 import { matchesTableQuery } from './search_actions';
 import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
@@ -91,6 +97,28 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     return null;
   })();
 
+  const relationEls: RelationCardElements | null = (() => {
+    const card = document.getElementById('relation-card');
+    const kind = document.getElementById('relation-card-kind');
+    const title = document.getElementById('relation-card-title');
+    const name = document.getElementById('relation-card-name');
+    const pairs = document.getElementById('relation-card-pairs');
+    const openFrom = document.getElementById('relation-card-open-from');
+    const openTo = document.getElementById('relation-card-open-to');
+    if (
+      card instanceof HTMLElement &&
+      kind instanceof HTMLElement &&
+      title instanceof HTMLElement &&
+      name instanceof HTMLElement &&
+      pairs instanceof HTMLElement &&
+      openFrom instanceof HTMLButtonElement &&
+      openTo instanceof HTMLButtonElement
+    ) {
+      return { card, kind, title, name, pairs, openFrom, openTo };
+    }
+    return null;
+  })();
+
   if (svgRoot && drawerEls && hoverEls) {
     const runtime = getViewerRuntime();
 
@@ -101,10 +129,8 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       const id = node.getAttribute('data-id') ?? node.getAttribute('data-table-id');
       if (id !== null && !nodesById.has(id)) nodesById.set(id, node);
     });
-    const painter = createHighlightPainter({
-      nodesById,
-      edges: Array.from(svgRoot.querySelectorAll('.edge')),
-    });
+    const edgeEls = Array.from(svgRoot.querySelectorAll('.edge'));
+    const painter = createHighlightPainter({ nodesById, edges: edgeEls });
 
     const findNode = (nodeId: string): Element | undefined => nodesById.get(nodeId);
 
@@ -212,15 +238,30 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const renderHighlight = (): void => {
       painter.clear();
       hideHoverPopover(hoverEls);
+      const relation =
+        state.selectedEdge === null ? null : computeRelationHighlight(state.selectedEdge, state);
+      if (relationEls !== null) {
+        renderRelationCard(
+          relation === null ? undefined : state.edges[relation.edgeIndex],
+          state.tableById,
+          relationEls,
+        );
+      }
 
-      if (state.selectedNode !== null) {
+      if (relation !== null) {
+        painter.applyRelation(relation);
+        renderDrawer(undefined, state, drawerEls);
+        traversalEl?.setAttribute('hidden', '');
+      } else if (state.selectedNode !== null) {
         const highlight = computeNeighborHighlights(
           state.selectedNode,
           state,
           state.traversalDepth,
         );
         painter.applySelected(highlight);
-        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
+        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, (edge) => {
+          selectRelation(edge, true);
+        });
         traversalEl?.removeAttribute('hidden');
         syncTraversalButtons();
       } else {
@@ -252,6 +293,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const setSelectedNode = (tableId: string | null): void => {
       const previous = state.selectedNode;
       state.selectedNode = tableId;
+      state.selectedEdge = null;
       state.hoveredNode = null;
       renderInteraction();
 
@@ -264,6 +306,25 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       } else {
         emitViewerEvent('relune:node-selected', { nodeId: tableId });
       }
+    };
+
+    /**
+     * Selects one relationship, clearing any table selection. Keyboard paths
+     * move focus to the relation card, since the drawer they came from closes.
+     */
+    const setSelectedEdge = (edgeIndex: number | null, focusCard = false): void => {
+      const hadTable = state.selectedNode !== null;
+      state.selectedNode = null;
+      state.selectedEdge = edgeIndex;
+      state.hoveredNode = null;
+      renderInteraction();
+      if (hadTable) emitViewerEvent('relune:node-cleared', undefined);
+      if (focusCard && edgeIndex !== null) relationEls?.card.focus();
+    };
+
+    const selectRelation = (edge: EdgeMetadata, focusCard = false): void => {
+      const index = state.edges.indexOf(edge);
+      if (index >= 0) setSelectedEdge(index, focusCard);
     };
 
     const clearHoverPreview = (): void => {
@@ -305,19 +366,32 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
     // ── Edge click listeners ────────────────────────────────────────────
 
-    svgRoot.querySelectorAll('.edge').forEach((edgeEl) => {
+    // Edges render in metadata order, so a DOM index is a metadata index.
+    edgeEls.forEach((edgeEl, index) => {
       edgeEl.addEventListener('click', (event: Event) => {
         event.stopPropagation();
-        const fromId = edgeEl.getAttribute('data-from');
-        if (fromId === null) return;
-        navigateToTable(fromId);
+        setSelectedEdge(state.selectedEdge === index ? null : index);
       });
     });
 
     svgRoot.addEventListener('click', () => {
-      if (state.selectedNode !== null) {
+      if (state.selectedNode !== null || state.selectedEdge !== null) {
         setSelectedNode(null);
       }
+    });
+
+    const openRelationEnd = (end: 'from' | 'to'): void => {
+      const edge = state.selectedEdge === null ? undefined : state.edges[state.selectedEdge];
+      if (edge !== undefined) navigateToTable(edge[end]);
+    };
+    relationEls?.openFrom.addEventListener('click', () => {
+      openRelationEnd('from');
+    });
+    relationEls?.openTo.addEventListener('click', () => {
+      openRelationEnd('to');
+    });
+    document.getElementById('relation-card-close')?.addEventListener('click', () => {
+      setSelectedEdge(null);
     });
 
     drawerClose?.addEventListener('click', () => {
