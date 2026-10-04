@@ -359,8 +359,8 @@ expression: snapshot
           "height": 132.0,
           "id": "product_categories",
           "kind": "Table",
-          "width": 243.0,
-          "x": 770.2000122070313,
+          "width": 267.0,
+          "x": 746.2000122070313,
           "y": 810.0
         },
         {
@@ -735,8 +735,8 @@ expression: snapshot
           "height": 132.0,
           "id": "product_categories",
           "kind": "Table",
-          "width": 243.0,
-          "x": 770.2000122070313,
+          "width": 267.0,
+          "x": 746.2000122070313,
           "y": 810.0
         },
         {
@@ -1057,8 +1057,8 @@ expression: snapshot
           "height": 132.0,
           "id": "product_categories",
           "kind": "Table",
-          "width": 243.0,
-          "x": 770.2000122070313,
+          "width": 267.0,
+          "x": 746.2000122070313,
           "y": 810.0
         },
         {

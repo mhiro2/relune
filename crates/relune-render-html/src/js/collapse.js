@@ -8,6 +8,7 @@
   var TEXT_INSET = 12;
   var INDICATOR_WIDTH = 16;
   var INDICATOR_GAP = 4;
+  var COLLAPSE_CONTROL_RESERVE = INDICATOR_WIDTH + INDICATOR_GAP * 2;
   var MIN_NAME_CLIP_WIDTH = 24;
   var EXPANDED_GLYPH = "\u25BE";
   var COLLAPSED_GLYPH = "\u25B8";
@@ -31,7 +32,7 @@
     const width = numericAttribute(clipRect, "width");
     clipRect.setAttribute(
       "width",
-      String(Math.max(width - INDICATOR_WIDTH - INDICATOR_GAP * 2, MIN_NAME_CLIP_WIDTH))
+      String(Math.max(width - COLLAPSE_CONTROL_RESERVE, MIN_NAME_CLIP_WIDTH))
     );
   }
   function decorateTable(node, header, columnCount) {

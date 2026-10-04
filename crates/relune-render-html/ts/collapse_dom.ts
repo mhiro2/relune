@@ -16,6 +16,8 @@ const TEXT_INSET = 12;
 
 const INDICATOR_WIDTH = 16;
 const INDICATOR_GAP = 4;
+// Clip width given up to the indicator; layout reserves the same amount.
+const COLLAPSE_CONTROL_RESERVE = INDICATOR_WIDTH + INDICATOR_GAP * 2;
 const MIN_NAME_CLIP_WIDTH = 24;
 
 const EXPANDED_GLYPH = '▾';
@@ -61,7 +63,7 @@ function shrinkNameClip(node: Element): void {
   const width = numericAttribute(clipRect, 'width');
   clipRect.setAttribute(
     'width',
-    String(Math.max(width - INDICATOR_WIDTH - INDICATOR_GAP * 2, MIN_NAME_CLIP_WIDTH)),
+    String(Math.max(width - COLLAPSE_CONTROL_RESERVE, MIN_NAME_CLIP_WIDTH)),
   );
 }
 
