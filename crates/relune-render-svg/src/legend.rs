@@ -9,6 +9,11 @@ use relune_layout::metrics::{COLUMN_BADGE_HEIGHT, COLUMN_NULLABLE_MARKER};
 use crate::node::{ColumnBadge, render_column_badge};
 use crate::theme::ThemeColors;
 
+/// Width taken by the title, badges, and nullable marker, including padding.
+const LEGEND_ITEMS_WIDTH: f32 = 488.0;
+/// Width added for the statistics block and its divider.
+const LEGEND_STATS_WIDTH: f32 = 160.0;
+
 /// Renders a legend block showing the PK, FK, and IX badges and the nullable
 /// marker exactly as node cards draw them.
 /// Optionally includes statistics if provided.
@@ -29,13 +34,31 @@ pub fn render_legend(
 ) -> fmt::Result {
     let bar_height = 42.0;
     let side_padding = 18.0;
-    let legend_width = (svg_width - side_padding * 2.0).clamp(320.0, 640.0);
+    let available_width = svg_width - side_padding * 2.0;
+    // The legend never shrinks below its items; on narrower canvases the
+    // whole bar is scaled down instead of letting items run off the edge.
+    let content_width = if stats.is_some() {
+        LEGEND_ITEMS_WIDTH + LEGEND_STATS_WIDTH
+    } else {
+        LEGEND_ITEMS_WIDTH
+    };
+    let legend_width = available_width.clamp(content_width, content_width.max(640.0));
     let legend_x = (svg_width - legend_width) * 0.5;
     let legend_y = svg_height - bar_height - 18.0;
     let mut cursor_x = legend_x + 16.0;
     let baseline_y = legend_y + 25.0;
 
-    out.push_str(r#"<g class="legend">"#);
+    if legend_width > available_width && available_width > 0.0 {
+        let scale = available_width / legend_width;
+        let (cx, cy) = (svg_width * 0.5, legend_y + bar_height);
+        write!(
+            out,
+            r#"<g class="legend" transform="translate({cx:.1} {cy:.1}) scale({scale:.3}) translate({:.1} {:.1})">"#,
+            -cx, -cy
+        )?;
+    } else {
+        out.push_str(r#"<g class="legend">"#);
+    }
 
     write!(
         out,
@@ -67,7 +90,7 @@ pub fn render_legend(
     render_legend_item_label(out, cursor_x + 24.0, baseline_y, "Nullable", theme)?;
 
     if let Some(stats) = stats {
-        let stats_x = legend_x + legend_width - 144.0;
+        let stats_x = legend_x + legend_width - LEGEND_STATS_WIDTH + 16.0;
         write!(
             out,
             r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/><text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
@@ -155,6 +178,20 @@ mod tests {
 
         assert!(out.contains("class=\"legend\""));
         assert!(out.contains("5 tables · 42 columns · 8 FKs"));
+    }
+
+    #[test]
+    fn test_legend_scales_down_on_narrow_canvas() {
+        let colors = test_theme_colors();
+        let mut wide = String::new();
+        let mut narrow = String::new();
+
+        render_legend_ok(&mut wide, &colors, None, 800.0, 600.0);
+        render_legend_ok(&mut narrow, &colors, None, 400.0, 600.0);
+
+        assert!(wide.starts_with(r#"<g class="legend">"#));
+        assert!(narrow.starts_with(r#"<g class="legend" transform="#));
+        assert!(narrow.contains("scale(0.746)"));
     }
 
     #[test]
