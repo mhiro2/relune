@@ -616,6 +616,7 @@ mod tests {
     use super::*;
     use relune_core::layout::Cardinality;
     use relune_core::{EdgeKind, NodeKind};
+    use relune_layout::metrics::COLUMN_NULLABLE_MARKER;
     use relune_layout::{
         ColumnFlags, ColumnRelationFlags, EdgeRoute, PositionedColumn, PositionedEdge,
         PositionedGroup, PositionedNode, RouteStyle,
@@ -791,18 +792,22 @@ mod tests {
 
         // Should contain the node label
         assert!(svg.contains(">users<"));
-        // Should contain the columns (now in "name: type" format from PositionedColumn)
-        assert!(svg.contains("id: uuid PK"));
-        assert!(svg.contains("name: text"));
+        // Names and types are separate text elements.
+        assert!(svg.contains(r#"class="column-name""#));
+        assert!(svg.contains(">uuid PK</text>"));
+        assert!(svg.contains(">text</text>"));
+        assert!(!svg.contains("id: uuid"));
         // Should contain valid SVG structure
         assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(svg.contains("<rect"));
         assert!(svg.contains("<text"));
         assert!(svg.contains("node-0-header-clip"));
-        // One clip per badge count: `id` carries the PK badge, `name` none.
-        assert_eq!(svg.matches("<clipPath id=\"node-0-columns-").count(), 2);
-        assert_eq!(svg.matches("url(#node-0-columns-1-clip)").count(), 1);
-        assert_eq!(svg.matches("url(#node-0-columns-0-clip)").count(), 1);
+        // One clip per node, shared by every name and type.
+        assert_eq!(
+            svg.matches("<clipPath id=\"node-0-columns-clip\"").count(),
+            1
+        );
+        assert_eq!(svg.matches("url(#node-0-columns-clip)").count(), 4);
     }
 
     #[test]
@@ -973,7 +978,7 @@ mod tests {
         assert!(svg.contains("edge-kind-enum-reference"));
         assert!(svg.contains("stroke-dasharray=\"4,4\""));
         assert!(svg.contains("stroke-dasharray=\"6,4\""));
-        assert!(svg.contains("• active"));
+        assert!(svg.contains(">active</text>"));
         assert!(svg.contains("data-node-kind=\"view\""));
         assert!(svg.contains("data-node-kind=\"enum\""));
     }
@@ -1194,22 +1199,39 @@ mod tests {
         assert_eq!(svg2, svg3);
     }
 
-    #[test]
-    fn test_column_separators_sit_between_rows_of_each_node() {
-        // The first node previously got no separators and every later node got
-        // one above its first column.
-        let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
-        let per_node: Vec<usize> = svg
-            .split("<g class=\"table-node")
+    /// Returns the value of `attr` on every element whose class is `class`.
+    fn attribute_values<'a>(svg: &'a str, class: &str, attr: &str) -> Vec<&'a str> {
+        svg.split(&format!(r#"class="{class}""#))
             .skip(1)
-            .map(|node| node.matches("class=\"column-separator\"").count())
-            .collect();
-        let expected: Vec<usize> = multi_node_graph()
-            .nodes
-            .iter()
-            .map(|node| node.columns.len().saturating_sub(1))
-            .collect();
-        assert_eq!(per_node, expected);
+            .map(|rest| {
+                let start =
+                    rest.find(&format!(r#" {attr}=""#)).expect("attribute") + attr.len() + 3;
+                &rest[start..start + rest[start..].find('"').expect("closing quote")]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_column_rows_align_marks_without_separators() {
+        let mut graph = multi_node_graph();
+        graph.nodes[1].columns[2].flags.nullable = true;
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+        let posts = svg
+            .split("<g class=\"table-node")
+            .nth(2)
+            .expect("posts node");
+
+        assert!(!svg.contains("column-separator"));
+        assert!(!svg.contains(r#"font-style="italic""#));
+        // PK and FK badges sit in their own slots, so every name starts at
+        // the same x, after both slots.
+        let names = attribute_values(posts, "column-name", "x");
+        assert_eq!(names.len(), 3);
+        assert!(names.iter().all(|x| *x == names[0]));
+        let types = attribute_values(posts, "column-type", "x");
+        assert!(types.iter().all(|x| *x == types[0]));
+        assert_eq!(posts.matches(r#"class="column-nullable""#).count(), 1);
+        assert!(posts.contains(&format!(">{COLUMN_NULLABLE_MARKER}</text>")));
     }
 
     #[test]

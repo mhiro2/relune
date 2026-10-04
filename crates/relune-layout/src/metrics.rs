@@ -4,44 +4,61 @@
 //! nodes and group labels with the same values, so changing one here moves
 //! both sides together.
 
-use relune_core::NodeKind;
+use crate::ColumnFlags;
 use unicode_width::UnicodeWidthChar;
 
 /// Height of the node header band.
-pub const NODE_HEADER_HEIGHT: f32 = 32.0;
+pub const NODE_HEADER_HEIGHT: f32 = 34.0;
 /// Height of one column row.
-pub const NODE_COLUMN_HEIGHT: f32 = 18.0;
+pub const NODE_COLUMN_HEIGHT: f32 = 22.0;
 /// Baseline of the table name, measured from the node top.
-pub const NODE_HEADER_BASELINE: f32 = 21.0;
+pub const NODE_HEADER_BASELINE: f32 = 22.0;
 /// Top of the first column row, measured from the node top.
-pub const NODE_FIRST_ROW_TOP: f32 = 34.0;
+pub const NODE_FIRST_ROW_TOP: f32 = NODE_HEADER_HEIGHT + 4.0;
 /// Baseline of column text, measured from the top of its row.
-pub const NODE_ROW_BASELINE: f32 = 12.0;
+pub const NODE_ROW_BASELINE: f32 = 15.0;
 /// Baseline of the first column row, measured from the node top.
 pub const NODE_FIRST_COLUMN_BASELINE: f32 = NODE_FIRST_ROW_TOP + NODE_ROW_BASELINE;
-/// Horizontal inset of header and column text from the node edges.
-pub const NODE_TEXT_INSET: f32 = 10.0;
+/// Space kept below the last column row.
+pub const NODE_ROWS_BOTTOM_PADDING: f32 = 6.0;
+/// Horizontal inset of header and column content from the node edges.
+pub const NODE_TEXT_INSET: f32 = 12.0;
 /// Corner radius of the node body and header.
 pub const NODE_CORNER_RADIUS: f32 = 16.0;
 /// Space kept between the table-name clip and the node's right edge for the
 /// right-aligned kind label ("TABLE"/"VIEW"/"ENUM").
-pub const NODE_KIND_LABEL_RESERVE: f32 = 44.0;
+pub const NODE_KIND_LABEL_RESERVE: f32 = 48.0;
 
 /// Font size of the table name.
-pub const NODE_HEADER_FONT_SIZE: f32 = 13.0;
-/// Font size of column rows.
-pub const NODE_COLUMN_FONT_SIZE: f32 = 11.5;
+pub const NODE_HEADER_FONT_SIZE: f32 = 14.0;
+/// Font size of column names.
+pub const NODE_COLUMN_FONT_SIZE: f32 = 12.0;
+/// Font size of column types and the nullable marker.
+pub const NODE_DETAIL_FONT_SIZE: f32 = 11.0;
 
 /// Width of one PK / FK / IX badge.
-pub const COLUMN_BADGE_WIDTH: f32 = 20.0;
+pub const COLUMN_BADGE_WIDTH: f32 = 18.0;
 /// Height of one PK / FK / IX badge.
 pub const COLUMN_BADGE_HEIGHT: f32 = 13.0;
-/// Distance between the left edges of neighbouring badges.
-pub const COLUMN_BADGE_PITCH: f32 = 24.0;
-/// Distance from the node's right edge to the rightmost badge's left edge.
-pub const COLUMN_BADGE_RIGHT_INSET: f32 = 22.0;
-/// Gap kept between column text and the leftmost badge.
-pub const COLUMN_BADGE_TEXT_GAP: f32 = 6.0;
+/// Width of one badge slot, including the gap to the next slot.
+pub const COLUMN_BADGE_PITCH: f32 = 20.0;
+/// Gap between the key badges and the column name.
+pub const COLUMN_KEY_GUTTER_GAP: f32 = 4.0;
+/// Minimum gap between a column name and its right-aligned type.
+pub const COLUMN_NAME_TYPE_GAP: f32 = 16.0;
+/// Gap between the end of the type and the nullable marker.
+pub const COLUMN_NULLABLE_GAP: f32 = 2.0;
+/// Width of the nullable marker slot to the right of the type.
+pub const COLUMN_NULLABLE_SLOT_WIDTH: f32 = 10.0;
+/// Gap between the type (or nullable marker) and the IX badge.
+pub const COLUMN_INDEX_GAP: f32 = 6.0;
+/// Marker drawn after the type of a nullable column.
+pub const COLUMN_NULLABLE_MARKER: &str = "?";
+
+/// Advance width of one narrow character in the card's monospace font, in `em`.
+const MONO_NARROW_ADVANCE_EM: f32 = 0.6;
+/// Advance width of one wide (CJK) character, in `em`.
+const MONO_WIDE_ADVANCE_EM: f32 = 1.0;
 
 /// Horizontal inset of the group label from the group's left edge.
 pub const GROUP_LABEL_INSET: f32 = 12.0;
@@ -66,34 +83,107 @@ pub fn column_row_center(index: usize) -> f32 {
     (index as f32).mul_add(NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP) + NODE_COLUMN_HEIGHT / 2.0
 }
 
-/// Horizontal space a column row reserves at its right end for `badge_count`
-/// badges, including the gap before the leftmost one.
-#[must_use]
-#[allow(clippy::cast_precision_loss)] // Badge counts are tiny layout values.
-pub fn column_badge_reserve(badge_count: usize) -> f32 {
-    if badge_count == 0 {
-        return 0.0;
-    }
-    (badge_count as f32 - 1.0).mul_add(
-        COLUMN_BADGE_PITCH,
-        COLUMN_BADGE_RIGHT_INSET + COLUMN_BADGE_TEXT_GAP,
-    )
+/// Column marks a node reserves a fixed slot for in every row.
+///
+/// A slot is reserved when any column of the node needs it, so PK / FK
+/// badges, types, nullable markers, and IX badges line up down the card.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // One independent flag per slot.
+pub struct ColumnSlots {
+    /// Some column is part of the primary key.
+    pub primary_key: bool,
+    /// Some column participates in a foreign key.
+    pub foreign_key: bool,
+    /// Some column appears in an index.
+    pub indexed: bool,
+    /// Some column is nullable.
+    pub nullable: bool,
 }
 
-/// Text drawn for one column row: enum values get a bullet, and table or view
-/// columns append their data type when it is known.
+impl ColumnSlots {
+    /// Collects the slots needed by every column in `columns`.
+    #[must_use]
+    pub fn of<'a>(columns: impl IntoIterator<Item = &'a ColumnFlags>) -> Self {
+        columns
+            .into_iter()
+            .fold(Self::default(), |slots, flags| Self {
+                primary_key: slots.primary_key || flags.relation.is_primary_key,
+                foreign_key: slots.foreign_key || flags.relation.is_foreign_key,
+                indexed: slots.indexed || flags.relation.is_indexed,
+                nullable: slots.nullable || flags.nullable,
+            })
+    }
+
+    /// Offset of the FK badge from the row's left content edge; the PK badge
+    /// always sits at that edge.
+    #[must_use]
+    pub const fn foreign_key_offset(self) -> f32 {
+        if self.primary_key {
+            COLUMN_BADGE_PITCH
+        } else {
+            0.0
+        }
+    }
+
+    /// Width taken by the key badges before the column name.
+    #[must_use]
+    pub fn key_gutter(self) -> f32 {
+        let slots = u8::from(self.primary_key) + u8::from(self.foreign_key);
+        if slots == 0 {
+            0.0
+        } else {
+            f32::from(slots).mul_add(COLUMN_BADGE_PITCH, COLUMN_KEY_GUTTER_GAP)
+        }
+    }
+
+    /// Width taken right of the type by the nullable marker and IX badge.
+    #[must_use]
+    pub fn trailing_reserve(self) -> f32 {
+        let nullable = if self.nullable {
+            COLUMN_NULLABLE_SLOT_WIDTH
+        } else {
+            0.0
+        };
+        let indexed = if self.indexed {
+            COLUMN_INDEX_GAP + COLUMN_BADGE_WIDTH
+        } else {
+            0.0
+        };
+        nullable + indexed
+    }
+}
+
+/// Content width of one column row: key gutter, name, type, and trailing
+/// marks, excluding the node's horizontal insets.
 #[must_use]
-pub fn column_display_text(kind: NodeKind, name: &str, data_type: &str) -> String {
-    if kind == NodeKind::Enum {
-        format!("• {name}")
-    } else if data_type.is_empty() {
-        name.to_string()
+pub fn column_row_width(slots: ColumnSlots, name: &str, data_type: &str) -> f32 {
+    let name_width = estimate_mono_text_width(name, NODE_COLUMN_FONT_SIZE);
+    let type_width = if data_type.is_empty() {
+        0.0
     } else {
-        format!("{name}: {data_type}")
-    }
+        COLUMN_NAME_TYPE_GAP + estimate_mono_text_width(data_type, NODE_DETAIL_FONT_SIZE)
+    };
+    slots.key_gutter() + name_width + type_width + slots.trailing_reserve()
 }
 
-/// Estimates the rendered width of `text` at `font_size`.
+/// Estimates the rendered width of `text` in the card's monospace font.
+///
+/// Narrow characters advance by a fixed fraction of the font size, wide
+/// (CJK) characters by a full em, and zero-width characters not at all.
+#[must_use]
+pub fn estimate_mono_text_width(text: &str, font_size: f32) -> f32 {
+    text.chars()
+        .map(|ch| match ch.width_cjk().or_else(|| ch.width()) {
+            Some(0) => 0.0,
+            Some(1) | None => MONO_NARROW_ADVANCE_EM,
+            Some(_) => MONO_WIDE_ADVANCE_EM,
+        })
+        .sum::<f32>()
+        * font_size
+}
+
+/// Estimates the rendered width of proportional (sans-serif) `text` at
+/// `font_size`.
 ///
 /// East Asian wide characters count wider than ASCII so CJK identifiers are
 /// not clipped.
@@ -140,11 +230,54 @@ pub fn estimate_edge_label_width(text: &str) -> f32 {
 mod tests {
     use super::*;
 
+    fn flags(primary_key: bool, foreign_key: bool, nullable: bool) -> ColumnFlags {
+        ColumnFlags {
+            nullable,
+            relation: crate::ColumnRelationFlags {
+                is_primary_key: primary_key,
+                is_foreign_key: foreign_key,
+                is_indexed: false,
+            },
+        }
+    }
+
     #[test]
-    fn column_badge_reserve_grows_by_pitch() {
-        assert!(column_badge_reserve(0).abs() < f32::EPSILON);
-        assert!((column_badge_reserve(1) - 28.0).abs() < f32::EPSILON);
-        assert!((column_badge_reserve(3) - 76.0).abs() < f32::EPSILON);
+    fn column_slots_reserve_only_marks_some_column_uses() {
+        let columns = [flags(true, false, false), flags(false, false, true)];
+        let slots = ColumnSlots::of(&columns);
+
+        assert!(slots.primary_key && slots.nullable);
+        assert!(!slots.foreign_key && !slots.indexed);
+        assert!((slots.key_gutter() - 24.0).abs() < f32::EPSILON);
+        assert!((slots.trailing_reserve() - COLUMN_NULLABLE_SLOT_WIDTH).abs() < f32::EPSILON);
+        assert!(ColumnSlots::default().key_gutter().abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn foreign_key_slot_follows_primary_key_slot() {
+        let fk_only = ColumnSlots::of(&[flags(false, true, false)]);
+        let both = ColumnSlots::of(&[flags(true, false, false), flags(false, true, false)]);
+
+        assert!(fk_only.foreign_key_offset().abs() < f32::EPSILON);
+        assert!((both.foreign_key_offset() - COLUMN_BADGE_PITCH).abs() < f32::EPSILON);
+        assert!((both.key_gutter() - 44.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn column_row_width_separates_name_and_type() {
+        let slots = ColumnSlots::default();
+        let name_only = column_row_width(slots, "id", "");
+        let typed = column_row_width(slots, "id", "int");
+
+        assert!((name_only - 14.4).abs() < 0.01);
+        assert!((typed - (14.4 + COLUMN_NAME_TYPE_GAP + 19.8)).abs() < 0.01);
+    }
+
+    #[test]
+    fn mono_text_width_counts_wide_characters_as_one_em() {
+        assert!((estimate_mono_text_width("ab", 10.0) - 12.0).abs() < 0.01);
+        assert!((estimate_mono_text_width("顧客", 10.0) - 20.0).abs() < 0.01);
+        assert!((estimate_mono_text_width("e\u{301}", 10.0) - 6.0).abs() < 0.01);
     }
 
     #[test]

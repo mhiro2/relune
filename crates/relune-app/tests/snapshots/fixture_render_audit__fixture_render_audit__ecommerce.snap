@@ -6,9 +6,9 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
   "fixture": "ecommerce.sql",
   "layout": {
     "edge_count": 7,
-    "height": 938.0,
+    "height": 1042.0,
     "node_count": 7,
-    "width": 1503.4000244140625
+    "width": 1637.4000244140625
   },
   "patterns": {
     "long_detours": {
@@ -49,13 +49,13 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 423638,
+      "bytes": 429017,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 57846,
+      "bytes": 63225,
       "edge_groups": 42,
       "node_groups": 7
     }
