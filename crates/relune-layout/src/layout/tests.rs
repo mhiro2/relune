@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 
 use super::edge_routing::{
-    BYPASS_CHANNEL_LANE_STEP, EdgeObstacles, MIN_LABEL_ROUTE_T, NodeObstacleIndex,
-    ObstacleRoutingContext, RankAxisBounds, bypass_channel_candidates, bypass_channel_lane_count,
-    channel_candidates, channel_search_plan, edge_endpoint_marker_obstacles,
-    edge_route_obstacle_spacing, label_rect, obstacle_aware_channel_for_edge,
-    parallel_label_parameter, place_label_on_route, rank_axis_bounds, rect_overlaps_any,
-    route_edges, route_edges_with_diagnostics, route_obstacle_hit_count,
+    BYPASS_CHANNEL_LANE_STEP, EdgeObstacles, HARD_OBSTACLE_PADDING, MIN_LABEL_ROUTE_T,
+    NodeObstacleIndex, ObstacleRoutingContext, RankAxisBounds, bypass_channel_candidates,
+    bypass_channel_lane_count, channel_candidates, channel_search_plan,
+    edge_endpoint_marker_obstacles, edge_route_obstacle_spacing, label_rect,
+    obstacle_aware_channel_for_edge, parallel_label_parameter, place_label_on_route,
+    rank_axis_bounds, rect_overlaps_any, route_edges, route_edges_with_diagnostics,
+    route_obstacle_hit_count,
 };
 use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
@@ -2311,6 +2312,36 @@ fn test_route_edges_shift_inter_rank_channel_away_from_obstacle() {
             &label_rects_from_nodes(&positioned_nodes[2..]),
             0.0
         ),
+        0
+    );
+}
+
+#[test]
+fn test_hard_obstacle_check_catches_channel_just_inside_node_edge() {
+    let node = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 100.0,
+    };
+    let route_at = |x: f32| EdgeRoute {
+        x1: x,
+        y1: -40.0,
+        x2: x,
+        y2: 140.0,
+        control_points: vec![],
+        style: RouteStyle::Orthogonal,
+        label_position: (x, 50.0),
+    };
+
+    // A vertical channel 1px inside the right edge passes through the node.
+    assert_eq!(
+        route_obstacle_hit_count(&route_at(199.0), &[node], HARD_OBSTACLE_PADDING),
+        1
+    );
+    // Running along the edge itself still counts as clear.
+    assert_eq!(
+        route_obstacle_hit_count(&route_at(200.0), &[node], HARD_OBSTACLE_PADDING),
         0
     );
 }
