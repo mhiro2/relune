@@ -663,8 +663,12 @@ mod tests {
         assert!(css.contains(".highlighted-neighbor"));
         assert!(css.contains(".dimmed-by-highlight"));
         assert!(css.contains(".selected-node"));
-        assert!(css.contains(".node.selected-node {"));
+        assert!(css.contains(".node.selected-node .table-body {"));
+        assert!(css.contains("stroke: var(--selection-color);"));
+        assert!(css.contains("--selection-color: #4a6285;"));
         assert!(css.contains("transition: stroke 0.3s"));
+        // Table highlights are outlines only.
+        assert!(!css.contains("rgba(245, 158, 11, 0.48)"));
     }
 
     #[test]
