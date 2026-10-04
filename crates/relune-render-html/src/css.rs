@@ -1621,6 +1621,17 @@ pub(crate) fn build_css(
     .canvas svg .edge-label-pill {
       opacity: 0;
       transition: opacity 0.15s;
+      /* Invisible pills must not catch clicks meant for the canvas. */
+      pointer-events: none;
+    }
+
+    .canvas svg .edge:focus-visible {
+      outline: none;
+    }
+
+    .canvas svg .edge:focus-visible .edge-path {
+      stroke: var(--selection-color);
+      stroke-width: 2.4px;
     }
 
     .canvas svg .edge:hover .edge-label,

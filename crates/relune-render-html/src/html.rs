@@ -699,6 +699,9 @@ mod tests {
         ));
         assert!(css.contains(".canvas svg .edge.selected-edge .edge-label,"));
         assert!(css.contains(".canvas svg .edge:hover .edge-label,"));
+        assert!(
+            css.contains("pointer-events: none;\n    }\n\n    .canvas svg .edge:focus-visible {")
+        );
     }
 
     #[test]
