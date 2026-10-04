@@ -9,9 +9,9 @@ use super::{
 };
 use crate::metrics::{
     ColumnSlots, GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING,
-    NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT,
-    NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE, NODE_ROWS_BOTTOM_PADDING, NODE_TEXT_INSET,
-    column_row_width, estimate_mono_text_width, estimate_text_width,
+    NODE_COLLAPSE_CONTROL_RESERVE, NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP, NODE_HEADER_FONT_SIZE,
+    NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE, NODE_ROWS_BOTTOM_PADDING,
+    NODE_TEXT_INSET, column_row_width, estimate_mono_text_width, estimate_text_width,
 };
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
@@ -86,7 +86,8 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
         2.0,
         estimate_mono_text_width(&node.label, NODE_HEADER_FONT_SIZE),
     ) + NODE_HEADER_NAME_OFFSET
-        + HEADER_KIND_LABEL_RESERVE;
+        + HEADER_KIND_LABEL_RESERVE
+        + NODE_COLLAPSE_CONTROL_RESERVE;
     if !config.show_columns {
         return header_width.max(minimum_width).ceil();
     }

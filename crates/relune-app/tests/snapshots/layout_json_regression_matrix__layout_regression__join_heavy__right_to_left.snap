@@ -1810,8 +1810,8 @@ expression: snapshot
           "height": 88.0,
           "id": "role_permissions",
           "kind": "Table",
-          "width": 248.0,
-          "x": 1432.0,
+          "width": 250.0,
+          "x": 1430.0,
           "y": 2156.0
         },
         {
@@ -3747,8 +3747,8 @@ expression: snapshot
           "height": 88.0,
           "id": "role_permissions",
           "kind": "Table",
-          "width": 248.0,
-          "x": 1432.0,
+          "width": 250.0,
+          "x": 1430.0,
           "y": 2156.0
         },
         {
@@ -5301,8 +5301,8 @@ expression: snapshot
           "height": 88.0,
           "id": "role_permissions",
           "kind": "Table",
-          "width": 248.0,
-          "x": 1432.0,
+          "width": 250.0,
+          "x": 1430.0,
           "y": 2156.0
         },
         {

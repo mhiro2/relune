@@ -33,6 +33,10 @@ pub const NODE_HEADER_NAME_OFFSET: f32 = NODE_KIND_MARK_SIZE + 7.0;
 /// Space kept between the table-name clip and the node's right edge for the
 /// right-aligned kind label ("TABLE"/"VIEW"/"ENUM").
 pub const NODE_KIND_LABEL_RESERVE: f32 = 48.0;
+/// Header width the HTML viewer takes from the table-name clip for its
+/// collapse indicator. Layout reserves it for every node so names fit in
+/// both SVG and HTML output.
+pub const NODE_COLLAPSE_CONTROL_RESERVE: f32 = 24.0;
 
 /// Font size of the table name.
 pub const NODE_HEADER_FONT_SIZE: f32 = 14.0;
