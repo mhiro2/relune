@@ -102,7 +102,7 @@ pub(crate) fn build_viewer_controls_html() -> String {
 
 #[allow(clippy::needless_raw_string_hashes)]
 pub(crate) fn build_detail_drawer_html() -> String {
-    r#"  <aside class="detail-drawer" id="detail-drawer" hidden>
+    r#"  <aside class="detail-drawer" id="detail-drawer" tabindex="-1" aria-labelledby="detail-title" hidden>
     <div class="detail-drawer-header">
       <div>
         <p class="detail-kicker" id="detail-kind">Inspector</p>

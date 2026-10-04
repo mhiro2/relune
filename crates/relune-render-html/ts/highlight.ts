@@ -308,6 +308,10 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       }
     };
 
+    // Table whose drawer a relationship was opened from, so closing the
+    // relation card returns there instead of dropping keyboard focus.
+    let relationOrigin: string | null = null;
+
     /**
      * Selects one relationship, clearing any table selection. Keyboard paths
      * move focus to the relation card, since the drawer they came from closes.
@@ -317,6 +321,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       state.selectedNode = null;
       state.selectedEdge = edgeIndex;
       state.hoveredNode = null;
+      relationOrigin = null;
       renderInteraction();
       if (hadTable) emitViewerEvent('relune:node-cleared', undefined);
       if (focusCard && edgeIndex !== null) relationEls?.card.focus();
@@ -324,7 +329,16 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
     const selectRelation = (edge: EdgeMetadata, focusCard = false): void => {
       const index = state.edges.indexOf(edge);
-      if (index >= 0) setSelectedEdge(index, focusCard);
+      if (index < 0) return;
+      const origin = state.selectedNode;
+      setSelectedEdge(index, focusCard);
+      relationOrigin = origin;
+    };
+
+    /** Selects a table and moves focus into its drawer. */
+    const openTableDrawer = (tableId: string): void => {
+      navigateToTable(tableId);
+      drawerEls.drawer.focus();
     };
 
     const clearHoverPreview = (): void => {
@@ -382,7 +396,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
     const openRelationEnd = (end: 'from' | 'to'): void => {
       const edge = state.selectedEdge === null ? undefined : state.edges[state.selectedEdge];
-      if (edge !== undefined) navigateToTable(edge[end]);
+      if (edge !== undefined) openTableDrawer(edge[end]);
     };
     relationEls?.openFrom.addEventListener('click', () => {
       openRelationEnd('from');
@@ -391,7 +405,11 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       openRelationEnd('to');
     });
     document.getElementById('relation-card-close')?.addEventListener('click', () => {
-      setSelectedEdge(null);
+      if (relationOrigin !== null) {
+        openTableDrawer(relationOrigin);
+      } else {
+        setSelectedEdge(null);
+      }
     });
 
     drawerClose?.addEventListener('click', () => {
