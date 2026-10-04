@@ -942,9 +942,25 @@
         });
       });
       edgeEls.forEach((edgeEl, index) => {
+        const toggle = (focusCard) => {
+          setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
+        };
+        const edge = state.edges[index];
+        if (edge !== void 0) {
+          edgeEl.setAttribute("tabindex", "0");
+          edgeEl.setAttribute("role", "button");
+          edgeEl.setAttribute("aria-label", `Relationship ${relationColumnPairs(edge).join(", ")}`);
+        }
         edgeEl.addEventListener("click", (event) => {
           event.stopPropagation();
-          setSelectedEdge(state.selectedEdge === index ? null : index);
+          toggle(false);
+        });
+        edgeEl.addEventListener("keydown", (event) => {
+          const { key } = event;
+          if (key !== "Enter" && key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          toggle(true);
         });
       });
       svgRoot.addEventListener("click", () => {
@@ -962,12 +978,21 @@
       relationEls?.openTo.addEventListener("click", () => {
         openRelationEnd("to");
       });
-      document.getElementById("relation-card-close")?.addEventListener("click", () => {
+      const closeRelationCard = () => {
+        const index = state.selectedEdge;
         if (relationOrigin !== null) {
           openTableDrawer(relationOrigin);
-        } else {
-          setSelectedEdge(null);
+          return;
         }
+        setSelectedEdge(null);
+        if (index !== null) edgeEls[index]?.focus();
+      };
+      document.getElementById("relation-card-close")?.addEventListener("click", closeRelationCard);
+      relationEls?.card.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeRelationCard();
       });
       drawerClose?.addEventListener("click", () => {
         setSelectedNode(null);

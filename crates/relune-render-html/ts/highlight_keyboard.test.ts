@@ -82,6 +82,22 @@ describe('relationship keyboard path', () => {
     expect(document.activeElement).toBe(byId('detail-drawer'));
   });
 
+  it('selects a line from the keyboard and steps back with Escape', () => {
+    const line = document.querySelector('.edge') as SVGElement;
+    expect(line.getAttribute('tabindex')).toBe('0');
+    expect(line.getAttribute('role')).toBe('button');
+    expect(line.getAttribute('aria-label')).toBe('Relationship posts.user_id → users.id');
+
+    line.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const card = byId('relation-card');
+    expect(card.hasAttribute('hidden')).toBe(false);
+    expect(document.activeElement).toBe(card);
+
+    card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(card.hasAttribute('hidden')).toBe(true);
+    expect(document.activeElement).toBe(line);
+  });
+
   it('clears the relationship with the selection runtime', () => {
     (document.querySelector('.edge') as Element).dispatchEvent(
       new MouseEvent('click', { bubbles: true }),

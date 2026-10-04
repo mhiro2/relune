@@ -2,6 +2,7 @@ import {
   computeHoverPreview,
   computeNeighborHighlights,
   computeRelationHighlight,
+  relationColumnPairs,
 } from './highlight_actions';
 import {
   createHighlightPainter,
@@ -381,10 +382,27 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     // ── Edge click listeners ────────────────────────────────────────────
 
     // Edges render in metadata order, so a DOM index is a metadata index.
+    // Each line is also a keyboard button naming the mapping it selects.
     edgeEls.forEach((edgeEl, index) => {
+      const toggle = (focusCard: boolean): void => {
+        setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
+      };
+      const edge = state.edges[index];
+      if (edge !== undefined) {
+        edgeEl.setAttribute('tabindex', '0');
+        edgeEl.setAttribute('role', 'button');
+        edgeEl.setAttribute('aria-label', `Relationship ${relationColumnPairs(edge).join(', ')}`);
+      }
       edgeEl.addEventListener('click', (event: Event) => {
         event.stopPropagation();
-        setSelectedEdge(state.selectedEdge === index ? null : index);
+        toggle(false);
+      });
+      edgeEl.addEventListener('keydown', (event: Event) => {
+        const { key } = event as KeyboardEvent;
+        if (key !== 'Enter' && key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        toggle(true);
       });
     });
 
@@ -404,12 +422,23 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     relationEls?.openTo.addEventListener('click', () => {
       openRelationEnd('to');
     });
-    document.getElementById('relation-card-close')?.addEventListener('click', () => {
+    /** Closes the relation card, returning to the drawer or line it came from. */
+    const closeRelationCard = (): void => {
+      const index = state.selectedEdge;
       if (relationOrigin !== null) {
         openTableDrawer(relationOrigin);
-      } else {
-        setSelectedEdge(null);
+        return;
       }
+      setSelectedEdge(null);
+      if (index !== null) (edgeEls[index] as HTMLElement | SVGElement | undefined)?.focus();
+    };
+    document.getElementById('relation-card-close')?.addEventListener('click', closeRelationCard);
+    // Escape inside the card steps back instead of clearing the whole view.
+    relationEls?.card.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRelationCard();
     });
 
     drawerClose?.addEventListener('click', () => {
