@@ -192,7 +192,7 @@
       btn.classList.toggle("active", mode === activeMode);
     }
   }
-  function buildFacetSection(facet, onChange, onSearchInput) {
+  function buildFacetSection(facet, onBulkChange, onSearchInput) {
     const details = document.createElement("details");
     details.className = "filter-facet";
     details.dataset.facetId = facet.id;
@@ -211,28 +211,14 @@
     allBtn.className = "filter-facet-action";
     allBtn.textContent = "Select All";
     allBtn.addEventListener("click", () => {
-      const listEl = details.querySelector(".filter-facet-list");
-      if (!listEl) return;
-      for (const cb of listEl.querySelectorAll('input[type="checkbox"]')) {
-        if (!cb.checked) {
-          cb.checked = true;
-          onChange(cb.value, true);
-        }
-      }
+      setAllCheckboxes(details, true, onBulkChange);
     });
     const noneBtn = document.createElement("button");
     noneBtn.type = "button";
     noneBtn.className = "filter-facet-action";
     noneBtn.textContent = "Clear";
     noneBtn.addEventListener("click", () => {
-      const listEl = details.querySelector(".filter-facet-list");
-      if (!listEl) return;
-      for (const cb of listEl.querySelectorAll('input[type="checkbox"]')) {
-        if (cb.checked) {
-          cb.checked = false;
-          onChange(cb.value, false);
-        }
-      }
+      setAllCheckboxes(details, false, onBulkChange);
     });
     actions.append(allBtn, noneBtn);
     summary.append(label, badge);
@@ -255,6 +241,20 @@
     list.className = "filter-facet-list";
     details.appendChild(list);
     return details;
+  }
+  function setAllCheckboxes(details, checked, onBulkChange) {
+    const listEl = details.querySelector(".filter-facet-list");
+    if (!listEl) return;
+    const changed = [];
+    for (const cb of listEl.querySelectorAll('input[type="checkbox"]')) {
+      if (cb.checked !== checked) {
+        cb.checked = checked;
+        changed.push(cb.value);
+      }
+    }
+    if (changed.length > 0) {
+      onBulkChange(changed, checked);
+    }
   }
   function rebuildFacetCheckboxes(details, values, selectedValues, counts, onChange) {
     const list = details.querySelector(".filter-facet-list");
@@ -415,7 +415,7 @@
           const removeClass = state.mode === "dim" ? "hidden-by-filter" : "dimmed-by-filter";
           nodes.forEach((node) => {
             const tableId = node.getAttribute("data-id") ?? node.getAttribute("data-table-id") ?? "";
-            const table = tables.find((t) => t.id === tableId);
+            const table = tablesById.get(tableId);
             const matches = table !== void 0 && tableMatchesAllFacets(table, state);
             node.classList.toggle(dimClass, !matches);
             node.classList.remove(removeClass);
@@ -508,6 +508,7 @@
       const summaryRoot = summaryEl;
       const metadata = parseReluneMetadata();
       const tables = metadata?.tables ?? [];
+      const tablesById = new Map(tables.map((table) => [table.id, table]));
       const state = createFilterEngineState(tables);
       if (state.facets.size === 0) {
         sectionEl.hidden = true;
@@ -543,7 +544,17 @@
           columnTypeQuery.value = query;
           rebuildColumnTypeFacet(details, facet, query, onChange);
         } : void 0;
-        const details = buildFacetSection(facet, onChange, onSearchInput);
+        const onBulkChange = (values, checked) => {
+          for (const value of values) {
+            if (checked) {
+              facet.selectedValues.add(value);
+            } else {
+              facet.selectedValues.delete(value);
+            }
+          }
+          applyFilter2();
+        };
+        const details = buildFacetSection(facet, onBulkChange, onSearchInput);
         if (facet.allValues.length <= 5) {
           details.open = true;
         }
