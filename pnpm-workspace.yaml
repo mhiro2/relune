@@ -15,6 +15,12 @@ blockExoticSubdeps: true
 minimumReleaseAge: 10080
 strictDepBuilds: true
 trustPolicy: no-downgrade
+# Keep pnpm-lock.yaml as a single YAML document. GitHub's dependency graph only
+# reads the first document, so the environment document pnpm adds would hide
+# every real dependency from Dependabot alerts. CI pins the pnpm version through
+# pnpm/action-setup. Remove once this is fixed:
+# https://github.com/dependabot/dependabot-core/issues/15904
+pmOnFail: ignore
 
 allowBuilds:
   esbuild: true

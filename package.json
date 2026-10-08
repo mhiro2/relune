@@ -1,9 +1,9 @@
 {
   "private": true,
-  "packageManager": "pnpm@11.0.8",
   "scripts": {
     "preinstall": "npx only-allow pnpm"
   },
+  "devDependencies": {},
   "devEngines": {
     "runtime": {
       "name": "node",
@@ -11,5 +11,5 @@
       "onFail": "download"
     }
   },
-  "devDependencies": {}
+  "packageManager": "pnpm@12.8.1"
 }
