@@ -118,6 +118,15 @@ Options:
           - right-to-left: Right to left
           - bottom-to-top: Bottom to top
 
+      --density <DENSITY>
+          Columns each table card lists; cards are laid out at that size. Lists every column unless
+          the schema is large enough to fall back to `overview`
+
+          Possible values:
+          - overview: Table names, kinds, and relationships only
+          - keys:     Key columns and the columns relationships refer to
+          - full:     Every column with its type and constraints
+
       --stats
           Print render statistics to stderr
 

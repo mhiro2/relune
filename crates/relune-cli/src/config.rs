@@ -9,6 +9,7 @@
 //! layout = "hierarchical" # hierarchical, force-directed
 //! edge_style = "straight" # straight, orthogonal, curved
 //! direction = "top-to-bottom" # top-to-bottom, left-to-right, right-to-left, bottom-to-top
+//! density = "full" # overview, keys, full (unset: full, overview for large schemas)
 //! viewpoint = "billing"
 //! group_by = "none" # none, schema, prefix
 //! focus = "table_name"
@@ -31,6 +32,7 @@
 //! layout = "hierarchical"
 //! edge_style = "straight"
 //! direction = "top-to-bottom"
+//! density = "full"
 //! focus = "table_name"
 //! depth = 1
 //! include = ["table1", "table2"]
@@ -56,6 +58,7 @@
 //! layout = "hierarchical"
 //! edge_style = "straight"
 //! direction = "top-to-bottom"
+//! density = "full"
 //! focus = "table_name"
 //! depth = 1
 //! include = ["table1", "table2"]
@@ -86,8 +89,8 @@ use relune_core::{ReviewRuleId, ReviewSeverity, ReviewSeverityOverride};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
-    DialectArg, DiffFormat, DirectionArg, EdgeStyleArg, GroupByMode, LayoutAlgorithmArg,
-    RenderFormat, ReviewFormat, Theme,
+    DensityArg, DialectArg, DiffFormat, DirectionArg, EdgeStyleArg, GroupByMode,
+    LayoutAlgorithmArg, RenderFormat, ReviewFormat, Theme,
 };
 
 /// Root configuration structure.
@@ -142,6 +145,9 @@ pub struct RenderConfig {
     /// Layout direction.
     #[serde(default)]
     pub direction: Option<DirectionArg>,
+    /// Columns each table card lists.
+    #[serde(default)]
+    pub density: Option<DensityArg>,
     /// Grouping mode.
     #[serde(default)]
     pub group_by: Option<GroupByMode>,
@@ -211,6 +217,9 @@ pub struct ExportConfig {
     /// Layout direction.
     #[serde(default)]
     pub direction: Option<DirectionArg>,
+    /// Columns each table card lists in positioned output.
+    #[serde(default)]
+    pub density: Option<DensityArg>,
     /// Focus table name.
     #[serde(default)]
     pub focus: Option<String>,
@@ -316,6 +325,9 @@ pub struct DiffConfig {
     /// Layout direction for SVG/HTML output.
     #[serde(default)]
     pub direction: Option<DirectionArg>,
+    /// Columns each table card lists in SVG/HTML output.
+    #[serde(default)]
+    pub density: Option<DensityArg>,
     /// Grouping mode for SVG/HTML output.
     #[serde(default)]
     pub group_by: Option<GroupByMode>,
@@ -606,6 +618,7 @@ impl ReluneConfig {
                 .or(self.render.edge_style)
                 .unwrap_or_default(),
             direction: args.direction.or(self.render.direction).unwrap_or_default(),
+            density: args.density.or(self.render.density),
             group_by: args
                 .group_by
                 .or_else(|| viewpoint.and_then(|entry| entry.group_by))
@@ -683,6 +696,7 @@ impl ReluneConfig {
                 .or(self.export.edge_style)
                 .unwrap_or_default(),
             direction: args.direction.or(self.export.direction).unwrap_or_default(),
+            density: args.density.or(self.export.density),
             focus: args
                 .focus
                 .clone()
@@ -761,6 +775,7 @@ impl ReluneConfig {
             layout: self.diff.layout.unwrap_or_default(),
             edge_style: self.diff.edge_style.unwrap_or_default(),
             direction: self.diff.direction.unwrap_or_default(),
+            density: self.diff.density,
             group_by: viewpoint
                 .and_then(|entry| entry.group_by)
                 .or(self.diff.group_by),
@@ -967,6 +982,8 @@ pub struct MergedRenderConfig {
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
     pub direction: DirectionArg,
+    /// `None` leaves the density to layout's large-schema fallback.
+    pub density: Option<DensityArg>,
     pub group_by: Option<GroupByMode>,
     pub focus: Option<String>,
     pub depth: u32,
@@ -994,6 +1011,8 @@ pub struct MergedExportConfig {
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
     pub direction: DirectionArg,
+    /// `None` leaves the density to layout's large-schema fallback.
+    pub density: Option<DensityArg>,
     pub focus: Option<String>,
     pub depth: u32,
     pub include: Vec<String>,
@@ -1032,6 +1051,8 @@ pub struct MergedDiffConfig {
     pub layout: LayoutAlgorithmArg,
     pub edge_style: EdgeStyleArg,
     pub direction: DirectionArg,
+    /// `None` leaves the density to layout's large-schema fallback.
+    pub density: Option<DensityArg>,
     pub group_by: Option<GroupByMode>,
     pub focus: Option<String>,
     pub depth: u32,
@@ -1256,6 +1277,7 @@ mod tests {
             layout: Some(LayoutAlgorithmArg::Hierarchical),
             edge_style: Some(EdgeStyleArg::Straight),
             direction: None,
+            density: None,
             stats: true,
             fail_on_warning: false,
             dialect: None,
@@ -1285,6 +1307,7 @@ mod tests {
         let mut config = ReluneConfig::default();
         config.render.format = Some(RenderFormat::Html);
         config.render.theme = Some(Theme::Dark);
+        config.render.density = Some(DensityArg::Keys);
         config.render.focus = Some("config_table".to_string());
         config.render.viewpoint = Some("billing".to_string());
         config.render.depth = Some(5);
@@ -1320,6 +1343,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -1337,6 +1361,7 @@ mod tests {
         assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
         assert_eq!(merged.include, vec!["viewpoint_include"]);
         assert_eq!(merged.exclude, vec!["viewpoint_exclude"]);
+        assert_eq!(merged.density, Some(DensityArg::Keys));
     }
 
     #[test]
@@ -1346,6 +1371,7 @@ mod tests {
         config.render.focus = Some("config_table".to_string());
         config.render.viewpoint = Some("billing".to_string());
         config.render.depth = Some(5);
+        config.render.density = Some(DensityArg::Keys);
         config.render.group_by = Some(GroupByMode::Schema);
         config.render.include = vec!["config_include".to_string()];
         config.render.exclude = vec!["config_exclude".to_string()];
@@ -1379,6 +1405,7 @@ mod tests {
             layout: Some(LayoutAlgorithmArg::ForceDirected),
             edge_style: Some(EdgeStyleArg::Orthogonal),
             direction: None,
+            density: Some(DensityArg::Overview),
             stats: true,
             fail_on_warning: false,
             dialect: None,
@@ -1398,6 +1425,7 @@ mod tests {
         assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
         assert_eq!(merged.include, vec!["cli_include"]);
         assert_eq!(merged.exclude, vec!["cli_exclude"]);
+        assert_eq!(merged.density, Some(DensityArg::Overview));
     }
 
     #[test]
@@ -1491,6 +1519,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             fail_on_warning: false,
             dialect: None,
         };
@@ -1528,6 +1557,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             fail_on_warning: false,
             dialect: None,
         };
@@ -1570,6 +1600,7 @@ mod tests {
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
             direction: DirectionArg::default(),
+            density: None,
             group_by: None,
             focus: Some("users".to_string()),
             depth: 2,
@@ -1594,6 +1625,7 @@ mod tests {
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
             direction: DirectionArg::default(),
+            density: None,
             group_by: None,
             focus: None,
             depth: 2,
@@ -1619,6 +1651,7 @@ mod tests {
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
             direction: DirectionArg::default(),
+            density: None,
             group_by: None,
             focus: Some("users".to_string()),
             depth: 1,
@@ -1648,6 +1681,7 @@ mod tests {
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
             direction: DirectionArg::default(),
+            density: None,
             focus: Some("   ".to_string()),
             depth: 1,
             include: Vec::new(),
@@ -1674,6 +1708,7 @@ mod tests {
             layout: LayoutAlgorithmArg::Hierarchical,
             edge_style: EdgeStyleArg::Straight,
             direction: DirectionArg::default(),
+            density: None,
             focus: None,
             depth: 2,
             include: Vec::new(),
@@ -1739,6 +1774,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -1916,6 +1952,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -1954,6 +1991,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             fail_on_warning: false,
             dialect: None,
         }
@@ -2120,6 +2158,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: Some(DirectionArg::BottomToTop),
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -2154,6 +2193,7 @@ mod tests {
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -2218,6 +2258,7 @@ direction = "left-to-right"
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -2254,6 +2295,7 @@ direction = "left-to-right"
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             stats: false,
             fail_on_warning: false,
             dialect: None,
@@ -2467,6 +2509,7 @@ direction = "left-to-right"
             layout: None,
             edge_style: None,
             direction: None,
+            density: None,
             fail_on_warning: false,
             dialect: None,
         };
