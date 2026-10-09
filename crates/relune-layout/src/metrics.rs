@@ -83,6 +83,41 @@ pub const EDGE_LABEL_HEIGHT: f32 = 18.0;
 /// Horizontal padding inside the edge label pill, both sides combined.
 pub const EDGE_LABEL_PADDING: f32 = 18.0;
 
+/// Whether a card ends with a row counting the columns it leaves out.
+///
+/// Only a card that lists some columns gets the row; a card that lists none
+/// is a header alone, as in the overview density.
+#[must_use]
+pub const fn shows_omitted_columns_row(listed: usize, omitted: usize) -> bool {
+    listed > 0 && omitted > 0
+}
+
+/// Label of the row counting the columns a card leaves out.
+#[must_use]
+pub fn omitted_columns_label(omitted: usize) -> String {
+    if omitted == 1 {
+        "+1 column".to_string()
+    } else {
+        format!("+{omitted} columns")
+    }
+}
+
+/// Height of a card that lists `listed` columns and leaves out `omitted`.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // Row counts are small layout values.
+pub fn node_height(listed: usize, omitted: usize) -> f32 {
+    let rows = listed + usize::from(shows_omitted_columns_row(listed, omitted));
+    if rows == 0 {
+        return NODE_HEADER_HEIGHT;
+    }
+    (rows as f32)
+        .mul_add(
+            NODE_COLUMN_HEIGHT,
+            NODE_FIRST_ROW_TOP + NODE_ROWS_BOTTOM_PADDING,
+        )
+        .ceil()
+}
+
 /// Vertical center of column row `index`, measured from the node top.
 ///
 /// Edge ports attach here so a relationship line meets the row it refers to.
@@ -280,6 +315,17 @@ mod tests {
 
         assert!((name_only - 14.4).abs() < 0.01);
         assert!((typed - (14.4 + COLUMN_NAME_TYPE_GAP + 19.8)).abs() < 0.01);
+    }
+
+    #[test]
+    fn node_height_adds_a_row_only_for_cards_listing_some_columns() {
+        let listed = node_height(2, 0);
+
+        assert!((node_height(0, 0) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
+        assert!((node_height(0, 5) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
+        assert!((node_height(2, 3) - listed - NODE_COLUMN_HEIGHT).abs() < f32::EPSILON);
+        assert_eq!(omitted_columns_label(1), "+1 column");
+        assert_eq!(omitted_columns_label(4), "+4 columns");
     }
 
     #[test]

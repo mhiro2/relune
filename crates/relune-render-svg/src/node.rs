@@ -8,7 +8,8 @@ use relune_layout::metrics::{
     COLUMN_NULLABLE_SLOT_WIDTH, ColumnSlots, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
     NODE_CORNER_RADIUS, NODE_DETAIL_FONT_SIZE, NODE_FIRST_ROW_TOP, NODE_HEADER_BASELINE,
     NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
-    NODE_KIND_MARK_SIZE, NODE_ROW_BASELINE, NODE_TEXT_INSET,
+    NODE_KIND_MARK_SIZE, NODE_ROW_BASELINE, NODE_TEXT_INSET, omitted_columns_label,
+    shows_omitted_columns_row,
 };
 
 use crate::escape::{escape_attribute, escape_text};
@@ -261,6 +262,24 @@ fn render_column_row(
     Ok(())
 }
 
+/// Renders the row counting the columns a card leaves out.
+fn render_omitted_columns_row(
+    out: &mut String,
+    omitted: usize,
+    geometry: &RowGeometry,
+    row_top: f32,
+    colors: &ThemeColors,
+) -> fmt::Result {
+    write!(
+        out,
+        r#"<text class="omitted-columns" x="{:.1}" y="{:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_DETAIL_FONT_SIZE}" fill="{}">{}</text>"#,
+        geometry.name_x,
+        row_top + NODE_ROW_BASELINE,
+        colors.text_muted,
+        escape_text(&omitted_columns_label(omitted))
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Node rendering
 // ---------------------------------------------------------------------------
@@ -302,7 +321,7 @@ pub(crate) fn render_node_internal(
 
     // Add tooltip if enabled (with overlay annotations appended)
     if show_tooltips {
-        let column_count = node.columns.len();
+        let column_count = node.columns.len() + node.omitted_columns;
         let pk_count = node
             .columns
             .iter()
@@ -435,6 +454,9 @@ pub(crate) fn render_node_internal(
         for column in &node.columns {
             render_column_row(out, column, &geometry, row_top, &clip_id, colors)?;
             row_top += NODE_COLUMN_HEIGHT;
+        }
+        if shows_omitted_columns_row(node.columns.len(), node.omitted_columns) {
+            render_omitted_columns_row(out, node.omitted_columns, &geometry, row_top, colors)?;
         }
     }
     write!(

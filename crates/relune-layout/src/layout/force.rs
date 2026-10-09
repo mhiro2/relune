@@ -414,7 +414,7 @@ pub(super) fn apply_force_layout(
         .iter()
         .zip(positions.iter().zip(node_sizes.iter()))
         .map(|(node, (&(x, y), size))| {
-            build_positioned_node(node, x, y, size.width, size.height, config.show_columns)
+            build_positioned_node(node, x, y, size.width, size.height, size.omitted_columns)
         })
         .collect();
 
