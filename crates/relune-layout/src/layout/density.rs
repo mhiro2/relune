@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use relune_core::CardDensity;
+use relune_core::{CardDensity, normalize_identifier};
 
 use crate::graph::{LayoutColumn, LayoutGraph};
 
@@ -27,7 +27,9 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
         },
         CardDensity::Overview => filter_columns(graph, |_, _| false),
         CardDensity::Keys => {
-            let mut referenced: HashMap<&str, HashSet<&str>> = HashMap::new();
+            // Relationships may name columns in a different case than the
+            // table declares them, so names are compared normalized.
+            let mut referenced: HashMap<&str, HashSet<String>> = HashMap::new();
             for edge in &graph.edges {
                 for (node_id, columns) in [
                     (&edge.from, &edge.from_columns),
@@ -36,7 +38,7 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
                     referenced
                         .entry(node_id.as_str())
                         .or_default()
-                        .extend(columns.iter().map(String::as_str));
+                        .extend(columns.iter().map(|name| normalize_identifier(name)));
                 }
             }
             filter_columns(graph, |node_id, column| {
@@ -44,7 +46,7 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
                     || column.is_foreign_key
                     || referenced
                         .get(node_id)
-                        .is_some_and(|names| names.contains(column.name.as_str()))
+                        .is_some_and(|names| names.contains(&normalize_identifier(&column.name)))
             })
         }
     }
@@ -172,6 +174,18 @@ mod tests {
         assert_eq!(listed(&view, "users"), ["id", "email"]);
         assert_eq!(listed(&view, "posts"), ["id", "author_email"]);
         assert_eq!(view.omitted_columns, vec![1, 1]);
+    }
+
+    #[test]
+    fn keys_density_matches_relationship_columns_regardless_of_case() {
+        let mut schema = schema();
+        schema.tables[0].columns[1].name = "Email".to_string();
+        schema.tables[1].columns[1].name = "Author_Email".to_string();
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let view = apply_density(&graph, CardDensity::Keys);
+
+        assert_eq!(listed(&view, "users"), ["id", "Email"]);
+        assert_eq!(listed(&view, "posts"), ["id", "Author_Email"]);
     }
 
     #[test]
