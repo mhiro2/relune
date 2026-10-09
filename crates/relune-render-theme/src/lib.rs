@@ -52,10 +52,11 @@ pub struct ThemeColors {
     pub group_band_fill: &'static str,
     /// Group border stroke.
     pub group_stroke: &'static str,
-    /// Accent glow color used for hover/highlight effects on edges and nodes.
-    pub glow_color: &'static str,
-    /// Secondary glow particle color (slightly lighter than `glow_color`).
-    pub glow_particle: &'static str,
+    /// Accent color for viewer controls and edge hover feedback.
+    pub accent_color: &'static str,
+    /// Blue-grey outline for selected and highlighted diagram elements, kept
+    /// apart from kind marks and review severities.
+    pub selection_color: &'static str,
     /// Whether this is a light theme (used for conditional rendering).
     pub is_light: bool,
 }
@@ -75,14 +76,14 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_primary: "#e2e8f0",
             text_secondary: "#cbd5e1",
             text_muted: "#94a3b8",
-            edge_stroke: "#64748b",
-            arrow_fill: "#64748b",
+            edge_stroke: "#56627a",
+            arrow_fill: "#56627a",
             group_shadow: "rgba(0, 0, 0, 0.5)",
             group_fill: "#0f172acc",
             group_band_fill: "#172036",
             group_stroke: "#334155",
-            glow_color: "#f59e0b",
-            glow_particle: "#fbbf24",
+            accent_color: "#f59e0b",
+            selection_color: "#93a8c9",
             is_light: false,
         },
         Theme::Light => ThemeColors {
@@ -96,14 +97,14 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_primary: "#1e293b",
             text_secondary: "#334155",
             text_muted: "#64748b",
-            edge_stroke: "#94a3b8",
-            arrow_fill: "#94a3b8",
+            edge_stroke: "#8390a3",
+            arrow_fill: "#8390a3",
             group_shadow: "rgba(15, 23, 42, 0.08)",
             group_fill: "#ffffffd9",
             group_band_fill: "#eef2ff",
             group_stroke: "#cbd5e1",
-            glow_color: "#d97706",
-            glow_particle: "#f59e0b",
+            accent_color: "#d97706",
+            selection_color: "#4a6285",
             is_light: true,
         },
     }

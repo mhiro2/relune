@@ -1,4 +1,5 @@
 import type { HighlightState } from './highlight_state';
+import type { EdgeMetadata } from './metadata';
 
 interface HighlightNeighborhood {
   neighborIds: Set<string>;
@@ -86,4 +87,47 @@ export function computeNeighborHighlights(
 
 export function computeHoverPreview(nodeId: string, state: HighlightState): HoverPreview {
   return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
+}
+
+/** One selected relationship: its edge and the columns on each end. */
+export interface RelationHighlight {
+  edgeIndex: number;
+  fromId: string;
+  toId: string;
+  fromColumns: readonly string[];
+  toColumns: readonly string[];
+}
+
+export function computeRelationHighlight(
+  edgeIndex: number,
+  state: HighlightState,
+): RelationHighlight | null {
+  const edge = state.edges[edgeIndex];
+  if (edge === undefined) return null;
+  return {
+    edgeIndex,
+    fromId: edge.from,
+    toId: edge.to,
+    fromColumns: edge.from_columns,
+    toColumns: edge.to_columns,
+  };
+}
+
+/**
+ * Column correspondences of a relationship, one `from.col → to.col` line per
+ * column pair, so a composite key reads as its full set of pairs.
+ */
+export function relationColumnPairs(edge: EdgeMetadata): string[] {
+  const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
+  if (pairCount === 0) {
+    // Enum references know only the source column; keep it so two columns
+    // using the same enum stay distinguishable.
+    if (edge.from_columns.length > 0) {
+      return edge.from_columns.map((column) => `${edge.from}.${column} → ${edge.to}`);
+    }
+    return [`${edge.from} → ${edge.to}`];
+  }
+  return edge.from_columns
+    .slice(0, pairCount)
+    .map((column, index) => `${edge.from}.${column} → ${edge.to}.${edge.to_columns[index]}`);
 }
