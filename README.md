@@ -182,6 +182,9 @@ relune render --config relune.toml --sql schema.sql --viewpoint billing -o billi
 # Use a force-directed layout with orthogonal edges
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o erd-force.svg
 
+# List only key and relationship columns on each table card
+relune render --sql schema.sql --density keys -o erd-keys.svg
+
 # Generate Markdown docs to a file
 relune doc --sql schema.sql -o schema.md
 
