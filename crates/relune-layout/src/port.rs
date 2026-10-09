@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use relune_core::LayoutDirection;
+use relune_core::{LayoutDirection, normalize_identifier};
 
 use crate::graph::LayoutGraph;
 use crate::layout::{LayoutConfig, PositionedNode};
@@ -226,10 +226,16 @@ pub(crate) fn column_y_offset_from_center(node: &PositionedNode, edge_columns: &
     if edge_columns.is_empty() || node.columns.is_empty() {
         return 0.0;
     }
+    // Relationships may name columns in a different case than the table
+    // declares them.
+    let edge_columns: Vec<String> = edge_columns
+        .iter()
+        .map(|name| normalize_identifier(name))
+        .collect();
     let Some(col_index) = node
         .columns
         .iter()
-        .position(|column| edge_columns.contains(&column.name))
+        .position(|column| edge_columns.contains(&normalize_identifier(&column.name)))
     else {
         return 0.0;
     };
@@ -780,6 +786,16 @@ mod tests {
             offsets.windows(2).all(|pair| pair[1] - pair[0] > 0.0),
             "ports must stay distinct: {offsets:?}"
         );
+    }
+
+    #[test]
+    fn column_row_offset_matches_names_regardless_of_case() {
+        let node = node_with_fk_columns("t", 0.0, 0.0, 240.0, &["id", "Parent_Code", "name"]);
+        let exact = column_y_offset_from_center(&node, &["Parent_Code".to_string()]);
+        let folded = column_y_offset_from_center(&node, &["parent_code".to_string()]);
+
+        assert!(exact.abs() > f32::EPSILON);
+        assert!((exact - folded).abs() < f32::EPSILON);
     }
 
     fn node_with_fk_columns(
