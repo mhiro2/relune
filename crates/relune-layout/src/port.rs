@@ -508,6 +508,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32) -> PositionedNode {
         PositionedNode {
+            omitted_columns: 0,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,
@@ -674,6 +675,7 @@ mod tests {
     #[test]
     fn test_column_y_offset_from_center_uses_matching_column_row() {
         let node = PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -791,6 +793,7 @@ mod tests {
         #[allow(clippy::cast_precision_loss)]
         let height = (columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, 16.0 + NODE_HEADER_HEIGHT);
         PositionedNode {
+            omitted_columns: 0,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,

@@ -639,6 +639,7 @@ mod tests {
     fn single_node_graph() -> relune_layout::PositionedGraph {
         relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted_columns: 0,
                 id: "users".to_string(),
                 label: "users".to_string(),
                 kind: NodeKind::Table,
@@ -668,6 +669,7 @@ mod tests {
         relune_layout::PositionedGraph {
             nodes: vec![
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
@@ -684,6 +686,7 @@ mod tests {
                     group_index: None,
                 },
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "posts".to_string(),
                     label: "posts".to_string(),
                     kind: NodeKind::Table,
@@ -771,6 +774,36 @@ mod tests {
     }
 
     #[test]
+    fn test_render_svg_counts_omitted_columns_below_listed_rows() {
+        let mut graph = single_node_graph();
+        graph.nodes[0].omitted_columns = 3;
+        let svg = render_svg(
+            &graph,
+            SvgRenderOptions {
+                show_tooltips: true,
+                ..SvgRenderOptions::default()
+            },
+        );
+
+        assert!(svg.contains(r#"class="omitted-columns""#));
+        assert!(svg.contains(">+3 columns</text>"));
+        // The tooltip counts every column, listed or not.
+        assert!(svg.contains("5 columns"));
+    }
+
+    #[test]
+    fn test_render_svg_header_only_card_has_no_omitted_row() {
+        let mut graph = single_node_graph();
+        graph.nodes[0].columns.clear();
+        graph.nodes[0].omitted_columns = 2;
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+
+        assert!(!svg.contains("omitted-columns"));
+        assert!(!svg.contains("column-row"));
+        assert!(!svg.contains("table-header-divider"));
+    }
+
+    #[test]
     fn test_render_svg_shares_per_kind_defs_and_emits_one_path_per_edge() {
         let graph = multi_node_graph();
         let svg = render_svg(&graph, SvgRenderOptions::default());
@@ -823,6 +856,7 @@ mod tests {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
@@ -841,6 +875,7 @@ mod tests {
                     group_index: None,
                 },
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "active_users".to_string(),
                     label: "active_users".to_string(),
                     kind: NodeKind::View,
@@ -859,6 +894,7 @@ mod tests {
                     group_index: None,
                 },
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "status".to_string(),
                     label: "status".to_string(),
                     kind: NodeKind::Enum,
@@ -988,6 +1024,7 @@ mod tests {
     fn test_render_svg_escapes_special_characters_in_labels() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted_columns: 0,
                 id: "test".to_string(),
                 label: "Test & <Label>".to_string(),
                 kind: NodeKind::Table,
@@ -1056,6 +1093,7 @@ mod tests {
         let escaped = "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;";
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted_columns: 0,
                 id: payload.to_string(),
                 label: payload.to_string(),
                 kind: NodeKind::Table,
@@ -1201,6 +1239,7 @@ mod tests {
     fn test_render_svg_with_empty_columns() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted_columns: 0,
                 id: "empty".to_string(),
                 label: "EmptyTable".to_string(),
                 kind: NodeKind::Table,
@@ -1520,6 +1559,7 @@ mod tests {
         relune_layout::PositionedGraph {
             nodes: vec![
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
@@ -1536,6 +1576,7 @@ mod tests {
                     group_index: Some(0),
                 },
                 PositionedNode {
+                    omitted_columns: 0,
                     id: "posts".to_string(),
                     label: "posts".to_string(),
                     kind: NodeKind::Table,
@@ -1595,6 +1636,7 @@ mod tests {
     fn layout_graph_without_groups() -> relune_layout::PositionedGraph {
         relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted_columns: 0,
                 id: "users".to_string(),
                 label: "users".to_string(),
                 kind: NodeKind::Table,
@@ -1759,6 +1801,7 @@ mod tests {
     fn test_render_svg_escapes_special_characters_in_groups() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted_columns: 0,
                 id: "test & table".to_string(),
                 label: "Test & <Table>".to_string(),
                 kind: NodeKind::Table,
