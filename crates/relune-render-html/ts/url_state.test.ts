@@ -15,7 +15,6 @@ const ALL_MODULES: ViewerModule[] = [
   'filters',
   'selection',
   'groups',
-  'collapse',
   'minimap',
 ];
 
@@ -45,7 +44,6 @@ function installRuntime() {
     facets: new Map<FacetId, string[]>(),
     mode: 'dim' as FilterMode,
     hiddenGroups: [] as string[],
-    collapsed: [] as string[],
     minimapHidden: true,
   };
   const mocks = {
@@ -111,12 +109,6 @@ function installRuntime() {
     }),
     getHiddenGroups: () => state.hiddenGroups,
   };
-  runtime.collapse = {
-    getCollapsed: () => state.collapsed,
-    setCollapsed: vi.fn((ids: string[]) => {
-      state.collapsed = ids;
-    }),
-  };
   runtime.minimap = {
     isHidden: () => state.minimapHidden,
     setHidden: mocks.setHidden,
@@ -164,7 +156,7 @@ describe('restoring state from the URL hash', () => {
     history.replaceState(
       null,
       '',
-      '/diagram.html#q=email&t=public.posts&s=1.5000&x=-20.0&y=10.0&fs=public&ft=text&ft=numeric%2810%2C2%29&fm=focus&hg=g-public&c=public.users&mv=1',
+      '/diagram.html#q=email&t=public.posts&s=1.5000&x=-20.0&y=10.0&fs=public&ft=text&ft=numeric%2810%2C2%29&fm=focus&hg=g-public&mv=1',
     );
     await loadUrlState();
     // Nothing is restored until the modules the page provides report ready.
@@ -179,18 +171,17 @@ describe('restoring state from the URL hash', () => {
       columnType: ['text', 'numeric(10,2)'],
     });
     expect(state.hiddenGroups).toEqual(['g-public']);
-    expect(state.collapsed).toEqual(['public.users']);
     expect(state.selected).toBe('public.posts');
     expect(mocks.setHidden).toHaveBeenCalledWith(false, { silent: true });
   });
 
   it('ignores values that do not fit the current diagram', async () => {
-    const { mocks, state } = installRuntime();
+    const { mocks } = installRuntime();
     markAllReady();
     history.replaceState(
       null,
       '',
-      '/diagram.html#q=invoices&t=public.missing&s=9&x=0&y=0&fm=bogus&c=public.missing&c=public.posts',
+      '/diagram.html#q=invoices&t=public.missing&s=9&x=0&y=0&fm=bogus',
     );
     await loadUrlState();
 
@@ -198,14 +189,13 @@ describe('restoring state from the URL hash', () => {
     expect(mocks.setQuery).not.toHaveBeenCalled();
     expect(mocks.setMode).not.toHaveBeenCalled();
     expect(mocks.select).not.toHaveBeenCalled();
-    expect(state.collapsed).toEqual(['public.posts']);
     expect(mocks.setHidden).toHaveBeenCalledWith(true, { silent: true });
   });
 
   it('only waits for the modules the page provides', async () => {
     const { state } = installRuntime();
-    document.getElementById('canvas')?.remove();
-    for (const module of ALL_MODULES.filter((m) => m !== 'collapse')) {
+    document.getElementById('minimap-shell')?.remove();
+    for (const module of ALL_MODULES.filter((m) => m !== 'minimap')) {
       markViewerModuleReady(module);
     }
     history.replaceState(null, '', '/diagram.html#t=public.users');
@@ -248,7 +238,6 @@ describe('writing state to the URL hash', () => {
     state.facets.set('columnType', ['numeric(10,2)']);
     state.mode = 'hide';
     state.hiddenGroups = ['g-public'];
-    state.collapsed = ['public.posts'];
     state.minimapHidden = false;
     document.dispatchEvent(new CustomEvent('relune:search-changed'));
     document.dispatchEvent(new CustomEvent('relune:node-selected'));
@@ -257,7 +246,7 @@ describe('writing state to the URL hash', () => {
     vi.advanceTimersByTime(300);
     expect(push).toHaveBeenCalledOnce();
     expect(location.hash).toBe(
-      '#q=user&t=public.users&s=1.2500&x=12.3&y=-5.0&fk=table&fk=view&ft=numeric%2810%2C2%29&fm=hide&hg=g-public&c=public.posts&mv=1',
+      '#q=user&t=public.users&s=1.2500&x=12.3&y=-5.0&fk=table&fk=view&ft=numeric%2810%2C2%29&fm=hide&hg=g-public&mv=1',
     );
   });
 

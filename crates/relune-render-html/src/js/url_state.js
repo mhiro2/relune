@@ -116,7 +116,6 @@
         params.set(PARAM_FILTER_MODE, filterMode);
       }
       appendList2(params, PARAM_HIDDEN_GROUPS, runtime.groups?.getHiddenGroups() ?? []);
-      appendList2(params, PARAM_COLLAPSED, runtime.collapse?.getCollapsed() ?? []);
       if (runtime.minimap?.isHidden() === false) {
         params.set(PARAM_MINIMAP_VISIBLE, "1");
       }
@@ -170,10 +169,6 @@
       for (const groupId of readList2(params, PARAM_HIDDEN_GROUPS)) {
         runtime.groups?.setVisibility(groupId, false);
       }
-      const collapsed = readList2(params, PARAM_COLLAPSED).filter((id) => tableIds.has(id));
-      if (collapsed.length > 0) {
-        runtime.collapse?.setCollapsed(collapsed);
-      }
       const table = params.get(PARAM_TABLE);
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
@@ -194,9 +189,6 @@
       }
       if ((metadata?.groups?.length ?? 0) > 0) {
         modules.push("groups");
-      }
-      if (document.getElementById("canvas")?.querySelector("svg") != null) {
-        modules.push("collapse");
       }
       if (document.getElementById("minimap-shell") !== null) {
         modules.push("minimap");
@@ -220,7 +212,6 @@
     const PARAM_FILTER_DIFF = "fd";
     const PARAM_FILTER_MODE = "fm";
     const PARAM_HIDDEN_GROUPS = "hg";
-    const PARAM_COLLAPSED = "c";
     const PARAM_MINIMAP_VISIBLE = "mv";
     const FACET_PARAMS = [
       { param: PARAM_FILTER_SCHEMA, facetId: "schema" },
@@ -241,7 +232,6 @@
     document.addEventListener("relune:viewport-changed", scheduleWrite2);
     document.addEventListener("relune:filters-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:groups-changed", scheduleDiscreteWrite2);
-    document.addEventListener("relune:collapse-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:minimap-toggled", scheduleDiscreteWrite2);
     window.addEventListener("popstate", () => {
       restoringFromPopstate = true;
