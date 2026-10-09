@@ -215,7 +215,8 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
 #[cfg(test)]
 mod tests {
     use relune_layout::metrics::{
-        NODE_FIRST_COLUMN_BASELINE, NODE_KIND_LABEL_RESERVE, NODE_TEXT_INSET,
+        NODE_COLLAPSE_CONTROL_RESERVE, NODE_FIRST_COLUMN_BASELINE, NODE_KIND_LABEL_RESERVE,
+        NODE_TEXT_INSET,
     };
 
     /// The collapse controller positions its overlays with copies of the node
@@ -234,5 +235,11 @@ mod tests {
                 "ts/collapse_dom.ts must declare `{declaration}`"
             );
         }
+        // The indicator takes INDICATOR_WIDTH plus a gap on each side.
+        let width: f32 = 16.0;
+        let gap: f32 = 4.0;
+        assert!(source.contains(&format!("const INDICATOR_WIDTH = {width};")));
+        assert!(source.contains(&format!("const INDICATOR_GAP = {gap};")));
+        assert!((gap.mul_add(2.0, width) - NODE_COLLAPSE_CONTROL_RESERVE).abs() < f32::EPSILON);
     }
 }
