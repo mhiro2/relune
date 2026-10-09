@@ -20,7 +20,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   const PARAM_FILTER_DIFF = 'fd';
   const PARAM_FILTER_MODE = 'fm';
   const PARAM_HIDDEN_GROUPS = 'hg';
-  const PARAM_COLLAPSED = 'c';
   const PARAM_MINIMAP_VISIBLE = 'mv';
 
   type FacetUrlParam = { param: string; facetId: string };
@@ -132,7 +131,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     }
 
     appendList(params, PARAM_HIDDEN_GROUPS, runtime.groups?.getHiddenGroups() ?? []);
-    appendList(params, PARAM_COLLAPSED, runtime.collapse?.getCollapsed() ?? []);
 
     if (runtime.minimap?.isHidden() === false) {
       params.set(PARAM_MINIMAP_VISIBLE, '1');
@@ -213,12 +211,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       runtime.groups?.setVisibility(groupId, false);
     }
 
-    // Restore collapsed tables
-    const collapsed = readList(params, PARAM_COLLAPSED).filter((id) => tableIds.has(id));
-    if (collapsed.length > 0) {
-      runtime.collapse?.setCollapsed(collapsed);
-    }
-
     // Restore selected table (last, so it can center on restored viewport scale)
     const table = params.get(PARAM_TABLE);
     if (table !== null && table !== '' && tableIds.has(table)) {
@@ -243,9 +235,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     if ((metadata?.groups?.length ?? 0) > 0) {
       modules.push('groups');
     }
-    if (document.getElementById('canvas')?.querySelector('svg') != null) {
-      modules.push('collapse');
-    }
     if (document.getElementById('minimap-shell') !== null) {
       modules.push('minimap');
     }
@@ -262,7 +251,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   document.addEventListener('relune:viewport-changed', scheduleWrite);
   document.addEventListener('relune:filters-changed', scheduleDiscreteWrite);
   document.addEventListener('relune:groups-changed', scheduleDiscreteWrite);
-  document.addEventListener('relune:collapse-changed', scheduleDiscreteWrite);
   document.addEventListener('relune:minimap-toggled', scheduleDiscreteWrite);
 
   // ---------------------------------------------------------------------------

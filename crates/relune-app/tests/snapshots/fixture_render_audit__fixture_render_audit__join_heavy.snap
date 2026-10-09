@@ -8,7 +8,7 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
     "edge_count": 40,
     "height": 1642.0,
     "node_count": 23,
-    "width": 4597.0
+    "width": 4595.0
   },
   "patterns": {
     "long_detours": {
@@ -46,20 +46,20 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       "count_under_24px": 9,
       "worst_examples": [
         "role_permissions[permission_id] -> permissions[id] (15.0px)",
-        "task_watchers[user_id] -> users[id] (15.9px)",
-        "role_permissions[role_id] -> roles[id] (16.0px)"
+        "role_permissions[role_id] -> roles[id] (16.0px)",
+        "task_tags[task_id] -> tasks[id] (16.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 604549,
+      "bytes": 593940,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 208411,
+      "bytes": 208409,
       "edge_groups": 160,
       "node_groups": 23
     }

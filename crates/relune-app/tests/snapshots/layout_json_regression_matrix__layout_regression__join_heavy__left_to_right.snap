@@ -1914,7 +1914,7 @@ expression: snapshot
           "height": 88.0,
           "id": "role_permissions",
           "kind": "Table",
-          "width": 250.0,
+          "width": 248.0,
           "x": 1268.0,
           "y": 2156.0
         },
@@ -3955,7 +3955,7 @@ expression: snapshot
           "height": 88.0,
           "id": "role_permissions",
           "kind": "Table",
-          "width": 250.0,
+          "width": 248.0,
           "x": 1268.0,
           "y": 2156.0
         },
@@ -5509,7 +5509,7 @@ expression: snapshot
           "height": 88.0,
           "id": "role_permissions",
           "kind": "Table",
-          "width": 250.0,
+          "width": 248.0,
           "x": 1268.0,
           "y": 2156.0
         },

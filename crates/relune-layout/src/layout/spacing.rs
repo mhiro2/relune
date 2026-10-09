@@ -9,10 +9,9 @@ use super::{
 };
 use crate::metrics::{
     ColumnSlots, GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING,
-    NODE_COLLAPSE_CONTROL_RESERVE, NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE,
-    NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE, NODE_TEXT_INSET, column_row_width,
-    estimate_mono_text_width, estimate_text_width, node_height, omitted_columns_label,
-    shows_omitted_columns_row,
+    NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
+    NODE_TEXT_INSET, column_row_width, estimate_mono_text_width, estimate_text_width, node_height,
+    omitted_columns_label, shows_omitted_columns_row,
 };
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
@@ -94,8 +93,7 @@ fn estimate_node_width(
         2.0,
         estimate_mono_text_width(&node.label, NODE_HEADER_FONT_SIZE),
     ) + NODE_HEADER_NAME_OFFSET
-        + HEADER_KIND_LABEL_RESERVE
-        + NODE_COLLAPSE_CONTROL_RESERVE;
+        + HEADER_KIND_LABEL_RESERVE;
     if node.columns.is_empty() {
         return header_width.max(minimum_width).ceil();
     }
