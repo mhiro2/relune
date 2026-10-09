@@ -3,6 +3,8 @@ export type Theme = 'light' | 'dark';
 export type LayoutAlgorithm = 'hierarchical' | 'force-directed';
 export type LayoutDirection = 'top-to-bottom' | 'left-to-right' | 'right-to-left' | 'bottom-to-top';
 export type EdgeStyle = 'curved' | 'orthogonal' | 'straight';
+/** Columns each card lists; `auto` leaves the choice to the engine. */
+export type Density = 'auto' | 'full' | 'keys' | 'overview';
 export type GroupBy = 'none' | 'schema' | 'prefix';
 export type WorkbenchMode = 'render' | 'inspect' | 'export' | 'lint' | 'compare';
 export type ExportFormat = 'schema-json' | 'graph-json' | 'layout-json' | 'mermaid' | 'd2' | 'dot';
@@ -260,6 +262,7 @@ export type PersistedState = {
   layout: LayoutAlgorithm;
   direction: LayoutDirection;
   edgeStyle: EdgeStyle;
+  density: Density;
   viewpoint: ViewpointId;
   groupBy: GroupBy;
   focusTable: string;

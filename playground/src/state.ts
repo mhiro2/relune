@@ -1,5 +1,6 @@
 import type {
   CompareView,
+  Density,
   EdgeStyle,
   ExampleId,
   ExportFormat,
@@ -23,6 +24,7 @@ export const DEFAULT_STATE: PersistedState = {
   layout: 'hierarchical',
   direction: 'top-to-bottom',
   edgeStyle: 'curved',
+  density: 'auto',
   viewpoint: MANUAL_VIEWPOINT_ID,
   groupBy: 'none',
   focusTable: '',
@@ -109,6 +111,7 @@ export function parseQueryState(search: string): Partial<PersistedState> {
     layout: (params.get('layout') as LayoutAlgorithm | null) ?? undefined,
     direction: (params.get('direction') as LayoutDirection | null) ?? undefined,
     edgeStyle: (params.get('edges') as EdgeStyle | null) ?? undefined,
+    density: (params.get('density') as Density | null) ?? undefined,
     viewpoint: params.get('viewpoint') ?? undefined,
     groupBy: (params.get('group') as GroupBy | null) ?? undefined,
     focusTable: params.get('focus') ?? undefined,
@@ -132,6 +135,9 @@ export function buildQueryString(state: PersistedState): string {
   params.set('layout', state.layout);
   params.set('direction', state.direction);
   params.set('edges', state.edgeStyle);
+  if (state.density !== DEFAULT_STATE.density) {
+    params.set('density', state.density);
+  }
   params.set('group', state.groupBy);
 
   if (state.viewpoint) {
@@ -191,6 +197,9 @@ export function sanitizeState(state: Partial<PersistedState>): Partial<Persisted
   }
   if (isEdgeStyle(state.edgeStyle)) {
     sanitized.edgeStyle = state.edgeStyle;
+  }
+  if (isDensity(state.density)) {
+    sanitized.density = state.density;
   }
   if (typeof state.viewpoint === 'string') {
     sanitized.viewpoint = state.viewpoint.trim();
@@ -276,6 +285,10 @@ function isLayoutDirection(value: unknown): value is LayoutDirection {
 
 function isEdgeStyle(value: unknown): value is EdgeStyle {
   return value === 'curved' || value === 'orthogonal' || value === 'straight';
+}
+
+function isDensity(value: unknown): value is Density {
+  return value === 'auto' || value === 'full' || value === 'keys' || value === 'overview';
 }
 
 function isGroupBy(value: unknown): value is GroupBy {
