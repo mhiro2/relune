@@ -109,6 +109,14 @@ Options:
           - right-to-left: Right to left
           - bottom-to-top: Bottom to top
 
+      --density <DENSITY>
+          Columns each table card lists in positioned output
+
+          Possible values:
+          - overview: Table names, kinds, and relationships only
+          - keys:     Key columns and the columns relationships refer to
+          - full:     Every column with its type and constraints
+
       --fail-on-warning
           Exit with non-zero code if warnings are emitted
 

@@ -367,7 +367,7 @@ expression: snapshot
           "height": 132.0,
           "id": "product_categories",
           "kind": "Table",
-          "width": 267.0,
+          "width": 243.0,
           "x": 664.2000122070313,
           "y": 810.0
         },
@@ -751,7 +751,7 @@ expression: snapshot
           "height": 132.0,
           "id": "product_categories",
           "kind": "Table",
-          "width": 267.0,
+          "width": 243.0,
           "x": 664.2000122070313,
           "y": 810.0
         },
@@ -1073,7 +1073,7 @@ expression: snapshot
           "height": 132.0,
           "id": "product_categories",
           "kind": "Table",
-          "width": 267.0,
+          "width": 243.0,
           "x": 664.2000122070313,
           "y": 810.0
         },

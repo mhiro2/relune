@@ -40,11 +40,6 @@ pub(crate) const fn build_filter_engine_js() -> &'static str {
     include_str!("js/filter_engine.js")
 }
 
-/// Build the collapse JavaScript.
-pub(crate) const fn build_collapse_js() -> &'static str {
-    include_str!("js/collapse.js")
-}
-
 /// Build the highlight neighbors JavaScript.
 pub(crate) const fn build_highlight_js() -> &'static str {
     include_str!("js/highlight.js")
@@ -238,34 +233,7 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use relune_layout::metrics::{
-        NODE_COLLAPSE_CONTROL_RESERVE, NODE_COLUMN_HEIGHT, NODE_FIRST_COLUMN_BASELINE,
-        NODE_KIND_LABEL_RESERVE, NODE_ROW_BASELINE, NODE_TEXT_INSET,
-    };
-
-    /// The collapse controller positions its overlays with copies of the node
-    /// metrics; this keeps those copies in step with the Rust definitions.
-    #[test]
-    fn collapse_dom_mirrors_node_metrics() {
-        let source = include_str!("../ts/collapse_dom.ts");
-        for (name, value) in [
-            ("KIND_LABEL_RESERVE", NODE_KIND_LABEL_RESERVE),
-            ("FIRST_ROW_BASELINE", NODE_FIRST_COLUMN_BASELINE),
-            ("TEXT_INSET", NODE_TEXT_INSET),
-        ] {
-            let declaration = format!("const {name} = {value};");
-            assert!(
-                source.contains(&declaration),
-                "ts/collapse_dom.ts must declare `{declaration}`"
-            );
-        }
-        // The indicator takes INDICATOR_WIDTH plus a gap on each side.
-        let width: f32 = 16.0;
-        let gap: f32 = 4.0;
-        assert!(source.contains(&format!("const INDICATOR_WIDTH = {width};")));
-        assert!(source.contains(&format!("const INDICATOR_GAP = {gap};")));
-        assert!((gap.mul_add(2.0, width) - NODE_COLLAPSE_CONTROL_RESERVE).abs() < f32::EPSILON);
-    }
+    use relune_layout::metrics::{NODE_COLUMN_HEIGHT, NODE_ROW_BASELINE};
 
     /// The highlight painter draws column bands from copies of the row
     /// metrics; this keeps those copies in step with the Rust definitions.

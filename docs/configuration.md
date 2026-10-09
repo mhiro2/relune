@@ -21,6 +21,7 @@ theme = "light"
 layout = "force-directed"
 edge_style = "orthogonal"
 direction = "left-to-right"
+density = "keys"
 viewpoint = "billing"
 group_by = "none"
 focus = "orders"
@@ -96,6 +97,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
+| `density` | `overview`, `keys`, `full`; unset lists every column and falls back to `overview` for large schemas (see [Card density](cli-reference.md#card-density)) |
 | `viewpoint` | Name from `[viewpoints.<name>]` |
 | `group_by` | `none`, `schema`, `prefix` |
 | `focus` | Table name |
@@ -104,7 +106,7 @@ relune --config relune.toml render --sql schema.sql -o erd.svg
 | `show_legend`, `show_stats` | Booleans; `--stats` on the CLI forces `show_stats` only |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 
-`layout`, `edge_style`, and `direction` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
+`layout`, `edge_style`, `direction`, and `density` can be set in the file and overridden with CLI flags. See `ReluneConfig::merge_render_args` in `crates/relune-cli/src/config.rs` for exact precedence.
 
 Semantic validation is also applied after merge:
 
@@ -143,6 +145,7 @@ If `viewpoint` is set, Relune applies the selected named preset before CLI flags
 | `layout` | `hierarchical`, `force-directed` |
 | `edge_style` | `straight`, `orthogonal`, `curved` |
 | `direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` |
+| `density` | `overview`, `keys`, `full`; applies to `layout-json` |
 | `focus`, `depth` | Same as CLI |
 | `include` / `exclude` | Same as CLI |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
@@ -203,6 +206,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `fail_on_warning` | Boolean; treat warning diagnostics as failures |
 | `allow_invalid_schema` | Boolean; compare inputs with empty or duplicate object names instead of failing |
+| `density` | `overview`, `keys`, `full`; columns each card lists in `svg` / `html` output (config only) |
 
 `diff` still requires the before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--fail-on-warning`, and `--allow-invalid-schema`, and CLI flags override them when provided. File-based `diff` inputs are detected by content, so schema JSON copied to a non-`.json` filename is still treated as schema JSON.
 

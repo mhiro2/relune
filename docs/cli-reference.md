@@ -100,6 +100,7 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 | `--layout hierarchical\|force-directed` | Layout algorithm |
 | `--direction top-to-bottom\|left-to-right\|right-to-left\|bottom-to-top` | Primary flow direction |
 | `--edge-style straight\|orthogonal\|curved` | Edge rendering style |
+| `--density overview\|keys\|full` | Columns each table card lists (see [Card density](#card-density)) |
 
 **Other:** `--stats` (stderr statistics), `--fail-on-warning` (non-zero on warnings).
 
@@ -118,9 +119,22 @@ relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 relune render --config relune.toml --sql schema.sql --viewpoint billing -o billing.svg
 relune render --sql schema.sql --group-by schema -o grouped.svg
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o force.svg
+relune render --sql schema.sql --density keys -o keys.svg
 relune render --sql schema.sql --include users --include orders -o subset.svg
 relune render --schema-json schema.json -o from-json.svg
 ```
+
+### Card density
+
+`--density` picks how much of each table a card lists. Layout sizes every card for the rows it shows, so relationship lines always meet a listed row or the edge of the card.
+
+| Density | Card lists | Use it to |
+|---------|------------|-----------|
+| `overview` | Table name and kind only | See the overall structure |
+| `keys` | Primary key and foreign key columns, plus every column a relationship names; a `+N columns` row counts the rest | Read how tables connect |
+| `full` | Every column with its type and constraints | Check definitions |
+
+Without `--density` (or a `density` config key), cards list every column, except that diagrams with more than 100 objects (tables, views, and enums) fall back to `overview`. An explicit density always wins. Zooming the HTML viewer never changes the density or the layout.
 
 ---
 
@@ -177,7 +191,7 @@ Emit normalized JSON or diagram text. **`--format` is required.**
 | `d2` | [D2](https://d2lang.com/) diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, `--exclude`, `--layout`, `--direction`, and `--edge-style` like `render` for graph-backed exports. `export` applies the same focus/filter validation rules as `render`, so `--depth` requires `--focus`, the same table cannot appear in both `--include` and `--exclude`, and the focused table must stay inside the effective include set.
+Supports `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, `--exclude`, `--layout`, `--direction`, `--edge-style`, and `--density` like `render` for graph-backed exports; `--density` only affects `layout-json`. `export` applies the same focus/filter validation rules as `render`, so `--depth` requires `--focus`, the same table cannot appear in both `--include` and `--exclude`, and the focused table must stay inside the effective include set.
 `--fail-on-warning` is also available for CI flows that treat parser diagnostics as failures.
 
 `layout-json` includes graph-level `routing_debug.non_self_loop_detour_activations` and per-edge `routing_debug` fields for source/target side policy, slot indices, slot counts, row offsets, and selected channel coordinates.

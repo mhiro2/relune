@@ -663,6 +663,32 @@ mod export_tests {
     }
 
     #[test]
+    fn export_layout_json_lays_out_cards_at_the_chosen_density() {
+        let layout = |density: &str| {
+            let output = relune()
+                .arg("export")
+                .arg("--sql")
+                .arg(simple_blog_fixture())
+                .arg("--format")
+                .arg("layout-json")
+                .arg("--density")
+                .arg(density)
+                .assert()
+                .success();
+            parse_layout_json(&String::from_utf8_lossy(&output.get_output().stdout))
+        };
+
+        let overview = layout("overview");
+        assert!(overview.nodes.iter().all(|node| node.columns.is_empty()));
+
+        let keys = layout("keys");
+        let posts = keys.nodes.iter().find(|node| node.id == "posts").unwrap();
+        let listed: Vec<&str> = posts.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(listed, ["id", "user_id"]);
+        assert_eq!(posts.omitted_columns, 5);
+    }
+
+    #[test]
     fn export_layout_json_fixture_regression_snapshot() {
         let mut cmd = relune();
         let output = cmd

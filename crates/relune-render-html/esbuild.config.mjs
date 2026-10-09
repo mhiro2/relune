@@ -11,7 +11,6 @@ const entries = [
   'search',
   'filter_engine',
   'group_toggle',
-  'collapse',
   'highlight',
   'minimap',
   'shortcuts',
