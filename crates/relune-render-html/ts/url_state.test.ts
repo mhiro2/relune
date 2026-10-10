@@ -108,6 +108,8 @@ function installRuntime() {
       if (!visible) state.hiddenGroups.push(id);
     }),
     getHiddenGroups: () => state.hiddenGroups,
+    isPanelOpen: () => false,
+    setPanelOpen: vi.fn(),
   };
   runtime.minimap = {
     isHidden: () => state.minimapHidden,

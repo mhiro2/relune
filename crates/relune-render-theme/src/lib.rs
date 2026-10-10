@@ -106,8 +106,6 @@ pub struct ThemeColors {
     pub group_fill: &'static str,
     /// Group boundary, drawn only where membership would be ambiguous.
     pub group_stroke: &'static str,
-    /// Accent color for viewer controls and edge hover feedback.
-    pub accent_color: &'static str,
     /// Blue-grey outline for selected and highlighted diagram elements, kept
     /// apart from kind marks and review severities.
     pub selection_color: &'static str,
@@ -141,7 +139,6 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             arrow_fill: "#56627a",
             group_fill: "#121725",
             group_stroke: "#475569",
-            accent_color: "#f59e0b",
             selection_color: "#93a8c9",
             badges: BadgeColors {
                 primary_key: BadgeColor {
@@ -189,7 +186,6 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             arrow_fill: "#8390a3",
             group_fill: "#eef1f6",
             group_stroke: "#a3afbf",
-            accent_color: "#d97706",
             selection_color: "#4a6285",
             badges: BadgeColors {
                 primary_key: BadgeColor {

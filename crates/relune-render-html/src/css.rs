@@ -21,102 +21,120 @@ pub(crate) fn build_css(
     enable_highlight: bool,
 ) -> String {
     let colors = get_colors(theme);
-    let accent_color = colors.accent_color;
     let selection_color = colors.selection_color;
-    let (viewer_bg, panel_bg, panel_border, panel_shadow, accent_soft, grid_dot, grid_line) =
-        match theme {
-            Theme::Dark => (
-                "radial-gradient(circle at top, rgba(245, 158, 11, 0.16), transparent 34%), linear-gradient(180deg, #0b1020 0%, #111827 52%, #0a0f1c 100%)",
-                "rgba(10, 15, 28, 0.9)",
-                "rgba(148, 163, 184, 0.18)",
-                "0 18px 48px rgba(2, 6, 23, 0.52)",
-                "rgba(245, 158, 11, 0.16)",
-                "rgba(148, 163, 184, 0.12)",
-                "rgba(148, 163, 184, 0.05)",
-            ),
-            Theme::Light => (
-                "radial-gradient(circle at top, rgba(217, 119, 6, 0.12), transparent 32%), linear-gradient(180deg, #f8fafc 0%, #eef2ff 42%, #f8fafc 100%)",
-                "rgba(255, 255, 255, 0.86)",
-                "rgba(71, 85, 105, 0.16)",
-                "0 16px 36px rgba(15, 23, 42, 0.12)",
-                "rgba(194, 65, 12, 0.12)",
-                "rgba(71, 85, 105, 0.12)",
-                "rgba(71, 85, 105, 0.04)",
-            ),
-        };
+    let (panel_bg, panel_border, panel_shadow, grid_dot, grid_line) = match theme {
+        Theme::Dark => (
+            "rgba(14, 18, 30, 0.94)",
+            "rgba(148, 163, 184, 0.18)",
+            "0 8px 24px rgba(2, 6, 23, 0.4)",
+            "rgba(148, 163, 184, 0.12)",
+            "rgba(148, 163, 184, 0.05)",
+        ),
+        Theme::Light => (
+            "rgba(255, 255, 255, 0.94)",
+            "rgba(71, 85, 105, 0.16)",
+            "0 6px 20px rgba(15, 23, 42, 0.08)",
+            "rgba(71, 85, 105, 0.12)",
+            "rgba(71, 85, 105, 0.04)",
+        ),
+    };
 
     let search_css = if enable_search {
         r"
-    /* Explorer sidebar styles */
+    /* Explorer sidebar: search and the object list first, filters and
+       groups as collapsed sections underneath. */
     .search-panel {
       position: fixed;
       top: 12px;
       left: 12px;
       bottom: 12px;
-      width: min(340px, calc(100vw - 24px));
+      width: min(300px, calc(100vw - 24px));
       display: flex;
       flex-direction: column;
       min-height: 0;
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
-      border-radius: 22px;
+      border-radius: 14px;
       z-index: 240;
       overflow: hidden;
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
     }
 
+    .search-panel[hidden],
+    .sidebar-open[hidden] {
+      display: none;
+    }
+
     body:has(h1) .search-panel {
       top: 61px;
     }
 
-    .search-panel-header {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 16px 16px 10px;
-      border-bottom: 1px solid var(--panel-border);
+    .sidebar-open {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: var(--panel-bg);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      color: var(--text-color);
+      font: 600 12px var(--ui-font);
+      cursor: pointer;
+      z-index: 240;
     }
 
-    .search-panel-title {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0.01em;
+    body:has(h1) .sidebar-open {
+      top: 61px;
     }
 
-    .search-panel-meta,
-    .object-browser-count {
-      font-size: 11px;
-      opacity: 0.65;
-      white-space: nowrap;
+    .sidebar-open svg,
+    .sidebar-collapse svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .sidebar-open:hover,
+    .sidebar-open:focus-visible {
+      border-color: var(--selection-color);
+      outline: none;
     }
 
     .search-container {
       display: flex;
       align-items: center;
-      padding: 12px 14px;
-      gap: 10px;
+      padding: 8px 8px 8px 14px;
+      gap: 8px;
+      border-bottom: 1px solid var(--panel-border);
     }
 
     .search-icon {
       flex-shrink: 0;
-      width: 16px;
-      height: 16px;
-      opacity: 0.5;
+      width: 15px;
+      height: 15px;
+      opacity: 0.6;
     }
 
     .search-input {
       flex: 1;
+      min-width: 0;
+      height: 28px;
       border: none;
       background: transparent;
       font-family: var(--ui-font);
-      font-size: 14px;
+      font-size: 13px;
       color: var(--text-color);
       outline: none;
     }
 
     .search-input::placeholder {
+      color: var(--text-color);
       opacity: 0.6;
     }
 
@@ -128,29 +146,66 @@ pub(crate) fn build_css(
       background: transparent;
       color: var(--text-color);
       cursor: pointer;
-      opacity: 0;
       border-radius: 50%;
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: center;
-      transition: opacity 0.15s, background-color 0.15s;
+      opacity: 0.6;
       font-size: 16px;
       line-height: 1;
     }
 
     .search-clear.visible {
-      opacity: 0.5;
+      display: flex;
     }
 
     .search-clear:hover {
       opacity: 1;
-      background-color: var(--accent-soft);
+      background-color: var(--selection-faint);
+    }
+
+    .search-shortcut {
+      flex-shrink: 0;
+      min-width: 18px;
+      padding: 1px 5px;
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      font: 600 11px var(--mono-font);
+      text-align: center;
+      opacity: 0.7;
+    }
+
+    .search-input:focus ~ .search-shortcut,
+    .search-clear.visible ~ .search-shortcut {
+      display: none;
+    }
+
+    .sidebar-collapse {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-color);
+      cursor: pointer;
+      opacity: 0.7;
+    }
+
+    .sidebar-collapse:hover,
+    .sidebar-collapse:focus-visible {
+      opacity: 1;
+      background: var(--selection-faint);
+      outline: none;
     }
 
     .search-results {
-      padding: 0 16px 12px;
+      padding: 6px 14px 0;
       font-size: 12px;
-      opacity: 0.7;
+      opacity: 0.75;
       display: none;
     }
 
@@ -162,8 +217,7 @@ pub(crate) fn build_css(
       display: flex;
       flex: 1;
       flex-direction: column;
-      min-height: 180px;
-      border-top: 1px solid var(--panel-border);
+      min-height: 120px;
     }
 
     .object-browser-header {
@@ -171,23 +225,33 @@ pub(crate) fn build_css(
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      padding: 12px 16px 8px;
-      font-size: 12px;
+      padding: 10px 14px 4px;
+      font-size: 11px;
       font-weight: 600;
-      opacity: 0.9;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.75;
+    }
+
+    .search-panel-meta,
+    .object-browser-count {
+      font-size: 11px;
+      letter-spacing: normal;
+      text-transform: none;
+      white-space: nowrap;
     }
 
     .object-browser-list {
       flex: 1;
       min-height: 0;
       overflow-y: auto;
-      padding: 4px 0 12px;
+      padding: 2px 0 8px;
     }
 
     .object-browser-empty {
-      padding: 0 16px 16px;
+      padding: 0 14px 12px;
       font-size: 12px;
-      opacity: 0.62;
+      opacity: 0.7;
     }
 
     .object-browser-empty[hidden] {
@@ -201,18 +265,18 @@ pub(crate) fn build_css(
       background: transparent;
       color: inherit;
       text-align: left;
-      padding: 12px 16px 11px;
+      padding: 6px 14px 6px 12px;
       cursor: pointer;
       transition: background-color 0.16s, border-color 0.16s, opacity 0.16s;
     }
 
     .object-browser-item:hover {
-      background: var(--accent-soft);
+      background: var(--selection-faint);
     }
 
     .object-browser-item.selected {
-      background: color-mix(in srgb, var(--accent-soft) 76%, transparent);
-      border-left-color: var(--accent-color);
+      background: var(--selection-faint);
+      border-left-color: var(--selection-color);
     }
 
     .object-browser-item.filtered-out {
@@ -232,7 +296,7 @@ pub(crate) fn build_css(
     }
 
     .object-browser-item-header {
-      margin-bottom: 6px;
+      margin-bottom: 1px;
     }
 
     .object-browser-item-name {
@@ -246,19 +310,91 @@ pub(crate) fn build_css(
 
     .object-browser-kind {
       flex-shrink: 0;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: rgba(148, 163, 184, 0.14);
       font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
+      font-weight: 600;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
+      opacity: 0.7;
     }
 
     .object-browser-item-meta {
       font-size: 11px;
       opacity: 0.7;
       font-family: var(--mono-font);
+    }
+
+    /* Collapsed sections under the object list. */
+    .sidebar-section {
+      flex-shrink: 0;
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .sidebar-section-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+    }
+
+    .sidebar-section-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .sidebar-section-summary::before {
+      content: '\25B6';
+      font-size: 8px;
+      opacity: 0.7;
+      transition: transform 0.16s;
+    }
+
+    .sidebar-section[open] > .sidebar-section-summary::before {
+      transform: rotate(90deg);
+    }
+
+    .sidebar-section-summary:hover {
+      background: var(--selection-faint);
+    }
+
+    .sidebar-section-summary:focus-visible {
+      outline: 2px solid var(--selection-color);
+      outline-offset: -2px;
+    }
+
+    .sidebar-section-title {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sidebar-section-meta {
+      font-size: 11px;
+      font-weight: 500;
+      opacity: 0.7;
+    }
+
+    .sidebar-section-badge {
+      min-width: 18px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--selection-color);
+      color: var(--bg-color);
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .sidebar-section-badge[hidden] {
+      display: none;
+    }
+
+    .sidebar-section-body {
+      max-height: 40vh;
+      overflow-y: auto;
+      padding-bottom: 6px;
     }
 
     .node.dimmed-by-search {
@@ -297,23 +433,12 @@ pub(crate) fn build_css(
         r"
     /* ── Filter section ─────────────────────────────────────────────── */
 
-    .filter-section {
-      border-top: 1px solid var(--panel-border);
-    }
-
     .filter-section-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      padding: 10px 14px 6px;
-      font-size: 12px;
-      font-weight: 600;
-      opacity: 0.9;
-    }
-
-    .filter-section-header > span {
-      flex-shrink: 0;
+      padding: 2px 14px 8px;
     }
 
     .filter-mode-switcher {
@@ -338,12 +463,12 @@ pub(crate) fn build_css(
 
     .filter-mode-button:hover {
       opacity: 0.9;
-      background-color: var(--accent-soft);
+      background-color: var(--selection-faint);
     }
 
     .filter-mode-button.active {
       opacity: 1;
-      background-color: var(--accent-soft);
+      background-color: var(--selection-faint);
     }
 
     .filter-section-reset {
@@ -360,8 +485,8 @@ pub(crate) fn build_css(
 
     .filter-section-reset:hover {
       opacity: 1;
-      border-color: var(--accent-color);
-      background-color: var(--accent-soft);
+      border-color: var(--selection-color);
+      background-color: var(--selection-faint);
     }
 
     .filter-section-reset[hidden] {
@@ -380,7 +505,7 @@ pub(crate) fn build_css(
     }
 
     .filter-summary-chip {
-      background: var(--accent-soft);
+      background: var(--selection-faint);
       border: none;
       color: var(--text-color);
       font-size: 10px;
@@ -392,8 +517,7 @@ pub(crate) fn build_css(
     }
 
     .filter-summary-chip:hover {
-      background: var(--accent-color);
-      color: white;
+      outline: 1px solid var(--selection-color);
     }
 
     /* ── Facet sections ─────────────────────────────────────────────── */
@@ -440,8 +564,8 @@ pub(crate) fn build_css(
       flex-shrink: 0;
       padding: 1px 6px;
       border-radius: 999px;
-      background: var(--accent-color);
-      color: white;
+      background: var(--selection-color);
+      color: var(--bg-color);
       text-align: center;
       font-size: 10px;
       font-weight: 700;
@@ -475,8 +599,8 @@ pub(crate) fn build_css(
 
     .filter-facet-action:hover {
       opacity: 1;
-      border-color: var(--accent-color);
-      background-color: var(--accent-soft);
+      border-color: var(--selection-color);
+      background-color: var(--selection-faint);
     }
 
     .filter-facet-search {
@@ -508,7 +632,7 @@ pub(crate) fn build_css(
     }
 
     .filter-facet-item:hover {
-      background-color: var(--accent-soft);
+      background-color: var(--selection-faint);
     }
 
     .filter-facet-item span {
@@ -521,7 +645,7 @@ pub(crate) fn build_css(
       min-width: 24px;
       padding: 1px 6px;
       border-radius: 999px;
-      background: var(--accent-soft);
+      background: var(--selection-faint);
       text-align: center;
       font-size: 10px;
       font-weight: 700;
@@ -534,21 +658,15 @@ pub(crate) fn build_css(
     let group_panel_css = if enable_group_toggles {
         r#"
     /* Group panel styles */
-    .group-panel {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-
     body > .group-panel {
       position: fixed;
       top: 12px;
       left: 12px;
-      width: min(340px, calc(100vw - 24px));
+      width: min(300px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
-      border-radius: 22px;
+      border-radius: 14px;
       z-index: 220;
       overflow: hidden;
       box-shadow: var(--panel-shadow);
@@ -559,57 +677,10 @@ pub(crate) fn build_css(
       top: 61px;
     }
 
-    .search-panel .group-panel {
-      border-top: 1px solid var(--panel-border);
-      background: transparent;
-    }
-
-    .group-panel-header {
-      padding: 12px 14px;
-      font-size: 13px;
-      font-weight: 600;
-      border-bottom: 1px solid var(--panel-border);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .group-panel-title {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .group-panel-collapse-btn {
-      flex-shrink: 0;
-      width: 28px;
-      height: 28px;
-      padding: 0;
-      border: none;
-      border-radius: 6px;
-      background: transparent;
-      color: var(--text-color);
-      font-size: 14px;
-      line-height: 1;
-      cursor: pointer;
-      opacity: 0.75;
-      transition: opacity 0.15s, background-color 0.15s;
-    }
-
-    .group-panel-collapse-btn:hover {
-      opacity: 1;
-      background-color: var(--accent-soft);
-    }
-
-    .group-panel.group-panel-collapsed .group-panel-body {
-      display: none;
-    }
-
     .group-panel-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
+      padding: 0 10px 4px;
     }
 
     .group-panel-actions button {
@@ -626,26 +697,20 @@ pub(crate) fn build_css(
 
     .group-panel-actions button:hover {
       opacity: 1;
-      border-color: var(--accent-color);
-      background-color: var(--accent-soft);
-    }
-
-    .group-list {
-      padding: 8px 0 12px;
-      max-height: min(220px, 28vh);
-      overflow-y: auto;
+      border-color: var(--selection-color);
+      background-color: var(--selection-faint);
     }
 
     .group-item {
       display: flex;
       align-items: center;
-      padding: 8px 14px;
+      padding: 5px 14px;
       cursor: pointer;
       transition: background-color 0.15s;
     }
 
     .group-item:hover {
-      background-color: var(--accent-soft);
+      background-color: var(--selection-faint);
     }
 
     .group-item input[type="checkbox"] {
@@ -673,9 +738,8 @@ pub(crate) fn build_css(
       opacity: 0.5;
     }
 
-    /* Hidden nodes/edges */
-    .node.hidden-by-group,
-    .edge.hidden-by-group {
+    /* Hidden groups take their tables, lines, surface, and label along. */
+    .hidden-by-group {
       display: none !important;
     }"#
     } else {
@@ -708,7 +772,7 @@ pub(crate) fn build_css(
       font-size: 10px;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--accent-color);
+      opacity: 0.72;
     }
 
     .hover-popover-title {
@@ -862,7 +926,7 @@ pub(crate) fn build_css(
       position: fixed;
       top: 12px;
       right: 12px;
-      width: min(340px, calc(100vw - 24px));
+      width: min(320px, calc(100vw - 24px));
       max-height: calc(100vh - 24px);
       overflow: auto;
       padding: 12px 14px;
@@ -998,6 +1062,12 @@ pub(crate) fn build_css(
       display: none;
     }
 
+    /* The sidebar shows active filters itself; the bar stands in for it
+       while the sidebar is put away. */
+    .search-panel:not([hidden]) ~ .filter-reset-bar {
+      display: none;
+    }
+
     body:has(h1) .filter-reset-bar {
       top: 61px;
     }
@@ -1012,8 +1082,8 @@ pub(crate) fn build_css(
     }
 
     .filter-reset-button {
-      border: 1px solid var(--accent-color);
-      background: var(--accent-soft);
+      border: 1px solid var(--selection-color);
+      background: var(--selection-faint);
       color: var(--text-color);
       border-radius: 999px;
       padding: 6px 12px;
@@ -1078,8 +1148,8 @@ pub(crate) fn build_css(
 
     .viewer-control-button:hover {
       transform: translateY(-1px);
-      border-color: var(--accent-color);
-      background: color-mix(in srgb, var(--panel-bg) 82%, var(--accent-soft));
+      border-color: var(--selection-color);
+      background: color-mix(in srgb, var(--panel-bg) 82%, var(--selection-faint));
     }
 
     .viewer-control-button[aria-pressed=false] {
@@ -1090,13 +1160,15 @@ pub(crate) fn build_css(
       opacity: 1;
     }
 
+    /* The minimap sits in the bottom-right corner and steps left of the
+       detail drawer while one is open. */
     .minimap-shell {
       position: fixed;
       right: 12px;
-      bottom: 88px;
-      width: min(240px, calc(100vw - 24px));
+      bottom: 16px;
+      width: min(220px, calc(100vw - 24px));
       border: 1px solid var(--panel-border);
-      border-radius: 22px;
+      border-radius: 14px;
       background: var(--panel-bg);
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
@@ -1104,28 +1176,18 @@ pub(crate) fn build_css(
       z-index: 210;
     }
 
-    .minimap-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--panel-border);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      opacity: 0.8;
+    .minimap-shell[hidden] {
+      display: none;
     }
 
-    .minimap-hint {
-      opacity: 0.65;
-      text-transform: none;
-      letter-spacing: normal;
+    body:has(#detail-drawer:not([hidden])) .minimap-shell {
+      right: calc(min(320px, 100vw - 24px) + 24px);
     }
 
     .minimap {
       display: block;
       width: 100%;
-      height: 150px;
+      height: 140px;
       cursor: pointer;
       background: rgba(148, 163, 184, 0.04);
     }
@@ -1138,30 +1200,35 @@ pub(crate) fn build_css(
       transition: fill 0.15s, stroke 0.15s;
     }
 
+    .minimap-node.hidden {
+      display: none;
+    }
+
     .minimap-node.selected {
-      fill: var(--accent-color);
-      stroke: var(--accent-color);
-      filter: drop-shadow(0 0 3px var(--accent-soft));
+      fill: var(--selection-color);
+      stroke: var(--selection-color);
     }
 
     .minimap-frame {
-      fill: rgba(245, 158, 11, 0.1);
-      stroke: var(--accent-color);
+      fill: var(--selection-faint);
+      stroke: var(--selection-color);
       stroke-width: 1.8;
       stroke-dasharray: 4 2;
       rx: 2;
     }
 
+    /* The drawer is only as tall as its content, so short tables leave
+       the rest of the right edge to the diagram. */
     .detail-drawer {
       position: fixed;
       top: 12px;
       right: 12px;
-      width: min(340px, calc(100vw - 24px));
-      bottom: 12px;
+      width: min(320px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
       overflow: auto;
       padding: 16px;
       border: 1px solid var(--panel-border);
-      border-radius: 22px;
+      border-radius: 14px;
       background: var(--panel-bg);
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
@@ -1174,6 +1241,7 @@ pub(crate) fn build_css(
 
     body:has(h1) .detail-drawer {
       top: 61px;
+      max-height: calc(100vh - 73px);
     }
 
     .detail-drawer-header {
@@ -1187,7 +1255,7 @@ pub(crate) fn build_css(
       font-size: 11px;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--accent-color);
+      opacity: 0.72;
       margin-bottom: 6px;
     }
 
@@ -1273,13 +1341,13 @@ pub(crate) fn build_css(
     }
 
     .detail-traversal-btn:hover {
-      border-color: var(--accent-color);
-      background: color-mix(in srgb, transparent 80%, var(--accent-soft));
+      border-color: var(--selection-color);
+      background: color-mix(in srgb, transparent 80%, var(--selection-faint));
     }
 
     .detail-traversal-btn.active {
-      border-color: var(--accent-color);
-      background: var(--accent-soft);
+      border-color: var(--selection-color);
+      background: var(--selection-faint);
       font-weight: 600;
     }
 
@@ -1373,8 +1441,8 @@ pub(crate) fn build_css(
     }
 
     .detail-relation:hover {
-      border-color: var(--accent-color);
-      background: color-mix(in srgb, rgba(148, 163, 184, 0.05) 72%, var(--accent-soft));
+      border-color: var(--selection-color);
+      background: color-mix(in srgb, rgba(148, 163, 184, 0.05) 72%, var(--selection-faint));
     }
 
     .detail-column-name,
@@ -1652,8 +1720,7 @@ pub(crate) fn build_css(
 
     @media (max-width: 960px) {
       .detail-drawer,
-      .search-panel,
-      .minimap-shell {
+      .search-panel {
         width: calc(100vw - 24px);
       }
 
@@ -1687,7 +1754,8 @@ pub(crate) fn build_css(
         max-height: 38vh;
       }
 
-      .minimap-shell {
+      .minimap-shell,
+      body:has(#detail-drawer:not([hidden])) .minimap-shell {
         right: 12px;
         bottom: 74px;
       }
@@ -1705,10 +1773,9 @@ pub(crate) fn build_css(
       --panel-bg: {panel_bg};
       --panel-border: {panel_border};
       --panel-shadow: {panel_shadow};
-      --accent-color: {accent_color};
-      --accent-soft: {accent_soft};
       --selection-color: {selection_color};
       --selection-soft: color-mix(in srgb, var(--selection-color) 62%, transparent);
+      --selection-faint: color-mix(in srgb, var(--selection-color) 14%, transparent);
       --badge-pk-bg: {badge_pk_bg};
       --badge-pk-text: {badge_pk_text};
       --badge-fk-bg: {badge_fk_bg};
@@ -1723,7 +1790,6 @@ pub(crate) fn build_css(
       --risk-warning: {risk_warning};
       --risk-info: {risk_info};
       --risk-text: {risk_text};
-      --viewer-bg: {viewer_bg};
       --grid-dot: {grid_dot};
       --grid-line: {grid_line};
       --ui-font: 'Inter', 'Segoe UI', system-ui, sans-serif;
@@ -1750,7 +1816,7 @@ pub(crate) fn build_css(
 
     body {{
       font-family: var(--ui-font);
-      background: var(--viewer-bg);
+      background: var(--bg-color);
       color: var(--text-color);
       min-height: 100vh;
       overflow: hidden;
@@ -1800,7 +1866,7 @@ pub(crate) fn build_css(
     }}
 
     .viewer-notice-warning {{
-      border-color: color-mix(in srgb, var(--accent-color) 44%, var(--panel-border));
+      border-color: color-mix(in srgb, var(--risk-warning) 44%, var(--panel-border));
     }}
 
     .container {{
@@ -1879,8 +1945,6 @@ pub(crate) fn build_css(
         panel_bg = panel_bg,
         panel_border = panel_border,
         panel_shadow = panel_shadow,
-        accent_color = accent_color,
-        accent_soft = accent_soft,
         selection_color = selection_color,
         badge_pk_bg = badge_background(colors.badges.primary_key),
         badge_pk_text = colors.badges.primary_key.text,
@@ -1896,7 +1960,6 @@ pub(crate) fn build_css(
         risk_warning = colors.risk.warning,
         risk_info = colors.risk.info,
         risk_text = colors.risk.text,
-        viewer_bg = viewer_bg,
         grid_dot = grid_dot,
         grid_line = grid_line,
         viewer_shell_css = viewer_shell_css,

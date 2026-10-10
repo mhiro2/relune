@@ -56,6 +56,13 @@ export interface ViewerSelectionApi {
 export interface ViewerGroupsApi {
   setVisibility(groupId: string, visible: boolean): void;
   getHiddenGroups(): string[];
+  isPanelOpen(): boolean;
+  setPanelOpen(open: boolean): void;
+}
+
+export interface ViewerSidebarApi {
+  isCollapsed(): boolean;
+  setCollapsed(collapsed: boolean): void;
 }
 
 export interface ViewerMinimapApi {
@@ -70,6 +77,7 @@ export interface ViewerRuntime {
   selection?: ViewerSelectionApi;
   groups?: ViewerGroupsApi;
   minimap?: ViewerMinimapApi;
+  sidebar?: ViewerSidebarApi;
 }
 
 export type ViewerModule = 'viewport' | 'filters' | 'search' | 'selection' | 'groups' | 'minimap';
@@ -195,6 +203,39 @@ export function getSessionStorage(): Storage | null {
     reportSessionStorageError('accessing session storage', error);
     return null;
   }
+}
+
+/** Reads a flag saved for this tab, or `null` when none is saved. */
+export function readSessionFlag(key: string): boolean | null {
+  const storage = getSessionStorage();
+  if (storage === null) return null;
+  try {
+    const value = storage.getItem(key);
+    return value === null ? null : value === '1';
+  } catch (error: unknown) {
+    reportSessionStorageError(`restoring ${key}`, error);
+    return null;
+  }
+}
+
+/** Saves a flag for this tab. */
+export function writeSessionFlag(key: string, value: boolean): void {
+  const storage = getSessionStorage();
+  if (storage === null) return;
+  try {
+    storage.setItem(key, value ? '1' : '0');
+  } catch (error: unknown) {
+    reportSessionStorageError(`saving ${key}`, error);
+  }
+}
+
+/** Keeps a collapsible section open or closed across reloads of this tab. */
+export function persistDetailsOpen(details: HTMLDetailsElement, key: string): void {
+  const saved = readSessionFlag(key);
+  if (saved !== null) details.open = saved;
+  details.addEventListener('toggle', () => {
+    writeSessionFlag(key, details.open);
+  });
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {
