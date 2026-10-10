@@ -390,10 +390,82 @@
   function emitViewerEvent(name, detail) {
     document.dispatchEvent(new CustomEvent(name, { detail }));
   }
+  function noticeStack() {
+    const existing = document.getElementById("relune-viewer-notices");
+    if (existing instanceof HTMLElement) {
+      return existing;
+    }
+    const stack = document.createElement("div");
+    stack.id = "relune-viewer-notices";
+    stack.className = "viewer-notice-stack";
+    document.body.appendChild(stack);
+    return stack;
+  }
+  function showViewerNotice(message, severity = "warning") {
+    const item = document.createElement("div");
+    item.className = `viewer-notice viewer-notice-${severity}`;
+    item.setAttribute("role", severity === "warning" ? "alert" : "status");
+    item.textContent = message;
+    noticeStack().appendChild(item);
+    window.setTimeout(() => {
+      item.remove();
+    }, 4500);
+  }
+  function reportSessionStorageError(action, error) {
+    const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
+    if (isSecurityError) {
+      return;
+    }
+    const isQuotaExceeded = error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+    if (isQuotaExceeded) {
+      showViewerNotice(
+        `Session storage is full while ${action}. Viewer state was not saved.`,
+        "warning"
+      );
+      return;
+    }
+    console.warn(`Session storage error while ${action}`, error);
+  }
+  function getSessionStorage() {
+    try {
+      return window.sessionStorage;
+    } catch (error) {
+      reportSessionStorageError("accessing session storage", error);
+      return null;
+    }
+  }
+  function readSessionFlag(key) {
+    const storage = getSessionStorage();
+    if (storage === null) return null;
+    try {
+      const value = storage.getItem(key);
+      return value === null ? null : value === "1";
+    } catch (error) {
+      reportSessionStorageError(`restoring ${key}`, error);
+      return null;
+    }
+  }
+  function writeSessionFlag(key, value) {
+    const storage = getSessionStorage();
+    if (storage === null) return;
+    try {
+      storage.setItem(key, value ? "1" : "0");
+    } catch (error) {
+      reportSessionStorageError(`saving ${key}`, error);
+    }
+  }
+  function persistDetailsOpen(details, key) {
+    const saved = readSessionFlag(key);
+    if (saved !== null) details.open = saved;
+    details.addEventListener("toggle", () => {
+      writeSessionFlag(key, details.open);
+    });
+  }
 
   // ts/filter_engine.ts
   {
     const sectionEl = document.getElementById("filter-section");
+    const activeCountEl = document.getElementById("filter-active-count");
     const headerEl = document.getElementById("filter-section-header");
     const summaryEl = document.getElementById("filter-active-summary");
     const facetsEl = document.getElementById("filter-facets");
@@ -432,9 +504,15 @@
             syncFacetBadge(details, facet.selectedValues.size);
           }
         }
+        if (activeCountEl !== null) {
+          const selected = summaryItems.reduce((sum, item) => sum + item.count, 0);
+          activeCountEl.hidden = selected === 0;
+          activeCountEl.textContent = String(selected);
+        }
         renderActiveFilterSummary(summaryRoot, summaryItems, (facetId) => {
           const details = facetDetails.get(facetId);
           if (details) {
+            if (sectionEl instanceof HTMLDetailsElement) sectionEl.open = true;
             details.open = true;
             details.scrollIntoView({ behavior: "smooth", block: "nearest" });
           }
@@ -509,13 +587,10 @@
       const metadata = parseReluneMetadata();
       const tables = metadata?.tables ?? [];
       const state = createFilterEngineState(tables);
-      if (state.facets.size === 0) {
-        sectionEl.hidden = true;
-      } else {
-        sectionEl.hidden = false;
+      sectionEl.hidden = state.facets.size === 0;
+      if (sectionEl instanceof HTMLDetailsElement) {
+        persistDetailsOpen(sectionEl, "relune-filter-section-open");
       }
-      const titleSpan = document.createElement("span");
-      titleSpan.textContent = "Filters";
       const modeSwitcher = buildFilterModeSwitcher(state.mode, (mode) => {
         state.mode = mode;
         syncModeSwitcher(modeSwitcher, mode);
@@ -527,7 +602,7 @@
       resetAllBtn.textContent = "Reset";
       resetAllBtn.hidden = true;
       resetAllBtn.addEventListener("click", clearAll2);
-      headerEl.append(titleSpan, modeSwitcher, resetAllBtn);
+      headerEl.append(modeSwitcher, resetAllBtn);
       const columnTypeQuery = { value: "" };
       const facetDetails = /* @__PURE__ */ new Map();
       for (const facet of state.facets.values()) {

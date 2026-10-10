@@ -24,7 +24,7 @@ export function buildGroupListDOM(
 
     const count = document.createElement('span');
     count.className = 'count';
-    count.textContent = `(${group.table_ids?.length ?? 0})`;
+    count.textContent = String(group.table_ids?.length ?? 0);
 
     item.appendChild(checkbox);
     item.appendChild(label);
@@ -38,7 +38,16 @@ export function buildGroupListDOM(
   }
 }
 
-export function applyGroupVisibility(svg: Element, tableIds: string[], visible: boolean): void {
+/** Shows or hides a group's tables together with its surface and label. */
+export function applyGroupVisibility(
+  svg: Element,
+  groupId: string,
+  tableIds: string[],
+  visible: boolean,
+): void {
+  svg.querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`).forEach((element) => {
+    element.classList.toggle('hidden-by-group', !visible);
+  });
   for (const tableId of tableIds) {
     const node = svg.querySelector(`.node[data-id="${CSS.escape(tableId)}"]`);
     if (node) {

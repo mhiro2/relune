@@ -32,6 +32,7 @@
       switch (event.key) {
         case "/":
           event.preventDefault();
+          runtime.sidebar?.setCollapsed(false);
           runtime.search?.focus();
           break;
         case "Escape":
@@ -47,7 +48,18 @@
         case "g":
         case "G":
           event.preventDefault();
-          document.getElementById("group-panel-collapse")?.dispatchEvent(new MouseEvent("click"));
+          if (runtime.groups !== void 0) {
+            const reveal = runtime.sidebar?.isCollapsed() === true;
+            runtime.sidebar?.setCollapsed(false);
+            runtime.groups.setPanelOpen(reveal || !runtime.groups.isPanelOpen());
+          }
+          break;
+        case "s":
+        case "S":
+          event.preventDefault();
+          if (runtime.sidebar !== void 0) {
+            runtime.sidebar.setCollapsed(!runtime.sidebar.isCollapsed());
+          }
           break;
         case "m":
         case "M":

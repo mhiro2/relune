@@ -8,9 +8,8 @@ import { parseReluneMetadata, type GroupMetadata } from './metadata';
 import {
   emitViewerEvent,
   getViewerRuntime,
-  getSessionStorage,
   markViewerModuleReady,
-  reportSessionStorageError,
+  persistDetailsOpen,
 } from './viewer_api';
 
 {
@@ -25,38 +24,10 @@ import {
         groupPanel.style.display = 'none';
       }
     } else {
-      const collapseBtn = document.getElementById('group-panel-collapse');
-      const COLLAPSE_KEY = 'relune-group-panel-collapsed';
-      const sessionStorageRef = getSessionStorage();
-
-      function applyPanelCollapsed(collapsed: boolean): void {
-        if (!groupPanel || !collapseBtn) return;
-        groupPanel.classList.toggle('group-panel-collapsed', collapsed);
-        collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        collapseBtn.textContent = collapsed ? '\u25B8' : '\u25BE';
+      if (groupPanel instanceof HTMLDetailsElement) {
+        persistDetailsOpen(groupPanel, 'relune-group-panel-open');
       }
-
-      collapseBtn?.addEventListener('click', () => {
-        const next = !groupPanel?.classList.contains('group-panel-collapsed');
-        applyPanelCollapsed(next);
-        if (sessionStorageRef === null) {
-          return;
-        }
-
-        try {
-          sessionStorageRef.setItem(COLLAPSE_KEY, next ? '1' : '0');
-        } catch (error: unknown) {
-          reportSessionStorageError('saving the group panel state', error);
-        }
-      });
-
-      try {
-        if (sessionStorageRef?.getItem(COLLAPSE_KEY) === '1') {
-          applyPanelCollapsed(true);
-        }
-      } catch (error: unknown) {
-        reportSessionStorageError('restoring the group panel state', error);
-      }
+      const groupPanelMeta = document.getElementById('group-panel-meta');
 
       const groupTableMap: Record<string, string[]> = {};
       for (const group of groups) {
@@ -66,6 +37,14 @@ import {
       const visibleGroups: Record<string, boolean> = {};
       for (const group of groups) {
         visibleGroups[group.id] = true;
+      }
+
+      /** Summarises the groups in the collapsed panel's header. */
+      function syncPanelMeta(): void {
+        if (groupPanelMeta === null) return;
+        const hidden = groups.filter((group) => visibleGroups[group.id] === false).length;
+        groupPanelMeta.textContent =
+          hidden === 0 ? String(groups.length) : `${hidden} of ${groups.length} hidden`;
       }
 
       function isNodeHidden(nodeId: string): boolean {
@@ -84,9 +63,10 @@ import {
         const svg = document.querySelector('.canvas svg');
         if (!svg) return;
 
-        applyGroupVisibility(svg, groupTableMap[groupId] ?? [], visible);
+        applyGroupVisibility(svg, groupId, groupTableMap[groupId] ?? [], visible);
         updateEdgeVisibility(svg, isNodeHidden);
         syncGroupItemClass(groupId, visible);
+        syncPanelMeta();
 
         emitViewerEvent('relune:groups-changed', {
           visibleGroups: { ...visibleGroups },
@@ -132,12 +112,19 @@ import {
             .filter((group) => visibleGroups[group.id] === false)
             .map((group) => group.id);
         },
+        isPanelOpen(): boolean {
+          return groupPanel instanceof HTMLDetailsElement && groupPanel.open;
+        },
+        setPanelOpen(open: boolean): void {
+          if (groupPanel instanceof HTMLDetailsElement) groupPanel.open = open;
+        },
       };
       markViewerModuleReady('groups');
 
       if (groupList) {
         buildGroupListDOM(groups, groupList, toggleGroup);
       }
+      syncPanelMeta();
     }
   }
 }

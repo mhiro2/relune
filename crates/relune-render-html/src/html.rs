@@ -6,8 +6,8 @@ use crate::components::{
     build_detail_drawer_html, build_filter_engine_js, build_filter_reset_bar_html,
     build_group_panel_html, build_group_toggle_js, build_highlight_js, build_hover_popover_html,
     build_load_motion_js, build_minimap_js, build_pan_zoom_js, build_relation_card_html,
-    build_search_js, build_search_panel_html, build_shortcuts_js, build_url_state_js,
-    build_viewer_controls_html,
+    build_search_js, build_search_panel_html, build_shortcuts_js, build_sidebar_js,
+    build_sidebar_open_html, build_url_state_js, build_viewer_controls_html,
 };
 use crate::css::build_css;
 use crate::options::HtmlRenderOptions;
@@ -93,6 +93,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         js_parts.push(build_group_toggle_js());
     }
     if options.enable_search {
+        js_parts.push(build_sidebar_js());
         js_parts.push(build_search_js());
         js_parts.push(build_filter_engine_js());
     }
@@ -114,6 +115,12 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 
     let group_panel = if options.enable_group_toggles && !options.enable_search {
         Some(build_group_panel_html())
+    } else {
+        None
+    };
+
+    let sidebar_open = if options.enable_search {
+        Some(build_sidebar_open_html())
     } else {
         None
     };
@@ -169,6 +176,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
 <body>
 {heading}
 {search_panel}
+{sidebar_open}
 {filter_reset_bar}
 {group_panel}
 {hover_popover}
@@ -192,6 +200,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         favicon_data_uri = FAVICON_DATA_URI.as_str(),
         heading = heading.unwrap_or_default(),
         search_panel = search_panel.unwrap_or_default(),
+        sidebar_open = sidebar_open.unwrap_or_default(),
         filter_reset_bar = filter_reset_bar.unwrap_or_default(),
         group_panel = group_panel.unwrap_or_default(),
         hover_popover = hover_popover.unwrap_or_default(),
@@ -401,11 +410,11 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(html.contains(r#"class="group-panel""#));
-        assert!(html.contains(r#"id="group-panel""#));
+        // Groups are a collapsed section, closed until a reader opens it.
+        assert!(html.contains(r#"<details class="sidebar-section group-panel" id="group-panel">"#));
         assert!(html.contains(r#"id="show-all-groups""#));
         assert!(html.contains(r#"id="hide-all-groups""#));
-        assert!(html.contains(r#"id="group-panel-collapse""#));
+        assert!(html.contains(r#"id="group-panel-meta""#));
         assert!(html.contains("buildGroupList"));
     }
 
@@ -420,7 +429,7 @@ mod tests {
 
         let html = build_html_document(svg, metadata, &options);
 
-        assert!(!html.contains(r#"class="group-panel""#));
+        assert!(!html.contains(r#"id="group-panel""#));
         assert!(!html.contains("buildGroupList"));
         assert!(!html.contains("toggleGroup"));
     }
@@ -747,12 +756,66 @@ mod tests {
     fn test_panel_radius_consistency() {
         let css = build_css(Theme::Dark, true, true, true);
 
-        // All major panels use 22px radius
+        // All major panels share one modest radius.
         assert!(css.contains(".search-panel"));
         assert!(css.contains(".minimap-shell"));
         assert!(css.contains(".detail-drawer"));
-        // minimap-shell should use 22px, not 18px
+        assert!(!css.contains("border-radius: 22px"));
         assert!(!css.contains("border-radius: 18px"));
+    }
+
+    #[test]
+    fn test_viewer_chrome_avoids_orange_accents_and_glows() {
+        for theme in [Theme::Dark, Theme::Light] {
+            let css = build_css(theme, true, true, true);
+
+            assert!(!css.contains("--accent-color"));
+            assert!(!css.contains("radial-gradient(circle at top"));
+            assert!(css.contains("--selection-faint:"));
+        }
+    }
+
+    #[test]
+    fn test_sidebar_puts_search_and_objects_before_collapsed_sections() {
+        let html = build_search_panel_html(true);
+
+        let search = html.find(r#"id="table-search""#).unwrap();
+        let objects = html.find(r#"id="object-browser-list""#).unwrap();
+        let filters = html
+            .find(r#"<details class="sidebar-section filter-section" id="filter-section">"#)
+            .unwrap();
+        let groups = html.find(r#"id="group-panel""#).unwrap();
+        assert!(search < objects && objects < filters && filters < groups);
+        // Neither section starts open.
+        assert!(!html.contains("<details open"));
+        assert!(html.contains(r#"id="sidebar-collapse""#));
+    }
+
+    #[test]
+    fn test_sidebar_open_button_only_with_search() {
+        let svg = "<svg></svg>";
+        let with_search = build_html_document(svg, "{}", &HtmlRenderOptions::default());
+        let without_search = build_html_document(
+            svg,
+            "{}",
+            &HtmlRenderOptions {
+                enable_search: false,
+                ..Default::default()
+            },
+        );
+
+        assert!(with_search.contains(r#"id="sidebar-open""#));
+        assert!(with_search.contains("relune-sidebar-collapsed"));
+        assert!(!without_search.contains(r#"id="sidebar-open""#));
+    }
+
+    #[test]
+    fn test_filter_reset_bar_shows_only_without_the_sidebar() {
+        let css = build_css(Theme::Light, false, true, false);
+
+        assert!(
+            css.contains(".search-panel:not([hidden]) ~ .filter-reset-bar {\n      display: none;")
+        );
     }
 
     #[test]
@@ -760,9 +823,11 @@ mod tests {
         let css = build_css(Theme::Dark, false, true, true);
 
         assert!(css.contains(".minimap-node.selected"));
-        assert!(css.contains("drop-shadow"));
+        assert!(css.contains(".minimap-node.hidden"));
         assert!(css.contains("stroke-dasharray"));
         assert!(css.contains(".minimap-frame"));
+        // The minimap steps left of an open detail drawer.
+        assert!(css.contains("body:has(#detail-drawer:not([hidden])) .minimap-shell"));
     }
 
     #[test]

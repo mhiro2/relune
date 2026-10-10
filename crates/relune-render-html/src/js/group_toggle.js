@@ -17,7 +17,7 @@
       label.textContent = group.label || group.id;
       const count = document.createElement("span");
       count.className = "count";
-      count.textContent = `(${group.table_ids?.length ?? 0})`;
+      count.textContent = String(group.table_ids?.length ?? 0);
       item.appendChild(checkbox);
       item.appendChild(label);
       item.appendChild(count);
@@ -27,7 +27,10 @@
       container.appendChild(item);
     }
   }
-  function applyGroupVisibility(svg, tableIds, visible) {
+  function applyGroupVisibility(svg, groupId, tableIds, visible) {
+    svg.querySelectorAll(`[data-group-id="${CSS.escape(groupId)}"]`).forEach((element) => {
+      element.classList.toggle("hidden-by-group", !visible);
+    });
     for (const tableId of tableIds) {
       const node = svg.querySelector(`.node[data-id="${CSS.escape(tableId)}"]`);
       if (node) {
@@ -155,6 +158,33 @@
       return null;
     }
   }
+  function readSessionFlag(key) {
+    const storage = getSessionStorage();
+    if (storage === null) return null;
+    try {
+      const value = storage.getItem(key);
+      return value === null ? null : value === "1";
+    } catch (error) {
+      reportSessionStorageError(`restoring ${key}`, error);
+      return null;
+    }
+  }
+  function writeSessionFlag(key, value) {
+    const storage = getSessionStorage();
+    if (storage === null) return;
+    try {
+      storage.setItem(key, value ? "1" : "0");
+    } catch (error) {
+      reportSessionStorageError(`saving ${key}`, error);
+    }
+  }
+  function persistDetailsOpen(details, key) {
+    const saved = readSessionFlag(key);
+    if (saved !== null) details.open = saved;
+    details.addEventListener("toggle", () => {
+      writeSessionFlag(key, details.open);
+    });
+  }
 
   // ts/group_toggle.ts
   {
@@ -168,11 +198,10 @@
           groupPanel.style.display = "none";
         }
       } else {
-        let applyPanelCollapsed2 = function(collapsed) {
-          if (!groupPanel || !collapseBtn) return;
-          groupPanel.classList.toggle("group-panel-collapsed", collapsed);
-          collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-          collapseBtn.textContent = collapsed ? "\u25B8" : "\u25BE";
+        let syncPanelMeta2 = function() {
+          if (groupPanelMeta === null) return;
+          const hidden = groups.filter((group) => visibleGroups[group.id] === false).length;
+          groupPanelMeta.textContent = hidden === 0 ? String(groups.length) : `${hidden} of ${groups.length} hidden`;
         }, isNodeHidden2 = function(nodeId) {
           for (const groupId of Object.keys(groupTableMap)) {
             if (!visibleGroups[groupId]) {
@@ -185,9 +214,10 @@
           visibleGroups[groupId] = visible;
           const svg = document.querySelector(".canvas svg");
           if (!svg) return;
-          applyGroupVisibility(svg, groupTableMap[groupId] ?? [], visible);
+          applyGroupVisibility(svg, groupId, groupTableMap[groupId] ?? [], visible);
           updateEdgeVisibility(svg, isNodeHidden2);
           syncGroupItemClass(groupId, visible);
+          syncPanelMeta2();
           emitViewerEvent("relune:groups-changed", {
             visibleGroups: { ...visibleGroups }
           });
@@ -208,29 +238,11 @@
             }
           }
         };
-        applyPanelCollapsed = applyPanelCollapsed2, isNodeHidden = isNodeHidden2, toggleGroup = toggleGroup2, showAllGroups = showAllGroups2, hideAllGroups = hideAllGroups2;
-        const collapseBtn = document.getElementById("group-panel-collapse");
-        const COLLAPSE_KEY = "relune-group-panel-collapsed";
-        const sessionStorageRef = getSessionStorage();
-        collapseBtn?.addEventListener("click", () => {
-          const next = !groupPanel?.classList.contains("group-panel-collapsed");
-          applyPanelCollapsed2(next);
-          if (sessionStorageRef === null) {
-            return;
-          }
-          try {
-            sessionStorageRef.setItem(COLLAPSE_KEY, next ? "1" : "0");
-          } catch (error) {
-            reportSessionStorageError("saving the group panel state", error);
-          }
-        });
-        try {
-          if (sessionStorageRef?.getItem(COLLAPSE_KEY) === "1") {
-            applyPanelCollapsed2(true);
-          }
-        } catch (error) {
-          reportSessionStorageError("restoring the group panel state", error);
+        syncPanelMeta = syncPanelMeta2, isNodeHidden = isNodeHidden2, toggleGroup = toggleGroup2, showAllGroups = showAllGroups2, hideAllGroups = hideAllGroups2;
+        if (groupPanel instanceof HTMLDetailsElement) {
+          persistDetailsOpen(groupPanel, "relune-group-panel-open");
         }
+        const groupPanelMeta = document.getElementById("group-panel-meta");
         const groupTableMap = {};
         for (const group of groups) {
           groupTableMap[group.id] = group.table_ids ?? [];
@@ -254,16 +266,23 @@
           },
           getHiddenGroups() {
             return groups.filter((group) => visibleGroups[group.id] === false).map((group) => group.id);
+          },
+          isPanelOpen() {
+            return groupPanel instanceof HTMLDetailsElement && groupPanel.open;
+          },
+          setPanelOpen(open) {
+            if (groupPanel instanceof HTMLDetailsElement) groupPanel.open = open;
           }
         };
         markViewerModuleReady("groups");
         if (groupList) {
           buildGroupListDOM(groups, groupList, toggleGroup2);
         }
+        syncPanelMeta2();
       }
     }
   }
-  var applyPanelCollapsed;
+  var syncPanelMeta;
   var isNodeHidden;
   var toggleGroup;
   var showAllGroups;
