@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeRelationHighlight, relationColumnPairs, relationKey } from './highlight_actions';
+import {
+  computeRelationHighlight,
+  nextLineIndex,
+  relationColumnPairs,
+  relationKey,
+} from './highlight_actions';
 import { createHighlightPainter, pathEndpoints, renderRelationCard } from './highlight_dom';
 import { createHighlightState } from './highlight_state';
 import { edge, table } from './test_fixtures';
@@ -49,6 +54,16 @@ const highlightedColumns = (node: Element | undefined): string[] =>
   );
 
 describe('relationColumnPairs', () => {
+  it('steps between focusable lines without wrapping', () => {
+    const visible = (index: number): boolean => index !== 2;
+    expect(nextLineIndex(4, 1, 'ArrowRight', visible)).toBe(3);
+    expect(nextLineIndex(4, 3, 'ArrowLeft', visible)).toBe(1);
+    expect(nextLineIndex(4, 3, 'ArrowDown', visible)).toBeNull();
+    expect(nextLineIndex(4, 3, 'Home', visible)).toBe(0);
+    expect(nextLineIndex(4, 0, 'End', visible)).toBe(3);
+    expect(nextLineIndex(4, 0, 'Tab', visible)).toBeNull();
+  });
+
   it('names a relationship by both ends and their columns', () => {
     expect(relationKey(edges[0]!)).toBe(
       'stock_movements(region_code,warehouse_number,bin_label)>warehouse_bins(region_code,warehouse_number,bin_label)',

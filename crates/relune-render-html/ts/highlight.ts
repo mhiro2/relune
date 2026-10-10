@@ -2,6 +2,7 @@ import {
   computeHoverPreview,
   computeNeighborHighlights,
   computeRelationHighlight,
+  nextLineIndex,
   relationColumnPairs,
   relationKey,
 } from './highlight_actions';
@@ -336,6 +337,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       relationOrigin = null;
       renderInteraction();
       if (hadTable) emitViewerEvent('relune:node-cleared', undefined);
+      if (edgeIndex !== null) setRovingLine(edgeIndex);
       if (edgeIndex !== previous) {
         const key = selectedRelationKey();
         if (key === null) {
@@ -401,29 +403,72 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     // ── Edge click listeners ────────────────────────────────────────────
 
     // Edges render in metadata order, so a DOM index is a metadata index.
-    // Each line is also a keyboard button naming the mapping it selects.
+    // Each line is also a keyboard button naming the mapping it selects. The
+    // lines share one Tab stop and arrow keys move between them, so Tab does
+    // not have to walk every line of a large diagram.
+    const lineHint = document.createElement('p');
+    lineHint.id = 'relation-line-hint';
+    lineHint.className = 'visually-hidden';
+    lineHint.textContent = 'Use the arrow keys to move between relationships.';
+    document.body.appendChild(lineHint);
+
+    const isLineFocusable = (index: number): boolean => {
+      const line = edgeEls[index];
+      return (
+        line !== undefined &&
+        !line.classList.contains('hidden-by-group') &&
+        !line.classList.contains('hidden-by-filter')
+      );
+    };
+    let rovingLine = -1;
+    const setRovingLine = (index: number): void => {
+      if (index === rovingLine) return;
+      edgeEls[rovingLine]?.setAttribute('tabindex', '-1');
+      rovingLine = index;
+      edgeEls[index]?.setAttribute('tabindex', '0');
+    };
+    /** Keeps the Tab stop on a line that is still on the diagram. */
+    const syncRovingLine = (): void => {
+      if (isLineFocusable(rovingLine)) return;
+      const first = nextLineIndex(edgeEls.length, -1, 'Home', isLineFocusable);
+      if (first !== null) setRovingLine(first);
+    };
+
     edgeEls.forEach((edgeEl, index) => {
       const toggle = (focusCard: boolean): void => {
         setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
       };
       const edge = state.edges[index];
       if (edge !== undefined) {
-        edgeEl.setAttribute('tabindex', '0');
+        edgeEl.setAttribute('tabindex', '-1');
         edgeEl.setAttribute('role', 'button');
         edgeEl.setAttribute('aria-label', `Relationship ${relationColumnPairs(edge).join(', ')}`);
+        edgeEl.setAttribute('aria-describedby', lineHint.id);
       }
+      edgeEl.addEventListener('focus', () => {
+        setRovingLine(index);
+      });
       edgeEl.addEventListener('click', (event: Event) => {
         event.stopPropagation();
         toggle(false);
       });
       edgeEl.addEventListener('keydown', (event: Event) => {
         const { key } = event as KeyboardEvent;
-        if (key !== 'Enter' && key !== ' ') return;
+        if (key === 'Enter' || key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          toggle(true);
+          return;
+        }
+        const next = nextLineIndex(edgeEls.length, index, key, isLineFocusable);
+        if (next === null) return;
         event.preventDefault();
         event.stopPropagation();
-        toggle(true);
+        setRovingLine(next);
+        (edgeEls[next] as HTMLElement | SVGElement | undefined)?.focus();
       });
     });
+    syncRovingLine();
 
     svgRoot.addEventListener('click', () => {
       if (state.selectedNode !== null || state.selectedEdge !== null) {
@@ -465,6 +510,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     });
 
     const handleVisibilityStateChange = (): void => {
+      syncRovingLine();
       if (state.selectedNode === null && state.hoveredNode !== null) {
         state.hoveredNode = null;
         renderInteraction();
