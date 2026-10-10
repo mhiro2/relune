@@ -188,4 +188,10 @@ describe('moving between relationship lines', () => {
     getViewerRuntime().selection?.selectRelation('posts(editor_1_id)>users(id)');
     expect(tabStops()).toEqual([2]);
   });
+
+  it('keeps the Tab stop visible when a hidden relationship is selected', () => {
+    lines()[2]?.classList.add('hidden-by-group');
+    getViewerRuntime().selection?.selectRelation('posts(editor_1_id)>users(id)');
+    expect(tabStops()).toEqual([0]);
+  });
 });

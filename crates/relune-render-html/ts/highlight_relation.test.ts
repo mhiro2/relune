@@ -71,6 +71,15 @@ describe('relationColumnPairs', () => {
     expect(relationKey(edges[1]!)).toBe('tags()>warehouse_bins()');
   });
 
+  it('keeps quoted identifiers with delimiters apart from composite keys', () => {
+    const quoted = edge('posts', 'users', { from_columns: ['a,b'], to_columns: ['x,y'] });
+    const composite = edge('posts', 'users', { from_columns: ['a', 'b'], to_columns: ['x', 'y'] });
+
+    expect(relationKey(composite)).toBe('posts(a,b)>users(x,y)');
+    expect(relationKey(quoted)).toBe('posts(a%2Cb)>users(x%2Cy)');
+    expect(relationKey(edge('a>b', 'c(d)'))).toBe('a%3Eb()>c%28d%29()');
+  });
+
   it('lists one mapping per column pair of a composite key', () => {
     expect(relationColumnPairs(edges[0] as (typeof edges)[number])).toEqual([
       'stock_movements.region_code → warehouse_bins.region_code',

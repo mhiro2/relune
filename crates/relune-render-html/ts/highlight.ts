@@ -337,7 +337,9 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       relationOrigin = null;
       renderInteraction();
       if (hadTable) emitViewerEvent('relune:node-cleared', undefined);
-      if (edgeIndex !== null) setRovingLine(edgeIndex);
+      // A relationship restored behind a hidden group keeps the Tab stop on
+      // a line that is still on the diagram.
+      if (edgeIndex !== null && isLineFocusable(edgeIndex)) setRovingLine(edgeIndex);
       if (edgeIndex !== previous) {
         const key = selectedRelationKey();
         if (key === null) {

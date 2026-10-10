@@ -63,8 +63,12 @@
       toColumns: edge.to_columns
     };
   }
+  function escapeKeyPart(part) {
+    return part.replaceAll(/[%(),>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  }
   function relationKey(edge) {
-    return `${edge.from}(${edge.from_columns.join(",")})>${edge.to}(${edge.to_columns.join(",")})`;
+    const end = (table, columns) => `${escapeKeyPart(table)}(${columns.map(escapeKeyPart).join(",")})`;
+    return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
   }
   function relationColumnPairs(edge) {
     const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
@@ -961,7 +965,7 @@
         relationOrigin = null;
         renderInteraction();
         if (hadTable) emitViewerEvent("relune:node-cleared", void 0);
-        if (edgeIndex !== null) setRovingLine(edgeIndex);
+        if (edgeIndex !== null && isLineFocusable(edgeIndex)) setRovingLine(edgeIndex);
         if (edgeIndex !== previous) {
           const key = selectedRelationKey();
           if (key === null) {

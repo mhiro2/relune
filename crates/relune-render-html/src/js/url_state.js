@@ -143,6 +143,7 @@
       const params = readHash2();
       runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== "1", { silent: true });
       if (params.toString() === "") {
+        runtime.selection?.clear();
         return;
       }
       const s = params.get(PARAM_SCALE);
@@ -180,6 +181,8 @@
       const table = params.get(PARAM_TABLE);
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
+      } else {
+        runtime.selection?.clear();
       }
     }, expectedViewerModules2 = function() {
       const modules = [];

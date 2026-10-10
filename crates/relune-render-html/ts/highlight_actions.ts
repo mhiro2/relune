@@ -117,13 +117,21 @@ export function computeRelationHighlight(
  * Column correspondences of a relationship, one `from.col → to.col` line per
  * column pair, so a composite key reads as its full set of pairs.
  */
+/** Percent-escapes the characters a relationship key uses as delimiters. */
+function escapeKeyPart(part: string): string {
+  return part.replaceAll(/[%(),>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
 /**
  * Readable key naming one relationship in a shared link, e.g.
  * `posts(user_id)>users(id)`. It names both ends and their columns, so it
- * stays valid while unrelated relationships come and go.
+ * stays valid while unrelated relationships come and go; delimiters inside
+ * quoted identifiers are escaped so no two relationships share a key.
  */
 export function relationKey(edge: EdgeMetadata): string {
-  return `${edge.from}(${edge.from_columns.join(',')})>${edge.to}(${edge.to_columns.join(',')})`;
+  const end = (table: string, columns: readonly string[]): string =>
+    `${escapeKeyPart(table)}(${columns.map(escapeKeyPart).join(',')})`;
+  return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
 }
 
 export function relationColumnPairs(edge: EdgeMetadata): string[] {
