@@ -1,7 +1,15 @@
 //! CSS generation for the HTML viewer.
 
 use crate::options::Theme;
-use relune_render_theme::get_colors;
+use relune_render_theme::{BadgeColor, get_colors};
+
+/// CSS background of a column badge: its fill at the badge's opacity.
+fn badge_background(badge: BadgeColor) -> String {
+    format!(
+        "color-mix(in srgb, {} {}%, transparent)",
+        badge.fill, badge.fill_opacity_percent
+    )
+}
 
 /// Build CSS styles based on theme and options.
 #[allow(clippy::too_many_lines)]
@@ -1292,8 +1300,8 @@ pub(crate) fn build_css(
     }
 
     .detail-badge-join {
-      background: rgba(139, 92, 246, 0.18);
-      color: #a78bfa;
+      background: var(--badge-ix-bg);
+      color: var(--badge-ix-text);
     }
 
     .detail-metric {
@@ -1395,21 +1403,23 @@ pub(crate) fn build_css(
       opacity: 0.78;
     }
 
+    /* Key pills reuse the card badge colors so a column reads the same in
+       the diagram and in the drawer. */
     .detail-column-pill-pk {
-      background: rgba(245, 158, 11, 0.2);
-      color: var(--accent-color);
+      background: var(--badge-pk-bg);
+      color: var(--badge-pk-text);
       opacity: 1;
     }
 
     .detail-column-pill-fk {
-      background: rgba(99, 102, 241, 0.2);
-      color: #818cf8;
+      background: var(--badge-fk-bg);
+      color: var(--badge-fk-text);
       opacity: 1;
     }
 
     .detail-column-pill-ix {
-      background: rgba(20, 184, 166, 0.2);
-      color: #2dd4bf;
+      background: var(--badge-ix-bg);
+      color: var(--badge-ix-text);
       opacity: 1;
     }
 
@@ -1699,6 +1709,12 @@ pub(crate) fn build_css(
       --accent-soft: {accent_soft};
       --selection-color: {selection_color};
       --selection-soft: color-mix(in srgb, var(--selection-color) 62%, transparent);
+      --badge-pk-bg: {badge_pk_bg};
+      --badge-pk-text: {badge_pk_text};
+      --badge-fk-bg: {badge_fk_bg};
+      --badge-fk-text: {badge_fk_text};
+      --badge-ix-bg: {badge_ix_bg};
+      --badge-ix-text: {badge_ix_text};
       --diff-added: {diff_added};
       --diff-removed: {diff_removed};
       --diff-modified: {diff_modified};
@@ -1866,6 +1882,12 @@ pub(crate) fn build_css(
         accent_color = accent_color,
         accent_soft = accent_soft,
         selection_color = selection_color,
+        badge_pk_bg = badge_background(colors.badges.primary_key),
+        badge_pk_text = colors.badges.primary_key.text,
+        badge_fk_bg = badge_background(colors.badges.foreign_key),
+        badge_fk_text = colors.badges.foreign_key.text,
+        badge_ix_bg = badge_background(colors.badges.index),
+        badge_ix_text = colors.badges.index.text,
         diff_added = colors.diff.added,
         diff_removed = colors.diff.removed,
         diff_modified = colors.diff.modified,
