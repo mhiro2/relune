@@ -279,7 +279,7 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | `--fail-on-warning` | Non-zero exit on warnings | -- |
 | `--allow-invalid-schema` | Compare inputs with empty or duplicate table/column/view/enum names instead of failing (errors become `SCHEMA004` warnings) | off |
 
-Visual diffs (`svg` / `html`) mark each change's kind with `+` / `−` / `~` and a faint tint, write type changes as `before → after`, and label risky cards with the highest review severity and its count (`breaking 1`), using the same `[review]` rules, suppressed tables, and severity overrides as `relune review`. Change kind and risk are independent: read the marker for *what* changed and the label for *how risky* it is. With `density = "keys"` in `[diff]`, changed columns stay listed next to the key columns.
+Visual diffs (`svg` / `html`) mark each change's kind with `+` / `−` / `~` and a faint tint, write type changes as `before → after`, and label risky cards with the highest review severity and its count (`breaking 1`), using the same `[review]` rules, suppressed tables, and severity overrides as `relune review`. Change kind and risk are independent: read the marker for *what* changed and the label for *how risky* it is. With `density = "keys"` in `[diff]`, changed columns stay listed next to the key columns. With `show_legend = true` under `[diff]`, the legend explains both.
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
 
