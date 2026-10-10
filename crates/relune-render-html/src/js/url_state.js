@@ -102,6 +102,10 @@
       if (selected !== null) {
         params.set(PARAM_TABLE, selected);
       }
+      const relation = runtime.selection?.getSelectedRelation() ?? null;
+      if (relation !== null) {
+        params.set(PARAM_RELATION, relation);
+      }
       const viewport = runtime.viewport?.getState();
       if (viewport !== null && viewport !== void 0) {
         params.set(PARAM_SCALE, viewport.scale.toFixed(4));
@@ -169,6 +173,10 @@
       for (const groupId of readList2(params, PARAM_HIDDEN_GROUPS)) {
         runtime.groups?.setVisibility(groupId, false);
       }
+      const relation = params.get(PARAM_RELATION);
+      if (relation !== null && relation !== "" && runtime.selection?.selectRelation(relation)) {
+        return;
+      }
       const table = params.get(PARAM_TABLE);
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
@@ -202,6 +210,7 @@
     const tableIds = new Set(tables.map((table) => table.id));
     const PARAM_SEARCH = "q";
     const PARAM_TABLE = "t";
+    const PARAM_RELATION = "r";
     const PARAM_SCALE = "s";
     const PARAM_PAN_X = "x";
     const PARAM_PAN_Y = "y";
@@ -229,6 +238,8 @@
     document.addEventListener("relune:search-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:node-selected", scheduleDiscreteWrite2);
     document.addEventListener("relune:node-cleared", scheduleDiscreteWrite2);
+    document.addEventListener("relune:relation-selected", scheduleDiscreteWrite2);
+    document.addEventListener("relune:relation-cleared", scheduleDiscreteWrite2);
     document.addEventListener("relune:viewport-changed", scheduleWrite2);
     document.addEventListener("relune:filters-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:groups-changed", scheduleDiscreteWrite2);

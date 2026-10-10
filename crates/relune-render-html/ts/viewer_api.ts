@@ -51,6 +51,9 @@ export interface ViewerSelectionApi {
   clear(): void;
   select(nodeId: string): void;
   getSelected(): string | null;
+  /** Selects the relationship with this key; returns whether one matched. */
+  selectRelation(key: string): boolean;
+  getSelectedRelation(): string | null;
 }
 
 export interface ViewerGroupsApi {

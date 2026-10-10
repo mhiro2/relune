@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeRelationHighlight, relationColumnPairs } from './highlight_actions';
+import { computeRelationHighlight, relationColumnPairs, relationKey } from './highlight_actions';
 import { createHighlightPainter, pathEndpoints, renderRelationCard } from './highlight_dom';
 import { createHighlightState } from './highlight_state';
 import { edge, table } from './test_fixtures';
@@ -49,6 +49,13 @@ const highlightedColumns = (node: Element | undefined): string[] =>
   );
 
 describe('relationColumnPairs', () => {
+  it('names a relationship by both ends and their columns', () => {
+    expect(relationKey(edges[0]!)).toBe(
+      'stock_movements(region_code,warehouse_number,bin_label)>warehouse_bins(region_code,warehouse_number,bin_label)',
+    );
+    expect(relationKey(edges[1]!)).toBe('tags()>warehouse_bins()');
+  });
+
   it('lists one mapping per column pair of a composite key', () => {
     expect(relationColumnPairs(edges[0] as (typeof edges)[number])).toEqual([
       'stock_movements.region_code → warehouse_bins.region_code',

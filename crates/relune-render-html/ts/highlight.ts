@@ -3,6 +3,7 @@ import {
   computeNeighborHighlights,
   computeRelationHighlight,
   relationColumnPairs,
+  relationKey,
 } from './highlight_actions';
 import {
   createHighlightPainter,
@@ -293,12 +294,19 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       syncObjectBrowser();
     };
 
+    const selectedRelationKey = (): string | null => {
+      const edge = state.selectedEdge === null ? undefined : state.edges[state.selectedEdge];
+      return edge === undefined ? null : relationKey(edge);
+    };
+
     const setSelectedNode = (tableId: string | null): void => {
       const previous = state.selectedNode;
+      const hadRelation = state.selectedEdge !== null;
       state.selectedNode = tableId;
       state.selectedEdge = null;
       state.hoveredNode = null;
       renderInteraction();
+      if (hadRelation) emitViewerEvent('relune:relation-cleared', undefined);
 
       if (previous === tableId) {
         return;
@@ -321,12 +329,21 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
      */
     const setSelectedEdge = (edgeIndex: number | null, focusCard = false): void => {
       const hadTable = state.selectedNode !== null;
+      const previous = state.selectedEdge;
       state.selectedNode = null;
       state.selectedEdge = edgeIndex;
       state.hoveredNode = null;
       relationOrigin = null;
       renderInteraction();
       if (hadTable) emitViewerEvent('relune:node-cleared', undefined);
+      if (edgeIndex !== previous) {
+        const key = selectedRelationKey();
+        if (key === null) {
+          emitViewerEvent('relune:relation-cleared', undefined);
+        } else {
+          emitViewerEvent('relune:relation-selected', { key });
+        }
+      }
       if (focusCard && edgeIndex !== null) relationEls?.card.focus();
     };
 
@@ -477,6 +494,13 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       getSelected(): string | null {
         return state.selectedNode;
       },
+      selectRelation(key: string): boolean {
+        const index = state.edges.findIndex((edge) => relationKey(edge) === key);
+        if (index < 0) return false;
+        setSelectedEdge(index);
+        return true;
+      },
+      getSelectedRelation: selectedRelationKey,
     };
     markViewerModuleReady('selection');
 

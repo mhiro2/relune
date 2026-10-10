@@ -106,4 +106,22 @@ describe('relationship keyboard path', () => {
     expect(byId('relation-card').hasAttribute('hidden')).toBe(true);
     expect(document.querySelectorAll('.selected-edge, .relation-port')).toHaveLength(0);
   });
+
+  it('selects a relationship by key and reports the change', () => {
+    const events: string[] = [];
+    for (const name of ['relune:relation-selected', 'relune:relation-cleared']) {
+      document.addEventListener(name, () => events.push(name));
+    }
+    const selection = getViewerRuntime().selection;
+
+    expect(selection?.selectRelation('posts(user_id)>users(missing)')).toBe(false);
+    expect(selection?.selectRelation('posts(user_id)>users(id)')).toBe(true);
+    expect(selection?.getSelectedRelation()).toBe('posts(user_id)>users(id)');
+    expect(byId('relation-card').hasAttribute('hidden')).toBe(false);
+
+    // Selecting a table drops the relationship.
+    selection?.select('users');
+    expect(selection?.getSelectedRelation()).toBeNull();
+    expect(events).toEqual(['relune:relation-selected', 'relune:relation-cleared']);
+  });
 });

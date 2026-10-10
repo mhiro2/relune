@@ -117,6 +117,15 @@ export function computeRelationHighlight(
  * Column correspondences of a relationship, one `from.col → to.col` line per
  * column pair, so a composite key reads as its full set of pairs.
  */
+/**
+ * Readable key naming one relationship in a shared link, e.g.
+ * `posts(user_id)>users(id)`. It names both ends and their columns, so it
+ * stays valid while unrelated relationships come and go.
+ */
+export function relationKey(edge: EdgeMetadata): string {
+  return `${edge.from}(${edge.from_columns.join(',')})>${edge.to}(${edge.to_columns.join(',')})`;
+}
+
 export function relationColumnPairs(edge: EdgeMetadata): string[] {
   const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
   if (pairCount === 0) {
