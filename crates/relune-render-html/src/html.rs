@@ -444,6 +444,16 @@ mod tests {
     }
 
     #[test]
+    fn test_standalone_group_panel_keeps_section_scrolling() {
+        // Without the search sidebar, the floating Groups panel still needs
+        // the collapsible section styles that scroll a long group list.
+        let css = build_css(Theme::Light, true, false, false);
+
+        assert!(css.contains(".sidebar-section-body {"));
+        assert!(css.contains("overflow-y: auto;"));
+    }
+
+    #[test]
     fn test_group_panel_css_not_included_when_disabled() {
         let css = build_css(Theme::Light, false, false, false);
 

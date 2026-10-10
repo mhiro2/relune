@@ -56,7 +56,10 @@ pub(crate) fn build_css(
       border: 1px solid var(--panel-border);
       border-radius: 14px;
       z-index: 240;
-      overflow: hidden;
+      /* Open sections can outgrow the sidebar; it then scrolls as a whole
+         rather than clipping their controls. */
+      overflow-x: hidden;
+      overflow-y: auto;
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
     }
@@ -215,8 +218,9 @@ pub(crate) fn build_css(
 
     .object-browser-section {
       display: flex;
-      flex: 1;
+      flex: 1 0 auto;
       flex-direction: column;
+      height: 0;
       min-height: 120px;
     }
 
@@ -323,6 +327,42 @@ pub(crate) fn build_css(
       font-family: var(--mono-font);
     }
 
+    .node.dimmed-by-search {
+      opacity: 0.25;
+      transition: opacity 0.2s;
+    }
+
+    .node.highlighted-by-search {
+      opacity: 1;
+      transition: opacity 0.2s;
+    }
+
+    .node.dimmed-by-filter {
+      opacity: 0.2;
+      transition: opacity 0.2s;
+    }
+
+    .node.dimmed-by-search.dimmed-by-filter {
+      opacity: 0.08;
+    }
+
+    .node.hidden-by-filter,
+    .edge.hidden-by-filter {
+      display: none !important;
+    }
+
+    .edge.dimmed-by-edge-filter {
+      opacity: 0.12;
+      transition: opacity 0.2s;
+    }"
+    } else {
+        ""
+    };
+
+    // Filters and Groups share the collapsible section styles; Groups also
+    // uses them when it floats on its own without the search sidebar.
+    let section_css = if enable_search || enable_group_toggles {
+        r"
     /* Collapsed sections under the object list. */
     .sidebar-section {
       flex-shrink: 0;
@@ -395,35 +435,6 @@ pub(crate) fn build_css(
       max-height: 40vh;
       overflow-y: auto;
       padding-bottom: 6px;
-    }
-
-    .node.dimmed-by-search {
-      opacity: 0.25;
-      transition: opacity 0.2s;
-    }
-
-    .node.highlighted-by-search {
-      opacity: 1;
-      transition: opacity 0.2s;
-    }
-
-    .node.dimmed-by-filter {
-      opacity: 0.2;
-      transition: opacity 0.2s;
-    }
-
-    .node.dimmed-by-search.dimmed-by-filter {
-      opacity: 0.08;
-    }
-
-    .node.hidden-by-filter,
-    .edge.hidden-by-filter {
-      display: none !important;
-    }
-
-    .edge.dimmed-by-edge-filter {
-      opacity: 0.12;
-      transition: opacity 0.2s;
     }"
     } else {
         ""
@@ -668,7 +679,8 @@ pub(crate) fn build_css(
       border: 1px solid var(--panel-border);
       border-radius: 14px;
       z-index: 220;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
       box-shadow: var(--panel-shadow);
       backdrop-filter: blur(16px);
     }
@@ -1939,7 +1951,7 @@ pub(crate) fn build_css(
     .viewport:hover::after {{
       opacity: 0.8;
     }}
-{search_css}{filter_section_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
+{search_css}{section_css}{filter_section_css}{group_panel_css}{highlight_css}{viewer_shell_css}",
         bg_color = colors.background,
         color_scheme = if matches!(theme, Theme::Dark) {
             "dark"
