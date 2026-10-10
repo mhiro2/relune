@@ -102,13 +102,9 @@ pub struct ThemeColors {
     pub edge_stroke: &'static str,
     /// Arrow marker color.
     pub arrow_fill: &'static str,
-    /// Soft shadow color used under group panels.
-    pub group_shadow: &'static str,
-    /// Group background fill.
+    /// Faint surface of a group, kept apart from the canvas and the cards.
     pub group_fill: &'static str,
-    /// Group accent band fill.
-    pub group_band_fill: &'static str,
-    /// Group border stroke.
+    /// Group boundary, drawn only where membership would be ambiguous.
     pub group_stroke: &'static str,
     /// Accent color for viewer controls and edge hover feedback.
     pub accent_color: &'static str,
@@ -143,10 +139,8 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_muted: "#94a3b8",
             edge_stroke: "#56627a",
             arrow_fill: "#56627a",
-            group_shadow: "rgba(0, 0, 0, 0.5)",
-            group_fill: "#0f172acc",
-            group_band_fill: "#172036",
-            group_stroke: "#334155",
+            group_fill: "#121725",
+            group_stroke: "#475569",
             accent_color: "#f59e0b",
             selection_color: "#93a8c9",
             badges: BadgeColors {
@@ -193,10 +187,8 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_muted: "#64748b",
             edge_stroke: "#8390a3",
             arrow_fill: "#8390a3",
-            group_shadow: "rgba(15, 23, 42, 0.08)",
-            group_fill: "#ffffffd9",
-            group_band_fill: "#eef2ff",
-            group_stroke: "#cbd5e1",
+            group_fill: "#eef1f6",
+            group_stroke: "#a3afbf",
             accent_color: "#d97706",
             selection_color: "#4a6285",
             badges: BadgeColors {
@@ -310,6 +302,15 @@ mod tests {
             write!(out, "{value:02x}").unwrap();
         }
         out
+    }
+
+    #[test]
+    fn group_labels_meet_text_contrast_on_group_surfaces() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            let ratio = contrast(colors.text_secondary, colors.group_fill);
+            assert!(ratio >= 4.5, "{theme:?}: {ratio:.2}");
+        }
     }
 
     #[test]

@@ -69,6 +69,14 @@ const MONO_NARROW_ADVANCE_EM: f32 = 0.6;
 /// Advance width of one wide (CJK) character, in `em`.
 const MONO_WIDE_ADVANCE_EM: f32 = 1.0;
 
+/// Padding between a group's edges and its outermost cards, except the top.
+pub const GROUP_PADDING: f32 = 20.0;
+/// Padding above a group's topmost card, which holds the group label.
+pub const GROUP_TOP_PADDING: f32 = 34.0;
+/// Corner radius of a group surface.
+pub const GROUP_CORNER_RADIUS: f32 = 10.0;
+/// Baseline of the group label below the group's top edge.
+pub const GROUP_LABEL_BASELINE: f32 = 21.0;
 /// Horizontal inset of the group label from the group's left edge.
 pub const GROUP_LABEL_INSET: f32 = 12.0;
 /// Font size of the group label.

@@ -22,7 +22,7 @@ mod theme;
 pub use edge::{EdgeRenderOptions, render_edge};
 pub use error::SvgRenderError;
 pub use geometry::{Point, Rect, clamp, compute_column_y, lerp};
-pub use group::{render_group, render_group_background, render_group_label};
+pub use group::{ambiguous_groups, render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
@@ -113,9 +113,9 @@ pub fn render_svg_with_overlay(
     )?;
     out.push_str(r#"<rect width="100%" height="100%" fill="url(#canvas-grid)" opacity="0.92"/>"#);
 
-    // Render group shells behind nodes and edges.
-    for group in &graph.groups {
-        render_group_background(&mut out, group, &colors)?;
+    // Render group surfaces behind nodes and edges.
+    for (group, outlined) in graph.groups.iter().zip(ambiguous_groups(graph)) {
+        render_group_background(&mut out, group, outlined, &colors)?;
     }
 
     // Render edges with enhanced options
@@ -273,8 +273,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 .edge:hover .crow-inline {{ stroke: {hover_color}; }}
 .node:hover .table-body {{ stroke-width: 1.6px; }}
 .group-box,
-.group-band,
-.group-divider,
 .group-label {{ pointer-events: none; }}
 </style>",
         hover_color = colors.selection_color,
@@ -291,9 +289,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <rect width="8" height="8" fill="transparent"/>
 <rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
 </pattern>
-<filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
-<feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
-</filter>
 <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
 <path d="M1,1 L9,5 L1,9" fill="none" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>
@@ -315,7 +310,7 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <path d="M2 2 L2 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
 <path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>"#,
-        colors.canvas_base, colors.canvas_dot, colors.canvas_dot, colors.group_shadow,
+        colors.canvas_base, colors.canvas_dot, colors.canvas_dot,
     )?;
     out.push_str("\n</defs>");
     Ok(())
@@ -1665,10 +1660,10 @@ mod tests {
         assert!(svg.contains("data-group-id=\"user_domain\""));
         assert!(svg.contains("class=\"group-label\""));
         assert!(svg.contains(">User Domain<"));
-        // Should contain dashed stroke for group
-        assert!(svg.contains("stroke-dasharray=\"10,5\""));
-        // Should contain the refreshed group accent band
-        assert!(svg.contains("class=\"group-band\""));
+        // Groups are plain surfaces without a dashed frame, band, or shadow.
+        assert!(!svg.contains("stroke-dasharray=\"10,5\""));
+        assert!(!svg.contains("group-band"));
+        assert!(!svg.contains("group-shadow"));
     }
 
     #[test]
@@ -1769,9 +1764,9 @@ mod tests {
         let graph = layout_graph_with_groups();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        // Group boxes keep their large radius; node cards use a small one.
+        // Group surfaces and node cards both use small radii.
         assert!(svg.contains(r#"class="group-box" x="#));
-        assert!(svg.contains("rx=\"20\""));
+        assert!(svg.contains("rx=\"10\""));
         assert!(svg.contains(r#"class="table-body""#));
         assert!(svg.contains("rx=\"6\" ry=\"6\""));
     }

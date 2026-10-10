@@ -53,13 +53,13 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 596359,
+      "bytes": 596106,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 208409,
+      "bytes": 208196,
       "edge_groups": 160,
       "node_groups": 23
     }
