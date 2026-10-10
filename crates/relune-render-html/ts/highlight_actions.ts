@@ -140,3 +140,36 @@ export function relationColumnPairs(edge: EdgeMetadata): string[] {
     .slice(0, pairCount)
     .map((column, index) => `${edge.from}.${column} → ${edge.to}.${edge.to_columns[index]}`);
 }
+
+/**
+ * Index the arrow, Home, or End `key` moves to among `count` relationship
+ * lines, skipping lines `isFocusable` rejects. Returns `null` for other keys
+ * or when there is nowhere to go.
+ */
+export function nextLineIndex(
+  count: number,
+  current: number,
+  key: string,
+  isFocusable: (index: number) => boolean,
+): number | null {
+  const scan = (start: number, step: number): number | null => {
+    for (let index = start; index >= 0 && index < count; index += step) {
+      if (isFocusable(index)) return index;
+    }
+    return null;
+  };
+  switch (key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      return scan(current + 1, 1);
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      return scan(current - 1, -1);
+    case 'Home':
+      return scan(0, 1);
+    case 'End':
+      return scan(count - 1, -1);
+    default:
+      return null;
+  }
+}
