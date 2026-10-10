@@ -35,7 +35,9 @@ pub use layout::{
 pub use order::{
     CrossingReductionStrategy, order_nodes_within_layers, order_nodes_within_layers_with_strategy,
 };
-pub use overlay::{Annotation, DiagramOverlay, EdgeKey, EdgeOverlay, NodeOverlay, OverlaySeverity};
+pub use overlay::{
+    Annotation, ColumnChange, DiagramOverlay, EdgeKey, EdgeOverlay, NodeChange, NodeOverlay,
+};
 pub use rank::{RankAssignment, assign_ranks};
 pub use relune_core::layout::{EdgeRoute, RouteStyle};
 pub use route::{
