@@ -725,6 +725,11 @@ mod tests {
         assert!(css.contains(".detail-column-pills"));
         assert!(css.contains(".detail-column-pill"));
         assert!(css.contains(".detail-column-pill-pk"));
+        // Key pills match the card badges instead of the orange accent.
+        assert!(css.contains("--badge-pk-bg: color-mix(in srgb, #cbd5e1 100%, transparent);"));
+        assert!(css.contains("--badge-fk-text: #7dd3fc;"));
+        assert!(css.contains("color: var(--badge-pk-text);"));
+        assert!(!css.contains("rgba(245, 158, 11, 0.2)"));
     }
 
     #[test]
