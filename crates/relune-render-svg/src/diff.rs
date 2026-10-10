@@ -96,9 +96,28 @@ pub(crate) fn render_risk_label(
     colors: &ThemeColors,
 ) -> fmt::Result {
     let label = risk_label(severity, count);
-    let width = RISK_LABEL_PADDING.mul_add(2.0, estimate_text_width(&label, RISK_LABEL_FONT_SIZE));
-    let x = right_x - RISK_LABEL_INSET - width;
-    let y = top_y - RISK_LABEL_HEIGHT / 2.0;
+    let x = right_x - RISK_LABEL_INSET - risk_pill_width(&label);
+    render_risk_pill(out, x, top_y, &label, severity, colors).map(drop)
+}
+
+/// Width of a risk pill holding `label`.
+fn risk_pill_width(label: &str) -> f32 {
+    RISK_LABEL_PADDING.mul_add(2.0, estimate_text_width(label, RISK_LABEL_FONT_SIZE))
+}
+
+/// Draws a risk pill holding `label` and returns its width.
+///
+/// The pill's left edge sits at `x`, vertically centered on `center_y`.
+pub(crate) fn render_risk_pill(
+    out: &mut String,
+    x: f32,
+    center_y: f32,
+    label: &str,
+    severity: ReviewSeverity,
+    colors: &ThemeColors,
+) -> Result<f32, fmt::Error> {
+    let width = risk_pill_width(label);
+    let y = center_y - RISK_LABEL_HEIGHT / 2.0;
     let (fill, text) = (risk_fill(severity, colors), colors.risk.text);
     write!(
         out,
@@ -107,8 +126,9 @@ pub(crate) fn render_risk_label(
         RISK_LABEL_HEIGHT / 2.0,
         x + width / 2.0,
         y + 12.5,
-        escape_text(&label),
-    )
+        escape_text(label),
+    )?;
+    Ok(width)
 }
 
 /// Draws a change marker centered at (`center_x`, `baseline`).
