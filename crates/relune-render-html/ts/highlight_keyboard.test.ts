@@ -4,11 +4,20 @@ import { edge, metadataScript, resetViewerRuntime, table } from './test_fixtures
 import { getViewerRuntime } from './viewer_api';
 
 // Mirrors the viewer shell around the drawer, hover popover, and relation card.
-function renderViewer(): void {
+function renderViewer(extraLines = 0): void {
+  const extraEdges = Array.from({ length: extraLines }, (_, index) =>
+    edge('posts', 'users', { from_columns: [`editor_${index}_id`], to_columns: ['id'] }),
+  );
+  const extraLineEls = extraEdges
+    .map(() => '<g class="edge" data-from="posts" data-to="users"><path class="edge-path"/></g>')
+    .join('');
   document.body.innerHTML = `
     ${metadataScript({
       tables: [table('posts'), table('users')],
-      edges: [edge('posts', 'users', { from_columns: ['user_id'], to_columns: ['id'] })],
+      edges: [
+        edge('posts', 'users', { from_columns: ['user_id'], to_columns: ['id'] }),
+        ...extraEdges,
+      ],
     })}
     <aside id="hover-popover" hidden>
       <p id="hover-popover-kind"></p><h2 id="hover-popover-title"></h2>
@@ -31,6 +40,7 @@ function renderViewer(): void {
       <g class="node" data-id="posts"><rect class="table-body"/></g>
       <g class="node" data-id="users"><rect class="table-body"/></g>
       <g class="edge" data-from="posts" data-to="users"><path class="edge-path" d="M 0 0 L 10 10"/></g>
+      ${extraLineEls}
     </svg></div></div>`;
 }
 
@@ -105,5 +115,83 @@ describe('relationship keyboard path', () => {
     getViewerRuntime().selection?.clear();
     expect(byId('relation-card').hasAttribute('hidden')).toBe(true);
     expect(document.querySelectorAll('.selected-edge, .relation-port')).toHaveLength(0);
+  });
+
+  it('selects a relationship by key and reports the change', () => {
+    const events: string[] = [];
+    for (const name of ['relune:relation-selected', 'relune:relation-cleared']) {
+      document.addEventListener(name, () => events.push(name));
+    }
+    const selection = getViewerRuntime().selection;
+
+    expect(selection?.selectRelation('posts(user_id)>users(missing)')).toBe(false);
+    expect(selection?.selectRelation('posts(user_id)>users(id)')).toBe(true);
+    expect(selection?.getSelectedRelation()).toBe('posts(user_id)>users(id)');
+    expect(byId('relation-card').hasAttribute('hidden')).toBe(false);
+
+    // Selecting a table drops the relationship.
+    selection?.select('users');
+    expect(selection?.getSelectedRelation()).toBeNull();
+    expect(events).toEqual(['relune:relation-selected', 'relune:relation-cleared']);
+  });
+});
+
+describe('moving between relationship lines', () => {
+  beforeEach(async () => {
+    resetViewerRuntime();
+    renderViewer(2);
+    vi.resetModules();
+    await import('./highlight');
+  });
+
+  const lines = (): SVGElement[] => Array.from(document.querySelectorAll<SVGElement>('.edge'));
+  const tabStops = (): number[] =>
+    lines().flatMap((line, index) => (line.getAttribute('tabindex') === '0' ? [index] : []));
+  const press = (line: SVGElement, key: string): void => {
+    line.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  };
+
+  it('gives every line one shared Tab stop moved by the arrow keys', () => {
+    expect(tabStops()).toEqual([0]);
+    const [first, second, third] = lines();
+    expect(first?.getAttribute('aria-describedby')).toBe('relation-line-hint');
+
+    first?.focus();
+    press(first!, 'ArrowRight');
+    expect(document.activeElement).toBe(second);
+    expect(tabStops()).toEqual([1]);
+
+    press(second!, 'End');
+    expect(document.activeElement).toBe(third);
+    press(third!, 'ArrowDown');
+    expect(document.activeElement).toBe(third);
+    press(third!, 'Home');
+    expect(document.activeElement).toBe(first);
+    expect(tabStops()).toEqual([0]);
+  });
+
+  it('skips hidden lines and keeps the Tab stop on a visible one', () => {
+    const [first, second, third] = lines();
+    second?.classList.add('hidden-by-group');
+    first?.focus();
+    press(first!, 'ArrowRight');
+    expect(document.activeElement).toBe(third);
+
+    first?.classList.add('hidden-by-filter');
+    third?.classList.add('hidden-by-filter');
+    second?.classList.remove('hidden-by-group');
+    document.dispatchEvent(new CustomEvent('relune:filters-changed'));
+    expect(tabStops()).toEqual([1]);
+  });
+
+  it('moves the Tab stop to a relationship selected elsewhere', () => {
+    getViewerRuntime().selection?.selectRelation('posts(editor_1_id)>users(id)');
+    expect(tabStops()).toEqual([2]);
+  });
+
+  it('keeps the Tab stop visible when a hidden relationship is selected', () => {
+    lines()[2]?.classList.add('hidden-by-group');
+    getViewerRuntime().selection?.selectRelation('posts(editor_1_id)>users(id)');
+    expect(tabStops()).toEqual([0]);
   });
 });

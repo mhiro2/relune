@@ -20,7 +20,7 @@ use crate::diff::{
 };
 use crate::escape::{escape_attribute, escape_text};
 use crate::is_light_theme;
-use crate::theme::ThemeColors;
+use crate::theme::{BadgeColor, ThemeColors};
 
 // ---------------------------------------------------------------------------
 // Node style
@@ -67,14 +67,6 @@ pub(crate) const fn node_label_background(colors: &ThemeColors) -> &'static str 
 // Column badges (PK / FK / IX)
 // ---------------------------------------------------------------------------
 
-/// Colors of one column badge.
-#[derive(Clone, Copy)]
-pub(crate) struct BadgeStyle {
-    fill: &'static str,
-    fill_opacity: f32,
-    text: &'static str,
-}
-
 /// Column badge kinds, ordered by how much a reader relies on them.
 #[derive(Clone, Copy)]
 pub(crate) enum ColumnBadge {
@@ -92,21 +84,11 @@ impl ColumnBadge {
         }
     }
 
-    /// PK is a solid neutral chip, FK a blue tint, IX a quiet grey tint, so
-    /// the badges step down in weight without borrowing kind or state hues.
-    const fn style(self, colors: &ThemeColors) -> BadgeStyle {
-        let (fill, fill_opacity, text) = match (self, is_light_theme(colors)) {
-            (Self::PrimaryKey, false) => ("#cbd5e1", 1.0, "#0f172a"),
-            (Self::PrimaryKey, true) => ("#334155", 1.0, "#ffffff"),
-            (Self::ForeignKey, false) => ("#38bdf8", 0.18, "#7dd3fc"),
-            (Self::ForeignKey, true) => ("#0284c7", 0.12, "#075985"),
-            (Self::Index, false) => ("#94a3b8", 0.16, "#cbd5e1"),
-            (Self::Index, true) => ("#64748b", 0.12, "#334155"),
-        };
-        BadgeStyle {
-            fill,
-            fill_opacity,
-            text,
+    const fn colors(self, colors: &ThemeColors) -> BadgeColor {
+        match self {
+            Self::PrimaryKey => colors.badges.primary_key,
+            Self::ForeignKey => colors.badges.foreign_key,
+            Self::Index => colors.badges.index,
         }
     }
 }
@@ -119,11 +101,12 @@ pub(crate) fn render_column_badge(
     badge: ColumnBadge,
     colors: &ThemeColors,
 ) -> fmt::Result {
-    let BadgeStyle {
+    let BadgeColor {
         fill,
-        fill_opacity,
+        fill_opacity_percent,
         text,
-    } = badge.style(colors);
+    } = badge.colors(colors);
+    let fill_opacity = f32::from(fill_opacity_percent) / 100.0;
     write!(
         out,
         r#"<rect class="col-badge" x="{x:.1}" y="{y:.1}" width="{COLUMN_BADGE_WIDTH}" height="{COLUMN_BADGE_HEIGHT}" rx="3" fill="{fill}" fill-opacity="{fill_opacity}"/><text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" font-weight="700" fill="{text}">{}</text>"#,

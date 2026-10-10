@@ -35,11 +35,22 @@ function renderViewer(): void {
     <div id="minimap-shell"></div>`;
 }
 
+/** Makes the selection mock's `clear` drop both kinds of selection. */
+function runtimeClear(state: { selected: string | null; relation: string | null }): void {
+  const selection = getViewerRuntime().selection;
+  if (selection === undefined) return;
+  selection.clear = vi.fn(() => {
+    state.selected = null;
+    state.relation = null;
+  });
+}
+
 // In-memory stand-ins for the viewer modules url_state talks to.
 function installRuntime() {
   const state = {
     query: '',
     selected: null as string | null,
+    relation: null as string | null,
     viewport: { scale: 1, panX: 0, panY: 0 },
     facets: new Map<FacetId, string[]>(),
     mode: 'dim' as FilterMode,
@@ -52,6 +63,11 @@ function installRuntime() {
     }),
     select: vi.fn((id: string) => {
       state.selected = id;
+    }),
+    selectRelation: vi.fn((key: string) => {
+      if (key !== 'public.posts(author_id)>public.users(id)') return false;
+      state.relation = key;
+      return true;
     }),
     setState: vi.fn((scale: number, panX: number, panY: number) => {
       state.viewport = { scale, panX, panY };
@@ -75,6 +91,8 @@ function installRuntime() {
     clear: vi.fn(),
     select: mocks.select,
     getSelected: () => state.selected,
+    selectRelation: mocks.selectRelation,
+    getSelectedRelation: () => state.relation,
   };
   runtime.viewport = {
     zoomIn: vi.fn(),
@@ -108,6 +126,8 @@ function installRuntime() {
       if (!visible) state.hiddenGroups.push(id);
     }),
     getHiddenGroups: () => state.hiddenGroups,
+    isPanelOpen: () => false,
+    setPanelOpen: vi.fn(),
   };
   runtime.minimap = {
     isHidden: () => state.minimapHidden,
@@ -211,6 +231,57 @@ describe('restoring state from the URL hash', () => {
     expect(mocks.setState).not.toHaveBeenCalled();
   });
 
+  it('restores a selected relationship instead of a table', async () => {
+    const { mocks, state } = installRuntime();
+    markAllReady();
+    history.replaceState(
+      null,
+      '',
+      '/diagram.html#r=public.posts%28author_id%29%3Epublic.users%28id%29&t=public.users',
+    );
+    await loadUrlState();
+
+    expect(state.relation).toBe('public.posts(author_id)>public.users(id)');
+    expect(mocks.select).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the table when the relationship is gone', async () => {
+    const { mocks, state } = installRuntime();
+    markAllReady();
+    history.replaceState(
+      null,
+      '',
+      '/diagram.html#r=public.posts%28x%29%3Epublic.users%28id%29&t=public.users',
+    );
+    await loadUrlState();
+
+    expect(mocks.selectRelation).toHaveBeenCalledOnce();
+    expect(state.relation).toBeNull();
+    expect(state.selected).toBe('public.users');
+  });
+
+  it('drops a selection the hash no longer names on popstate', async () => {
+    const { state } = installRuntime();
+    runtimeClear(state);
+    markAllReady();
+    history.replaceState(
+      null,
+      '',
+      '/diagram.html#r=public.posts%28author_id%29%3Epublic.users%28id%29',
+    );
+    await loadUrlState();
+    expect(state.relation).toBe('public.posts(author_id)>public.users(id)');
+
+    history.replaceState(null, '', '/diagram.html#s=1.0000&x=0.0&y=0.0');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(state.relation).toBeNull();
+
+    state.selected = 'public.users';
+    history.replaceState(null, '', '/diagram.html');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(state.selected).toBeNull();
+  });
+
   it('re-applies the hash on popstate', async () => {
     const { state } = installRuntime();
     markAllReady();
@@ -248,6 +319,23 @@ describe('writing state to the URL hash', () => {
     expect(location.hash).toBe(
       '#q=user&t=public.users&s=1.2500&x=12.3&y=-5.0&fk=table&fk=view&ft=numeric%2810%2C2%29&fm=hide&hg=g-public&mv=1',
     );
+  });
+
+  it('records the selected relationship', async () => {
+    const { state } = installRuntime();
+    markAllReady();
+    await loadUrlState();
+    vi.useFakeTimers();
+
+    state.relation = 'public.posts(author_id)>public.users(id)';
+    document.dispatchEvent(new CustomEvent('relune:relation-selected'));
+    vi.advanceTimersByTime(300);
+    expect(new URLSearchParams(location.hash.slice(1)).get('r')).toBe(state.relation);
+
+    state.relation = null;
+    document.dispatchEvent(new CustomEvent('relune:relation-cleared'));
+    vi.advanceTimersByTime(300);
+    expect(location.hash).not.toContain('r=');
   });
 
   it('replaces the entry for continuous viewport changes', async () => {

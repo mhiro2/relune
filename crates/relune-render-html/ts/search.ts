@@ -65,6 +65,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
     runtime.search = {
       focus(): void {
+        runtime.sidebar?.setCollapsed(false);
         searchInput.focus();
       },
       clear(): void {

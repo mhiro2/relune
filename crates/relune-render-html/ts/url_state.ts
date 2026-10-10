@@ -10,6 +10,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
 
   const PARAM_SEARCH = 'q';
   const PARAM_TABLE = 't';
+  const PARAM_RELATION = 'r';
   const PARAM_SCALE = 's';
   const PARAM_PAN_X = 'x';
   const PARAM_PAN_Y = 'y';
@@ -114,6 +115,11 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       params.set(PARAM_TABLE, selected);
     }
 
+    const relation = runtime.selection?.getSelectedRelation() ?? null;
+    if (relation !== null) {
+      params.set(PARAM_RELATION, relation);
+    }
+
     const viewport = runtime.viewport?.getState();
     if (viewport !== null && viewport !== undefined) {
       params.set(PARAM_SCALE, viewport.scale.toFixed(4));
@@ -170,6 +176,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     // already flipped back to false, causing a spurious pushState.
     runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1', { silent: true });
     if (params.toString() === '') {
+      // Going back to a clean hash drops whatever is still selected.
+      runtime.selection?.clear();
       return;
     }
 
@@ -211,10 +219,17 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       runtime.groups?.setVisibility(groupId, false);
     }
 
-    // Restore selected table (last, so it can center on restored viewport scale)
+    // Restore the selected relationship or table last, so it can center on
+    // the restored viewport scale. The two are never selected together.
+    const relation = params.get(PARAM_RELATION);
+    if (relation !== null && relation !== '' && runtime.selection?.selectRelation(relation)) {
+      return;
+    }
     const table = params.get(PARAM_TABLE);
     if (table !== null && table !== '' && tableIds.has(table)) {
       runtime.selection?.select(table);
+    } else {
+      runtime.selection?.clear();
     }
   }
 
@@ -248,6 +263,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   document.addEventListener('relune:search-changed', scheduleDiscreteWrite);
   document.addEventListener('relune:node-selected', scheduleDiscreteWrite);
   document.addEventListener('relune:node-cleared', scheduleDiscreteWrite);
+  document.addEventListener('relune:relation-selected', scheduleDiscreteWrite);
+  document.addEventListener('relune:relation-cleared', scheduleDiscreteWrite);
   document.addEventListener('relune:viewport-changed', scheduleWrite);
   document.addEventListener('relune:filters-changed', scheduleDiscreteWrite);
   document.addEventListener('relune:groups-changed', scheduleDiscreteWrite);

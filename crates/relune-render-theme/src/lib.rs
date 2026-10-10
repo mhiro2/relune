@@ -48,6 +48,33 @@ pub struct RiskColors {
     pub text: &'static str,
 }
 
+/// Colors of one PK / FK / IX column badge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BadgeColor {
+    /// Chip fill, drawn at `fill_opacity_percent`.
+    pub fill: &'static str,
+    /// Opacity of the chip fill, in percent.
+    pub fill_opacity_percent: u8,
+    /// Label text color.
+    pub text: &'static str,
+}
+
+/// Colors of the column badges shared by node cards and the viewer.
+///
+/// PK is a solid neutral chip, FK a blue tint, IX a quiet grey tint, so the
+/// badges step down in weight without borrowing kind or state hues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// Holds no strings itself, so serde cannot infer the `'static` bound.
+#[serde(bound(deserialize = "'de: 'static"))]
+pub struct BadgeColors {
+    /// Primary key badge.
+    pub primary_key: BadgeColor,
+    /// Foreign key badge.
+    pub foreign_key: BadgeColor,
+    /// Index badge.
+    pub index: BadgeColor,
+}
+
 /// Color palette for a specific theme.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeColors {
@@ -75,19 +102,15 @@ pub struct ThemeColors {
     pub edge_stroke: &'static str,
     /// Arrow marker color.
     pub arrow_fill: &'static str,
-    /// Soft shadow color used under group panels.
-    pub group_shadow: &'static str,
-    /// Group background fill.
+    /// Faint surface of a group, kept apart from the canvas and the cards.
     pub group_fill: &'static str,
-    /// Group accent band fill.
-    pub group_band_fill: &'static str,
-    /// Group border stroke.
+    /// Group boundary, drawn only where membership would be ambiguous.
     pub group_stroke: &'static str,
-    /// Accent color for viewer controls and edge hover feedback.
-    pub accent_color: &'static str,
     /// Blue-grey outline for selected and highlighted diagram elements, kept
     /// apart from kind marks and review severities.
     pub selection_color: &'static str,
+    /// Column badge colors.
+    pub badges: BadgeColors,
     /// Diff change kind colors.
     pub diff: DiffColors,
     /// Review risk label colors.
@@ -98,6 +121,7 @@ pub struct ThemeColors {
 
 /// Returns the color palette for the given theme.
 #[must_use]
+#[allow(clippy::too_many_lines)] // Two literal palettes read best side by side.
 pub const fn get_colors(theme: Theme) -> ThemeColors {
     match theme {
         Theme::Dark => ThemeColors {
@@ -113,12 +137,26 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_muted: "#94a3b8",
             edge_stroke: "#56627a",
             arrow_fill: "#56627a",
-            group_shadow: "rgba(0, 0, 0, 0.5)",
-            group_fill: "#0f172acc",
-            group_band_fill: "#172036",
-            group_stroke: "#334155",
-            accent_color: "#f59e0b",
+            group_fill: "#121725",
+            group_stroke: "#475569",
             selection_color: "#93a8c9",
+            badges: BadgeColors {
+                primary_key: BadgeColor {
+                    fill: "#cbd5e1",
+                    fill_opacity_percent: 100,
+                    text: "#0f172a",
+                },
+                foreign_key: BadgeColor {
+                    fill: "#38bdf8",
+                    fill_opacity_percent: 18,
+                    text: "#7dd3fc",
+                },
+                index: BadgeColor {
+                    fill: "#94a3b8",
+                    fill_opacity_percent: 16,
+                    text: "#cbd5e1",
+                },
+            },
             diff: DiffColors {
                 added: "#4ade80",
                 removed: "#f87171",
@@ -146,12 +184,26 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             text_muted: "#64748b",
             edge_stroke: "#8390a3",
             arrow_fill: "#8390a3",
-            group_shadow: "rgba(15, 23, 42, 0.08)",
-            group_fill: "#ffffffd9",
-            group_band_fill: "#eef2ff",
-            group_stroke: "#cbd5e1",
-            accent_color: "#d97706",
+            group_fill: "#eef1f6",
+            group_stroke: "#a3afbf",
             selection_color: "#4a6285",
+            badges: BadgeColors {
+                primary_key: BadgeColor {
+                    fill: "#334155",
+                    fill_opacity_percent: 100,
+                    text: "#ffffff",
+                },
+                foreign_key: BadgeColor {
+                    fill: "#0284c7",
+                    fill_opacity_percent: 12,
+                    text: "#075985",
+                },
+                index: BadgeColor {
+                    fill: "#64748b",
+                    fill_opacity_percent: 12,
+                    text: "#334155",
+                },
+            },
             diff: DiffColors {
                 added: "#15803d",
                 removed: "#b91c1c",
@@ -227,6 +279,45 @@ mod tests {
             for color in [colors.diff.added, colors.diff.removed, colors.diff.modified] {
                 let ratio = contrast(color, colors.node_fill);
                 assert!(ratio >= 4.5, "{theme:?} {color}: {ratio:.2}");
+            }
+        }
+    }
+
+    /// Hex color of `fill` drawn at `percent` opacity over `base`.
+    fn blend(fill: &str, percent: u8, base: &str) -> String {
+        use std::fmt::Write;
+
+        let alpha = f64::from(percent) / 100.0;
+        let mut out = String::from("#");
+        for index in [1, 3, 5] {
+            let channel =
+                |hex: &str| f64::from(u8::from_str_radix(&hex[index..index + 2], 16).unwrap());
+            let value = alpha.mul_add(channel(fill), (1.0 - alpha) * channel(base));
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let value = value.round() as u8;
+            write!(out, "{value:02x}").unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn group_labels_meet_text_contrast_on_group_surfaces() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            let ratio = contrast(colors.text_secondary, colors.group_fill);
+            assert!(ratio >= 4.5, "{theme:?}: {ratio:.2}");
+        }
+    }
+
+    #[test]
+    fn column_badges_meet_text_contrast_on_cards() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            let badges = colors.badges;
+            for badge in [badges.primary_key, badges.foreign_key, badges.index] {
+                let chip = blend(badge.fill, badge.fill_opacity_percent, colors.node_fill);
+                let ratio = contrast(badge.text, &chip);
+                assert!(ratio >= 4.5, "{theme:?} {badge:?}: {ratio:.2}");
             }
         }
     }

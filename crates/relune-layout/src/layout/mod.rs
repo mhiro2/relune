@@ -40,10 +40,7 @@ const fn default_force_iterations() -> usize {
     150
 }
 
-/// Horizontal padding around grouped nodes.
-pub(super) const GROUP_PADDING: f32 = 20.0;
-/// Extra top inset reserved for the rendered group label band.
-pub(super) const GROUP_TOP_PADDING: f32 = 44.0;
+use crate::metrics::{GROUP_PADDING, GROUP_TOP_PADDING};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct NodeSize {

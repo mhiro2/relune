@@ -18,10 +18,16 @@ import {
   type FilterMode,
 } from './filter_engine_state';
 import { parseReluneMetadata, type TableMetadata } from './metadata';
-import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
+import {
+  emitViewerEvent,
+  getViewerRuntime,
+  markViewerModuleReady,
+  persistDetailsOpen,
+} from './viewer_api';
 
 {
   const sectionEl = document.getElementById('filter-section');
+  const activeCountEl = document.getElementById('filter-active-count');
   const headerEl = document.getElementById('filter-section-header');
   const summaryEl = document.getElementById('filter-active-summary');
   const facetsEl = document.getElementById('filter-facets');
@@ -46,16 +52,12 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const tables: TableMetadata[] = metadata?.tables ?? [];
     const state = createFilterEngineState(tables);
 
-    if (state.facets.size === 0) {
-      sectionEl.hidden = true;
-    } else {
-      sectionEl.hidden = false;
+    sectionEl.hidden = state.facets.size === 0;
+    if (sectionEl instanceof HTMLDetailsElement) {
+      persistDetailsOpen(sectionEl, 'relune-filter-section-open');
     }
 
     // ── Build header ────────────────────────────────────────────────
-
-    const titleSpan = document.createElement('span');
-    titleSpan.textContent = 'Filters';
 
     const modeSwitcher = buildFilterModeSwitcher(state.mode, (mode) => {
       state.mode = mode;
@@ -70,7 +72,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     resetAllBtn.hidden = true;
     resetAllBtn.addEventListener('click', clearAll);
 
-    headerEl.append(titleSpan, modeSwitcher, resetAllBtn);
+    headerEl.append(modeSwitcher, resetAllBtn);
 
     // ── Per-facet search query state (columnType only) ──────────────
 
@@ -161,9 +163,16 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         }
       }
 
+      if (activeCountEl !== null) {
+        const selected = summaryItems.reduce((sum, item) => sum + item.count, 0);
+        activeCountEl.hidden = selected === 0;
+        activeCountEl.textContent = String(selected);
+      }
+
       renderActiveFilterSummary(summaryRoot, summaryItems, (facetId) => {
         const details = facetDetails.get(facetId);
         if (details) {
+          if (sectionEl instanceof HTMLDetailsElement) sectionEl.open = true;
           details.open = true;
           details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }

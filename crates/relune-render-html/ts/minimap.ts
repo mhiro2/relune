@@ -8,6 +8,7 @@ import {
 
 interface MinimapNode {
   id: string;
+  source: Element;
   x: number;
   y: number;
   width: number;
@@ -82,6 +83,7 @@ interface MinimapNode {
 
       nodes.push({
         id,
+        source: node,
         x: Number.parseFloat(rect.getAttribute('x') ?? '0'),
         y: Number.parseFloat(rect.getAttribute('y') ?? '0'),
         width: Number.parseFloat(rect.getAttribute('width') ?? '0'),
@@ -90,6 +92,7 @@ interface MinimapNode {
     });
 
     const nodeEls = new Map<string, SVGRectElement>();
+    const sourceById = new Map(nodes.map((node) => [node.id, node.source]));
     for (const node of nodes) {
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('class', 'minimap-node');
@@ -124,6 +127,20 @@ interface MinimapNode {
         element.classList.toggle('selected', id === customEvent.detail.nodeId);
       });
     });
+
+    // Tables a hidden group or a hide/focus filter takes off the diagram
+    // leave the minimap too.
+    const syncHiddenNodes = (): void => {
+      nodeEls.forEach((element, id) => {
+        const source = sourceById.get(id);
+        const hidden =
+          source?.classList.contains('hidden-by-group') === true ||
+          source?.classList.contains('hidden-by-filter') === true;
+        element.classList.toggle('hidden', hidden);
+      });
+    };
+    document.addEventListener('relune:groups-changed', syncHiddenNodes);
+    document.addEventListener('relune:filters-changed', syncHiddenNodes);
 
     document.addEventListener('relune:node-cleared', () => {
       nodeEls.forEach((element) => {

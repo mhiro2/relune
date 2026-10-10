@@ -165,6 +165,7 @@
       };
       runtime.search = {
         focus() {
+          runtime.sidebar?.setCollapsed(false);
           searchInput.focus();
         },
         clear() {
