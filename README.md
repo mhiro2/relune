@@ -133,7 +133,7 @@ Compare schema revisions and integrate with tooling:
 - text and Markdown diff output
 - JSON output for CI and automation
 - `layout-json` with routing debug metadata for edge-side, slot, and channel inspection
-- SVG or HTML visual diff with color-coded overlays
+- SVG or HTML visual diff that shows each change's kind (`+` / `−` / `~` with a faint tint) apart from its review risk (`breaking 1`-style labels)
 - [GitHub Actions integration](docs/github-actions.md) for automated schema review on pull requests
 
 ### Flexible input sources
