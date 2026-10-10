@@ -176,6 +176,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     // already flipped back to false, causing a spurious pushState.
     runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1', { silent: true });
     if (params.toString() === '') {
+      // Going back to a clean hash drops whatever is still selected.
+      runtime.selection?.clear();
       return;
     }
 
@@ -226,6 +228,8 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     const table = params.get(PARAM_TABLE);
     if (table !== null && table !== '' && tableIds.has(table)) {
       runtime.selection?.select(table);
+    } else {
+      runtime.selection?.clear();
     }
   }
 

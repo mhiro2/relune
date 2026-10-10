@@ -35,6 +35,16 @@ function renderViewer(): void {
     <div id="minimap-shell"></div>`;
 }
 
+/** Makes the selection mock's `clear` drop both kinds of selection. */
+function runtimeClear(state: { selected: string | null; relation: string | null }): void {
+  const selection = getViewerRuntime().selection;
+  if (selection === undefined) return;
+  selection.clear = vi.fn(() => {
+    state.selected = null;
+    state.relation = null;
+  });
+}
+
 // In-memory stand-ins for the viewer modules url_state talks to.
 function installRuntime() {
   const state = {
@@ -248,6 +258,28 @@ describe('restoring state from the URL hash', () => {
     expect(mocks.selectRelation).toHaveBeenCalledOnce();
     expect(state.relation).toBeNull();
     expect(state.selected).toBe('public.users');
+  });
+
+  it('drops a selection the hash no longer names on popstate', async () => {
+    const { state } = installRuntime();
+    runtimeClear(state);
+    markAllReady();
+    history.replaceState(
+      null,
+      '',
+      '/diagram.html#r=public.posts%28author_id%29%3Epublic.users%28id%29',
+    );
+    await loadUrlState();
+    expect(state.relation).toBe('public.posts(author_id)>public.users(id)');
+
+    history.replaceState(null, '', '/diagram.html#s=1.0000&x=0.0&y=0.0');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(state.relation).toBeNull();
+
+    state.selected = 'public.users';
+    history.replaceState(null, '', '/diagram.html');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(state.selected).toBeNull();
   });
 
   it('re-applies the hash on popstate', async () => {
