@@ -91,7 +91,7 @@
     if (typeFacet.allValues.length > 0) {
       facets.set("columnType", typeFacet);
     }
-    const severityFacet = buildFacet("severity", "Issues", tables, extractSeverityValues);
+    const severityFacet = buildFacet("severity", "Risk", tables, extractSeverityValues);
     if (severityFacet.allValues.length > 1) {
       facets.set("severity", severityFacet);
     }

@@ -3,8 +3,8 @@
 //! This metadata is embedded as JSON in the HTML document for future features
 //! like search, filtering, and highlighting.
 
-use relune_core::{EdgeKind, NodeKind};
-use relune_layout::{DiagramOverlay, LayoutGraph, overlay::EdgeKey};
+use relune_core::{ChangeKind, EdgeKind, NodeKind, ReviewSeverity};
+use relune_layout::{DiagramOverlay, LayoutGraph};
 use serde::{Deserialize, Serialize};
 
 /// Metadata about the graph for client-side features.
@@ -39,12 +39,15 @@ pub struct TableMetadata {
     pub outbound_count: usize,
     /// Whether this is likely a join table.
     pub is_join_table_candidate: bool,
-    /// Overlay lint/health annotations (empty when no overlay provided).
+    /// Review risk annotations (empty when no overlay provided).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<IssueMetadata>,
     /// Diff change kind (present only when rendering a diff).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff_kind: Option<String>,
+    pub diff_kind: Option<ChangeKind>,
+    /// Individual changes listed under the diff change, e.g. `"+ email"`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diff_details: Vec<String>,
 }
 
 /// Metadata about a column.
@@ -67,7 +70,10 @@ pub struct ColumnMetadata {
     pub is_indexed: bool,
     /// Diff change kind for this column (present only when rendering a diff).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff_kind: Option<String>,
+    pub diff_kind: Option<ChangeKind>,
+    /// Type before the diff changed it (present only for type changes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_data_type: Option<String>,
 }
 
 /// Metadata about a single edge/relation.
@@ -85,25 +91,22 @@ pub struct EdgeMetadata {
     pub to_columns: Vec<String>,
     /// Edge kind.
     pub kind: EdgeKind,
-    /// Overlay lint/health annotations (empty when no overlay provided).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub issues: Vec<IssueMetadata>,
     /// Diff change kind for this edge (present only when rendering a diff).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff_kind: Option<String>,
+    pub diff_kind: Option<ChangeKind>,
 }
 
-/// A single lint/health issue for client-side display.
+/// A single review risk for client-side display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueMetadata {
-    /// Severity level.
-    pub severity: String,
+    /// Review severity of the risk.
+    pub severity: ReviewSeverity,
     /// Short description.
     pub message: String,
     /// Optional resolution hint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
-    /// Optional rule identifier (e.g. `"no-primary-key"`).
+    /// Optional rule identifier (e.g. `"risk/drop-column"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_id: Option<String>,
 }
@@ -132,7 +135,7 @@ pub fn build_metadata_with_overlay(
             let issues = node_overlay
                 .map(|no| annotations_to_issues(&no.annotations))
                 .unwrap_or_default();
-            let diff_kind = node_overlay.and_then(|no| extract_diff_kind(&no.annotations));
+            let change = node_overlay.and_then(|no| no.change.as_ref());
             TableMetadata {
                 id: node.id.clone(),
                 label: node.label.clone(),
@@ -143,9 +146,7 @@ pub fn build_metadata_with_overlay(
                     .columns
                     .iter()
                     .map(|c| {
-                        let col_diff = node_overlay
-                            .and_then(|no| no.column_changes.get(&c.name))
-                            .copied();
+                        let col_diff = node_overlay.and_then(|no| no.column_changes.get(&c.name));
                         ColumnMetadata {
                             name: c.name.clone(),
                             data_type: c.data_type.clone(),
@@ -153,7 +154,9 @@ pub fn build_metadata_with_overlay(
                             is_primary_key: c.is_primary_key,
                             is_foreign_key: c.is_foreign_key,
                             is_indexed: c.is_indexed,
-                            diff_kind: col_diff.map(|change| change.to_string()),
+                            diff_kind: col_diff.map(|change| change.kind),
+                            previous_data_type: col_diff
+                                .and_then(|change| change.previous_type.clone()),
                         }
                     })
                     .collect(),
@@ -161,7 +164,10 @@ pub fn build_metadata_with_overlay(
                 outbound_count: node.outbound_count,
                 is_join_table_candidate: node.is_join_table_candidate,
                 issues,
-                diff_kind,
+                diff_kind: change.map(|change| change.kind),
+                diff_details: change
+                    .map(|change| change.details.clone())
+                    .unwrap_or_default(),
             }
         })
         .collect();
@@ -169,25 +175,16 @@ pub fn build_metadata_with_overlay(
     let edges: Vec<EdgeMetadata> = graph
         .edges
         .iter()
-        .map(|edge| {
-            let edge_overlay = overlay.and_then(|o| {
-                o.edges
-                    .get(&EdgeKey::new(edge.from.as_str(), edge.to.as_str()))
-            });
-            let issues = edge_overlay
-                .map(|eo| annotations_to_issues(&eo.annotations))
-                .unwrap_or_default();
-            let diff_kind = edge_overlay.and_then(|eo| extract_diff_kind(&eo.annotations));
-            EdgeMetadata {
-                from: edge.from.clone(),
-                to: edge.to.clone(),
-                name: edge.name.clone(),
-                from_columns: edge.from_columns.clone(),
-                to_columns: edge.to_columns.clone(),
-                kind: edge.kind,
-                issues,
-                diff_kind,
-            }
+        .map(|edge| EdgeMetadata {
+            from: edge.from.clone(),
+            to: edge.to.clone(),
+            name: edge.name.clone(),
+            from_columns: edge.from_columns.clone(),
+            to_columns: edge.to_columns.clone(),
+            kind: edge.kind,
+            diff_kind: overlay
+                .and_then(|o| o.edge(&edge.from, &edge.to, &edge.from_columns, &edge.to_columns))
+                .and_then(|eo| eo.change),
         })
         .collect();
 
@@ -212,34 +209,14 @@ pub fn build_metadata_with_overlay(
     }
 }
 
-/// Extract diff change kind from annotations, if any diff annotation is present.
-fn extract_diff_kind(annotations: &[relune_layout::overlay::Annotation]) -> Option<String> {
-    annotations.iter().find_map(|a| {
-        a.rule_id.as_deref().and_then(|id| match id {
-            "diff-added" => Some("added".to_string()),
-            "diff-removed" => Some("removed".to_string()),
-            "diff-modified" => Some("modified".to_string()),
-            _ => None,
-        })
-    })
-}
-
 fn annotations_to_issues(annotations: &[relune_layout::overlay::Annotation]) -> Vec<IssueMetadata> {
     annotations
         .iter()
-        .map(|a| {
-            let severity = match a.severity {
-                relune_layout::OverlaySeverity::Error => "error",
-                relune_layout::OverlaySeverity::Warning => "warning",
-                relune_layout::OverlaySeverity::Info => "info",
-                relune_layout::OverlaySeverity::Hint => "hint",
-            };
-            IssueMetadata {
-                severity: severity.to_string(),
-                message: a.message.clone(),
-                hint: a.hint.clone(),
-                rule_id: a.rule_id.clone(),
-            }
+        .map(|a| IssueMetadata {
+            severity: a.severity,
+            message: a.message.clone(),
+            hint: a.hint.clone(),
+            rule_id: a.rule_id.clone(),
         })
         .collect()
 }
@@ -266,6 +243,7 @@ mod tests {
                     is_primary_key: true,
                     is_foreign_key: false,
                     is_indexed: false,
+                    previous_data_type: None,
                 }],
                 inbound_count: 1,
                 outbound_count: 0,
@@ -353,6 +331,7 @@ mod tests {
                     is_primary_key: false,
                     is_foreign_key: true,
                     is_indexed: true,
+                    previous_data_type: None,
                 }],
                 inbound_count: 0,
                 outbound_count: 1,
@@ -414,16 +393,16 @@ mod tests {
     }
 
     #[test]
-    fn test_metadata_with_overlay_embeds_node_issues() {
+    fn test_metadata_with_overlay_embeds_node_risks() {
         let graph = create_test_graph();
         let mut overlay = DiagramOverlay::new();
         overlay.add_node_annotation(
             "users",
             relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "No primary key".to_string(),
-                hint: Some("Add a PK column".to_string()),
-                rule_id: Some("no-primary-key".to_string()),
+                severity: ReviewSeverity::Breaking,
+                message: "Column users.email is dropped".to_string(),
+                hint: Some("Back up the data first".to_string()),
+                rule_id: Some("risk/drop-column".to_string()),
             },
         );
 
@@ -431,61 +410,63 @@ mod tests {
 
         let table = &metadata.tables[0];
         assert_eq!(table.issues.len(), 1);
-        assert_eq!(table.issues[0].severity, "warning");
-        assert_eq!(table.issues[0].message, "No primary key");
-        assert_eq!(table.issues[0].hint.as_deref(), Some("Add a PK column"));
-        assert_eq!(table.issues[0].rule_id.as_deref(), Some("no-primary-key"));
+        assert_eq!(table.issues[0].severity, ReviewSeverity::Breaking);
+        assert_eq!(table.issues[0].message, "Column users.email is dropped");
+        assert_eq!(
+            table.issues[0].hint.as_deref(),
+            Some("Back up the data first")
+        );
+        assert_eq!(table.issues[0].rule_id.as_deref(), Some("risk/drop-column"));
+        // A risk alone does not make the table changed.
+        assert_eq!(table.diff_kind, None);
+        let json = serde_json::to_string(&metadata).unwrap();
+        assert!(json.contains(r#""severity":"breaking""#));
     }
 
     #[test]
-    fn test_metadata_with_overlay_embeds_edge_issues() {
+    fn test_metadata_with_overlay_embeds_edge_change() {
         let graph = create_test_graph();
         let mut overlay = DiagramOverlay::new();
-        overlay.add_edge_annotation(
-            "posts",
-            "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Info,
-                message: "Missing index on FK".to_string(),
-                hint: None,
-                rule_id: None,
-            },
-        );
+        overlay.set_edge_change("posts", "users", &["user_id"], &["id"], ChangeKind::Added);
 
         let metadata = build_metadata_with_overlay(&graph, Some(&overlay));
 
-        let edge = &metadata.edges[0];
-        assert_eq!(edge.issues.len(), 1);
-        assert_eq!(edge.issues[0].severity, "info");
-        assert_eq!(edge.issues[0].message, "Missing index on FK");
+        assert_eq!(metadata.edges[0].diff_kind, Some(ChangeKind::Added));
     }
 
     #[test]
     fn test_metadata_column_diff_kind_comes_from_column_changes() {
         let graph = create_test_graph();
         let mut overlay = DiagramOverlay::new();
-        // An index that shares the column's name shows up in the summary hint
-        // but must not mark the column itself as changed.
-        overlay.add_node_annotation(
+        // An index that shares the column's name shows up in the details but
+        // must not mark the column itself as changed.
+        overlay.set_node_change(
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "Modified (1 changes)".to_string(),
-                hint: Some("+ id".to_string()),
-                rule_id: Some("diff-modified".to_string()),
+            relune_layout::NodeChange {
+                kind: ChangeKind::Modified,
+                summary: "Modified (1 changes)".to_string(),
+                details: vec!["+ id".to_string()],
             },
         );
 
         let metadata = build_metadata_with_overlay(&graph, Some(&overlay));
-        assert_eq!(metadata.tables[0].diff_kind.as_deref(), Some("modified"));
+        assert_eq!(metadata.tables[0].diff_kind, Some(ChangeKind::Modified));
+        assert_eq!(metadata.tables[0].diff_details, vec!["+ id".to_string()]);
         assert_eq!(metadata.tables[0].columns[0].diff_kind, None);
+        assert!(metadata.tables[0].issues.is_empty());
 
-        overlay.set_column_change("users", "id", relune_core::ChangeKind::Modified);
-        let metadata = build_metadata_with_overlay(&graph, Some(&overlay));
-        assert_eq!(
-            metadata.tables[0].columns[0].diff_kind.as_deref(),
-            Some("modified")
+        overlay.set_column_change(
+            "users",
+            "id",
+            relune_layout::ColumnChange {
+                kind: ChangeKind::Modified,
+                previous_type: Some("int".to_string()),
+            },
         );
+        let metadata = build_metadata_with_overlay(&graph, Some(&overlay));
+        let column = &metadata.tables[0].columns[0];
+        assert_eq!(column.diff_kind, Some(ChangeKind::Modified));
+        assert_eq!(column.previous_data_type.as_deref(), Some("int"));
     }
 
     #[test]
@@ -494,7 +475,7 @@ mod tests {
         let metadata = build_metadata_with_overlay(&graph, None);
 
         assert!(metadata.tables[0].issues.is_empty());
-        assert!(metadata.edges[0].issues.is_empty());
+        assert_eq!(metadata.edges[0].diff_kind, None);
     }
 
     #[test]

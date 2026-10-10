@@ -113,7 +113,7 @@ fn input_coverage(schema: &Schema, diagnostics: &[Diagnostic]) -> ReviewInputCov
 ///
 /// Returns the resolved effective dialect plus an optional warning
 /// diagnostic surfaced to the caller.
-fn resolve_effective_dialect(
+pub(crate) fn resolve_effective_dialect(
     requested: SqlDialect,
     before: Option<SqlDialect>,
     after: Option<SqlDialect>,

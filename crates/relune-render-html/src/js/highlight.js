@@ -75,6 +75,7 @@
   }
 
   // ts/metadata.ts
+  var RISK_SEVERITY_ORDER = ["info", "warning", "caution", "breaking"];
   var METADATA_ELEMENT_ID = "relune-metadata";
   function parseReluneMetadata() {
     const el = document.getElementById(METADATA_ELEMENT_ID);
@@ -88,13 +89,32 @@
       return null;
     }
   }
+  function topRisk(issues) {
+    let top;
+    for (const issue of issues) {
+      if (top === void 0 || RISK_SEVERITY_ORDER.indexOf(issue.severity) > RISK_SEVERITY_ORDER.indexOf(top)) {
+        top = issue.severity;
+      }
+    }
+    if (top === void 0) return void 0;
+    const severity = top;
+    return { severity, count: issues.filter((issue) => issue.severity === severity).length };
+  }
+  function riskLabel(issues) {
+    const top = topRisk(issues);
+    return top === void 0 ? void 0 : `${top.severity} ${top.count}`;
+  }
+  var DIFF_MARKERS = { added: "+", removed: "\u2212", modified: "~" };
+  function diffMarker(kind) {
+    return DIFF_MARKERS[kind];
+  }
   function tableDisplayName(table) {
     return table.label || table.table_name || table.id;
   }
 
   // ts/highlight_dom.ts
   var ALLOWED_DIFF_KINDS = /* @__PURE__ */ new Set(["added", "removed", "modified"]);
-  var ALLOWED_SEVERITIES = /* @__PURE__ */ new Set(["error", "warning", "info", "hint"]);
+  var ALLOWED_SEVERITIES = /* @__PURE__ */ new Set(["breaking", "caution", "warning", "info"]);
   function safeCssToken(value, allowlist) {
     return allowlist.has(value) ? value : "";
   }
@@ -111,7 +131,18 @@
     const badge = document.createElement("div");
     const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
     badge.className = safe !== "" ? `detail-diff-badge detail-diff-badge-${safe}` : "detail-diff-badge";
-    badge.textContent = kind;
+    badge.textContent = `${diffMarker(kind)} ${kind}`;
+    return badge;
+  }
+  function riskBadge(issues, baseClass) {
+    const top = topRisk(issues);
+    const label = riskLabel(issues);
+    if (top === void 0 || label === void 0) return void 0;
+    const badge = document.createElement("span");
+    const safe = safeCssToken(top.severity, ALLOWED_SEVERITIES);
+    badge.className = safe !== "" ? `${baseClass} ${baseClass}-${safe}` : baseClass;
+    badge.textContent = label;
+    badge.title = `${issues.length} risk${issues.length === 1 ? "" : "s"}`;
     return badge;
   }
   function metricCard(label, value) {
@@ -310,6 +341,8 @@
       clearChildren(elements.metrics);
       clearChildren(elements.columns);
       clearChildren(elements.relations);
+      if (elements.changes) clearChildren(elements.changes);
+      if (elements.changesSection) elements.changesSection.setAttribute("hidden", "");
       if (elements.issues) clearChildren(elements.issues);
       elements.columnsEmpty.removeAttribute("hidden");
       elements.relationsEmpty.removeAttribute("hidden");
@@ -336,6 +369,21 @@
       metricCard("\u2190 In", String(table.inbound_count)),
       metricCard("Out \u2192", String(table.outbound_count))
     );
+    if (elements.changes instanceof HTMLElement && elements.changesSection instanceof HTMLElement) {
+      clearChildren(elements.changes);
+      const details = table.diff_details ?? [];
+      if (details.length === 0) {
+        elements.changesSection.setAttribute("hidden", "");
+      } else {
+        elements.changesSection.removeAttribute("hidden");
+        for (const detail of details) {
+          const item = document.createElement("li");
+          item.className = "detail-change";
+          item.textContent = detail;
+          elements.changes.appendChild(item);
+        }
+      }
+    }
     clearChildren(elements.columns);
     if (table.columns.length === 0) {
       elements.columnsEmpty.removeAttribute("hidden");
@@ -396,9 +444,9 @@
     if (table.diff_kind) {
       elements.badges.appendChild(diffBadge(table.diff_kind));
     }
-    const issues = table.issues ?? [];
-    if (issues.length > 0) {
-      elements.badges.appendChild(issueCountBadge(issues));
+    const badge = riskBadge(table.issues ?? [], "hover-popover-badge");
+    if (badge !== void 0) {
+      elements.badges.appendChild(badge);
     }
     placePopover(elements.popover, position);
   }
@@ -430,7 +478,8 @@
     }
     const typePill = document.createElement("span");
     typePill.className = "detail-column-pill";
-    typePill.textContent = column.data_type || "unknown";
+    const dataType = column.data_type || "unknown";
+    typePill.textContent = column.previous_data_type != null ? `${column.previous_data_type} \u2192 ${dataType}` : dataType;
     pills.appendChild(typePill);
     const nullPill = document.createElement("span");
     nullPill.className = `detail-column-pill ${column.nullable ? "detail-column-pill-nullable" : "detail-column-pill-required"}`;
@@ -440,7 +489,7 @@
       const diffPill = document.createElement("span");
       const safeDiff = safeCssToken(column.diff_kind, ALLOWED_DIFF_KINDS);
       diffPill.className = safeDiff !== "" ? `detail-column-pill detail-column-pill-diff detail-column-pill-diff-${safeDiff}` : "detail-column-pill detail-column-pill-diff";
-      diffPill.textContent = column.diff_kind;
+      diffPill.textContent = `${diffMarker(column.diff_kind)} ${column.diff_kind}`;
       pills.appendChild(diffPill);
     }
     columnEl.append(name, pills);
@@ -506,19 +555,6 @@
     metric.append(labelEl, valueEl);
     return metric;
   }
-  function issueCountBadge(issues) {
-    const badge = document.createElement("span");
-    const safeSeverity = safeCssToken(highestIssueSeverity(issues), ALLOWED_SEVERITIES);
-    badge.className = safeSeverity !== "" ? `hover-popover-badge hover-popover-badge-${safeSeverity}` : "hover-popover-badge";
-    badge.textContent = `${issues.length} issue${issues.length === 1 ? "" : "s"}`;
-    return badge;
-  }
-  function highestIssueSeverity(issues) {
-    const severityRank = { error: 3, warning: 2, info: 1, hint: 0 };
-    return issues.reduce((max, issue) => {
-      return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
-    }, "hint");
-  }
   function placePopover(popover, position) {
     const margin = 12;
     popover.removeAttribute("hidden");
@@ -566,17 +602,8 @@
     const kind = document.createElement("span");
     kind.className = "object-browser-kind";
     kind.textContent = table.kind;
-    const tableIssues = table.issues ?? [];
-    if (tableIssues.length > 0) {
-      const severityRank = { error: 3, warning: 2, info: 1, hint: 0 };
-      const maxSeverity = tableIssues.reduce((max, issue) => {
-        return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
-      }, "hint");
-      const issueBadge = document.createElement("span");
-      const safeSev = safeCssToken(maxSeverity, ALLOWED_SEVERITIES);
-      issueBadge.className = safeSev !== "" ? `object-browser-issue-badge object-browser-issue-badge-${safeSev}` : "object-browser-issue-badge";
-      issueBadge.textContent = String(tableIssues.length);
-      issueBadge.title = `${tableIssues.length} issue${tableIssues.length === 1 ? "" : "s"}`;
+    const issueBadge = riskBadge(table.issues ?? [], "object-browser-issue-badge");
+    if (issueBadge !== void 0) {
       header.append(name, issueBadge, kind);
     } else {
       header.append(name, kind);
@@ -709,6 +736,8 @@
           columnsEmpty,
           relations,
           relationsEmpty,
+          changesSection: document.getElementById("detail-changes-section"),
+          changes: document.getElementById("detail-changes"),
           issues: document.getElementById("detail-issues"),
           issuesEmpty: document.getElementById("detail-issues-empty")
         };

@@ -462,6 +462,9 @@ pub struct PositionedColumn {
     pub name: String,
     /// Column data type.
     pub data_type: String,
+    /// Type the column had before a diff changed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_data_type: Option<String>,
     /// Boolean render flags flattened for stable serialized output.
     #[serde(flatten)]
     pub flags: ColumnFlags,
