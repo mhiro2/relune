@@ -17,6 +17,37 @@ pub enum Theme {
     Light,
 }
 
+/// Colors of the diff change kinds: markers, outlines, and faint tints.
+///
+/// Each color keeps AA text contrast against the card surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffColors {
+    /// Added tables, columns, and relationships.
+    pub added: &'static str,
+    /// Removed tables, columns, and relationships.
+    pub removed: &'static str,
+    /// Modified tables and columns.
+    pub modified: &'static str,
+}
+
+/// Solid fills of the review risk labels, with one text color for all.
+///
+/// Solid fills keep risk labels apart from the faint change tints; every
+/// fill meets AA contrast with `text`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RiskColors {
+    /// `breaking` findings.
+    pub breaking: &'static str,
+    /// `caution` findings.
+    pub caution: &'static str,
+    /// `warning` findings.
+    pub warning: &'static str,
+    /// `info` findings.
+    pub info: &'static str,
+    /// Label text drawn on every fill.
+    pub text: &'static str,
+}
+
 /// Color palette for a specific theme.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeColors {
@@ -57,6 +88,10 @@ pub struct ThemeColors {
     /// Blue-grey outline for selected and highlighted diagram elements, kept
     /// apart from kind marks and review severities.
     pub selection_color: &'static str,
+    /// Diff change kind colors.
+    pub diff: DiffColors,
+    /// Review risk label colors.
+    pub risk: RiskColors,
     /// Whether this is a light theme (used for conditional rendering).
     pub is_light: bool,
 }
@@ -84,6 +119,18 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_stroke: "#334155",
             accent_color: "#f59e0b",
             selection_color: "#93a8c9",
+            diff: DiffColors {
+                added: "#4ade80",
+                removed: "#f87171",
+                modified: "#facc15",
+            },
+            risk: RiskColors {
+                breaking: "#f87171",
+                caution: "#fb923c",
+                warning: "#facc15",
+                info: "#94a3b8",
+                text: "#0c0f1a",
+            },
             is_light: false,
         },
         Theme::Light => ThemeColors {
@@ -105,6 +152,18 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
             group_stroke: "#cbd5e1",
             accent_color: "#d97706",
             selection_color: "#4a6285",
+            diff: DiffColors {
+                added: "#15803d",
+                removed: "#b91c1c",
+                modified: "#a16207",
+            },
+            risk: RiskColors {
+                breaking: "#b91c1c",
+                caution: "#c2410c",
+                warning: "#a16207",
+                info: "#475569",
+                text: "#ffffff",
+            },
             is_light: true,
         },
     }
@@ -139,6 +198,49 @@ mod tests {
         assert_eq!(colors.node_fill, "#ffffff");
         assert_eq!(colors.header_fill, "#f8fafc");
         assert_eq!(colors.text_primary, "#1e293b");
+    }
+
+    fn relative_luminance(hex: &str) -> f64 {
+        let channel = |index: usize| {
+            let value = f64::from(u8::from_str_radix(&hex[index..index + 2], 16).unwrap()) / 255.0;
+            if value <= 0.039_28 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.0722f64.mul_add(
+            channel(5),
+            0.2126f64.mul_add(channel(1), 0.7152 * channel(3)),
+        )
+    }
+
+    fn contrast(a: &str, b: &str) -> f64 {
+        let (la, lb) = (relative_luminance(a), relative_luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    #[test]
+    fn diff_colors_meet_text_contrast_on_cards() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            for color in [colors.diff.added, colors.diff.removed, colors.diff.modified] {
+                let ratio = contrast(color, colors.node_fill);
+                assert!(ratio >= 4.5, "{theme:?} {color}: {ratio:.2}");
+            }
+        }
+    }
+
+    #[test]
+    fn risk_labels_meet_text_contrast() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            let risk = &colors.risk;
+            for fill in [risk.breaking, risk.caution, risk.warning, risk.info] {
+                let ratio = contrast(fill, risk.text);
+                assert!(ratio >= 4.5, "{theme:?} {fill}: {ratio:.2}");
+            }
+        }
     }
 
     #[test]

@@ -56,7 +56,7 @@ fn regression_removed_table_with_fk_visible_in_svg() {
         svg.contains("sessions"),
         "removed table 'sessions' must appear in default (unfiltered) SVG"
     );
-    assert!(svg.contains("overlay-error"), "removed table overlay");
+    assert!(svg.contains("diff-removed"), "removed table overlay");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn regression_modified_table_removed_columns_with_grouping() {
     let (result, svg) = diff_svg(before, after, FilterSpec::default(), grouping);
 
     assert_eq!(result.diff.modified_tables.len(), 2);
-    assert!(svg.contains("overlay-warning"), "modified tables overlay");
+    assert!(svg.contains("diff-modified"), "modified tables overlay");
     // Both tables must appear
     assert!(svg.contains("app_users"));
     assert!(svg.contains("app_posts"));
@@ -152,7 +152,7 @@ fn regression_added_table_with_fk_to_excluded_target() {
 
     // Should render without panic
     assert!(svg.contains("<svg"));
-    assert!(svg.contains("overlay-info"), "added table overlay");
+    assert!(svg.contains("diff-added"), "added table overlay");
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ fn regression_all_tables_removed() {
     );
 
     assert_eq!(result.diff.removed_tables.len(), 2);
-    assert!(svg.contains("overlay-error"), "removed table overlay");
+    assert!(svg.contains("diff-removed"), "removed table overlay");
     assert!(svg.contains("users"));
     assert!(svg.contains("posts"));
 }
@@ -200,7 +200,7 @@ fn regression_all_tables_added() {
     );
 
     assert_eq!(result.diff.added_tables.len(), 2);
-    assert!(svg.contains("overlay-info"), "added table overlay");
+    assert!(svg.contains("diff-added"), "added table overlay");
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ fn regression_fk_replacement_on_modified_table() {
         "should have both removed and added FK diffs"
     );
 
-    assert!(svg.contains("overlay-warning"), "modified table overlay");
+    assert!(svg.contains("diff-modified"), "modified table overlay");
     // All three tables visible
     assert!(svg.contains("users"));
     assert!(svg.contains("categories"));

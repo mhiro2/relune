@@ -166,7 +166,9 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     })
 }
 
-fn build_graph(
+/// Builds the layout graph for `request`, with the overlay's previous column
+/// types applied so cards are sized for `before → after`.
+pub(crate) fn build_graph(
     request: &RenderRequest,
     schema: &relune_core::Schema,
 ) -> Result<(relune_layout::LayoutGraph, Vec<relune_core::Diagnostic>), AppError> {
@@ -179,6 +181,9 @@ fn build_graph(
         graph = FocusExtractor
             .extract(&graph, focus)
             .map_err(relune_layout::LayoutError::from)?;
+    }
+    if let Some(overlay) = &request.overlay {
+        overlay.apply_type_changes(&mut graph);
     }
     Ok((graph, diagnostics))
 }
@@ -263,6 +268,25 @@ mod tests {
         let result = result.unwrap();
         assert!(result.content.contains("<svg"));
         assert_eq!(result.stats.table_count, 1);
+    }
+
+    #[test]
+    fn test_render_applies_overlay_type_changes() {
+        let sql = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(120));";
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.set_column_change(
+            "users",
+            "name",
+            relune_layout::ColumnChange {
+                kind: relune_core::ChangeKind::Modified,
+                previous_type: Some("VARCHAR(500)".to_string()),
+            },
+        );
+        let mut request = RenderRequest::from_sql(sql).with_output_format(OutputFormat::Svg);
+        request.overlay = Some(overlay);
+
+        let svg = render(request).unwrap().content;
+        assert!(svg.contains(r#"<tspan class="column-type-previous">VARCHAR(500)</tspan> → "#));
     }
 
     #[test]

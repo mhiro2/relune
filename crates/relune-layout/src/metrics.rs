@@ -57,6 +57,12 @@ pub const COLUMN_NULLABLE_SLOT_WIDTH: f32 = 10.0;
 pub const COLUMN_INDEX_GAP: f32 = 6.0;
 /// Marker drawn after the type of a nullable column.
 pub const COLUMN_NULLABLE_MARKER: &str = "?";
+/// Separator between the previous and current type of a column a diff
+/// changed, as in `varchar(500) → varchar(120)`.
+pub const TYPE_CHANGE_SEPARATOR: &str = " → ";
+/// Center of the diff change marker (`+` / `−` / `~`) from the card's left
+/// edge. It sits in the text inset, so marking a row needs no extra width.
+pub const CHANGE_MARKER_CENTER: f32 = NODE_TEXT_INSET / 2.0;
 
 /// Advance width of one narrow character in the card's monospace font, in `em`.
 const MONO_NARROW_ADVANCE_EM: f32 = 0.6;
@@ -193,13 +199,27 @@ impl ColumnSlots {
 
 /// Content width of one column row: key gutter, name, type, and trailing
 /// marks, excluding the node's horizontal insets.
+///
+/// `previous_type` is the type before a diff changed it; the type slot then
+/// holds `previous → data_type`.
 #[must_use]
-pub fn column_row_width(slots: ColumnSlots, name: &str, data_type: &str) -> f32 {
+pub fn column_row_width(
+    slots: ColumnSlots,
+    name: &str,
+    previous_type: Option<&str>,
+    data_type: &str,
+) -> f32 {
     let name_width = estimate_mono_text_width(name, NODE_COLUMN_FONT_SIZE);
+    let change_width = previous_type.map_or(0.0, |previous| {
+        estimate_mono_text_width(previous, NODE_DETAIL_FONT_SIZE)
+            + estimate_mono_text_width(TYPE_CHANGE_SEPARATOR, NODE_DETAIL_FONT_SIZE)
+    });
     let type_width = if data_type.is_empty() {
         0.0
     } else {
-        COLUMN_NAME_TYPE_GAP + estimate_mono_text_width(data_type, NODE_DETAIL_FONT_SIZE)
+        COLUMN_NAME_TYPE_GAP
+            + change_width
+            + estimate_mono_text_width(data_type, NODE_DETAIL_FONT_SIZE)
     };
     slots.key_gutter() + name_width + type_width + slots.trailing_reserve()
 }
@@ -304,11 +324,22 @@ mod tests {
     #[test]
     fn column_row_width_separates_name_and_type() {
         let slots = ColumnSlots::default();
-        let name_only = column_row_width(slots, "id", "");
-        let typed = column_row_width(slots, "id", "int");
+        let name_only = column_row_width(slots, "id", None, "");
+        let typed = column_row_width(slots, "id", None, "int");
 
         assert!((name_only - 14.4).abs() < 0.01);
         assert!((typed - (14.4 + COLUMN_NAME_TYPE_GAP + 19.8)).abs() < 0.01);
+    }
+
+    #[test]
+    fn column_row_width_makes_room_for_a_type_change() {
+        let slots = ColumnSlots::default();
+        let typed = column_row_width(slots, "id", None, "int");
+        let changed = column_row_width(slots, "id", Some("bigint"), "int");
+
+        let expected = estimate_mono_text_width("bigint", NODE_DETAIL_FONT_SIZE)
+            + estimate_mono_text_width(TYPE_CHANGE_SEPARATOR, NODE_DETAIL_FONT_SIZE);
+        assert!((changed - typed - expected).abs() < 0.01);
     }
 
     #[test]
