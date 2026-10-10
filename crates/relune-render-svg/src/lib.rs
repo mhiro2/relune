@@ -151,7 +151,8 @@ pub fn render_svg_with_overlay(
 
     // Render legend if requested
     if options.show_legend {
-        render_legend(&mut out, &colors, None, graph.width, graph.height)?;
+        let diff = overlay.is_some_and(|overlay| !overlay.is_empty());
+        render_legend(&mut out, &colors, None, diff, graph.width, graph.height)?;
     }
 
     out.push_str("</svg>");
@@ -217,7 +218,11 @@ fn estimate_svg_capacity(
             1_024 + label_bytes + column_bytes + tooltip_bytes + overlay_bytes
         })
         .sum();
-    let legend_bytes = if options.show_legend { 1_024 } else { 0 };
+    let legend_bytes = match (options.show_legend, overlay.is_some()) {
+        (false, _) => 0,
+        (true, false) => 3_072,
+        (true, true) => 6_144,
+    };
 
     base + group_bytes + edge_bytes + node_bytes + legend_bytes
 }

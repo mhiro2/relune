@@ -6,22 +6,30 @@ use relune_core::model::SchemaStats;
 
 use relune_layout::metrics::{COLUMN_BADGE_HEIGHT, COLUMN_NULLABLE_MARKER};
 
+use relune_core::{ChangeKind, ReviewSeverity};
+
+use crate::diff::{render_change_marker, render_risk_pill};
 use crate::node::{ColumnBadge, render_column_badge};
 use crate::theme::ThemeColors;
 
 /// Width taken by the title, badges, and nullable marker, including padding.
 const LEGEND_ITEMS_WIDTH: f32 = 488.0;
+/// Width added for the diff change kinds, the risk label, and their divider.
+const LEGEND_DIFF_WIDTH: f32 = 392.0;
 /// Width added for the statistics block and its divider.
 const LEGEND_STATS_WIDTH: f32 = 160.0;
 
-/// Renders a legend block showing the PK, FK, and IX badges and the nullable
-/// marker exactly as node cards draw them.
-/// Optionally includes statistics if provided.
+/// Renders a legend block explaining the marks node cards draw.
+///
+/// The PK, FK, and IX badges and the nullable marker are drawn exactly as on
+/// the cards. Diff diagrams add the change kind markers and the risk label;
+/// statistics are included if provided.
 ///
 /// # Arguments
 /// * `out` - The output string buffer
 /// * `theme` - The theme colors to use
 /// * `stats` - Optional schema statistics to display
+/// * `diff` - Whether to explain the diff change kinds and risk label
 /// * `svg_width` - Width of the SVG canvas (for positioning)
 /// * `svg_height` - Height of the SVG canvas (for positioning)
 #[allow(clippy::too_many_lines)]
@@ -29,6 +37,7 @@ pub fn render_legend(
     out: &mut String,
     theme: &ThemeColors,
     stats: Option<&SchemaStats>,
+    diff: bool,
     svg_width: f32,
     svg_height: f32,
 ) -> fmt::Result {
@@ -37,11 +46,13 @@ pub fn render_legend(
     let available_width = svg_width - side_padding * 2.0;
     // The legend never shrinks below its items; on narrower canvases the
     // whole bar is scaled down instead of letting items run off the edge.
-    let content_width = if stats.is_some() {
-        LEGEND_ITEMS_WIDTH + LEGEND_STATS_WIDTH
-    } else {
-        LEGEND_ITEMS_WIDTH
-    };
+    let content_width = LEGEND_ITEMS_WIDTH
+        + if diff { LEGEND_DIFF_WIDTH } else { 0.0 }
+        + if stats.is_some() {
+            LEGEND_STATS_WIDTH
+        } else {
+            0.0
+        };
     let legend_width = available_width.clamp(content_width, content_width.max(640.0));
     let legend_x = (svg_width - legend_width) * 0.5;
     let legend_y = svg_height - bar_height - 18.0;
@@ -89,16 +100,42 @@ pub fn render_legend(
     )?;
     render_legend_item_label(out, cursor_x + 24.0, baseline_y, "Nullable", theme)?;
 
+    if diff {
+        cursor_x += 88.0;
+        render_legend_divider(out, cursor_x, legend_y, bar_height, theme)?;
+        cursor_x += 16.0;
+        for (kind, label, advance) in [
+            (ChangeKind::Added, "Added", 70.0),
+            (ChangeKind::Removed, "Removed", 84.0),
+            (ChangeKind::Modified, "Modified", 88.0),
+        ] {
+            render_change_marker(out, cursor_x + 5.0, baseline_y, 12.0, kind, theme)?;
+            render_legend_item_label(out, cursor_x + 16.0, baseline_y, label, theme)?;
+            cursor_x += advance;
+        }
+        let pill_width = render_risk_pill(
+            out,
+            cursor_x,
+            baseline_y - 4.0,
+            "breaking",
+            ReviewSeverity::Breaking,
+            theme,
+        )?;
+        render_legend_item_label(
+            out,
+            cursor_x + pill_width + 8.0,
+            baseline_y,
+            "Review risk",
+            theme,
+        )?;
+    }
+
     if let Some(stats) = stats {
         let stats_x = legend_x + legend_width - LEGEND_STATS_WIDTH + 16.0;
+        render_legend_divider(out, stats_x - 16.0, legend_y, bar_height, theme)?;
         write!(
             out,
-            r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/><text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
-            stats_x - 16.0,
-            legend_y + 10.0,
-            stats_x - 16.0,
-            legend_y + bar_height - 10.0,
-            theme.group_stroke,
+            r#"<text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
             stats_x,
             baseline_y,
             theme.text_secondary,
@@ -110,6 +147,22 @@ pub fn render_legend(
 
     out.push_str("</g>");
     Ok(())
+}
+
+fn render_legend_divider(
+    out: &mut String,
+    x: f32,
+    legend_y: f32,
+    bar_height: f32,
+    theme: &ThemeColors,
+) -> fmt::Result {
+    write!(
+        out,
+        r#"<line x1="{x:.1}" y1="{:.1}" x2="{x:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/>"#,
+        legend_y + 10.0,
+        legend_y + bar_height - 10.0,
+        theme.group_stroke,
+    )
 }
 
 fn render_legend_item_label(
@@ -137,7 +190,7 @@ mod tests {
         width: f32,
         height: f32,
     ) {
-        render_legend(out, colors, stats, width, height)
+        render_legend(out, colors, stats, false, width, height)
             .expect("legend rendering should succeed in tests");
     }
 
@@ -178,6 +231,26 @@ mod tests {
 
         assert!(out.contains("class=\"legend\""));
         assert!(out.contains("5 tables · 42 columns · 8 FKs"));
+    }
+
+    #[test]
+    fn test_render_legend_explains_diff_marks() {
+        let colors = test_theme_colors();
+        let mut plain = String::new();
+        let mut diff = String::new();
+
+        render_legend_ok(&mut plain, &colors, None, 1200.0, 600.0);
+        render_legend(&mut diff, &colors, None, true, 1200.0, 600.0).unwrap();
+
+        assert!(!plain.contains("diff-marker"));
+        assert!(!plain.contains("Review risk"));
+        assert_eq!(diff.matches(r#"class="diff-marker""#).count(), 3);
+        for label in ["Added", "Removed", "Modified", "Review risk"] {
+            assert!(diff.contains(&format!(">{label}<")), "missing {label}");
+        }
+        assert!(diff.contains(r#"<g class="risk-label risk-breaking">"#));
+        // The diff items widen the bar instead of overflowing it.
+        assert!(diff.contains(r#"width="880.0""#));
     }
 
     #[test]
