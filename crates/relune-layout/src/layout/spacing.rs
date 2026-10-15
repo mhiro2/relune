@@ -9,9 +9,9 @@ use super::{
 };
 use crate::metrics::{
     ColumnSlots, GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING,
-    NODE_COLLAPSE_CONTROL_RESERVE, NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP, NODE_HEADER_FONT_SIZE,
-    NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE, NODE_ROWS_BOTTOM_PADDING,
-    NODE_TEXT_INSET, column_row_width, estimate_mono_text_width, estimate_text_width,
+    NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
+    NODE_TEXT_INSET, column_row_width, estimate_mono_text_width, estimate_text_width, node_height,
+    omitted_columns_label, shows_omitted_columns_row,
 };
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
@@ -27,24 +27,22 @@ pub(super) fn build_positioned_node(
     y: f32,
     width: f32,
     height: f32,
-    show_columns: bool,
+    omitted_columns: usize,
 ) -> PositionedNode {
     PositionedNode {
         id: node.id.clone(),
         label: node.label.clone(),
         kind: node.kind,
-        columns: if show_columns {
-            node.columns
-                .iter()
-                .map(|c| PositionedColumn {
-                    name: c.name.clone(),
-                    data_type: c.data_type.clone(),
-                    flags: column_flags(c),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        },
+        columns: node
+            .columns
+            .iter()
+            .map(|c| PositionedColumn {
+                name: c.name.clone(),
+                data_type: c.data_type.clone(),
+                flags: column_flags(c),
+            })
+            .collect(),
+        omitted_columns,
         x,
         y,
         width,
@@ -55,16 +53,21 @@ pub(super) fn build_positioned_node(
     }
 }
 
+/// Sizes every card for the columns it lists and the ones it leaves out
+/// (`omitted_columns`, by node index).
 pub(super) fn measure_node_sizes(
     graph: &crate::graph::LayoutGraph,
+    omitted_columns: &[usize],
     config: &LayoutConfig,
 ) -> Vec<NodeSize> {
     graph
         .nodes
         .iter()
-        .map(|node| NodeSize {
-            width: estimate_node_width(node, config),
-            height: estimate_node_height(node, config),
+        .zip(omitted_columns)
+        .map(|(node, &omitted)| NodeSize {
+            width: estimate_node_width(node, omitted, config),
+            height: node_height(node.columns.len(), omitted),
+            omitted_columns: omitted,
         })
         .collect()
 }
@@ -80,15 +83,18 @@ const fn column_flags(column: &crate::graph::LayoutColumn) -> ColumnFlags {
     }
 }
 
-fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
+fn estimate_node_width(
+    node: &crate::graph::LayoutNode,
+    omitted_columns: usize,
+    config: &LayoutConfig,
+) -> f32 {
     let minimum_width = (config.node_width * MIN_NODE_WIDTH_FACTOR).max(160.0);
     let header_width = NODE_TEXT_INSET.mul_add(
         2.0,
         estimate_mono_text_width(&node.label, NODE_HEADER_FONT_SIZE),
     ) + NODE_HEADER_NAME_OFFSET
-        + HEADER_KIND_LABEL_RESERVE
-        + NODE_COLLAPSE_CONTROL_RESERVE;
-    if !config.show_columns {
+        + HEADER_KIND_LABEL_RESERVE;
+    if node.columns.is_empty() {
         return header_width.max(minimum_width).ceil();
     }
 
@@ -99,23 +105,20 @@ fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -
         .iter()
         .map(|column| column_row_width(slots, &column.name, &column.data_type))
         .fold(0.0, f32::max);
+    let omitted_row_width = if shows_omitted_columns_row(node.columns.len(), omitted_columns) {
+        slots.key_gutter()
+            + estimate_mono_text_width(
+                &omitted_columns_label(omitted_columns),
+                NODE_DETAIL_FONT_SIZE,
+            )
+    } else {
+        0.0
+    };
+    let column_width = column_width.max(omitted_row_width);
 
     header_width
         .max(NODE_TEXT_INSET.mul_add(2.0, column_width))
         .max(minimum_width)
-        .ceil()
-}
-
-#[allow(clippy::cast_precision_loss)] // Layout sizing is approximate and bounded for diagram rendering.
-pub(super) fn estimate_node_height(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
-    if !config.show_columns {
-        return NODE_HEADER_HEIGHT;
-    }
-    (node.columns.len() as f32)
-        .mul_add(
-            NODE_COLUMN_HEIGHT,
-            NODE_FIRST_ROW_TOP + NODE_ROWS_BOTTOM_PADDING,
-        )
         .ceil()
 }
 

@@ -118,8 +118,9 @@ pub struct LayoutCompactionSpec {
     /// Minimum node padding when compaction is active.
     #[serde(default = "default_compact_node_padding")]
     pub min_node_padding: f32,
-    /// Multiplier applied to `threshold` to decide when columns are hidden automatically.
-    /// Set to 0 to keep columns visible even in compact mode.
+    /// Multiplier applied to `threshold` to decide when an unset card density
+    /// falls back to [`CardDensity::Overview`]. Set to 0 to keep listing every
+    /// column. An explicit [`LayoutSpec::density`] always wins.
     #[serde(default = "default_hide_columns_threshold_multiplier")]
     pub hide_columns_threshold_multiplier: usize,
 }
@@ -166,6 +167,23 @@ pub struct LayoutSpec {
     /// exactly as specified.
     #[serde(default = "default_auto_tune_spacing")]
     pub auto_tune_spacing: bool,
+    /// Columns each card lists. `None` lists every column, falling back to
+    /// [`CardDensity::Overview`] for schemas past the compaction limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density: Option<CardDensity>,
+}
+
+/// How much of each table a card lists; layout sizes cards for it.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CardDensity {
+    /// Table names, kinds, and relationships only.
+    Overview,
+    /// Key columns and every column a relationship refers to.
+    Keys,
+    /// Every column with its type and constraints.
+    #[default]
+    Full,
 }
 
 /// Layout algorithm for positioning nodes.
@@ -236,6 +254,7 @@ impl Default for LayoutSpec {
             force_iterations: default_force_iterations(),
             compaction: LayoutCompactionSpec::default(),
             auto_tune_spacing: default_auto_tune_spacing(),
+            density: None,
         }
     }
 }

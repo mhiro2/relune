@@ -50,8 +50,8 @@ pub mod review;
 
 // Re-exports for convenience
 pub use config::{
-    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm, LayoutCompactionSpec,
-    LayoutDirection, LayoutSpec,
+    CardDensity, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutAlgorithm,
+    LayoutCompactionSpec, LayoutDirection, LayoutSpec,
 };
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity, SourceSpan};
 pub use diff::{ChangeKind, SchemaDiff, align_default_schema, diff_schemas};

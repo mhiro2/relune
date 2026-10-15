@@ -14,7 +14,7 @@ use crate::output::{
 };
 use crate::png;
 use relune_app::{
-    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, OutputFormat, RenderOptions,
+    FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, OutputFormat, RenderOptions,
     RenderRequest, RenderTheme, render,
 };
 
@@ -69,12 +69,12 @@ pub fn run_render(
         },
     };
 
-    let layout = LayoutSpec {
-        algorithm: merged.layout.into(),
-        edge_style: merged.edge_style.into(),
-        direction: merged.direction.into(),
-        ..Default::default()
-    };
+    let layout = super::layout_spec(
+        merged.layout,
+        merged.edge_style,
+        merged.direction,
+        merged.density,
+    );
 
     // Build request
     let request = RenderRequest {

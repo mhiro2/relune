@@ -15,7 +15,7 @@ use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
     resolve_force_overlaps, rows_from_primary_bands,
 };
-use super::spacing::{build_positioned_node, estimate_node_height, fit_canvas_to_content};
+use super::spacing::{build_positioned_node, fit_canvas_to_content};
 use super::*;
 use crate::channel::ChannelCandidateClass;
 use crate::graph::{LayoutEdge, LayoutGraph};
@@ -1141,7 +1141,7 @@ fn test_build_positioned_node_preserves_column_flags() {
         group_index: None,
     };
 
-    let positioned = build_positioned_node(&node, 10.0, 20.0, 200.0, 100.0, true);
+    let positioned = build_positioned_node(&node, 10.0, 20.0, 200.0, 100.0, 0);
 
     assert!(positioned.columns[0].flags.relation.is_primary_key);
     assert!(!positioned.columns[0].flags.relation.is_foreign_key);
@@ -1173,10 +1173,14 @@ fn test_compaction_respects_layout_spec_overrides() {
     assert_eq!(compacted.vertical_spacing, 120.0);
     assert_eq!(compacted.node_width, 180.0);
     assert_eq!(compacted.node_padding, 6.0);
-    assert!(!compacted.hide_columns);
+    assert_eq!(config.effective_density(30), CardDensity::Full);
+    assert_eq!(config.effective_density(31), CardDensity::Overview);
 
-    let hidden_columns = config.compute_compacted_config(31);
-    assert!(hidden_columns.hide_columns);
+    let explicit = LayoutConfig {
+        density: Some(CardDensity::Keys),
+        ..config
+    };
+    assert_eq!(explicit.effective_density(31), CardDensity::Keys);
 }
 
 #[test]
@@ -1288,7 +1292,7 @@ fn test_build_layout_from_graph_does_not_mutate_input_when_columns_are_hidden() 
     let original_column_count = graph.nodes[0].columns.len();
     let original_first_column_name = graph.nodes[0].columns[0].name.clone();
     let config = LayoutConfig {
-        show_columns: false,
+        density: Some(CardDensity::Overview),
         ..Default::default()
     };
 
@@ -1301,7 +1305,6 @@ fn test_build_layout_from_graph_does_not_mutate_input_when_columns_are_hidden() 
 
 #[test]
 fn test_column_y_offset_from_center_basic() {
-    let config = LayoutConfig::default();
     let layout_node = crate::graph::LayoutNode {
         id: "t".to_string(),
         label: "t".to_string(),
@@ -1332,8 +1335,9 @@ fn test_column_y_offset_from_center_basic() {
         is_join_table_candidate: false,
         group_index: None,
     };
-    let height = estimate_node_height(&layout_node, &config);
+    let height = crate::metrics::node_height(layout_node.columns.len(), 0);
     let node = PositionedNode {
+        omitted_columns: 0,
         id: "t".to_string(),
         label: "t".to_string(),
         kind: NodeKind::Table,
@@ -1387,6 +1391,7 @@ fn test_column_y_offset_from_center_basic() {
 #[allow(clippy::float_cmp)]
 fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
     let empty_node = PositionedNode {
+        omitted_columns: 0,
         id: "t".to_string(),
         label: "t".to_string(),
         kind: NodeKind::Table,
@@ -1616,10 +1621,12 @@ fn test_resolve_force_overlaps_with_asymmetric_node_sizes() {
     let mut positions = vec![(364.75726, 1350.5088), (320.7149, 1578.5088)];
     let node_sizes = vec![
         NodeSize {
+            omitted_columns: 0,
             width: 319.0,
             height: 264.0,
         },
         NodeSize {
+            omitted_columns: 0,
             width: 291.0,
             height: 174.0,
         },
@@ -1628,6 +1635,7 @@ fn test_resolve_force_overlaps_with_asymmetric_node_sizes() {
     resolve_force_overlaps(&mut positions, &node_sizes, 8.0);
 
     let left = PositionedNode {
+        omitted_columns: 0,
         id: "orders".to_string(),
         label: "orders".to_string(),
         kind: relune_core::NodeKind::Table,
@@ -1641,6 +1649,7 @@ fn test_resolve_force_overlaps_with_asymmetric_node_sizes() {
         group_index: None,
     };
     let right = PositionedNode {
+        omitted_columns: 0,
         id: "order_items".to_string(),
         label: "order_items".to_string(),
         kind: relune_core::NodeKind::Table,
@@ -1677,6 +1686,7 @@ fn test_resolve_force_overlaps_grid_handles_many_nodes() {
             let y = r as f32 * cell_h * 0.6;
             positions.push((x, y));
             node_sizes.push(NodeSize {
+                omitted_columns: 0,
                 width: cell_w,
                 height: cell_h,
             });
@@ -1724,6 +1734,7 @@ fn test_resolve_force_overlaps_handles_one_oversized_node() {
     // One very tall table must not coarsen the grid for everything else.
     let mut positions = vec![(0.0_f32, 0.0_f32)];
     let mut node_sizes = vec![NodeSize {
+        omitted_columns: 0,
         width: 240.0,
         height: 6000.0,
     }];
@@ -1731,6 +1742,7 @@ fn test_resolve_force_overlaps_handles_one_oversized_node() {
         let offset = f32::from(index);
         positions.push((offset * 37.0 % 900.0, offset * 29.0));
         node_sizes.push(NodeSize {
+            omitted_columns: 0,
             width: 160.0,
             height: 90.0,
         });
@@ -1748,6 +1760,7 @@ fn test_resolve_force_overlaps_legalizes_stacked_nodes() {
     let mut positions = vec![(100.0_f32, 100.0_f32); 40];
     let node_sizes = vec![
         NodeSize {
+            omitted_columns: 0,
             width: 160.0,
             height: 90.0,
         };
@@ -1856,6 +1869,7 @@ fn test_parallel_edge_labels_avoid_endpoint_nodes() {
     };
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -1869,6 +1883,7 @@ fn test_parallel_edge_labels_avoid_endpoint_nodes() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2171,6 +2186,7 @@ fn test_route_edges_use_inter_rank_channel_for_hierarchical_flow() {
     let graph = single_edge_graph("authors", "posts");
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2184,6 +2200,7 @@ fn test_route_edges_use_inter_rank_channel_for_hierarchical_flow() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2214,6 +2231,7 @@ fn test_route_edges_use_separate_same_rank_channel_rule() {
     let graph = single_edge_graph("authors", "posts");
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2227,6 +2245,7 @@ fn test_route_edges_use_separate_same_rank_channel_rule() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2258,6 +2277,7 @@ fn test_route_edges_shift_inter_rank_channel_away_from_obstacle() {
     let graph = single_edge_graph("authors", "posts");
     let mut positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2271,6 +2291,7 @@ fn test_route_edges_shift_inter_rank_channel_away_from_obstacle() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2285,6 +2306,7 @@ fn test_route_edges_shift_inter_rank_channel_away_from_obstacle() {
         },
     ];
     positioned_nodes.push(PositionedNode {
+        omitted_columns: 0,
         id: "blocker".to_string(),
         label: "blocker".to_string(),
         kind: NodeKind::Table,
@@ -2392,6 +2414,7 @@ fn test_route_edges_spread_parallel_edges_across_channels() {
     };
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2405,6 +2428,7 @@ fn test_route_edges_spread_parallel_edges_across_channels() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2453,6 +2477,7 @@ fn test_route_edges_shift_reverse_channel_away_from_obstacle() {
     let graph = single_edge_graph("posts", "authors");
     let mut positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2466,6 +2491,7 @@ fn test_route_edges_shift_reverse_channel_away_from_obstacle() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2480,6 +2506,7 @@ fn test_route_edges_shift_reverse_channel_away_from_obstacle() {
         },
     ];
     positioned_nodes.push(PositionedNode {
+        omitted_columns: 0,
         id: "blocker".to_string(),
         label: "blocker".to_string(),
         kind: NodeKind::Table,
@@ -2511,6 +2538,7 @@ fn test_obstacle_aware_channel_rejects_candidates_that_violate_hard_constraints(
     let graph = single_edge_graph("authors", "posts");
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2524,6 +2552,7 @@ fn test_obstacle_aware_channel_rejects_candidates_that_violate_hard_constraints(
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2597,6 +2626,7 @@ fn test_route_edges_measure_detour_activation_without_ranked_channels() {
     let graph = single_edge_graph("authors", "posts");
     let mut positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2610,6 +2640,7 @@ fn test_route_edges_measure_detour_activation_without_ranked_channels() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2624,6 +2655,7 @@ fn test_route_edges_measure_detour_activation_without_ranked_channels() {
         },
     ];
     positioned_nodes.push(PositionedNode {
+        omitted_columns: 0,
         id: "blocker".to_string(),
         label: "blocker".to_string(),
         kind: NodeKind::Table,
@@ -2648,6 +2680,7 @@ fn test_route_edges_channel_fallback_diagnostic_when_all_candidates_blocked() {
     let graph = single_edge_graph("authors", "posts");
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "authors".to_string(),
             label: "authors".to_string(),
             kind: NodeKind::Table,
@@ -2661,6 +2694,7 @@ fn test_route_edges_channel_fallback_diagnostic_when_all_candidates_blocked() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2674,6 +2708,7 @@ fn test_route_edges_channel_fallback_diagnostic_when_all_candidates_blocked() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "blocker".to_string(),
             label: "blocker".to_string(),
             kind: NodeKind::Table,
@@ -2705,6 +2740,7 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_vertical_rank() {
     let graph = single_edge_graph("comments", "users");
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "comments".to_string(),
             label: "comments".to_string(),
             kind: NodeKind::Table,
@@ -2718,6 +2754,7 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_vertical_rank() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "users".to_string(),
             label: "users".to_string(),
             kind: NodeKind::Table,
@@ -2731,6 +2768,7 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_vertical_rank() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -2905,6 +2943,7 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_horizontal_rank() {
     };
     let positioned_nodes = vec![
         PositionedNode {
+            omitted_columns: 0,
             id: "comments".to_string(),
             label: "comments".to_string(),
             kind: NodeKind::Table,
@@ -2918,6 +2957,7 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_horizontal_rank() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "users".to_string(),
             label: "users".to_string(),
             kind: NodeKind::Table,
@@ -2931,6 +2971,7 @@ fn test_route_edges_bypass_intermediate_obstacle_for_skipped_horizontal_rank() {
             group_index: None,
         },
         PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -3439,7 +3480,7 @@ fn force_layout_without_groups_shares_columns_across_ranks() {
 fn force_rows_follow_final_primary_bands() {
     let graph = LayoutGraphBuilder::new().build(&make_synthetic_schema(4, &[]));
     let place = |index: usize, y: f32, height: f32| {
-        build_positioned_node(&graph.nodes[index], 0.0, y, 100.0, height, false)
+        build_positioned_node(&graph.nodes[index], 0.0, y, 100.0, height, 0)
     };
     // Nodes 0 and 1 overlap on Y and share a band, node 3 forms the middle
     // band and node 2 the bottom one.

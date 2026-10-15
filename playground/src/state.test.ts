@@ -62,6 +62,7 @@ describe('sanitizeState', () => {
         layout: 'force-directed',
         direction: 'left-to-right',
         edgeStyle: 'orthogonal',
+        density: 'keys',
         groupBy: 'schema',
         exportFormat: 'd2',
         compareView: 'review',
@@ -76,6 +77,7 @@ describe('sanitizeState', () => {
       layout: 'force-directed',
       direction: 'left-to-right',
       edgeStyle: 'orthogonal',
+      density: 'keys',
       groupBy: 'schema',
       exportFormat: 'd2',
       compareView: 'review',
@@ -93,6 +95,7 @@ describe('sanitizeState', () => {
       layout: 'circular',
       direction: 'diagonal',
       edgeStyle: 'wavy',
+      density: 'dense',
       groupBy: 'owner',
       exportFormat: 'png',
       compareView: 'html',
@@ -158,6 +161,13 @@ describe('buildQueryString', () => {
     expect(buildQueryString(DEFAULT_STATE)).toBe(
       'example=simple-blog&mode=render&theme=light&layout=hierarchical&direction=top-to-bottom&edges=curved&group=none',
     );
+  });
+
+  it('writes a non-default density and reads it back', () => {
+    const query = buildQueryString(state({ density: 'overview' }));
+
+    expect(new URLSearchParams(query).get('density')).toBe('overview');
+    expect(parseQueryState(`?${query}`).density).toBe('overview');
   });
 
   it('writes scope settings and non-default depth', () => {

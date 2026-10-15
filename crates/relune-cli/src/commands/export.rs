@@ -9,7 +9,7 @@ use crate::error::CliResult;
 use crate::output::{check_diagnostics, print_success, write_output};
 use relune_app::{
     ExportFormat as AppExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
-    GroupingStrategy, LayoutSpec, export,
+    GroupingStrategy, export,
 };
 
 /// Run the export command.
@@ -63,12 +63,12 @@ pub fn run_export(
         filter,
         focus,
         grouping,
-        layout: LayoutSpec {
-            algorithm: merged.layout.into(),
-            edge_style: merged.edge_style.into(),
-            direction: merged.direction.into(),
-            ..Default::default()
-        },
+        layout: super::layout_spec(
+            merged.layout,
+            merged.edge_style,
+            merged.direction,
+            merged.density,
+        ),
         output_path: args.out.clone(),
     };
 

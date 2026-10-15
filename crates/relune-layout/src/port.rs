@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use relune_core::LayoutDirection;
+use relune_core::{LayoutDirection, normalize_identifier};
 
 use crate::graph::LayoutGraph;
 use crate::layout::{LayoutConfig, PositionedNode};
@@ -226,10 +226,16 @@ pub(crate) fn column_y_offset_from_center(node: &PositionedNode, edge_columns: &
     if edge_columns.is_empty() || node.columns.is_empty() {
         return 0.0;
     }
+    // Relationships may name columns in a different case than the table
+    // declares them.
+    let edge_columns: Vec<String> = edge_columns
+        .iter()
+        .map(|name| normalize_identifier(name))
+        .collect();
     let Some(col_index) = node
         .columns
         .iter()
-        .position(|column| edge_columns.contains(&column.name))
+        .position(|column| edge_columns.contains(&normalize_identifier(&column.name)))
     else {
         return 0.0;
     };
@@ -508,6 +514,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32) -> PositionedNode {
         PositionedNode {
+            omitted_columns: 0,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,
@@ -674,6 +681,7 @@ mod tests {
     #[test]
     fn test_column_y_offset_from_center_uses_matching_column_row() {
         let node = PositionedNode {
+            omitted_columns: 0,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -780,6 +788,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn column_row_offset_matches_names_regardless_of_case() {
+        let node = node_with_fk_columns("t", 0.0, 0.0, 240.0, &["id", "Parent_Code", "name"]);
+        let exact = column_y_offset_from_center(&node, &["Parent_Code".to_string()]);
+        let folded = column_y_offset_from_center(&node, &["parent_code".to_string()]);
+
+        assert!(exact.abs() > f32::EPSILON);
+        assert!((exact - folded).abs() < f32::EPSILON);
+    }
+
     fn node_with_fk_columns(
         id: &str,
         x: f32,
@@ -791,6 +809,7 @@ mod tests {
         #[allow(clippy::cast_precision_loss)]
         let height = (columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, 16.0 + NODE_HEADER_HEIGHT);
         PositionedNode {
+            omitted_columns: 0,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,

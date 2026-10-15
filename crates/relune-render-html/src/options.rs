@@ -28,11 +28,6 @@ pub struct HtmlRenderOptions {
     /// Default: true
     pub enable_group_toggles: bool,
 
-    /// Whether to enable table collapse/expand functionality.
-    /// When enabled, allows clicking on table headers to collapse/expand column lists.
-    /// Default: true
-    pub enable_collapse: bool,
-
     /// Whether to enable neighbor highlighting on hover/click.
     /// When enabled, highlights connected tables when hovering or clicking on a node.
     /// Default: true
@@ -47,7 +42,6 @@ impl Default for HtmlRenderOptions {
             enable_pan_zoom: true,
             enable_search: true,
             enable_group_toggles: true,
-            enable_collapse: true,
             enable_highlight: true,
         }
     }
@@ -63,7 +57,6 @@ impl HtmlRenderOptions {
             enable_pan_zoom: true,
             enable_search: true,
             enable_group_toggles: true,
-            enable_collapse: true,
             enable_highlight: true,
         }
     }
@@ -77,7 +70,6 @@ impl HtmlRenderOptions {
             enable_pan_zoom: true,
             enable_search: true,
             enable_group_toggles: true,
-            enable_collapse: true,
             enable_highlight: true,
         }
     }
@@ -110,13 +102,6 @@ impl HtmlRenderOptions {
         self
     }
 
-    /// Enable or disable collapse functionality.
-    #[must_use]
-    pub const fn with_collapse(mut self, enable: bool) -> Self {
-        self.enable_collapse = enable;
-        self
-    }
-
     /// Enable or disable highlight functionality.
     #[must_use]
     pub const fn with_highlight(mut self, enable: bool) -> Self {
@@ -137,7 +122,6 @@ mod tests {
         assert!(options.enable_pan_zoom);
         assert!(options.enable_search);
         assert!(options.enable_group_toggles);
-        assert!(options.enable_collapse);
         assert!(options.enable_highlight);
     }
 
@@ -170,15 +154,6 @@ mod tests {
 
         let options = HtmlRenderOptions::default().with_group_toggles(true);
         assert!(options.enable_group_toggles);
-    }
-
-    #[test]
-    fn test_with_collapse() {
-        let options = HtmlRenderOptions::default().with_collapse(false);
-        assert!(!options.enable_collapse);
-
-        let options = HtmlRenderOptions::default().with_collapse(true);
-        assert!(options.enable_collapse);
     }
 
     #[test]

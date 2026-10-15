@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
-use relune_core::{LayoutDirection, RouteStyle, SqlDialect};
+use relune_core::{CardDensity, LayoutDirection, RouteStyle, SqlDialect};
 use serde::{Deserialize, Serialize};
 
 /// Help text shown after `--help` for commands that accept the shared input
@@ -177,6 +177,11 @@ pub struct RenderArgs {
     #[arg(long = "direction", value_enum)]
     pub direction: Option<DirectionArg>,
 
+    /// Columns each table card lists; cards are laid out at that size.
+    /// Lists every column unless the schema is large enough to fall back to `overview`.
+    #[arg(long = "density", value_enum)]
+    pub density: Option<DensityArg>,
+
     // -------------------------------------------------------------------------
     // Other options
     // -------------------------------------------------------------------------
@@ -321,6 +326,28 @@ impl From<DirectionArg> for LayoutDirection {
             DirectionArg::LeftToRight => Self::LeftToRight,
             DirectionArg::RightToLeft => Self::RightToLeft,
             DirectionArg::BottomToTop => Self::BottomToTop,
+        }
+    }
+}
+
+/// Columns each table card lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DensityArg {
+    /// Table names, kinds, and relationships only.
+    Overview,
+    /// Key columns and the columns relationships refer to.
+    Keys,
+    /// Every column with its type and constraints.
+    Full,
+}
+
+impl From<DensityArg> for CardDensity {
+    fn from(value: DensityArg) -> Self {
+        match value {
+            DensityArg::Overview => Self::Overview,
+            DensityArg::Keys => Self::Keys,
+            DensityArg::Full => Self::Full,
         }
     }
 }
@@ -490,6 +517,10 @@ pub struct ExportArgs {
     /// Layout direction for positioned output.
     #[arg(long = "direction", value_enum)]
     pub direction: Option<DirectionArg>,
+
+    /// Columns each table card lists in positioned output.
+    #[arg(long = "density", value_enum)]
+    pub density: Option<DensityArg>,
 
     /// Exit with non-zero code if warnings are emitted.
     #[arg(long = "fail-on-warning")]

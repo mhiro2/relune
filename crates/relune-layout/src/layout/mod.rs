@@ -10,7 +10,8 @@ use tracing::{Level, debug, info, span};
 
 use relune_core::layout::{EdgeRoute, RouteStyle};
 use relune_core::{
-    EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection, LayoutSpec, NodeKind, Schema,
+    CardDensity, EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection, LayoutSpec,
+    NodeKind, Schema,
 };
 
 use crate::focus::FocusExtractor;
@@ -18,6 +19,7 @@ use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRe
 use crate::order::order_nodes_within_layers;
 use crate::rank::assign_ranks;
 
+mod density;
 mod edge_routing;
 mod force;
 mod groups;
@@ -26,6 +28,7 @@ mod routing_debug;
 mod spacing;
 mod spatial;
 
+use density::{DensityView, apply_density};
 use edge_routing::route_edges_with_diagnostics;
 use force::apply_force_layout;
 use groups::position_groups;
@@ -46,6 +49,8 @@ pub(super) const GROUP_TOP_PADDING: f32 = 44.0;
 pub(super) struct NodeSize {
     pub(super) width: f32,
     pub(super) height: f32,
+    /// Columns the card leaves out at the chosen density.
+    pub(super) omitted_columns: usize,
 }
 
 /// Configuration for layout.
@@ -67,9 +72,10 @@ pub struct LayoutConfig {
     pub direction: LayoutDirection,
     /// Edge rendering style.
     pub edge_style: RouteStyle,
-    /// Whether to show column details in nodes.
-    /// When false, only table names are displayed.
-    pub show_columns: bool,
+    /// Columns each card lists. `None` lists every column unless the schema
+    /// is past the compaction limit, where cards fall back to the overview.
+    #[serde(default)]
+    pub density: Option<CardDensity>,
     /// Layout mode (hierarchical or force-directed).
     #[serde(default)]
     pub mode: LayoutAlgorithm,
@@ -95,7 +101,7 @@ impl Default for LayoutConfig {
             node_padding: 8.0,
             direction: LayoutDirection::TopToBottom,
             edge_style: RouteStyle::Orthogonal,
-            show_columns: true,
+            density: None,
             mode: LayoutAlgorithm::default(),
             force_iterations: default_force_iterations(),
             compaction: LayoutCompactionSpec::default(),
@@ -188,6 +194,7 @@ impl From<&LayoutSpec> for LayoutConfig {
             force_iterations: spec.force_iterations,
             compaction: spec.compaction.clone(),
             auto_tune_spacing: spec.auto_tune_spacing,
+            density: spec.density,
             ..Default::default()
         }
     }
@@ -238,8 +245,6 @@ pub struct CompactedConfig {
     pub node_width: f32,
     /// Compacted padding inside nodes.
     pub node_padding: f32,
-    /// Whether columns should be hidden.
-    pub hide_columns: bool,
 }
 
 impl LayoutConfig {
@@ -267,13 +272,6 @@ impl LayoutConfig {
                     .max(self.compaction.min_node_width),
                 node_padding: (self.node_padding * compaction_factor)
                     .max(self.compaction.min_node_padding),
-                hide_columns: !self.show_columns
-                    || (self.compaction.hide_columns_threshold_multiplier > 0
-                        && node_count
-                            > self
-                                .compaction
-                                .threshold
-                                .saturating_mul(self.compaction.hide_columns_threshold_multiplier)),
             }
         } else {
             CompactedConfig {
@@ -281,9 +279,26 @@ impl LayoutConfig {
                 vertical_spacing: self.vertical_spacing,
                 node_width: self.node_width,
                 node_padding: self.node_padding,
-                hide_columns: !self.show_columns,
             }
         }
+    }
+
+    /// Card density for a graph of `node_count` nodes.
+    ///
+    /// An explicit density always wins. Otherwise cards list every column,
+    /// falling back to the overview once the node count passes
+    /// `compaction.threshold * compaction.hide_columns_threshold_multiplier`.
+    #[must_use]
+    pub fn effective_density(&self, node_count: usize) -> CardDensity {
+        self.density.unwrap_or_else(|| {
+            let multiplier = self.compaction.hide_columns_threshold_multiplier;
+            let limit = self.compaction.threshold.saturating_mul(multiplier);
+            if limit > 0 && node_count > limit {
+                CardDensity::Overview
+            } else {
+                CardDensity::Full
+            }
+        })
     }
 
     /// Check if compact mode should be enabled based on node count.
@@ -391,8 +406,11 @@ pub struct PositionedNode {
     pub label: String,
     /// Node kind.
     pub kind: NodeKind,
-    /// Column information.
+    /// Columns the card lists, in table order.
     pub columns: Vec<PositionedColumn>,
+    /// Columns the card leaves out at the chosen density.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub omitted_columns: usize,
     /// X coordinate (top-left corner).
     pub x: f32,
     /// Y coordinate (top-left corner).
@@ -407,6 +425,11 @@ pub struct PositionedNode {
     pub has_self_loop: bool,
     /// Group index (if grouped).
     pub group_index: Option<usize>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if requires &T
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 /// Shared flag set for rendered columns.
@@ -634,15 +657,22 @@ pub fn build_layout_from_graph_with_config(
             vertical_spacing: compacted.vertical_spacing,
             node_width: compacted.node_width,
             node_padding: compacted.node_padding,
-            show_columns: !compacted.hide_columns,
             ..tuned_config
         }
     } else {
         tuned_config
     };
 
+    let density = effective_config.effective_density(graph.nodes.len());
+    debug!("Laying out cards at {density:?} density");
+    let DensityView {
+        graph,
+        omitted_columns,
+    } = apply_density(graph, density);
+    let graph = graph.as_ref();
+
     // Step 3: Assign coordinates based on layout mode
-    let node_sizes = measure_node_sizes(graph, &effective_config);
+    let node_sizes = measure_node_sizes(graph, &omitted_columns, &effective_config);
     let ranks = assign_ranks(graph);
     debug!("Assigned {} ranks", ranks.num_ranks);
     let ordered_nodes = order_nodes_within_layers(graph, &ranks);

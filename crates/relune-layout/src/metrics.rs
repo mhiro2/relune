@@ -17,8 +17,6 @@ pub const NODE_HEADER_BASELINE: f32 = 22.0;
 pub const NODE_FIRST_ROW_TOP: f32 = NODE_HEADER_HEIGHT + 4.0;
 /// Baseline of column text, measured from the top of its row.
 pub const NODE_ROW_BASELINE: f32 = 15.0;
-/// Baseline of the first column row, measured from the node top.
-pub const NODE_FIRST_COLUMN_BASELINE: f32 = NODE_FIRST_ROW_TOP + NODE_ROW_BASELINE;
 /// Space kept below the last column row.
 pub const NODE_ROWS_BOTTOM_PADDING: f32 = 6.0;
 /// Horizontal inset of header and column content from the node edges.
@@ -33,10 +31,6 @@ pub const NODE_HEADER_NAME_OFFSET: f32 = NODE_KIND_MARK_SIZE + 7.0;
 /// Space kept between the table-name clip and the node's right edge for the
 /// right-aligned kind label ("TABLE"/"VIEW"/"ENUM").
 pub const NODE_KIND_LABEL_RESERVE: f32 = 48.0;
-/// Header width the HTML viewer takes from the table-name clip for its
-/// collapse indicator. Layout reserves it for every node so names fit in
-/// both SVG and HTML output.
-pub const NODE_COLLAPSE_CONTROL_RESERVE: f32 = 24.0;
 
 /// Font size of the table name.
 pub const NODE_HEADER_FONT_SIZE: f32 = 14.0;
@@ -82,6 +76,41 @@ pub const GROUP_LABEL_LETTER_SPACING: f32 = GROUP_LABEL_FONT_SIZE * GROUP_LABEL_
 pub const EDGE_LABEL_HEIGHT: f32 = 18.0;
 /// Horizontal padding inside the edge label pill, both sides combined.
 pub const EDGE_LABEL_PADDING: f32 = 18.0;
+
+/// Whether a card ends with a row counting the columns it leaves out.
+///
+/// Only a card that lists some columns gets the row; a card that lists none
+/// is a header alone, as in the overview density.
+#[must_use]
+pub const fn shows_omitted_columns_row(listed: usize, omitted: usize) -> bool {
+    listed > 0 && omitted > 0
+}
+
+/// Label of the row counting the columns a card leaves out.
+#[must_use]
+pub fn omitted_columns_label(omitted: usize) -> String {
+    if omitted == 1 {
+        "+1 column".to_string()
+    } else {
+        format!("+{omitted} columns")
+    }
+}
+
+/// Height of a card that lists `listed` columns and leaves out `omitted`.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // Row counts are small layout values.
+pub fn node_height(listed: usize, omitted: usize) -> f32 {
+    let rows = listed + usize::from(shows_omitted_columns_row(listed, omitted));
+    if rows == 0 {
+        return NODE_HEADER_HEIGHT;
+    }
+    (rows as f32)
+        .mul_add(
+            NODE_COLUMN_HEIGHT,
+            NODE_FIRST_ROW_TOP + NODE_ROWS_BOTTOM_PADDING,
+        )
+        .ceil()
+}
 
 /// Vertical center of column row `index`, measured from the node top.
 ///
@@ -280,6 +309,17 @@ mod tests {
 
         assert!((name_only - 14.4).abs() < 0.01);
         assert!((typed - (14.4 + COLUMN_NAME_TYPE_GAP + 19.8)).abs() < 0.01);
+    }
+
+    #[test]
+    fn node_height_adds_a_row_only_for_cards_listing_some_columns() {
+        let listed = node_height(2, 0);
+
+        assert!((node_height(0, 0) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
+        assert!((node_height(0, 5) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
+        assert!((node_height(2, 3) - listed - NODE_COLUMN_HEIGHT).abs() < f32::EPSILON);
+        assert_eq!(omitted_columns_label(1), "+1 column");
+        assert_eq!(omitted_columns_label(4), "+4 columns");
     }
 
     #[test]
