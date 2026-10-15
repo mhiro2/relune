@@ -5,7 +5,7 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{EdgeKind, NodeKind, layout::RouteStyle};
+use relune_core::{EdgeKind, layout::RouteStyle};
 
 pub mod edge;
 mod error;
@@ -241,10 +241,10 @@ fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usiz
 }
 
 fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
-    let (shadow_dy, shadow_blur, hatch_color) = if is_light_theme(colors) {
-        ("2", "5", "#cbd5e1")
+    let hatch_color = if is_light_theme(colors) {
+        "#cbd5e1"
     } else {
-        ("4", "8", "#334155")
+        "#334155"
     };
 
     write!(
@@ -257,7 +257,7 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 .edge:hover .edge-path {{ filter: drop-shadow(0 0 4px {glow_color}); }}
 .edge:hover .edge-path,
 .edge:hover .crow-inline {{ stroke: {glow_color}; }}
-.node:hover .table-body {{ stroke-width: 2.1px; }}
+.node:hover .table-body {{ stroke-width: 1.6px; }}
 .group-box,
 .group-band,
 .group-divider,
@@ -278,9 +278,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <rect width="8" height="8" fill="transparent"/>
 <rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
 </pattern>
-<filter id="node-shadow" x="-20%" y="-20%" width="140%" height="150%">
-<feDropShadow dx="0" dy="{shadow_dy}" stdDeviation="{shadow_blur}" flood-color="{}"/>
-</filter>
 <filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
 <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
 </filter>
@@ -305,21 +302,8 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <path d="M2 2 L2 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
 <path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>"#,
-        colors.canvas_base,
-        colors.canvas_dot,
-        colors.canvas_dot,
-        colors.node_shadow,
-        colors.node_shadow,
+        colors.canvas_base, colors.canvas_dot, colors.canvas_dot, colors.group_shadow,
     )?;
-    for kind in [NodeKind::Table, NodeKind::View, NodeKind::Enum] {
-        let header_fill = node::node_style(kind, colors).header_fill;
-        write!(
-            out,
-            r#"
-<linearGradient id="header-fade-{}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{header_fill}" stop-opacity="0.38"/><stop offset="100%" stop-color="{header_fill}" stop-opacity="0"/></linearGradient>"#,
-            node::node_kind_name(kind)
-        )?;
-    }
     out.push_str("\n</defs>");
     Ok(())
 }
@@ -616,6 +600,7 @@ mod tests {
     use super::*;
     use relune_core::layout::Cardinality;
     use relune_core::{EdgeKind, NodeKind};
+    use relune_layout::metrics::COLUMN_NULLABLE_MARKER;
     use relune_layout::{
         ColumnFlags, ColumnRelationFlags, EdgeRoute, PositionedColumn, PositionedEdge,
         PositionedGroup, PositionedNode, RouteStyle,
@@ -791,18 +776,22 @@ mod tests {
 
         // Should contain the node label
         assert!(svg.contains(">users<"));
-        // Should contain the columns (now in "name: type" format from PositionedColumn)
-        assert!(svg.contains("id: uuid PK"));
-        assert!(svg.contains("name: text"));
+        // Names and types are separate text elements.
+        assert!(svg.contains(r#"class="column-name""#));
+        assert!(svg.contains(">uuid PK</text>"));
+        assert!(svg.contains(">text</text>"));
+        assert!(!svg.contains("id: uuid"));
         // Should contain valid SVG structure
         assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(svg.contains("<rect"));
         assert!(svg.contains("<text"));
         assert!(svg.contains("node-0-header-clip"));
-        // One clip per badge count: `id` carries the PK badge, `name` none.
-        assert_eq!(svg.matches("<clipPath id=\"node-0-columns-").count(), 2);
-        assert_eq!(svg.matches("url(#node-0-columns-1-clip)").count(), 1);
-        assert_eq!(svg.matches("url(#node-0-columns-0-clip)").count(), 1);
+        // One clip per node, shared by every name and type.
+        assert_eq!(
+            svg.matches("<clipPath id=\"node-0-columns-clip\"").count(),
+            1
+        );
+        assert_eq!(svg.matches("url(#node-0-columns-clip)").count(), 4);
     }
 
     #[test]
@@ -810,9 +799,10 @@ mod tests {
         let graph = multi_node_graph();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        assert_eq!(svg.matches("<linearGradient id=\"header-fade-").count(), 3);
+        assert!(!svg.contains("header-fade"));
+        assert!(!svg.contains("node-shadow"));
         assert_eq!(
-            svg.matches(r#"fill="url(#header-fade-table)""#).count(),
+            svg.matches(r#"class="table-kind-mark""#).count(),
             graph.nodes.len()
         );
         assert_eq!(
@@ -973,7 +963,7 @@ mod tests {
         assert!(svg.contains("edge-kind-enum-reference"));
         assert!(svg.contains("stroke-dasharray=\"4,4\""));
         assert!(svg.contains("stroke-dasharray=\"6,4\""));
-        assert!(svg.contains("• active"));
+        assert!(svg.contains(">active</text>"));
         assert!(svg.contains("data-node-kind=\"view\""));
         assert!(svg.contains("data-node-kind=\"enum\""));
     }
@@ -1161,7 +1151,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
-        assert!(svg.contains("#151926"));
+        assert!(svg.contains(r##"fill="#161b26""##));
         assert!(svg.contains("edge-particles"));
     }
 
@@ -1176,8 +1166,9 @@ mod tests {
 
         // Light theme background
         assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill
-        assert!(svg.contains("#fffaf0"));
+        // Light theme node fill and table kind mark
+        assert!(svg.contains(r##"fill="#ffffff""##));
+        assert!(svg.contains(r##"fill="#ea580c""##));
     }
 
     #[test]
@@ -1194,22 +1185,39 @@ mod tests {
         assert_eq!(svg2, svg3);
     }
 
-    #[test]
-    fn test_column_separators_sit_between_rows_of_each_node() {
-        // The first node previously got no separators and every later node got
-        // one above its first column.
-        let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
-        let per_node: Vec<usize> = svg
-            .split("<g class=\"table-node")
+    /// Returns the value of `attr` on every element whose class is `class`.
+    fn attribute_values<'a>(svg: &'a str, class: &str, attr: &str) -> Vec<&'a str> {
+        svg.split(&format!(r#"class="{class}""#))
             .skip(1)
-            .map(|node| node.matches("class=\"column-separator\"").count())
-            .collect();
-        let expected: Vec<usize> = multi_node_graph()
-            .nodes
-            .iter()
-            .map(|node| node.columns.len().saturating_sub(1))
-            .collect();
-        assert_eq!(per_node, expected);
+            .map(|rest| {
+                let start =
+                    rest.find(&format!(r#" {attr}=""#)).expect("attribute") + attr.len() + 3;
+                &rest[start..start + rest[start..].find('"').expect("closing quote")]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_column_rows_align_marks_without_separators() {
+        let mut graph = multi_node_graph();
+        graph.nodes[1].columns[2].flags.nullable = true;
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+        let posts = svg
+            .split("<g class=\"table-node")
+            .nth(2)
+            .expect("posts node");
+
+        assert!(!svg.contains("column-separator"));
+        assert!(!svg.contains(r#"font-style="italic""#));
+        // PK and FK badges sit in their own slots, so every name starts at
+        // the same x, after both slots.
+        let names = attribute_values(posts, "column-name", "x");
+        assert_eq!(names.len(), 3);
+        assert!(names.iter().all(|x| *x == names[0]));
+        let types = attribute_values(posts, "column-type", "x");
+        assert!(types.iter().all(|x| *x == types[0]));
+        assert_eq!(posts.matches(r#"class="column-nullable""#).count(), 1);
+        assert!(posts.contains(&format!(">{COLUMN_NULLABLE_MARKER}</text>")));
     }
 
     #[test]
@@ -1739,7 +1747,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
-        assert!(svg.contains("#151926"));
+        assert!(svg.contains(r##"fill="#161b26""##));
     }
 
     #[test]
@@ -1753,8 +1761,9 @@ mod tests {
 
         // Light theme background
         assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill
-        assert!(svg.contains("#fffaf0"));
+        // Light theme node fill and table kind mark
+        assert!(svg.contains(r##"fill="#ffffff""##));
+        assert!(svg.contains(r##"fill="#ea580c""##));
     }
 
     #[test]
@@ -1762,9 +1771,11 @@ mod tests {
         let graph = layout_graph_with_groups();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        // Group box should have rounded corners
-        assert!(svg.contains("rx=\"16\""));
-        assert!(svg.contains("ry=\"16\""));
+        // Group boxes keep their large radius; node cards use a small one.
+        assert!(svg.contains(r#"class="group-box" x="#));
+        assert!(svg.contains("rx=\"20\""));
+        assert!(svg.contains(r#"class="table-body""#));
+        assert!(svg.contains("rx=\"6\" ry=\"6\""));
     }
 
     #[test]
@@ -1935,6 +1946,7 @@ mod snapshot_tests {
             "broken_input.sql" => include_str!("../../../fixtures/sql/broken_input.sql"),
             "cyclic_fk.sql" => include_str!("../../../fixtures/sql/cyclic_fk.sql"),
             "join_heavy.sql" => include_str!("../../../fixtures/sql/join_heavy.sql"),
+            "card_stress.sql" => include_str!("../../../fixtures/sql/card_stress.sql"),
             _ => panic!("Unknown fixture: {name}"),
         }
     }
@@ -2042,6 +2054,19 @@ mod snapshot_tests {
             prepend_module_to_snapshot => false,
         }, {
             insta::assert_snapshot!("join_heavy", svg);
+        });
+    }
+
+    #[test]
+    fn test_snapshot_card_stress() {
+        let sql = read_fixture("card_stress.sql");
+        let svg = process_fixture_to_svg(sql).expect("Failed to process card_stress.sql");
+
+        insta::with_settings!({
+            snapshot_path => "snapshots",
+            prepend_module_to_snapshot => false,
+        }, {
+            insta::assert_snapshot!("card_stress", svg);
         });
     }
 }

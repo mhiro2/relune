@@ -12,11 +12,11 @@ function tableNode(id: string, index: number, x: number, y: number, columns: str
     .join('');
   return `<g class="table-node node node-kind-table" data-table-id="${id}" data-id="${id}">
     <rect class="table-body" x="${x}" y="${y}" width="200" height="120"/>
-    <rect class="table-header" x="${x}" y="${y}" width="200" height="32"/>
-    <rect class="table-header-fade" x="${x}" y="${y + 16}" width="200" height="16"/>
-    <clipPath id="node-${index}-header-clip"><rect x="${x + 10}" y="${y + 8}" width="146" height="16"/></clipPath>
-    <text class="table-name" x="${x + 10}" y="${y + 21}" clip-path="url(#node-${index}-header-clip)">${id}</text>
-    <text class="table-kind" x="${x + 190}" y="${y + 21}">TABLE</text>
+    <rect class="table-header" x="${x}" y="${y}" width="200" height="34"/>
+    <rect class="table-kind-mark" x="${x + 12}" y="${y + 13}" width="8" height="8"/>
+    <clipPath id="node-${index}-header-clip"><rect x="${x + 27}" y="${y}" width="125" height="34"/></clipPath>
+    <text class="table-name" x="${x + 27}" y="${y + 22}" clip-path="url(#node-${index}-header-clip)">${id}</text>
+    <text class="table-kind" x="${x + 188}" y="${y + 22}">TABLE</text>
     ${rows}
     <rect class="type-filter-overlay" x="${x}" y="${y}" width="200" height="120"/>
   </g>`;
@@ -77,13 +77,13 @@ describe('createCollapseController', () => {
     expect(x).toBeLessThan(500);
     expect(y).toBeGreaterThan(40);
     expect(y).toBeLessThan(72);
-    expect(Number(node('users').querySelector('.column-count-badge')?.getAttribute('x'))).toBe(310);
+    expect(Number(node('users').querySelector('.column-count-badge')?.getAttribute('x'))).toBe(312);
   });
 
   it('narrows the table-name clip to make room for the indicator', () => {
     const { node } = setup();
     const clipWidth = Number(node('users').querySelector('clipPath rect')?.getAttribute('width'));
-    expect(clipWidth).toBeLessThan(146);
+    expect(clipWidth).toBeLessThan(125);
   });
 
   it('toggles a table once per header click', () => {

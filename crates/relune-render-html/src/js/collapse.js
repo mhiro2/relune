@@ -2,12 +2,13 @@
 (() => {
   // ts/collapse_dom.ts
   var SVG_NS = "http://www.w3.org/2000/svg";
-  var HEADER_SELECTOR = ".table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator";
-  var KIND_LABEL_RESERVE = 44;
-  var FIRST_ROW_BASELINE = 46;
-  var TEXT_INSET = 10;
+  var HEADER_SELECTOR = ".table-header, .table-kind-mark, .table-name, .table-kind, .collapse-indicator";
+  var KIND_LABEL_RESERVE = 48;
+  var FIRST_ROW_BASELINE = 53;
+  var TEXT_INSET = 12;
   var INDICATOR_WIDTH = 16;
   var INDICATOR_GAP = 4;
+  var COLLAPSE_CONTROL_RESERVE = INDICATOR_WIDTH + INDICATOR_GAP * 2;
   var MIN_NAME_CLIP_WIDTH = 24;
   var EXPANDED_GLYPH = "\u25BE";
   var COLLAPSED_GLYPH = "\u25B8";
@@ -31,7 +32,7 @@
     const width = numericAttribute(clipRect, "width");
     clipRect.setAttribute(
       "width",
-      String(Math.max(width - INDICATOR_WIDTH - INDICATOR_GAP * 2, MIN_NAME_CLIP_WIDTH))
+      String(Math.max(width - COLLAPSE_CONTROL_RESERVE, MIN_NAME_CLIP_WIDTH))
     );
   }
   function decorateTable(node, header, columnCount) {

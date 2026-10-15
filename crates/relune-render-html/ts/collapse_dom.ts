@@ -2,20 +2,22 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // Elements that make up the table header; clicking any of them toggles the table.
 const HEADER_SELECTOR =
-  '.table-header, .table-header-fade, .table-name, .table-kind, .collapse-indicator';
+  '.table-header, .table-kind-mark, .table-name, .table-kind, .collapse-indicator';
 
 // Node geometry mirrored from `relune_layout::metrics`; a Rust test in
 // relune-render-html keeps these values in sync.
 // The SVG renderer ends the table-name clip this far before the node's right
 // edge, leaving that space for the right-aligned kind label.
-const KIND_LABEL_RESERVE = 44;
+const KIND_LABEL_RESERVE = 48;
 // Baseline of the first column row, relative to the node top.
-const FIRST_ROW_BASELINE = 46;
+const FIRST_ROW_BASELINE = 53;
 // Horizontal inset of node text from the node's left edge.
-const TEXT_INSET = 10;
+const TEXT_INSET = 12;
 
 const INDICATOR_WIDTH = 16;
 const INDICATOR_GAP = 4;
+// Clip width given up to the indicator; layout reserves the same amount.
+const COLLAPSE_CONTROL_RESERVE = INDICATOR_WIDTH + INDICATOR_GAP * 2;
 const MIN_NAME_CLIP_WIDTH = 24;
 
 const EXPANDED_GLYPH = '▾';
@@ -61,7 +63,7 @@ function shrinkNameClip(node: Element): void {
   const width = numericAttribute(clipRect, 'width');
   clipRect.setAttribute(
     'width',
-    String(Math.max(width - INDICATOR_WIDTH - INDICATOR_GAP * 2, MIN_NAME_CLIP_WIDTH)),
+    String(Math.max(width - COLLAPSE_CONTROL_RESERVE, MIN_NAME_CLIP_WIDTH)),
   );
 }
 

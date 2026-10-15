@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 
 use super::edge_routing::{
-    BYPASS_CHANNEL_LANE_STEP, EdgeObstacles, MIN_LABEL_ROUTE_T, NodeObstacleIndex,
-    ObstacleRoutingContext, RankAxisBounds, bypass_channel_candidates, bypass_channel_lane_count,
-    channel_candidates, channel_search_plan, edge_endpoint_marker_obstacles,
-    edge_route_obstacle_spacing, label_rect, obstacle_aware_channel_for_edge,
-    parallel_label_parameter, place_label_on_route, rank_axis_bounds, rect_overlaps_any,
-    route_edges, route_edges_with_diagnostics, route_obstacle_hit_count,
+    BYPASS_CHANNEL_LANE_STEP, EdgeObstacles, HARD_OBSTACLE_PADDING, MIN_LABEL_ROUTE_T,
+    NodeObstacleIndex, ObstacleRoutingContext, RankAxisBounds, bypass_channel_candidates,
+    bypass_channel_lane_count, channel_candidates, channel_search_plan,
+    edge_endpoint_marker_obstacles, edge_route_obstacle_spacing, label_rect,
+    obstacle_aware_channel_for_edge, parallel_label_parameter, place_label_on_route,
+    rank_axis_bounds, rect_overlaps_any, route_edges, route_edges_with_diagnostics,
+    route_obstacle_hit_count,
 };
 use super::force::{
     FORCE_CONNECTED_NODE_GAP, force_layout_canonical_config, force_pair_axis_gaps,
@@ -20,7 +21,7 @@ use crate::channel::ChannelCandidateClass;
 use crate::graph::{LayoutEdge, LayoutGraph};
 use crate::metrics::{
     GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
-    NODE_HEADER_HEIGHT, estimate_text_width,
+    NODE_FIRST_ROW_TOP, estimate_text_width,
 };
 use crate::port::{RegularPortAssignment, column_y_offset_from_center};
 use crate::route::{
@@ -757,7 +758,7 @@ fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_y() {
 }
 
 #[test]
-fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_x() {
+fn force_prefix_grouped_layout_keeps_groups_in_a_band_disjoint_on_x() {
     use relune_core::{GroupingSpec, GroupingStrategy};
 
     let schema = make_prefix_grouping_schema();
@@ -776,11 +777,16 @@ fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_x() {
 
     for (i, a) in positioned.groups.iter().enumerate() {
         for b in positioned.groups.iter().skip(i + 1) {
+            // Packing places groups side by side within a band and may start
+            // a new band below, so groups only need disjoint X ranges when
+            // they share Y.
+            let shares_band = a.y < b.y + b.height && b.y < a.y + a.height;
             let overlap = a.x < b.x + b.width && b.x < a.x + a.width;
             assert!(
-                !overlap,
+                !(shares_band && overlap),
                 "force-grouped prefix layout produced overlapping X ranges for {} and {}",
-                a.id, b.id
+                a.id,
+                b.id
             );
         }
     }
@@ -1367,10 +1373,9 @@ fn test_column_y_offset_from_center_basic() {
     };
 
     // user_id is column index 1.
-    let offset = column_y_offset_from_center(&node, &["user_id".to_string()], &config);
-    let expected_col_y = 1.0f32
-        .mul_add(NODE_COLUMN_HEIGHT, config.node_padding + NODE_HEADER_HEIGHT)
-        + NODE_COLUMN_HEIGHT / 2.0;
+    let offset = column_y_offset_from_center(&node, &["user_id".to_string()]);
+    // The port sits on the rendered row center, not below the node padding.
+    let expected_col_y = NODE_COLUMN_HEIGHT.mul_add(1.5, NODE_FIRST_ROW_TOP);
     let expected = expected_col_y - node.height / 2.0;
     assert!(
         (offset - expected).abs() < 0.01,
@@ -1381,7 +1386,6 @@ fn test_column_y_offset_from_center_basic() {
 #[test]
 #[allow(clippy::float_cmp)]
 fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
-    let config = LayoutConfig::default();
     let empty_node = PositionedNode {
         id: "t".to_string(),
         label: "t".to_string(),
@@ -1398,11 +1402,11 @@ fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
 
     // No columns in node → 0 (center).
     assert_eq!(
-        column_y_offset_from_center(&empty_node, &["user_id".to_string()], &config),
+        column_y_offset_from_center(&empty_node, &["user_id".to_string()]),
         0.0
     );
     // Empty edge columns → 0 (center).
-    assert_eq!(column_y_offset_from_center(&empty_node, &[], &config), 0.0);
+    assert_eq!(column_y_offset_from_center(&empty_node, &[]), 0.0);
 
     let node_with_col = PositionedNode {
         columns: vec![PositionedColumn {
@@ -1422,7 +1426,7 @@ fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
     };
     // Column not found → 0 (center).
     assert_eq!(
-        column_y_offset_from_center(&node_with_col, &["nonexistent".to_string()], &config),
+        column_y_offset_from_center(&node_with_col, &["nonexistent".to_string()]),
         0.0
     );
 }
@@ -2313,6 +2317,36 @@ fn test_route_edges_shift_inter_rank_channel_away_from_obstacle() {
             &label_rects_from_nodes(&positioned_nodes[2..]),
             0.0
         ),
+        0
+    );
+}
+
+#[test]
+fn test_hard_obstacle_check_catches_channel_just_inside_node_edge() {
+    let node = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 100.0,
+    };
+    let route_at = |x: f32| EdgeRoute {
+        x1: x,
+        y1: -40.0,
+        x2: x,
+        y2: 140.0,
+        control_points: vec![],
+        style: RouteStyle::Orthogonal,
+        label_position: (x, 50.0),
+    };
+
+    // A vertical channel 1px inside the right edge passes through the node.
+    assert_eq!(
+        route_obstacle_hit_count(&route_at(199.0), &[node], HARD_OBSTACLE_PADDING),
+        1
+    );
+    // Running along the edge itself still counts as clear.
+    assert_eq!(
+        route_obstacle_hit_count(&route_at(200.0), &[node], HARD_OBSTACLE_PADDING),
         0
     );
 }

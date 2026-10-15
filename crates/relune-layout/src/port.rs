@@ -6,7 +6,7 @@ use relune_core::LayoutDirection;
 
 use crate::graph::LayoutGraph;
 use crate::layout::{LayoutConfig, PositionedNode};
-use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT};
+use crate::metrics::column_row_center;
 use crate::route::AttachmentSide;
 
 /// Base gap between parallel self-loop edges.
@@ -112,9 +112,8 @@ pub(crate) fn assign_edge_ports(
             .copied();
         let (source_side, target_side) =
             choose_regular_sides(source_node, target_node, source_rank, target_rank, config);
-        let source_row_offset =
-            column_y_offset_from_center(source_node, &edge.from_columns, config);
-        let target_row_offset = column_y_offset_from_center(target_node, &edge.to_columns, config);
+        let source_row_offset = column_y_offset_from_center(source_node, &edge.from_columns);
+        let target_row_offset = column_y_offset_from_center(target_node, &edge.to_columns);
 
         assignments[edge_index] = Some(EdgePortAssignment::Regular(RegularPortAssignment {
             source_side,
@@ -223,11 +222,7 @@ pub(crate) fn assign_edge_ports(
 }
 
 #[must_use]
-pub(crate) fn column_y_offset_from_center(
-    node: &PositionedNode,
-    edge_columns: &[String],
-    config: &LayoutConfig,
-) -> f32 {
+pub(crate) fn column_y_offset_from_center(node: &PositionedNode, edge_columns: &[String]) -> f32 {
     if edge_columns.is_empty() || node.columns.is_empty() {
         return 0.0;
     }
@@ -239,11 +234,7 @@ pub(crate) fn column_y_offset_from_center(
         return 0.0;
     };
     let center_y = node.height / 2.0;
-    #[allow(clippy::cast_precision_loss)]
-    let column_y = (col_index as f32)
-        .mul_add(NODE_COLUMN_HEIGHT, config.node_padding + NODE_HEADER_HEIGHT)
-        + NODE_COLUMN_HEIGHT / 2.0;
-    let offset = column_y - center_y;
+    let offset = column_row_center(col_index) - center_y;
     let max_offset = (center_y - 4.0).max(0.0);
     offset.clamp(-max_offset, max_offset)
 }
@@ -682,7 +673,6 @@ mod tests {
 
     #[test]
     fn test_column_y_offset_from_center_uses_matching_column_row() {
-        let config = LayoutConfig::default();
         let node = PositionedNode {
             id: "posts".to_string(),
             label: "posts".to_string(),
@@ -722,7 +712,7 @@ mod tests {
             group_index: None,
         };
 
-        let offset = column_y_offset_from_center(&node, &["author_id".to_string()], &config);
+        let offset = column_y_offset_from_center(&node, &["author_id".to_string()]);
 
         assert!(offset > 0.0);
     }

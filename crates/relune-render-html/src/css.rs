@@ -15,6 +15,11 @@ pub(crate) fn build_css(
 ) -> String {
     let colors = get_colors(theme);
     let accent_color = colors.glow_color;
+    // Blue-grey, so selection never reads as a table kind or a warning.
+    let selection_color = match theme {
+        Theme::Dark => "#93a8c9",
+        Theme::Light => "#4a6285",
+    };
     let (viewer_bg, panel_bg, panel_border, panel_shadow, accent_soft, grid_dot, grid_line) =
         match theme {
             Theme::Dark => (
@@ -678,7 +683,7 @@ pub(crate) fn build_css(
         r"
     /* Table collapse styles */
     .table-node .table-header,
-    .table-node .table-header-fade,
+    .table-node .table-kind-mark,
     .table-node .table-name,
     .table-node .table-kind,
     .table-node .collapse-indicator {
@@ -797,44 +802,22 @@ pub(crate) fn build_css(
     .hover-popover-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
     .hover-popover-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
 
+    /* Table highlights are outlines in the selection colour, never glows, so
+       they stay distinct from kind marks and review severities. */
     .node.hover-preview-node,
     .node.hover-preview-neighbor {
       opacity: 1 !important;
-      transition: opacity 0.18s, filter 0.18s;
-    }
-
-    .node.hover-preview-node {
-      filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.28));
+      transition: opacity 0.18s;
     }
 
     .node.hover-preview-node .table-body {
-      stroke: rgba(245, 158, 11, 0.72);
-      stroke-width: 2.05px;
-    }
-
-    .node.hover-preview-neighbor {
-      filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.18));
+      stroke: var(--selection-color);
+      stroke-width: 1.8px;
     }
 
     .node.hover-preview-neighbor .table-body {
-      stroke: rgba(245, 158, 11, 0.6);
-      stroke-width: 1.9px;
-    }
-
-    .node.hover-preview-neighbor.hover-inbound {
-      filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.18));
-    }
-
-    .node.hover-preview-neighbor.hover-inbound .table-body {
-      stroke: rgba(45, 212, 191, 0.68);
-    }
-
-    .node.hover-preview-neighbor.hover-outbound {
-      filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.2));
-    }
-
-    .node.hover-preview-neighbor.hover-outbound .table-body {
-      stroke: rgba(251, 191, 36, 0.72);
+      stroke: var(--selection-soft);
+      stroke-width: 1.5px;
     }
 
     .edge.hover-preview-edge {
@@ -845,33 +828,16 @@ pub(crate) fn build_css(
 
     .node.highlighted-neighbor {
       opacity: 1 !important;
-      filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.35));
-      transition: opacity 0.2s, filter 0.2s;
+      transition: opacity 0.2s;
     }
 
     .node .table-body {
-      transition: stroke 0.3s, stroke-width 0.3s, filter 0.3s, opacity 0.3s;
+      transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
     }
 
     .node.highlighted-neighbor .table-body {
-      stroke: rgba(245, 158, 11, 0.78);
-      stroke-width: 2.2px;
-    }
-
-    .node.highlighted-neighbor.inbound {
-      filter: drop-shadow(0 0 10px rgba(45, 212, 191, 0.35));
-    }
-
-    .node.highlighted-neighbor.inbound .table-body {
-      stroke: rgba(45, 212, 191, 0.78);
-    }
-
-    .node.highlighted-neighbor.outbound {
-      filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.4));
-    }
-
-    .node.highlighted-neighbor.outbound .table-body {
-      stroke: rgba(251, 191, 36, 0.84);
+      stroke: var(--selection-soft);
+      stroke-width: 1.5px;
     }
 
     .node.dimmed-by-highlight {
@@ -890,8 +856,9 @@ pub(crate) fn build_css(
       transition: opacity 0.2s;
     }
 
-    .node.selected-node {
-      filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.48));
+    .node.selected-node .table-body {
+      stroke: var(--selection-color);
+      stroke-width: 2px;
     }
 
     .edge.highlighted-neighbor .edge-path,
@@ -1604,6 +1571,8 @@ pub(crate) fn build_css(
       --panel-shadow: {panel_shadow};
       --accent-color: {accent_color};
       --accent-soft: {accent_soft};
+      --selection-color: {selection_color};
+      --selection-soft: color-mix(in srgb, var(--selection-color) 62%, transparent);
       --viewer-bg: {viewer_bg};
       --grid-dot: {grid_dot};
       --grid-line: {grid_line};
@@ -1762,6 +1731,7 @@ pub(crate) fn build_css(
         panel_shadow = panel_shadow,
         accent_color = accent_color,
         accent_soft = accent_soft,
+        selection_color = selection_color,
         viewer_bg = viewer_bg,
         grid_dot = grid_dot,
         grid_line = grid_line,
