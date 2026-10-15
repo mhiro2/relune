@@ -71,6 +71,8 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         columnsEmpty,
         relations,
         relationsEmpty,
+        changesSection: document.getElementById('detail-changes-section'),
+        changes: document.getElementById('detail-changes'),
         issues: document.getElementById('detail-issues'),
         issuesEmpty: document.getElementById('detail-issues-empty'),
       };

@@ -369,6 +369,7 @@ mod tests {
                     is_primary_key: true,
                     is_foreign_key: false,
                     is_indexed: false,
+                    previous_data_type: None,
                 }],
                 inbound_count: 0,
                 outbound_count: 1,
@@ -390,6 +391,7 @@ mod tests {
                         is_primary_key: true,
                         is_foreign_key: false,
                         is_indexed: false,
+                        previous_data_type: None,
                     },
                     LayoutColumn {
                         name: "user_id".into(),
@@ -398,6 +400,7 @@ mod tests {
                         is_primary_key: false,
                         is_foreign_key: true,
                         is_indexed: true,
+                        previous_data_type: None,
                     },
                 ],
                 inbound_count: 1,
@@ -548,6 +551,7 @@ mod tests {
                 is_primary_key: false,
                 is_foreign_key: false,
                 is_indexed: false,
+                previous_data_type: None,
             },
             LayoutColumn {
                 name: "user-id".into(),
@@ -556,6 +560,7 @@ mod tests {
                 is_primary_key: false,
                 is_foreign_key: false,
                 is_indexed: false,
+                previous_data_type: None,
             },
             LayoutColumn {
                 name: "user_id".into(),
@@ -564,6 +569,7 @@ mod tests {
                 is_primary_key: false,
                 is_foreign_key: false,
                 is_indexed: false,
+                previous_data_type: None,
             },
         ];
 

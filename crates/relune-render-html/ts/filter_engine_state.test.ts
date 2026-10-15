@@ -25,8 +25,8 @@ const tables = [
     kind: 'view',
     columns: [column('payload', 'jsonb')],
     issues: [
-      { severity: 'error', message: 'broken' },
-      { severity: 'error', message: 'still broken' },
+      { severity: 'breaking', message: 'broken' },
+      { severity: 'breaking', message: 'still broken' },
     ],
   }),
 ];
@@ -48,8 +48,8 @@ describe('createFilterEngineState', () => {
     expect(types?.hasSearch).toBe(true);
 
     const severity = state.facets.get('severity');
-    expect(severity?.allValues).toEqual(['error', 'none', 'warning']);
-    expect(severity?.counts.get('error')).toBe(1);
+    expect(severity?.allValues).toEqual(['breaking', 'none', 'warning']);
+    expect(severity?.counts.get('breaking')).toBe(1);
   });
 
   it('omits facets that cannot narrow the diagram', () => {
@@ -120,9 +120,9 @@ describe('facet matching', () => {
 
   it('summarises active facets with sorted values', () => {
     const state = createFilterEngineState(tables);
-    state.facets.get('severity')?.selectedValues.add('warning').add('error');
+    state.facets.get('severity')?.selectedValues.add('warning').add('breaking');
     expect(activeFilterSummary(state)).toEqual([
-      { facetId: 'severity', label: 'Issues', count: 2, values: ['error', 'warning'] },
+      { facetId: 'severity', label: 'Risk', count: 2, values: ['breaking', 'warning'] },
     ]);
   });
 });

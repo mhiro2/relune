@@ -747,10 +747,10 @@ pub(crate) fn build_css(
       font-weight: 700;
     }
 
-    .hover-popover-badge-error { background: rgba(248, 113, 113, 0.22); color: #f87171; }
-    .hover-popover-badge-warning { background: rgba(251, 191, 36, 0.22); color: #fbbf24; }
-    .hover-popover-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
-    .hover-popover-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
+    .hover-popover-badge-breaking { background: var(--risk-breaking); color: var(--risk-text); }
+    .hover-popover-badge-caution { background: var(--risk-caution); color: var(--risk-text); }
+    .hover-popover-badge-warning { background: var(--risk-warning); color: var(--risk-text); }
+    .hover-popover-badge-info { background: var(--risk-info); color: var(--risk-text); }
 
     /* Table highlights are outlines in the selection colour, never glows, so
        they stay distinct from kind marks and review severities. */
@@ -1428,18 +1428,18 @@ pub(crate) fn build_css(
     }
 
     .detail-column-pill-diff-added {
-      background: rgba(34, 197, 94, 0.2);
-      color: #22c55e;
+      background: color-mix(in srgb, var(--diff-added) 14%, transparent);
+      color: var(--diff-added);
     }
 
     .detail-column-pill-diff-removed {
-      background: rgba(239, 68, 68, 0.2);
-      color: #ef4444;
+      background: color-mix(in srgb, var(--diff-removed) 14%, transparent);
+      color: var(--diff-removed);
     }
 
     .detail-column-pill-diff-modified {
-      background: rgba(245, 158, 11, 0.2);
-      color: #f59e0b;
+      background: color-mix(in srgb, var(--diff-modified) 14%, transparent);
+      color: var(--diff-modified);
     }
 
     .detail-diff-badge {
@@ -1453,18 +1453,18 @@ pub(crate) fn build_css(
     }
 
     .detail-diff-badge-added {
-      background: rgba(34, 197, 94, 0.18);
-      color: #22c55e;
+      background: color-mix(in srgb, var(--diff-added) 14%, transparent);
+      color: var(--diff-added);
     }
 
     .detail-diff-badge-removed {
-      background: rgba(239, 68, 68, 0.18);
-      color: #ef4444;
+      background: color-mix(in srgb, var(--diff-removed) 14%, transparent);
+      color: var(--diff-removed);
     }
 
     .detail-diff-badge-modified {
-      background: rgba(245, 158, 11, 0.18);
-      color: #f59e0b;
+      background: color-mix(in srgb, var(--diff-modified) 14%, transparent);
+      color: var(--diff-modified);
     }
 
     .detail-column-meta,
@@ -1486,6 +1486,16 @@ pub(crate) fn build_css(
       opacity: 0.62;
     }
 
+    .detail-changes {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-family: var(--mono-font);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
     .detail-issue {
       border: 1px solid rgba(148, 163, 184, 0.12);
       border-radius: 12px;
@@ -1493,9 +1503,10 @@ pub(crate) fn build_css(
       margin-bottom: 6px;
     }
 
-    .detail-issue-error { border-color: rgba(248, 113, 113, 0.4); }
-    .detail-issue-warning { border-color: rgba(251, 191, 36, 0.4); }
-    .detail-issue-info { border-color: rgba(56, 189, 248, 0.4); }
+    .detail-issue-breaking { border-color: var(--risk-breaking); }
+    .detail-issue-caution { border-color: var(--risk-caution); }
+    .detail-issue-warning { border-color: var(--risk-warning); }
+    .detail-issue-info { border-color: var(--risk-info); }
 
     .detail-issue-header {
       display: flex;
@@ -1514,10 +1525,10 @@ pub(crate) fn build_css(
       white-space: nowrap;
     }
 
-    .detail-issue-badge-error { background: rgba(248, 113, 113, 0.22); color: #f87171; }
-    .detail-issue-badge-warning { background: rgba(251, 191, 36, 0.22); color: #fbbf24; }
-    .detail-issue-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
-    .detail-issue-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
+    .detail-issue-badge-breaking { background: var(--risk-breaking); color: var(--risk-text); }
+    .detail-issue-badge-caution { background: var(--risk-caution); color: var(--risk-text); }
+    .detail-issue-badge-warning { background: var(--risk-warning); color: var(--risk-text); }
+    .detail-issue-badge-info { background: var(--risk-info); color: var(--risk-text); }
 
     .detail-issue-message {
       font-size: 13px;
@@ -1544,10 +1555,10 @@ pub(crate) fn build_css(
       flex-shrink: 0;
     }
 
-    .object-browser-issue-badge-error { background: rgba(248, 113, 113, 0.22); color: #f87171; }
-    .object-browser-issue-badge-warning { background: rgba(251, 191, 36, 0.22); color: #fbbf24; }
-    .object-browser-issue-badge-info { background: rgba(56, 189, 248, 0.22); color: #38bdf8; }
-    .object-browser-issue-badge-hint { background: rgba(148, 163, 184, 0.18); color: #94a3b8; }
+    .object-browser-issue-badge-breaking { background: var(--risk-breaking); color: var(--risk-text); }
+    .object-browser-issue-badge-caution { background: var(--risk-caution); color: var(--risk-text); }
+    .object-browser-issue-badge-warning { background: var(--risk-warning); color: var(--risk-text); }
+    .object-browser-issue-badge-info { background: var(--risk-info); color: var(--risk-text); }
 
     .canvas svg .node,
     .canvas svg .edge {
@@ -1688,6 +1699,14 @@ pub(crate) fn build_css(
       --accent-soft: {accent_soft};
       --selection-color: {selection_color};
       --selection-soft: color-mix(in srgb, var(--selection-color) 62%, transparent);
+      --diff-added: {diff_added};
+      --diff-removed: {diff_removed};
+      --diff-modified: {diff_modified};
+      --risk-breaking: {risk_breaking};
+      --risk-caution: {risk_caution};
+      --risk-warning: {risk_warning};
+      --risk-info: {risk_info};
+      --risk-text: {risk_text};
       --viewer-bg: {viewer_bg};
       --grid-dot: {grid_dot};
       --grid-line: {grid_line};
@@ -1847,6 +1866,14 @@ pub(crate) fn build_css(
         accent_color = accent_color,
         accent_soft = accent_soft,
         selection_color = selection_color,
+        diff_added = colors.diff.added,
+        diff_removed = colors.diff.removed,
+        diff_modified = colors.diff.modified,
+        risk_breaking = colors.risk.breaking,
+        risk_caution = colors.risk.caution,
+        risk_warning = colors.risk.warning,
+        risk_info = colors.risk.info,
+        risk_text = colors.risk.text,
         viewer_bg = viewer_bg,
         grid_dot = grid_dot,
         grid_line = grid_line,

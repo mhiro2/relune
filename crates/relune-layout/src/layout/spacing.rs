@@ -39,6 +39,7 @@ pub(super) fn build_positioned_node(
             .map(|c| PositionedColumn {
                 name: c.name.clone(),
                 data_type: c.data_type.clone(),
+                previous_data_type: c.previous_data_type.clone(),
                 flags: column_flags(c),
             })
             .collect(),
@@ -103,7 +104,14 @@ fn estimate_node_width(
     let column_width = node
         .columns
         .iter()
-        .map(|column| column_row_width(slots, &column.name, &column.data_type))
+        .map(|column| {
+            column_row_width(
+                slots,
+                &column.name,
+                column.previous_data_type.as_deref(),
+                &column.data_type,
+            )
+        })
         .fold(0.0, f32::max);
     let omitted_row_width = if shows_omitted_columns_row(node.columns.len(), omitted_columns) {
         slots.key_gutter()

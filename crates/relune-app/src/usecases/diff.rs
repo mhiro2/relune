@@ -4,14 +4,19 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use relune_core::diff::{EnumDiff, TableDiff, ViewDiff};
-use relune_core::{ChangeKind, Enum as SchemaEnum, Schema, Table, View, diff_schemas};
-use relune_layout::{Annotation, DiagramOverlay, OverlaySeverity};
+use relune_core::{
+    ChangeKind, Enum as SchemaEnum, ReviewRuleId, RiskFinding, Schema, SqlDialect, Table, View,
+    diff_schemas,
+};
+use relune_layout::metrics::TYPE_CHANGE_SEPARATOR;
+use relune_layout::{Annotation, ColumnChange, DiagramOverlay, NodeChange};
 
 use crate::error::AppError;
 use crate::markdown;
 use crate::request::DiffRequest;
 use crate::result::DiffResult;
 use crate::schema_input::{SchemaValidation, align_input_schemas, schema_from_input_checked};
+use crate::usecases::review::resolve_effective_dialect;
 
 /// Execute a diff request.
 #[allow(clippy::needless_pass_by_value)]
@@ -38,11 +43,29 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     // Step 2: Compute diff
     let schema_diff = diff_schemas(&before_schema, &after_schema);
 
-    // Step 3: Render visual output if requested
+    // Step 3: Render visual output if requested, ranking each change's risk
+    // with the review rules for the dialect both inputs resolved to.
     let rendered = match request.format {
         DiffFormat::Svg | DiffFormat::Html => {
-            let content =
-                render_diff_visual(&before_schema, &after_schema, &schema_diff, &request)?;
+            let (dialect, _) = resolve_effective_dialect(
+                SqlDialect::Auto,
+                before_context.resolved_dialect,
+                after_context.resolved_dialect,
+            );
+            let findings = relune_core::run_rules(
+                &schema_diff,
+                &before_schema,
+                &after_schema,
+                ReviewRuleId::all_rules(),
+                dialect,
+            );
+            let content = render_diff_visual(
+                &before_schema,
+                &after_schema,
+                &schema_diff,
+                &findings,
+                &request,
+            )?;
             Some(content)
         }
         DiffFormat::Text | DiffFormat::Json | DiffFormat::Markdown => None,
@@ -60,12 +83,13 @@ fn render_diff_visual(
     before: &Schema,
     after: &Schema,
     schema_diff: &relune_core::SchemaDiff,
+    findings: &[RiskFinding],
     request: &DiffRequest,
 ) -> Result<String, AppError> {
     use crate::request::{DiffFormat, OutputFormat, RenderRequest};
 
     let merged = build_diff_schema(before, after, schema_diff);
-    let overlay = build_diff_overlay(before, after, schema_diff);
+    let overlay = build_diff_overlay(before, after, schema_diff, findings);
 
     let output_format = match request.format {
         DiffFormat::Svg => OutputFormat::Svg,
@@ -94,26 +118,15 @@ fn render_with_schema(
     schema: &Schema,
     request: &crate::request::RenderRequest,
 ) -> Result<String, AppError> {
-    use relune_layout::{
-        FocusExtractor, LayoutConfig, LayoutGraphBuilder, build_layout_from_graph_with_config,
-    };
+    use relune_layout::{LayoutConfig, build_layout_from_graph_with_config};
     use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
     use relune_render_svg::{SvgRenderOptions, Theme as SvgTheme, render_svg_with_overlay};
 
     use crate::request::{OutputFormat, RenderTheme};
 
     let layout_config = LayoutConfig::from(&request.layout);
-    let mut graph = LayoutGraphBuilder::new()
-        .filter(request.filter.clone())
-        .focus(request.focus.clone())
-        .grouping(request.grouping)
-        .build(schema);
-    if let Some(ref focus) = request.focus {
-        graph = FocusExtractor
-            .extract(&graph, focus)
-            .map_err(relune_layout::LayoutError::from)?;
-    }
-
+    // The diff result reports input diagnostics only.
+    let (graph, _) = crate::usecases::render::build_graph(request, schema)?;
     let positioned = build_layout_from_graph_with_config(&graph, &layout_config)?;
 
     let svg_theme = match request.options.theme {
@@ -775,16 +788,19 @@ pub fn build_diff_schema(
 
 /// Build a [`DiagramOverlay`] from a [`SchemaDiff`] for diff visualization.
 ///
-/// Annotates nodes and edges with their diff status:
-/// - Added tables/edges → `Info` severity, `rule_id = "diff-added"`
-/// - Removed tables/edges → `Error` severity, `rule_id = "diff-removed"`
-/// - Modified tables → `Warning` severity, `rule_id = "diff-modified"`
+/// Records what changed apart from how risky it is:
+/// - Every added, removed, or modified table, view, enum, column, and
+///   relationship gets its [`ChangeKind`]; a column whose type changed also
+///   keeps its previous type.
+/// - Each review finding becomes a risk annotation on the table it names,
+///   ranked by its [`ReviewSeverity`](relune_core::ReviewSeverity).
 #[must_use]
-#[allow(clippy::too_many_lines)] // Overlay annotations mirror every diff kind and stay easier to align in one function.
+#[allow(clippy::too_many_lines)] // Overlay changes mirror every diff kind and stay easier to align in one function.
 pub fn build_diff_overlay(
     before: &Schema,
     after: &Schema,
     diff: &relune_core::SchemaDiff,
+    findings: &[RiskFinding],
 ) -> DiagramOverlay {
     let mut overlay = DiagramOverlay::new();
 
@@ -819,47 +835,24 @@ pub fn build_diff_overlay(
         .map(|enum_type| (enum_type.qualified_name(), enum_type))
         .collect();
 
-    // Annotate added tables
-    for table_name in &diff.added_tables {
-        if let Some(table) = after_by_name.get(table_name) {
-            annotate_table_node(
-                &mut overlay,
-                table,
-                OverlaySeverity::Info,
-                "diff-added",
-                "Added",
+    for (names, tables, schema, kind) in [
+        (&diff.added_tables, &after_by_name, after, ChangeKind::Added),
+        (
+            &diff.removed_tables,
+            &before_by_name,
+            before,
+            ChangeKind::Removed,
+        ),
+    ] {
+        for table in names.iter().filter_map(|name| tables.get(name)) {
+            overlay.set_node_change(
+                &table.stable_id,
+                whole_node_change(kind, "table", table.columns.len(), "columns"),
             );
-            annotate_table_edges(
-                &mut overlay,
-                table,
-                after,
-                OverlaySeverity::Info,
-                "diff-added",
-            );
+            mark_table_edges(&mut overlay, table, schema, kind);
         }
     }
 
-    // Annotate removed tables
-    for table_name in &diff.removed_tables {
-        if let Some(table) = before_by_name.get(table_name) {
-            annotate_table_node(
-                &mut overlay,
-                table,
-                OverlaySeverity::Error,
-                "diff-removed",
-                "Removed",
-            );
-            annotate_table_edges(
-                &mut overlay,
-                table,
-                before,
-                OverlaySeverity::Error,
-                "diff-removed",
-            );
-        }
-    }
-
-    // Annotate modified tables
     for table_diff in &diff.modified_tables {
         let stable_id = after_by_name
             .get(&table_diff.table_name)
@@ -867,30 +860,22 @@ pub fn build_diff_overlay(
             .map(|t| t.stable_id.as_str());
 
         if let Some(stable_id) = stable_id {
-            annotate_modified_table(&mut overlay, stable_id, table_diff, before, after);
+            mark_modified_table(&mut overlay, stable_id, table_diff, before, after);
         }
     }
 
-    for view_name in &diff.added_views {
-        if let Some(view) = after_views_by_name.get(view_name) {
-            annotate_view_node(
-                &mut overlay,
-                view,
-                OverlaySeverity::Info,
-                "diff-added",
-                "Added",
-            );
-        }
-    }
-
-    for view_name in &diff.removed_views {
-        if let Some(view) = before_views_by_name.get(view_name) {
-            annotate_view_node(
-                &mut overlay,
-                view,
-                OverlaySeverity::Error,
-                "diff-removed",
-                "Removed",
+    for (names, views, kind) in [
+        (&diff.added_views, &after_views_by_name, ChangeKind::Added),
+        (
+            &diff.removed_views,
+            &before_views_by_name,
+            ChangeKind::Removed,
+        ),
+    ] {
+        for view in names.iter().filter_map(|name| views.get(name)) {
+            overlay.set_node_change(
+                &view.id,
+                whole_node_change(kind, "view", view.columns.len(), "columns"),
             );
         }
     }
@@ -901,30 +886,22 @@ pub fn build_diff_overlay(
             .or_else(|| before_views_by_name.get(&view_diff.view_name))
             .map(|view| view.id.as_str());
         if let Some(view_id) = view_id {
-            annotate_modified_view(&mut overlay, view_id, view_diff);
+            mark_modified_view(&mut overlay, view_id, view_diff);
         }
     }
 
-    for enum_name in &diff.added_enums {
-        if let Some(enum_type) = after_enums_by_name.get(enum_name) {
-            annotate_enum_node(
-                &mut overlay,
-                enum_type,
-                OverlaySeverity::Info,
-                "diff-added",
-                "Added",
-            );
-        }
-    }
-
-    for enum_name in &diff.removed_enums {
-        if let Some(enum_type) = before_enums_by_name.get(enum_name) {
-            annotate_enum_node(
-                &mut overlay,
-                enum_type,
-                OverlaySeverity::Error,
-                "diff-removed",
-                "Removed",
+    for (names, enums, kind) in [
+        (&diff.added_enums, &after_enums_by_name, ChangeKind::Added),
+        (
+            &diff.removed_enums,
+            &before_enums_by_name,
+            ChangeKind::Removed,
+        ),
+    ] {
+        for enum_type in names.iter().filter_map(|name| enums.get(name)) {
+            overlay.set_node_change(
+                &enum_type.id,
+                whole_node_change(kind, "enum", enum_type.values.len(), "values"),
             );
         }
     }
@@ -935,92 +912,65 @@ pub fn build_diff_overlay(
             .or_else(|| before_enums_by_name.get(&enum_diff.enum_name))
             .map(|enum_type| enum_type.id.as_str());
         if let Some(enum_id) = enum_id {
-            annotate_modified_enum(&mut overlay, enum_id, enum_diff);
+            mark_modified_enum(&mut overlay, enum_id, enum_diff);
+        }
+    }
+
+    for finding in findings {
+        if let Some(table_id) = &finding.table_id {
+            overlay.add_node_annotation(
+                table_id,
+                Annotation {
+                    severity: finding.severity,
+                    message: finding.message.clone(),
+                    hint: finding.mitigation.clone(),
+                    rule_id: Some(finding.rule_id.as_str().to_string()),
+                },
+            );
         }
     }
 
     overlay
 }
 
-fn annotate_table_node(
-    overlay: &mut DiagramOverlay,
-    table: &Table,
-    severity: OverlaySeverity,
-    rule_id: &str,
-    label: &str,
-) {
-    let col_count = table.columns.len();
-    overlay.add_node_annotation(
-        &table.stable_id,
-        Annotation {
-            severity,
-            message: format!("{label} table ({col_count} columns)"),
-            hint: None,
-            rule_id: Some(rule_id.to_string()),
-        },
-    );
+/// Change of a node that was added or removed as a whole.
+fn whole_node_change(kind: ChangeKind, noun: &str, parts: usize, part_noun: &str) -> NodeChange {
+    let label = match kind {
+        ChangeKind::Added => "Added",
+        ChangeKind::Removed => "Removed",
+        ChangeKind::Modified => "Modified",
+    };
+    NodeChange {
+        kind,
+        summary: format!("{label} {noun} ({parts} {part_noun})"),
+        details: Vec::new(),
+    }
 }
 
-fn annotate_view_node(
-    overlay: &mut DiagramOverlay,
-    view: &View,
-    severity: OverlaySeverity,
-    rule_id: &str,
-    label: &str,
-) {
-    overlay.add_node_annotation(
-        &view.id,
-        Annotation {
-            severity,
-            message: format!("{label} view ({} columns)", view.columns.len()),
-            hint: None,
-            rule_id: Some(rule_id.to_string()),
-        },
-    );
+/// Change of a node whose parts changed.
+fn modified_node_change(change_count: usize, details: Vec<String>) -> NodeChange {
+    NodeChange {
+        kind: ChangeKind::Modified,
+        summary: format!("Modified ({change_count} changes)"),
+        details,
+    }
 }
 
-fn annotate_enum_node(
-    overlay: &mut DiagramOverlay,
-    enum_type: &SchemaEnum,
-    severity: OverlaySeverity,
-    rule_id: &str,
-    label: &str,
-) {
-    overlay.add_node_annotation(
-        &enum_type.id,
-        Annotation {
-            severity,
-            message: format!("{label} enum ({} values)", enum_type.values.len()),
-            hint: None,
-            rule_id: Some(rule_id.to_string()),
-        },
-    );
-}
-
-fn annotate_table_edges(
+fn mark_table_edges(
     overlay: &mut DiagramOverlay,
     table: &Table,
     schema: &Schema,
-    severity: OverlaySeverity,
-    rule_id: &str,
+    kind: ChangeKind,
 ) {
-    let label = match severity {
-        OverlaySeverity::Info => "Added",
-        OverlaySeverity::Error => "Removed",
-        _ => "Changed",
-    };
     for fk in &table.foreign_keys {
         let target_id = resolve_fk_target_stable_id(schema, fk.to_schema.as_deref(), &fk.to_table);
         let to_id = target_id.as_deref().unwrap_or(&fk.to_table);
-        overlay.add_edge_annotation(
+        overlay.set_edge_change(
             &table.stable_id,
             to_id,
-            Annotation {
-                severity,
-                message: format!("{label} relationship"),
-                hint: None,
-                rule_id: Some(rule_id.to_string()),
-            },
+            &fk.from_columns,
+            &fk.to_columns,
+            kind,
         );
     }
 }
@@ -1033,22 +983,51 @@ const fn change_indicator(kind: ChangeKind) -> &'static str {
     }
 }
 
-fn annotate_modified_table(
+/// Type a modified column had before, when its type changed.
+fn previous_type(column: &relune_core::diff::ColumnDiff) -> Option<&str> {
+    let old = column.old_value.as_ref()?;
+    let new = column.new_value.as_ref()?;
+    (!old.data_type.eq_ignore_ascii_case(&new.data_type)).then_some(old.data_type.as_str())
+}
+
+/// Records each column change on `node_id` and returns its detail lines.
+fn mark_column_changes(
+    overlay: &mut DiagramOverlay,
+    node_id: &str,
+    column_diffs: &[relune_core::diff::ColumnDiff],
+) -> Vec<String> {
+    column_diffs
+        .iter()
+        .map(|column| {
+            let previous_type = previous_type(column);
+            overlay.set_column_change(
+                node_id,
+                &column.column_name,
+                ColumnChange {
+                    kind: column.change_kind,
+                    previous_type: previous_type.map(str::to_string),
+                },
+            );
+            let indicator = change_indicator(column.change_kind);
+            match (previous_type, &column.new_value) {
+                (Some(previous), Some(new)) => format!(
+                    "{indicator} {}: {previous}{TYPE_CHANGE_SEPARATOR}{}",
+                    column.column_name, new.data_type
+                ),
+                _ => format!("{indicator} {}", column.column_name),
+            }
+        })
+        .collect()
+}
+
+fn mark_modified_table(
     overlay: &mut DiagramOverlay,
     stable_id: &str,
     table_diff: &TableDiff,
     before: &Schema,
     after: &Schema,
 ) {
-    let mut details = Vec::new();
-    for col in &table_diff.column_diffs {
-        details.push(format!(
-            "{} {}",
-            change_indicator(col.change_kind),
-            col.column_name
-        ));
-        overlay.set_column_change(stable_id, &col.column_name, col.change_kind);
-    }
+    let mut details = mark_column_changes(overlay, stable_id, &table_diff.column_diffs);
     for fk in &table_diff.fk_diffs {
         let name = fk.name.as_deref().unwrap_or("unnamed FK");
         details.push(format!("{} {name}", change_indicator(fk.change_kind)));
@@ -1061,92 +1040,49 @@ fn annotate_modified_table(
         let name = check.name.as_deref().unwrap_or("unnamed check");
         details.push(format!("{} {name}", change_indicator(check.change_kind)));
     }
-
-    let change_count = table_diff.change_count();
-    overlay.add_node_annotation(
+    overlay.set_node_change(
         stable_id,
-        Annotation {
-            severity: OverlaySeverity::Warning,
-            message: format!("Modified ({change_count} changes)"),
-            hint: if details.is_empty() {
-                None
-            } else {
-                Some(details.join(", "))
-            },
-            rule_id: Some("diff-modified".to_string()),
-        },
+        modified_node_change(table_diff.change_count(), details),
     );
 
-    // Annotate FK edges based on diff
     for fk_diff in &table_diff.fk_diffs {
-        let (severity, msg, rule_id) = match fk_diff.change_kind {
-            ChangeKind::Added => (OverlaySeverity::Info, "Added relationship", "diff-added"),
-            ChangeKind::Removed => (
-                OverlaySeverity::Error,
-                "Removed relationship",
-                "diff-removed",
-            ),
-            ChangeKind::Modified => (
-                OverlaySeverity::Warning,
-                "Modified relationship",
-                "diff-modified",
-            ),
-        };
         let fk_ref = fk_diff.new_value.as_ref().or(fk_diff.old_value.as_ref());
-        let to_table = fk_ref.map_or("", |v| v.to_table.as_str());
-        let to_schema = fk_ref.and_then(|v| v.to_schema.as_deref());
-        if !to_table.is_empty() {
-            let target_id = resolve_fk_target_stable_id(after, to_schema, to_table)
-                .or_else(|| resolve_fk_target_stable_id(before, to_schema, to_table))
-                .unwrap_or_else(|| to_table.to_string());
-            overlay.add_edge_annotation(
-                stable_id,
-                &target_id,
-                Annotation {
-                    severity,
-                    message: msg.to_string(),
-                    hint: None,
-                    rule_id: Some(rule_id.to_string()),
-                },
-            );
-        }
+        let Some(fk_ref) = fk_ref.filter(|fk| !fk.to_table.is_empty()) else {
+            continue;
+        };
+        let to_schema = fk_ref.to_schema.as_deref();
+        let to_table = fk_ref.to_table.as_str();
+        let target_id = resolve_fk_target_stable_id(after, to_schema, to_table)
+            .or_else(|| resolve_fk_target_stable_id(before, to_schema, to_table))
+            .unwrap_or_else(|| to_table.to_string());
+        overlay.set_edge_change(
+            stable_id,
+            &target_id,
+            &fk_ref.from_columns,
+            &fk_ref.to_columns,
+            fk_diff.change_kind,
+        );
     }
 }
 
-fn annotate_modified_view(overlay: &mut DiagramOverlay, view_id: &str, view_diff: &ViewDiff) {
-    let mut details = Vec::new();
-    for column in &view_diff.column_diffs {
-        details.push(format!(
-            "{} {}",
-            change_indicator(column.change_kind),
-            column.column_name
-        ));
-        overlay.set_column_change(view_id, &column.column_name, column.change_kind);
-    }
+fn mark_modified_view(overlay: &mut DiagramOverlay, view_id: &str, view_diff: &ViewDiff) {
+    let mut details = mark_column_changes(overlay, view_id, &view_diff.column_diffs);
     if view_diff.definition_changed() {
         details.push("~ definition".to_string());
     }
 
     let change_count = view_diff.column_diffs.len() + usize::from(view_diff.definition_changed());
-    overlay.add_node_annotation(
-        view_id,
-        Annotation {
-            severity: OverlaySeverity::Warning,
-            message: format!("Modified ({change_count} changes)"),
-            hint: if details.is_empty() {
-                None
-            } else {
-                Some(details.join(", "))
-            },
-            rule_id: Some("diff-modified".to_string()),
-        },
-    );
+    overlay.set_node_change(view_id, modified_node_change(change_count, details));
 }
 
-fn annotate_modified_enum(overlay: &mut DiagramOverlay, enum_id: &str, enum_diff: &EnumDiff) {
+fn mark_modified_enum(overlay: &mut DiagramOverlay, enum_id: &str, enum_diff: &EnumDiff) {
     // Enum nodes list their values as columns.
     for value_diff in &enum_diff.value_diffs {
-        overlay.set_column_change(enum_id, &value_diff.value, value_diff.change_kind);
+        overlay.set_column_change(
+            enum_id,
+            &value_diff.value,
+            ColumnChange::new(value_diff.change_kind),
+        );
     }
     let details = enum_diff
         .value_diffs
@@ -1172,18 +1108,9 @@ fn annotate_modified_enum(overlay: &mut DiagramOverlay, enum_id: &str, enum_diff
         })
         .collect::<Vec<_>>();
 
-    overlay.add_node_annotation(
+    overlay.set_node_change(
         enum_id,
-        Annotation {
-            severity: OverlaySeverity::Warning,
-            message: format!("Modified ({} changes)", enum_diff.value_diffs.len()),
-            hint: if details.is_empty() {
-                None
-            } else {
-                Some(details.join(", "))
-            },
-            rule_id: Some("diff-modified".to_string()),
-        },
+        modified_node_change(enum_diff.value_diffs.len(), details),
     );
 }
 
@@ -1583,11 +1510,11 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
         assert!(!overlay.is_empty());
         let node = overlay.node("users").expect("should have users overlay");
-        assert_eq!(node.annotations[0].rule_id.as_deref(), Some("diff-added"));
-        assert_eq!(node.annotations[0].severity, OverlaySeverity::Info);
+        assert_eq!(node.change_kind(), Some(ChangeKind::Added));
+        assert!(node.annotations.is_empty());
     }
 
     #[test]
@@ -1609,22 +1536,28 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
         let view_overlay = overlay.node("active_users").expect("view overlay");
-        assert_eq!(view_overlay.max_severity(), Some(OverlaySeverity::Warning));
+        assert_eq!(view_overlay.change_kind(), Some(ChangeKind::Modified));
 
         assert_eq!(
             view_overlay.column_changes,
-            std::collections::BTreeMap::from([("status".to_string(), ChangeKind::Removed)])
+            std::collections::BTreeMap::from([(
+                "status".to_string(),
+                ColumnChange::new(ChangeKind::Removed)
+            )])
         );
 
         let enum_overlay = overlay.node("status").expect("enum overlay");
-        assert_eq!(enum_overlay.max_severity(), Some(OverlaySeverity::Warning));
+        assert_eq!(enum_overlay.change_kind(), Some(ChangeKind::Modified));
         assert_eq!(
             enum_overlay.column_changes,
             std::collections::BTreeMap::from([
-                ("draft".to_string(), ChangeKind::Modified),
-                ("published".to_string(), ChangeKind::Modified),
+                ("draft".to_string(), ColumnChange::new(ChangeKind::Modified)),
+                (
+                    "published".to_string(),
+                    ColumnChange::new(ChangeKind::Modified)
+                ),
             ])
         );
     }
@@ -1640,11 +1573,10 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
         assert!(!overlay.is_empty());
         let node = overlay.node("users").expect("should have users overlay");
-        assert_eq!(node.annotations[0].rule_id.as_deref(), Some("diff-removed"));
-        assert_eq!(node.annotations[0].severity, OverlaySeverity::Error);
+        assert_eq!(node.change_kind(), Some(ChangeKind::Removed));
     }
 
     #[test]
@@ -1658,14 +1590,12 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
         assert!(!overlay.is_empty());
         let node = overlay.node("users").expect("should have users overlay");
-        assert_eq!(
-            node.annotations[0].rule_id.as_deref(),
-            Some("diff-modified")
-        );
-        assert_eq!(node.annotations[0].severity, OverlaySeverity::Warning);
+        let change = node.change.as_ref().expect("modified table change");
+        assert_eq!(change.kind, ChangeKind::Modified);
+        assert_eq!(change.details, vec!["+ name".to_string()]);
     }
 
     #[test]
@@ -1682,14 +1612,75 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
         let node = overlay.node("users").expect("should have users overlay");
         assert_eq!(
             node.column_changes,
             std::collections::BTreeMap::from([
-                ("email".to_string(), ChangeKind::Modified),
-                ("name".to_string(), ChangeKind::Added),
+                (
+                    "email".to_string(),
+                    ColumnChange {
+                        kind: ChangeKind::Modified,
+                        previous_type: Some("TEXT".to_string()),
+                    }
+                ),
+                ("name".to_string(), ColumnChange::new(ChangeKind::Added)),
             ])
+        );
+        let details = &node.change.as_ref().expect("change").details;
+        assert!(details.contains(&"~ email: TEXT → VARCHAR(255)".to_string()));
+    }
+
+    #[test]
+    fn test_build_diff_overlay_keeps_risk_apart_from_change_kind() {
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(120), bio VARCHAR(500));\n\
+        ";
+        // `name` widens (modified, safe); `bio` narrows (modified, breaking);
+        // `status` is a NOT NULL column added without a default (added, risky).
+        let after = "\
+            CREATE TABLE users (\
+                id INT PRIMARY KEY, name VARCHAR(500), bio VARCHAR(120), status TEXT NOT NULL\
+            );\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+        let findings = relune_core::run_rules(
+            &diff,
+            &before_schema,
+            &after_schema,
+            ReviewRuleId::all_rules(),
+            relune_core::EffectiveDialect::Auto,
+        );
+
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &findings);
+        let node = overlay.node("users").expect("users overlay");
+        assert_eq!(node.change_kind(), Some(ChangeKind::Modified));
+        assert_eq!(
+            node.column_changes["status"],
+            ColumnChange::new(ChangeKind::Added)
+        );
+        assert_eq!(
+            node.column_changes["name"].previous_type.as_deref(),
+            Some("VARCHAR(120)")
+        );
+        let rules: Vec<_> = node
+            .annotations
+            .iter()
+            .map(|a| (a.rule_id.as_deref().unwrap_or_default(), a.severity))
+            .collect();
+        assert!(rules.contains(&("risk/type-narrow", relune_core::ReviewSeverity::Breaking)));
+        assert!(rules.contains(&(
+            "risk/add-not-null-on-existing",
+            relune_core::ReviewSeverity::Warning
+        )));
+        assert_eq!(
+            node.top_risk(),
+            Some((relune_core::ReviewSeverity::Breaking, 1))
         );
     }
 
@@ -1703,7 +1694,7 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(sql)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
         assert!(overlay.is_empty());
     }
 
@@ -1723,10 +1714,9 @@ mod tests {
         assert!(result.rendered.is_some());
         let svg = result.rendered.unwrap();
         assert!(svg.contains("<svg"));
-        // Added table should have overlay-info class
-        assert!(svg.contains("overlay-info"));
-        // Modified table should have overlay-warning class
-        assert!(svg.contains("overlay-warning"));
+        assert!(svg.contains("node-kind-table diff-added"));
+        assert!(svg.contains("node-kind-table diff-modified"));
+        assert!(svg.contains(r#"class="column-row diff-added" data-column-name="name""#));
     }
 
     #[test]
@@ -1745,9 +1735,10 @@ mod tests {
         assert!(result.rendered.is_some());
         let html = result.rendered.unwrap();
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("overlay-warning"));
-        // Metadata should include diff issues
         assert!(html.contains("diff-modified"));
+        // Metadata carries the change kind and details apart from risks
+        assert!(html.contains(r#""diff_kind":"modified""#));
+        assert!(html.contains(r#""diff_details":["+ name"]"#));
     }
 
     // ---------------------------------------------------------------
@@ -1780,10 +1771,10 @@ mod tests {
 
         let svg = result.rendered.as_deref().expect("SVG output expected");
         assert!(svg.contains("<svg"), "should produce valid SVG");
-        // Modified users → warning overlay
-        assert!(svg.contains("overlay-warning"), "modified table overlay");
-        // Added products → info overlay
-        assert!(svg.contains("overlay-info"), "added table overlay");
+        // Modified users → modified marking
+        assert!(svg.contains("diff-modified"), "modified table overlay");
+        // Added products → added marking
+        assert!(svg.contains("diff-added"), "added table overlay");
         // orders should be filtered out
         assert!(
             !svg.contains(">orders<"),
@@ -1825,7 +1816,7 @@ mod tests {
         );
 
         let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(svg.contains("overlay-warning"), "users should be modified");
+        assert!(svg.contains("diff-modified"), "users should be modified");
         assert!(
             !svg.contains(">logs<"),
             "excluded table should not appear in SVG"
@@ -1853,10 +1844,10 @@ mod tests {
         let result = diff(request).unwrap();
 
         let svg = result.rendered.as_deref().expect("SVG output expected");
-        // Removed table → error overlay
+        // Removed table → removed marking
         assert!(
-            svg.contains("overlay-error"),
-            "removed table should have error overlay"
+            svg.contains("diff-removed"),
+            "removed table should have removed marking"
         );
         assert!(
             svg.contains("old_cache"),
@@ -1928,8 +1919,8 @@ mod tests {
         assert!(svg.contains("<svg"), "should produce valid SVG");
         // posts is modified (FK removed)
         assert!(
-            svg.contains("overlay-warning"),
-            "modified table should have warning overlay"
+            svg.contains("diff-modified"),
+            "modified table should have modified marking"
         );
     }
 
@@ -1968,13 +1959,13 @@ mod tests {
         assert!(svg.contains("<svg"), "should produce valid SVG");
         // Modified orders → warning
         assert!(
-            svg.contains("overlay-warning"),
-            "modified table should have warning overlay"
+            svg.contains("diff-modified"),
+            "modified table should have modified marking"
         );
         // Added departments → info
         assert!(
-            svg.contains("overlay-info"),
-            "added table should have info overlay"
+            svg.contains("diff-added"),
+            "added table should have added marking"
         );
     }
 
@@ -2005,13 +1996,13 @@ mod tests {
         assert!(svg.contains("<svg"), "should produce valid SVG");
         // Modified app_users → warning
         assert!(
-            svg.contains("overlay-warning"),
-            "modified table should have warning overlay"
+            svg.contains("diff-modified"),
+            "modified table should have modified marking"
         );
         // Removed sys_logs → error
         assert!(
-            svg.contains("overlay-error"),
-            "removed table should have error overlay"
+            svg.contains("diff-removed"),
+            "removed table should have removed marking"
         );
         // All tables should be present
         assert!(svg.contains("app_users"), "app_users should appear");
@@ -2047,8 +2038,8 @@ mod tests {
             "removed table must remain visible with grouping active"
         );
         assert!(
-            svg.contains("overlay-error"),
-            "removed table should have error overlay"
+            svg.contains("diff-removed"),
+            "removed table should have removed marking"
         );
     }
 
@@ -2088,9 +2079,9 @@ mod tests {
         let svg = result.rendered.as_deref().expect("SVG output expected");
         assert!(svg.contains("<svg"));
         // Modified app_users → warning
-        assert!(svg.contains("overlay-warning"), "modified table overlay");
+        assert!(svg.contains("diff-modified"), "modified table overlay");
         // Added app_tags → info
-        assert!(svg.contains("overlay-info"), "added table overlay");
+        assert!(svg.contains("diff-added"), "added table overlay");
         // sys_logs is removed but also filtered out by app_* include
         assert!(
             !svg.contains("sys_logs"),
@@ -2126,7 +2117,7 @@ mod tests {
         let svg = result.rendered.as_deref().expect("SVG output expected");
         assert!(svg.contains("<svg"));
         // app_orders is modified (FK removed)
-        assert!(svg.contains("overlay-warning"), "modified table overlay");
+        assert!(svg.contains("diff-modified"), "modified table overlay");
         // All three tables should be present
         assert!(svg.contains("app_users"));
         assert!(svg.contains("app_orders"));
@@ -2163,10 +2154,10 @@ mod tests {
 
         let svg = result.rendered.as_deref().expect("SVG output expected");
         assert!(svg.contains("<svg"));
-        // Both modified tables → warning overlays
-        assert!(svg.contains("overlay-warning"), "modified tables overlay");
-        // Added events → info overlay
-        assert!(svg.contains("overlay-info"), "added table overlay");
+        // Both modified tables → modified markings
+        assert!(svg.contains("diff-modified"), "modified tables overlay");
+        // Added events → added marking
+        assert!(svg.contains("diff-added"), "added table overlay");
     }
 
     #[test]
@@ -2205,7 +2196,7 @@ mod tests {
         let svg = result.rendered.as_deref().expect("SVG output expected");
         assert!(svg.contains("<svg"));
         // Modified sales.orders should be visible
-        assert!(svg.contains("overlay-warning"), "modified orders overlay");
+        assert!(svg.contains("diff-modified"), "modified orders overlay");
         // hr tables should be filtered out
         assert!(
             !svg.contains("employees"),
@@ -2220,6 +2211,82 @@ mod tests {
     // ---------------------------------------------------------------
     // Overlay correctness: verify overlay data matches diff data
     // ---------------------------------------------------------------
+
+    #[test]
+    fn test_build_diff_overlay_keeps_parallel_relationships_apart() {
+        // Two FKs from posts to users: author_id stays, editor_id becomes
+        // reviewer_id. Each line must keep its own change kind.
+        let before = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (\
+                id INT PRIMARY KEY,\
+                author_id INT REFERENCES users(id),\
+                editor_id INT REFERENCES users(id)\
+            );\n\
+        ";
+        let after = "\
+            CREATE TABLE users (id INT PRIMARY KEY);\n\
+            CREATE TABLE posts (\
+                id INT PRIMARY KEY,\
+                author_id INT REFERENCES users(id),\
+                reviewer_id INT REFERENCES users(id)\
+            );\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
+
+        assert!(
+            overlay
+                .edge("posts", "users", &["author_id"], &["id"])
+                .is_none()
+        );
+        assert_eq!(
+            overlay
+                .edge("posts", "users", &["editor_id"], &["id"])
+                .and_then(|edge| edge.change),
+            Some(ChangeKind::Removed)
+        );
+        assert_eq!(
+            overlay
+                .edge("posts", "users", &["reviewer_id"], &["id"])
+                .and_then(|edge| edge.change),
+            Some(ChangeKind::Added)
+        );
+    }
+
+    #[test]
+    fn test_build_diff_overlay_tells_apart_repointed_target_columns() {
+        let before = "\
+            CREATE TABLE parent (id INT PRIMARY KEY, code INT UNIQUE);\n\
+            CREATE TABLE child (id INT PRIMARY KEY, ref INT REFERENCES parent(id));\n\
+        ";
+        let after = "\
+            CREATE TABLE parent (id INT PRIMARY KEY, code INT UNIQUE);\n\
+            CREATE TABLE child (id INT PRIMARY KEY, ref INT REFERENCES parent(code));\n\
+        ";
+
+        let (before_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(before)).unwrap();
+        let (after_schema, _) =
+            schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
+        let diff = relune_core::diff_schemas(&before_schema, &after_schema);
+
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
+
+        let change = |to_column: &str| {
+            overlay
+                .edge("child", "parent", &["ref"], &[to_column])
+                .and_then(|edge| edge.change)
+        };
+        assert_eq!(change("id"), Some(ChangeKind::Removed));
+        assert_eq!(change("code"), Some(ChangeKind::Added));
+    }
 
     #[test]
     fn test_build_diff_overlay_fk_edge_annotations() {
@@ -2240,25 +2307,22 @@ mod tests {
             schema_from_input(&crate::request::InputSource::sql_text(after)).unwrap();
         let diff = relune_core::diff_schemas(&before_schema, &after_schema);
 
-        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff);
+        let overlay = build_diff_overlay(&before_schema, &after_schema, &diff, &[]);
 
         // posts→users edge removed
-        let post_user_edge = overlay.edge("posts", "users");
+        let post_user_edge = overlay.edge("posts", "users", &["user_id"], &["id"]);
         assert!(
             post_user_edge.is_some(),
             "posts→users removed FK should be annotated"
         );
-        assert!(
-            post_user_edge
-                .unwrap()
-                .annotations
-                .iter()
-                .any(|a| a.rule_id.as_deref() == Some("diff-removed")),
-            "posts→users should have diff-removed annotation"
+        assert_eq!(
+            post_user_edge.unwrap().change,
+            Some(ChangeKind::Removed),
+            "posts→users should be marked removed"
         );
 
         // tags→users edge added (via modified table)
-        let tag_user_edge = overlay.edge("tags", "users");
+        let tag_user_edge = overlay.edge("tags", "users", &["user_id"], &["id"]);
         assert!(
             tag_user_edge.is_some(),
             "tags→users added FK should be annotated"

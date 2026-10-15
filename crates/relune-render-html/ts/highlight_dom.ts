@@ -6,7 +6,12 @@ import {
 } from './highlight_actions';
 import type { HighlightState } from './highlight_state';
 import {
+  diffMarker,
+  riskLabel,
   tableDisplayName,
+  topRisk,
+  type ColumnMetadata,
+  type DiffKind,
   type EdgeMetadata,
   type IssueMetadata,
   type TableMetadata,
@@ -15,7 +20,7 @@ import {
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 const ALLOWED_DIFF_KINDS = new Set(['added', 'removed', 'modified']);
-const ALLOWED_SEVERITIES = new Set(['error', 'warning', 'info', 'hint']);
+const ALLOWED_SEVERITIES = new Set(['breaking', 'caution', 'warning', 'info']);
 /** Sanitize a value for use in CSS class names. Returns empty string for unknown values. */
 function safeCssToken(value: string, allowlist: ReadonlySet<string>): string {
   return allowlist.has(value) ? value : '';
@@ -32,12 +37,28 @@ function joinTableBadge(): HTMLDivElement {
   return badge;
 }
 
-function diffBadge(kind: string): HTMLDivElement {
+function diffBadge(kind: DiffKind): HTMLDivElement {
   const badge = document.createElement('div');
   const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
   badge.className =
     safe !== '' ? `detail-diff-badge detail-diff-badge-${safe}` : 'detail-diff-badge';
-  badge.textContent = kind;
+  badge.textContent = `${diffMarker(kind)} ${kind}`;
+  return badge;
+}
+
+/** Badge naming the highest risk and its count, e.g. `breaking 1`. */
+function riskBadge(
+  issues: readonly IssueMetadata[],
+  baseClass: string,
+): HTMLSpanElement | undefined {
+  const top = topRisk(issues);
+  const label = riskLabel(issues);
+  if (top === undefined || label === undefined) return undefined;
+  const badge = document.createElement('span');
+  const safe = safeCssToken(top.severity, ALLOWED_SEVERITIES);
+  badge.className = safe !== '' ? `${baseClass} ${baseClass}-${safe}` : baseClass;
+  badge.textContent = label;
+  badge.title = `${issues.length} risk${issues.length === 1 ? '' : 's'}`;
   return badge;
 }
 
@@ -311,6 +332,8 @@ export interface DrawerElements {
   columnsEmpty: HTMLElement;
   relations: HTMLElement;
   relationsEmpty: HTMLElement;
+  changesSection: HTMLElement | null;
+  changes: HTMLElement | null;
   issues: HTMLElement | null;
   issuesEmpty: HTMLElement | null;
 }
@@ -341,6 +364,8 @@ export function renderDrawer(
     clearChildren(elements.metrics);
     clearChildren(elements.columns);
     clearChildren(elements.relations);
+    if (elements.changes) clearChildren(elements.changes);
+    if (elements.changesSection) elements.changesSection.setAttribute('hidden', '');
     if (elements.issues) clearChildren(elements.issues);
     elements.columnsEmpty.removeAttribute('hidden');
     elements.relationsEmpty.removeAttribute('hidden');
@@ -375,6 +400,23 @@ export function renderDrawer(
     metricCard('Out \u2192', String(table.outbound_count)),
   );
 
+  // Diff changes (FK, index and check changes are listed only here)
+  if (elements.changes instanceof HTMLElement && elements.changesSection instanceof HTMLElement) {
+    clearChildren(elements.changes);
+    const details = table.diff_details ?? [];
+    if (details.length === 0) {
+      elements.changesSection.setAttribute('hidden', '');
+    } else {
+      elements.changesSection.removeAttribute('hidden');
+      for (const detail of details) {
+        const item = document.createElement('li');
+        item.className = 'detail-change';
+        item.textContent = detail;
+        elements.changes.appendChild(item);
+      }
+    }
+  }
+
   // Columns
   clearChildren(elements.columns);
   if (table.columns.length === 0) {
@@ -400,7 +442,7 @@ export function renderDrawer(
     }
   }
 
-  // Issues
+  // Risks
   if (elements.issues instanceof HTMLElement && elements.issuesEmpty instanceof HTMLElement) {
     clearChildren(elements.issues);
     const issues: IssueMetadata[] = table.issues ?? [];
@@ -452,23 +494,15 @@ export function renderHoverPopover(
     elements.badges.appendChild(diffBadge(table.diff_kind));
   }
 
-  const issues = table.issues ?? [];
-  if (issues.length > 0) {
-    elements.badges.appendChild(issueCountBadge(issues));
+  const badge = riskBadge(table.issues ?? [], 'hover-popover-badge');
+  if (badge !== undefined) {
+    elements.badges.appendChild(badge);
   }
 
   placePopover(elements.popover, position);
 }
 
-function buildColumnElement(column: {
-  name: string;
-  data_type: string;
-  nullable: boolean;
-  is_primary_key: boolean;
-  is_foreign_key: boolean;
-  is_indexed: boolean;
-  diff_kind?: string | null;
-}): HTMLDivElement {
+function buildColumnElement(column: ColumnMetadata): HTMLDivElement {
   const columnEl = document.createElement('div');
   columnEl.className = 'detail-column';
 
@@ -502,7 +536,9 @@ function buildColumnElement(column: {
 
   const typePill = document.createElement('span');
   typePill.className = 'detail-column-pill';
-  typePill.textContent = column.data_type || 'unknown';
+  const dataType = column.data_type || 'unknown';
+  typePill.textContent =
+    column.previous_data_type != null ? `${column.previous_data_type} → ${dataType}` : dataType;
   pills.appendChild(typePill);
 
   const nullPill = document.createElement('span');
@@ -517,7 +553,7 @@ function buildColumnElement(column: {
       safeDiff !== ''
         ? `detail-column-pill detail-column-pill-diff detail-column-pill-diff-${safeDiff}`
         : 'detail-column-pill detail-column-pill-diff';
-    diffPill.textContent = column.diff_kind;
+    diffPill.textContent = `${diffMarker(column.diff_kind)} ${column.diff_kind}`;
     pills.appendChild(diffPill);
   }
 
@@ -610,24 +646,6 @@ function summaryMetric(label: string, value: string): HTMLSpanElement {
   return metric;
 }
 
-function issueCountBadge(issues: IssueMetadata[]): HTMLSpanElement {
-  const badge = document.createElement('span');
-  const safeSeverity = safeCssToken(highestIssueSeverity(issues), ALLOWED_SEVERITIES);
-  badge.className =
-    safeSeverity !== ''
-      ? `hover-popover-badge hover-popover-badge-${safeSeverity}`
-      : 'hover-popover-badge';
-  badge.textContent = `${issues.length} issue${issues.length === 1 ? '' : 's'}`;
-  return badge;
-}
-
-function highestIssueSeverity(issues: IssueMetadata[]): string {
-  const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
-  return issues.reduce((max, issue) => {
-    return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
-  }, 'hint');
-}
-
 function placePopover(popover: HTMLElement, position: PopoverPosition): void {
   const margin = 12;
   popover.removeAttribute('hidden');
@@ -706,20 +724,8 @@ function buildObjectBrowserButton(
   kind.className = 'object-browser-kind';
   kind.textContent = table.kind;
 
-  const tableIssues = table.issues ?? [];
-  if (tableIssues.length > 0) {
-    const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
-    const maxSeverity = tableIssues.reduce((max, issue) => {
-      return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
-    }, 'hint' as string);
-    const issueBadge = document.createElement('span');
-    const safeSev = safeCssToken(maxSeverity, ALLOWED_SEVERITIES);
-    issueBadge.className =
-      safeSev !== ''
-        ? `object-browser-issue-badge object-browser-issue-badge-${safeSev}`
-        : 'object-browser-issue-badge';
-    issueBadge.textContent = String(tableIssues.length);
-    issueBadge.title = `${tableIssues.length} issue${tableIssues.length === 1 ? '' : 's'}`;
+  const issueBadge = riskBadge(table.issues ?? [], 'object-browser-issue-badge');
+  if (issueBadge !== undefined) {
     header.append(name, issueBadge, kind);
   } else {
     header.append(name, kind);

@@ -697,6 +697,7 @@ mod tests {
                             is_indexed: false,
                         },
                     },
+                    previous_data_type: None,
                 },
                 PositionedColumn {
                     name: "author_id".to_string(),
@@ -709,6 +710,7 @@ mod tests {
                             is_indexed: true,
                         },
                     },
+                    previous_data_type: None,
                 },
             ],
             x: 0.0,
@@ -826,6 +828,7 @@ mod tests {
                             is_indexed: false,
                         },
                     },
+                    previous_data_type: None,
                 })
                 .collect(),
             x,

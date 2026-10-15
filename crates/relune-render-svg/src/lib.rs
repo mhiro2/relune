@@ -5,8 +5,9 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{EdgeKind, NodeKind, layout::RouteStyle};
+use relune_core::{ChangeKind, EdgeKind, NodeKind, layout::RouteStyle};
 
+mod diff;
 pub mod edge;
 mod error;
 pub mod escape;
@@ -124,7 +125,8 @@ pub fn render_svg_with_overlay(
         ..EdgeRenderOptions::default()
     };
     for (index, edge) in graph.edges.iter().enumerate() {
-        let edge_overlay = overlay.and_then(|o| o.edge(&edge.from, &edge.to));
+        let edge_overlay = overlay
+            .and_then(|o| o.edge(&edge.from, &edge.to, &edge.from_columns, &edge.to_columns));
         render_edge_internal(&mut out, edge, &colors, &edge_options, index, edge_overlay)?;
     }
 
@@ -182,8 +184,10 @@ fn estimate_svg_capacity(
                 .sum::<usize>();
             let tooltip_bytes = if options.show_tooltips { 256 } else { 0 };
             let overlay_bytes = overlay
-                .and_then(|item| item.edge(&edge.from, &edge.to))
-                .map_or(0, estimate_edge_overlay_bytes);
+                .and_then(|item| {
+                    item.edge(&edge.from, &edge.to, &edge.from_columns, &edge.to_columns)
+                })
+                .map_or(0, |_| 96);
             768 + route_bytes
                 + label_bytes
                 + endpoint_bytes
@@ -219,11 +223,25 @@ fn estimate_svg_capacity(
 }
 
 fn estimate_node_overlay_bytes(overlay: &relune_layout::NodeOverlay) -> usize {
-    estimate_annotations_bytes(&overlay.annotations)
-}
-
-fn estimate_edge_overlay_bytes(overlay: &relune_layout::EdgeOverlay) -> usize {
-    estimate_annotations_bytes(&overlay.annotations)
+    let change_bytes = overlay.change.as_ref().map_or(0, |change| {
+        256 + change.summary.len() * 12
+            + change
+                .details
+                .iter()
+                .map(|detail| detail.len() * 12)
+                .sum::<usize>()
+    });
+    let column_bytes = overlay
+        .column_changes
+        .values()
+        .map(|change| {
+            384 + change
+                .previous_type
+                .as_ref()
+                .map_or(0, |previous| 64 + previous.len() * 12)
+        })
+        .sum::<usize>();
+    change_bytes + column_bytes + estimate_annotations_bytes(&overlay.annotations)
 }
 
 fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usize {
@@ -331,56 +349,46 @@ fn render_edge_internal(
                 edge.route.style,
                 RouteStyle::Orthogonal | RouteStyle::Straight
             ) && shortest_seg < MIN_SVG_MARKER_BACKBONE_SEGMENT));
-    let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
+    let change = overlay.and_then(|edge_overlay| edge_overlay.change);
 
-    let stroke_dasharray = if options.dashed {
-        Some("5,3")
+    let stroke_dasharray = if options.dashed || change == Some(ChangeKind::Removed) {
+        Some(diff::REMOVED_DASHARRAY)
     } else {
         edge_style.dasharray
     };
 
-    // Add overlay severity CSS class if present
-    let severity_class = match max_severity {
-        Some(relune_layout::OverlaySeverity::Error) => " overlay-error",
-        Some(relune_layout::OverlaySeverity::Warning) => " overlay-warning",
-        Some(relune_layout::OverlaySeverity::Info) => " overlay-info",
-        Some(relune_layout::OverlaySeverity::Hint) => " overlay-hint",
-        None => "",
-    };
-
     write!(
         out,
-        r#"<g id="edge-{index}" class="edge edge-kind-{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
+        r#"<g id="edge-{index}" class="edge edge-kind-{}{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
-        severity_class,
+        if change.is_some() { " " } else { "" },
+        change.map_or("", diff::change_class),
         escape_attribute(&edge.from),
         escape_attribute(&edge.to),
         kind,
         index as f32 * 0.016 + 0.04
     )?;
 
-    // Add tooltip if enabled (with overlay annotations appended)
+    // Add tooltip if enabled (with the diff change appended)
     if options.show_tooltips {
         let mut tooltip_text = generate_edge_tooltip(edge);
-        if let Some(edge_overlay) = overlay
-            && !edge_overlay.annotations.is_empty()
-        {
-            tooltip_text.push('\n');
-            for annotation in &edge_overlay.annotations {
-                let severity_label = overlay_severity_label(annotation.severity);
-                write!(tooltip_text, "\n[{severity_label}] {}", annotation.message)?;
-                if let Some(ref hint) = annotation.hint {
-                    write!(tooltip_text, "\n  → {hint}")?;
-                }
-            }
+        if let Some(change) = change {
+            write!(
+                tooltip_text,
+                "\n\n{} {change} relationship",
+                diff::change_marker(change)
+            )?;
         }
         write!(out, r"<title>{}</title>", escape_text(&tooltip_text))?;
     }
 
-    // Override stroke color when overlay severity is present
-    let effective_stroke = match max_severity {
-        Some(severity) => overlay_severity_color(severity, colors),
-        None => edge_style.stroke,
+    // A changed relationship takes its change kind's color and a heavier line.
+    let (effective_stroke, stroke_width) = match change {
+        Some(change) => (
+            diff::change_color(change, colors),
+            options.stroke_width.max(2.0),
+        ),
+        None => (edge_style.stroke, options.stroke_width),
     };
 
     // Render the path with CSS class and data attributes
@@ -397,7 +405,7 @@ fn render_edge_internal(
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
-                options.stroke_width,
+                stroke_width,
                 marker_attrs,
                 stroke_dasharray
             )?;
@@ -409,7 +417,7 @@ fn render_edge_internal(
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
-                options.stroke_width,
+                stroke_width,
                 marker_attrs,
             )?;
         }
@@ -504,36 +512,6 @@ pub(crate) const fn is_light_theme(colors: &ThemeColors) -> bool {
     colors.is_light
 }
 
-/// Returns a display-friendly label for an overlay severity level.
-pub(crate) const fn overlay_severity_label(
-    severity: relune_layout::OverlaySeverity,
-) -> &'static str {
-    match severity {
-        relune_layout::OverlaySeverity::Error => "error",
-        relune_layout::OverlaySeverity::Warning => "warning",
-        relune_layout::OverlaySeverity::Info => "info",
-        relune_layout::OverlaySeverity::Hint => "hint",
-    }
-}
-
-/// Returns the stroke/fill color for an overlay severity, themed for light/dark.
-pub(crate) const fn overlay_severity_color(
-    severity: relune_layout::OverlaySeverity,
-    colors: &ThemeColors,
-) -> &'static str {
-    let light = is_light_theme(colors);
-    match (severity, light) {
-        (relune_layout::OverlaySeverity::Error, false) => "#f87171",
-        (relune_layout::OverlaySeverity::Error, true) => "#dc2626",
-        (relune_layout::OverlaySeverity::Warning, false) => "#fbbf24",
-        (relune_layout::OverlaySeverity::Warning, true) => "#d97706",
-        (relune_layout::OverlaySeverity::Info, false) => "#38bdf8",
-        (relune_layout::OverlaySeverity::Info, true) => "#0284c7",
-        (relune_layout::OverlaySeverity::Hint, false) => "#94a3b8",
-        (relune_layout::OverlaySeverity::Hint, true) => "#64748b",
-    }
-}
-
 const fn edge_kind_name(kind: EdgeKind) -> &'static str {
     match kind {
         EdgeKind::ForeignKey => "foreign-key",
@@ -619,6 +597,7 @@ mod tests {
         PositionedColumn {
             name: name.to_string(),
             data_type: data_type.to_string(),
+            previous_data_type: None,
             flags: ColumnFlags { nullable, relation },
         }
     }
@@ -1845,45 +1824,42 @@ mod tests {
         assert!(!svg.contains("Group & <Test>"));
     }
 
-    #[test]
-    fn test_render_svg_with_node_overlay_adds_severity_class() {
-        let graph = single_node_graph();
-        let mut overlay = relune_layout::DiagramOverlay::new();
-        overlay.add_node_annotation(
-            "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "No primary key".to_string(),
-                hint: Some("Add a PK column".to_string()),
-                rule_id: Some("no-primary-key".to_string()),
-            },
-        );
-
-        let options = SvgRenderOptions {
-            show_tooltips: true,
-            ..Default::default()
-        };
-        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
-
-        assert!(svg.contains("overlay-warning"));
-        assert!(svg.contains("overlay-badge"));
-        assert!(svg.contains("[warning] No primary key"));
-        assert!(svg.contains("Add a PK column"));
+    fn risk(severity: relune_core::ReviewSeverity, message: &str) -> relune_layout::Annotation {
+        relune_layout::Annotation {
+            severity,
+            message: message.to_string(),
+            hint: Some("Backfill before tightening".to_string()),
+            rule_id: Some("risk/add-not-null-on-existing".to_string()),
+        }
     }
 
     #[test]
-    fn test_render_svg_with_edge_overlay_changes_stroke() {
-        let graph = multi_node_graph();
+    fn test_render_svg_shows_risk_apart_from_change_kind() {
+        let graph = single_node_graph();
         let mut overlay = relune_layout::DiagramOverlay::new();
-        overlay.add_edge_annotation(
-            "posts",
+        overlay.set_node_change(
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "Missing index on FK".to_string(),
-                hint: None,
-                rule_id: Some("missing-foreign-key-index".to_string()),
+            relune_layout::NodeChange {
+                kind: relune_core::ChangeKind::Modified,
+                summary: "Modified (1 changes)".to_string(),
+                details: vec!["+ name".to_string()],
             },
+        );
+        overlay.set_column_change(
+            "users",
+            "name",
+            relune_layout::ColumnChange::new(relune_core::ChangeKind::Added),
+        );
+        overlay.add_node_annotation(
+            "users",
+            risk(
+                relune_core::ReviewSeverity::Warning,
+                "NOT NULL column added",
+            ),
+        );
+        overlay.add_node_annotation(
+            "users",
+            risk(relune_core::ReviewSeverity::Breaking, "Column dropped"),
         );
 
         let options = SvgRenderOptions {
@@ -1892,34 +1868,107 @@ mod tests {
         };
         let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
 
-        // Edge should have overlay-warning class
-        assert!(svg.contains("edge-kind-foreign-key overlay-warning"));
-        // Tooltip should include annotation
-        assert!(svg.contains("[warning] Missing index on FK"));
+        assert!(svg.contains("node-kind-table diff-modified risk-breaking"));
+        assert!(svg.contains(r#"class="column-row diff-added" data-column-name="name""#));
+        assert!(svg.contains(">breaking 1</text>"));
+        assert!(svg.contains("~ Modified (1 changes)"));
+        assert!(svg.contains("[warning] NOT NULL column added"));
+        assert!(svg.contains("Backfill before tightening"));
+    }
+
+    #[test]
+    fn test_render_svg_draws_type_change_inline() {
+        let mut graph = single_node_graph();
+        graph.nodes[0].columns[1].previous_data_type = Some("varchar(500)".to_string());
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.set_column_change(
+            "users",
+            "name",
+            relune_layout::ColumnChange {
+                kind: relune_core::ChangeKind::Modified,
+                previous_type: Some("varchar(500)".to_string()),
+            },
+        );
+
+        let svg = render_svg_with_overlay(&graph, SvgRenderOptions::default(), Some(&overlay));
+
+        assert!(svg.contains(
+            r#"<tspan class="column-type-previous">varchar(500)</tspan> → <tspan class="column-type-current""#
+        ));
+        assert!(svg.contains(">text</tspan></text>"));
+        // A row-level change leaves the card itself unmarked.
+        assert!(!svg.contains("risk-label"));
+        assert!(svg.contains(r#"class="column-row diff-modified""#));
+    }
+
+    #[test]
+    fn test_render_svg_marks_removed_card_and_relationship() {
+        let graph = multi_node_graph();
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.set_node_change(
+            "posts",
+            relune_layout::NodeChange {
+                kind: relune_core::ChangeKind::Removed,
+                summary: "Removed table (3 columns)".to_string(),
+                details: Vec::new(),
+            },
+        );
+        overlay.set_edge_change(
+            "posts",
+            "users",
+            &["user_id"],
+            &["id"],
+            relune_core::ChangeKind::Removed,
+        );
+
+        let options = SvgRenderOptions {
+            show_tooltips: true,
+            ..Default::default()
+        };
+        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
+
+        assert!(svg.contains("node-kind-table diff-removed"));
+        assert!(svg.contains(r#"class="diff-tint""#));
+        assert!(svg.contains("\u{2212}</text>"));
+        assert!(svg.contains("edge-kind-foreign-key diff-removed"));
+        assert!(svg.contains("removed relationship"));
+        // Nothing risky was reported, so no risk label is drawn.
+        assert!(!svg.contains("risk-label"));
     }
 
     #[test]
     fn test_svg_capacity_estimate_covers_overlay_render() {
         let graph = multi_node_graph();
         let mut overlay = relune_layout::DiagramOverlay::new();
-        overlay.add_node_annotation(
+        overlay.set_node_change(
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "Very long warning message for capacity estimation".to_string(),
-                hint: Some("Helpful remediation guidance for the warning".to_string()),
-                rule_id: Some("warn-capacity".to_string()),
+            relune_layout::NodeChange {
+                kind: relune_core::ChangeKind::Modified,
+                summary: "Modified (2 changes)".to_string(),
+                details: vec!["+ name".to_string(), "~ id: int → uuid PK".to_string()],
             },
         );
-        overlay.add_edge_annotation(
+        overlay.set_column_change(
+            "users",
+            "id",
+            relune_layout::ColumnChange {
+                kind: relune_core::ChangeKind::Modified,
+                previous_type: Some("int".to_string()),
+            },
+        );
+        overlay.add_node_annotation(
+            "users",
+            risk(
+                relune_core::ReviewSeverity::Breaking,
+                "Very long warning message for capacity estimation",
+            ),
+        );
+        overlay.set_edge_change(
             "posts",
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Error,
-                message: "Another long edge warning for tooltip expansion".to_string(),
-                hint: Some("Add the missing index".to_string()),
-                rule_id: Some("edge-capacity".to_string()),
-            },
+            &["user_id"],
+            &["id"],
+            relune_core::ChangeKind::Added,
         );
 
         let options = SvgRenderOptions {
@@ -1942,9 +1991,10 @@ mod tests {
         let svg_empty_overlay =
             render_svg_with_overlay(&graph, options, Some(&relune_layout::DiagramOverlay::new()));
 
-        // Both should produce identical output (no overlay classes/badges)
-        assert!(!svg_no_overlay.contains("overlay-"));
-        assert!(!svg_empty_overlay.contains("overlay-"));
+        // Both should produce identical output (no diff or risk marks)
+        assert_eq!(svg_no_overlay, svg_empty_overlay);
+        assert!(!svg_no_overlay.contains("diff-"));
+        assert!(!svg_no_overlay.contains("risk-"));
     }
 }
 

@@ -2,19 +2,25 @@
 
 use std::fmt::{self, Write};
 
+use relune_core::ChangeKind;
 use relune_core::NodeKind;
 use relune_layout::metrics::{
-    COLUMN_BADGE_HEIGHT, COLUMN_BADGE_WIDTH, COLUMN_NULLABLE_GAP, COLUMN_NULLABLE_MARKER,
-    COLUMN_NULLABLE_SLOT_WIDTH, ColumnSlots, NODE_COLUMN_FONT_SIZE, NODE_COLUMN_HEIGHT,
-    NODE_CORNER_RADIUS, NODE_DETAIL_FONT_SIZE, NODE_FIRST_ROW_TOP, NODE_HEADER_BASELINE,
-    NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
-    NODE_KIND_MARK_SIZE, NODE_ROW_BASELINE, NODE_TEXT_INSET, omitted_columns_label,
-    shows_omitted_columns_row,
+    CHANGE_MARKER_CENTER, COLUMN_BADGE_HEIGHT, COLUMN_BADGE_WIDTH, COLUMN_NULLABLE_GAP,
+    COLUMN_NULLABLE_MARKER, COLUMN_NULLABLE_SLOT_WIDTH, ColumnSlots, NODE_COLUMN_FONT_SIZE,
+    NODE_COLUMN_HEIGHT, NODE_CORNER_RADIUS, NODE_DETAIL_FONT_SIZE, NODE_FIRST_ROW_TOP,
+    NODE_HEADER_BASELINE, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET,
+    NODE_KIND_LABEL_RESERVE, NODE_KIND_MARK_SIZE, NODE_ROW_BASELINE, NODE_TEXT_INSET,
+    TYPE_CHANGE_SEPARATOR, omitted_columns_label, shows_omitted_columns_row,
 };
+use relune_layout::{NodeOverlay, PositionedColumn};
 
+use crate::diff::{
+    REMOVED_DASHARRAY, change_class, change_color, change_marker, render_change_marker,
+    render_change_tint, render_risk_label, risk_class,
+};
 use crate::escape::{escape_attribute, escape_text};
+use crate::is_light_theme;
 use crate::theme::ThemeColors;
-use crate::{is_light_theme, overlay_severity_color, overlay_severity_label};
 
 // ---------------------------------------------------------------------------
 // Node style
@@ -128,40 +134,15 @@ pub(crate) fn render_column_badge(
 }
 
 // ---------------------------------------------------------------------------
-// Overlay severity helpers
-// ---------------------------------------------------------------------------
-
-pub(crate) fn render_severity_badge(
-    out: &mut String,
-    x: f32,
-    y: f32,
-    severity: relune_layout::OverlaySeverity,
-    count: usize,
-    colors: &ThemeColors,
-) -> fmt::Result {
-    let fill = overlay_severity_color(severity, colors);
-    let text_fill = if is_light_theme(colors) {
-        "#ffffff"
-    } else {
-        "#0c0f1a"
-    };
-    let label = count.to_string();
-    let badge_width = if count >= 10 { 22.0 } else { 18.0 };
-    let badge_x = x - badge_width / 2.0;
-    write!(
-        out,
-        r#"<rect class="overlay-badge" x="{badge_x:.1}" y="{y:.1}" width="{badge_width:.1}" height="18" rx="9" fill="{fill}"/><text x="{:.1}" y="{:.1}" font-family="'Inter', system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle" fill="{text_fill}">{label}</text>"#,
-        badge_x + badge_width / 2.0,
-        y + 13.0,
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Column rows
 // ---------------------------------------------------------------------------
 
 /// Horizontal positions shared by every column row of one node.
 struct RowGeometry {
+    /// Left edge of the card.
+    card_x: f32,
+    /// Width of the card.
+    card_width: f32,
     /// Left edge of the key badges.
     key_x: f32,
     /// Left edge of the column name.
@@ -186,6 +167,8 @@ impl RowGeometry {
         };
         let index_reserve = slots.trailing_reserve() - nullable_reserve;
         Self {
+            card_x: node.x,
+            card_width: node.width,
             key_x,
             name_x: key_x + slots.key_gutter(),
             type_end_x: content_end - index_reserve - nullable_reserve,
@@ -197,7 +180,8 @@ impl RowGeometry {
 
 fn render_column_row(
     out: &mut String,
-    column: &relune_layout::PositionedColumn,
+    column: &PositionedColumn,
+    change: Option<ChangeKind>,
     geometry: &RowGeometry,
     row_top: f32,
     clip_id: &str,
@@ -209,10 +193,35 @@ fn render_column_row(
 
     write!(
         out,
-        r#"<g class="column-row" data-column-name="{}" data-nullable="{}">"#,
+        r#"<g class="column-row{}{}" data-column-name="{}" data-nullable="{}">"#,
+        if change.is_some() { " " } else { "" },
+        change.map_or("", change_class),
         escape_attribute(&column.name),
         column.flags.nullable
     )?;
+    if let Some(change) = change {
+        // The tint stays inside the border; the marker sits in the text inset.
+        render_change_tint(
+            out,
+            (
+                geometry.card_x + 1.0,
+                row_top,
+                geometry.card_width - 2.0,
+                NODE_COLUMN_HEIGHT,
+            ),
+            None,
+            change,
+            colors,
+        )?;
+        render_change_marker(
+            out,
+            geometry.card_x + CHANGE_MARKER_CENTER,
+            baseline,
+            NODE_DETAIL_FONT_SIZE,
+            change,
+            colors,
+        )?;
+    }
     if relation.is_primary_key {
         render_column_badge(
             out,
@@ -241,11 +250,22 @@ fn render_column_row(
     if !column.data_type.is_empty() {
         write!(
             out,
-            r#"<text class="column-type" x="{:.1}" y="{baseline:.1}" clip-path="url(#{clip_id})" text-anchor="end" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_DETAIL_FONT_SIZE}" fill="{}">{}</text>"#,
-            geometry.type_end_x,
-            colors.text_muted,
-            escape_text(&column.data_type)
+            r#"<text class="column-type" x="{:.1}" y="{baseline:.1}" clip-path="url(#{clip_id})" text-anchor="end" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="{NODE_DETAIL_FONT_SIZE}" fill="{}">"#,
+            geometry.type_end_x, colors.text_muted,
         )?;
+        // A changed type reads `previous → current`, with the current type
+        // in the stronger column-name color.
+        match &column.previous_data_type {
+            Some(previous) => write!(
+                out,
+                r#"<tspan class="column-type-previous">{}</tspan>{TYPE_CHANGE_SEPARATOR}<tspan class="column-type-current" fill="{}">{}</tspan>"#,
+                escape_text(previous),
+                colors.text_secondary,
+                escape_text(&column.data_type)
+            )?,
+            None => out.push_str(&escape_text(&column.data_type)),
+        }
+        out.push_str("</text>");
     }
     if column.flags.nullable {
         write!(
@@ -293,26 +313,28 @@ pub(crate) fn render_node_internal(
     colors: &ThemeColors,
     show_tooltips: bool,
     index: usize,
-    overlay: Option<&relune_layout::NodeOverlay>,
+    overlay: Option<&NodeOverlay>,
 ) -> fmt::Result {
     let kind = node_kind_name(node.kind);
     let node_label = node_kind_label(node.kind);
-    let max_severity = overlay.and_then(relune_layout::NodeOverlay::max_severity);
+    let change = overlay.and_then(NodeOverlay::change_kind);
+    let top_risk = overlay.and_then(NodeOverlay::top_risk);
 
-    // Add overlay severity CSS class if present
-    let severity_class = match max_severity {
-        Some(relune_layout::OverlaySeverity::Error) => " overlay-error",
-        Some(relune_layout::OverlaySeverity::Warning) => " overlay-warning",
-        Some(relune_layout::OverlaySeverity::Info) => " overlay-info",
-        Some(relune_layout::OverlaySeverity::Hint) => " overlay-hint",
-        None => "",
-    };
+    let mut state_classes = String::new();
+    if let Some(change) = change {
+        state_classes.push(' ');
+        state_classes.push_str(change_class(change));
+    }
+    if let Some((severity, _)) = top_risk {
+        state_classes.push(' ');
+        state_classes.push_str(risk_class(severity));
+    }
 
     write!(
         out,
         r#"<g class="table-node node node-kind-{}{}" data-table-id="{}" data-id="{}" data-node-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
-        severity_class,
+        state_classes,
         escape_attribute(&node.id),
         escape_attribute(&node.id),
         kind,
@@ -342,13 +364,26 @@ pub(crate) fn render_node_internal(
                 if pk_count == 1 { "" } else { "s" }
             ));
         }
+        if let Some(node_change) = overlay.and_then(|o| o.change.as_ref()) {
+            tooltip_parts.push(String::new());
+            tooltip_parts.push(format!(
+                "{} {}",
+                change_marker(node_change.kind),
+                node_change.summary
+            ));
+            tooltip_parts.extend(
+                node_change
+                    .details
+                    .iter()
+                    .map(|detail| format!("  {detail}")),
+            );
+        }
         if let Some(node_overlay) = overlay
             && !node_overlay.annotations.is_empty()
         {
             tooltip_parts.push(String::new());
             for annotation in &node_overlay.annotations {
-                let severity_label = overlay_severity_label(annotation.severity);
-                tooltip_parts.push(format!("[{}] {}", severity_label, annotation.message));
+                tooltip_parts.push(format!("[{}] {}", annotation.severity, annotation.message));
                 if let Some(ref hint) = annotation.hint {
                     tooltip_parts.push(format!("  → {hint}"));
                 }
@@ -361,15 +396,21 @@ pub(crate) fn render_node_internal(
         )?;
     }
 
-    // Node border: override stroke color when overlay severity is present
-    let (stroke_color, stroke_width) = match max_severity {
-        Some(severity) => (overlay_severity_color(severity, colors), "2"),
+    // A changed card is outlined in its change kind's color; a removed one
+    // also gets a dashed outline.
+    let (stroke_color, stroke_width) = match change {
+        Some(change) => (change_color(change, colors), "1.5"),
         None => (colors.node_stroke, "1"),
+    };
+    let stroke_dash = if change == Some(ChangeKind::Removed) {
+        format!(r#" stroke-dasharray="{REMOVED_DASHARRAY}""#)
+    } else {
+        String::new()
     };
 
     write!(
         out,
-        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}" stroke="{stroke_color}" stroke-width="{stroke_width}"/>"#,
+        r#"<rect class="table-body" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{NODE_CORNER_RADIUS}" ry="{NODE_CORNER_RADIUS}" fill="{}" stroke="{stroke_color}" stroke-width="{stroke_width}"{stroke_dash}/>"#,
         node.x, node.y, node.width, node.height, colors.node_fill
     )?;
     // The header tint is clipped to the card's rounded shape, inset so it
@@ -398,6 +439,28 @@ pub(crate) fn render_node_internal(
             colors.node_stroke
         )?;
     }
+    // A card added or removed as a whole is tinted throughout; a modified
+    // card tints only its changed rows.
+    if let Some(change @ (ChangeKind::Added | ChangeKind::Removed)) = change {
+        let card_clip = format!("node-{index}-card-clip");
+        render_change_tint(
+            out,
+            (node.x, node.y, node.width, node.height),
+            Some(&card_clip),
+            change,
+            colors,
+        )?;
+    }
+    if let Some(change) = change {
+        render_change_marker(
+            out,
+            node.x + CHANGE_MARKER_CENTER,
+            node.y + NODE_HEADER_BASELINE,
+            NODE_COLUMN_FONT_SIZE,
+            change,
+            colors,
+        )?;
+    }
     write!(
         out,
         r#"<rect class="table-kind-mark" x="{:.1}" y="{:.1}" width="{NODE_KIND_MARK_SIZE}" height="{NODE_KIND_MARK_SIZE}" rx="2" fill="{}"/>"#,
@@ -424,17 +487,10 @@ pub(crate) fn render_node_internal(
         escape_text(&kind.to_ascii_uppercase())
     )?;
 
-    // Render severity badge when overlay has annotations
-    if let Some(severity) = max_severity {
-        let annotation_count = overlay.map_or(0, |o| o.annotations.len());
-        render_severity_badge(
-            out,
-            node.x + node.width - 12.0,
-            node.y - 6.0,
-            severity,
-            annotation_count,
-            colors,
-        )?;
+    // The risk label names the highest review severity and how many
+    // findings carry it, apart from the change kind's colors.
+    if let Some((severity, count)) = top_risk {
+        render_risk_label(out, node.x + node.width, node.y, severity, count, colors)?;
     }
 
     if !node.columns.is_empty() {
@@ -452,7 +508,18 @@ pub(crate) fn render_node_internal(
         )?;
         let mut row_top = node.y + NODE_FIRST_ROW_TOP;
         for column in &node.columns {
-            render_column_row(out, column, &geometry, row_top, &clip_id, colors)?;
+            let column_change = overlay
+                .and_then(|o| o.column_changes.get(&column.name))
+                .map(|column_change| column_change.kind);
+            render_column_row(
+                out,
+                column,
+                column_change,
+                &geometry,
+                row_top,
+                &clip_id,
+                colors,
+            )?;
             row_top += NODE_COLUMN_HEIGHT;
         }
         if shows_omitted_columns_row(node.columns.len(), node.omitted_columns) {

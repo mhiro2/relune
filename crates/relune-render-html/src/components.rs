@@ -117,6 +117,10 @@ pub(crate) fn build_detail_drawer_html() -> String {
         <button type="button" class="detail-traversal-btn" data-depth="2">2-hop</button>
       </div>
     </div>
+    <section class="detail-section" id="detail-changes-section" hidden>
+      <h3>Changes</h3>
+      <ul class="detail-changes" id="detail-changes"></ul>
+    </section>
     <section class="detail-section">
       <h3>Columns</h3>
       <div class="detail-empty" id="detail-columns-empty">No column details available.</div>
@@ -128,8 +132,8 @@ pub(crate) fn build_detail_drawer_html() -> String {
       <div class="detail-relations" id="detail-relations"></div>
     </section>
     <section class="detail-section">
-      <h3>Health</h3>
-      <div class="detail-empty" id="detail-issues-empty">No issues detected.</div>
+      <h3>Risks</h3>
+      <div class="detail-empty" id="detail-issues-empty">No risks found.</div>
       <div class="detail-issues" id="detail-issues"></div>
     </section>
   </aside>

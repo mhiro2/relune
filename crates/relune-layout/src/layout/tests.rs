@@ -1124,6 +1124,7 @@ fn test_build_positioned_node_preserves_column_flags() {
                 is_primary_key: true,
                 is_foreign_key: false,
                 is_indexed: false,
+                previous_data_type: None,
             },
             crate::graph::LayoutColumn {
                 name: "user_id".to_string(),
@@ -1132,6 +1133,7 @@ fn test_build_positioned_node_preserves_column_flags() {
                 is_primary_key: false,
                 is_foreign_key: true,
                 is_indexed: true,
+                previous_data_type: None,
             },
         ],
         inbound_count: 0,
@@ -1319,6 +1321,7 @@ fn test_column_y_offset_from_center_basic() {
                 is_foreign_key: false,
                 is_indexed: false,
                 nullable: false,
+                previous_data_type: None,
             },
             crate::graph::LayoutColumn {
                 name: "user_id".to_string(),
@@ -1327,6 +1330,7 @@ fn test_column_y_offset_from_center_basic() {
                 is_foreign_key: true,
                 is_indexed: true,
                 nullable: false,
+                previous_data_type: None,
             },
         ],
         inbound_count: 0,
@@ -1353,6 +1357,7 @@ fn test_column_y_offset_from_center_basic() {
                         is_indexed: false,
                     },
                 },
+                previous_data_type: None,
             },
             PositionedColumn {
                 name: "user_id".to_string(),
@@ -1365,6 +1370,7 @@ fn test_column_y_offset_from_center_basic() {
                         is_indexed: true,
                     },
                 },
+                previous_data_type: None,
             },
         ],
         x: 0.0,
@@ -1425,6 +1431,7 @@ fn test_column_y_offset_fallback_for_empty_or_missing_columns() {
                     is_indexed: false,
                 },
             },
+            previous_data_type: None,
         }],
         height: 60.0,
         ..empty_node
