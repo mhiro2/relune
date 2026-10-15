@@ -117,6 +117,23 @@ export function computeRelationHighlight(
  * Column correspondences of a relationship, one `from.col → to.col` line per
  * column pair, so a composite key reads as its full set of pairs.
  */
+/** Percent-escapes the characters a relationship key uses as delimiters. */
+function escapeKeyPart(part: string): string {
+  return part.replaceAll(/[%(),>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/**
+ * Readable key naming one relationship in a shared link, e.g.
+ * `posts(user_id)>users(id)`. It names both ends and their columns, so it
+ * stays valid while unrelated relationships come and go; delimiters inside
+ * quoted identifiers are escaped so no two relationships share a key.
+ */
+export function relationKey(edge: EdgeMetadata): string {
+  const end = (table: string, columns: readonly string[]): string =>
+    `${escapeKeyPart(table)}(${columns.map(escapeKeyPart).join(',')})`;
+  return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
+}
+
 export function relationColumnPairs(edge: EdgeMetadata): string[] {
   const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
   if (pairCount === 0) {
@@ -130,4 +147,37 @@ export function relationColumnPairs(edge: EdgeMetadata): string[] {
   return edge.from_columns
     .slice(0, pairCount)
     .map((column, index) => `${edge.from}.${column} → ${edge.to}.${edge.to_columns[index]}`);
+}
+
+/**
+ * Index the arrow, Home, or End `key` moves to among `count` relationship
+ * lines, skipping lines `isFocusable` rejects. Returns `null` for other keys
+ * or when there is nowhere to go.
+ */
+export function nextLineIndex(
+  count: number,
+  current: number,
+  key: string,
+  isFocusable: (index: number) => boolean,
+): number | null {
+  const scan = (start: number, step: number): number | null => {
+    for (let index = start; index >= 0 && index < count; index += step) {
+      if (isFocusable(index)) return index;
+    }
+    return null;
+  };
+  switch (key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      return scan(current + 1, 1);
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      return scan(current - 1, -1);
+    case 'Home':
+      return scan(0, 1);
+    case 'End':
+      return scan(count - 1, -1);
+    default:
+      return null;
+  }
 }

@@ -136,6 +136,26 @@ relune render --schema-json schema.json -o from-json.svg
 
 Without `--density` (or a `density` config key), cards list every column, except that diagrams with more than 100 objects (tables, views, and enums) fall back to `overview`. An explicit density always wins. Zooming the HTML viewer never changes the density or the layout.
 
+### Groups
+
+`--group-by schema` or `--group-by prefix` draws each group as a faint surface behind its tables with a small heading. A thin boundary appears only where membership would otherwise be unclear, when another group or a table outside the group overlaps the surface.
+
+### HTML viewer
+
+The sidebar leads with search and the object list; **Filters** and **Groups** are collapsed sections that show how many filter values are active or how many groups are hidden. Selecting a table opens a detail drawer only as tall as its content, and selecting a relationship shows its column mapping in a small card. The minimap sits in the bottom-right corner and steps aside for an open drawer.
+
+| Key | Action |
+|-----|--------|
+| `/` | Focus search (bringing back a hidden sidebar) |
+| `S` | Hide or show the sidebar |
+| `G` | Open or close the Groups section |
+| `M` | Show or hide the minimap |
+| `F` | Fit the diagram to the window |
+| `+` / `-` | Zoom in / out |
+| `Esc` | Clear search, filters, and selection |
+
+Relationship lines share one Tab stop: Tab onto a line, move between lines with the arrow keys, Home, or End, and press Enter or Space to select one. The URL hash records the search, filters, hidden groups, viewport, minimap, and the selected table or relationship (`r=orders(customer_id)>customers(id)`), so a copied link reopens the same view.
+
 ---
 
 ## `inspect`
@@ -273,7 +293,7 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 
 Before comparing, `diff` and `review` treat objects in the default schema as unqualified when either input contains unqualified objects, so hand-written DDL (`CREATE TABLE users`) matches a schema exported from the database (`public.users`) instead of reporting every table as removed and re-added. The default schema is `public` for PostgreSQL, `main` for SQLite, and the connected database for MySQL (the schema shared by every object). Tables in other schemas, such as `auth.users`, stay qualified. When both inputs are fully qualified, names are reported as they are.
 
-The `svg` and `html` diagrams keep what changed apart from how risky it is. Added, removed, and modified tables, columns, and relationships are marked with `+` / `−` / `~` and a faint green / red / amber tint (a removed card or line is also dashed), and a column whose type changed reads `before → after` in its type slot, such as `varchar(500) → varchar(120)`. The risk comes from the default `review` rule set for the dialect both inputs resolve to: a card with findings carries a label naming the highest severity and how many findings have it (`breaking 1`, `caution 2`, ...), and its tooltip or the HTML viewer's Risks section lists every finding. An added column can therefore sit on a `breaking` card, and a modified one can carry no label at all. Unchanged tables keep their normal colors so they still read as context. `[review]` settings in the config file do not apply here; run `relune review` for the configured verdict.
+The `svg` and `html` diagrams keep what changed apart from how risky it is. Added, removed, and modified tables, columns, and relationships are marked with `+` / `−` / `~` and a faint green / red / amber tint (a removed card or line is also dashed), and a column whose type changed reads `before → after` in its type slot, such as `varchar(500) → varchar(120)`. The risk comes from the default `review` rule set for the dialect both inputs resolve to: a card with findings carries a label naming the highest severity and how many findings have it (`breaking 1`, `caution 2`, ...), and its tooltip or the HTML viewer's Risks section lists every finding. An added column can therefore sit on a `breaking` card, and a modified one can carry no label at all. Unchanged tables keep their normal colors so they still read as context. With `show_legend = true` under `[diff]`, the legend also explains the change markers and the risk label. `[review]` settings in the config file do not apply here; run `relune review` for the configured verdict.
 
 Within a table, an unnamed foreign key, index, or `CHECK` written in DDL matches the same constraint under the name the database generated for it (such as `orders_user_id_fkey` or `users_email_key`), so it is not reported as dropped and re-added; two differently named constraints stay a rename. Index predicates, expression keys, and `CHECK` expressions are compared with keyword case ignored, while text inside quoted literals and identifiers must match (`'Active'` → `'active'` is a change). Tables are paired by their `stable_id` (the `id` in schema JSON), so renaming a table there while keeping its `id` is reported as a modification of the same table.
 

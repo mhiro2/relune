@@ -126,6 +126,7 @@
         }
         nodes.push({
           id,
+          source: node,
           x: Number.parseFloat(rect.getAttribute("x") ?? "0"),
           y: Number.parseFloat(rect.getAttribute("y") ?? "0"),
           width: Number.parseFloat(rect.getAttribute("width") ?? "0"),
@@ -133,6 +134,7 @@
         });
       });
       const nodeEls = /* @__PURE__ */ new Map();
+      const sourceById = new Map(nodes.map((node) => [node.id, node.source]));
       for (const node of nodes) {
         const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
         rect.setAttribute("class", "minimap-node");
@@ -153,6 +155,15 @@
           element.classList.toggle("selected", id === customEvent.detail.nodeId);
         });
       });
+      const syncHiddenNodes = () => {
+        nodeEls.forEach((element, id) => {
+          const source = sourceById.get(id);
+          const hidden = source?.classList.contains("hidden-by-group") === true || source?.classList.contains("hidden-by-filter") === true;
+          element.classList.toggle("hidden", hidden);
+        });
+      };
+      document.addEventListener("relune:groups-changed", syncHiddenNodes);
+      document.addEventListener("relune:filters-changed", syncHiddenNodes);
       document.addEventListener("relune:node-cleared", () => {
         nodeEls.forEach((element) => {
           element.classList.remove("selected");

@@ -73,7 +73,7 @@ structure easier to understand, communicate, and change safely.
 Generate schema diagrams as:
 
 - SVG for static documentation, design notes, and README assets
-- HTML for interactive exploration with pan, zoom, search, and filters
+- HTML for interactive exploration with pan, zoom, search, filters, and shareable links to a selected table or relationship
 
 Relune can render:
 

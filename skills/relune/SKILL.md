@@ -274,7 +274,7 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | `-f`, `--format` | `text`, `json`, `markdown`, `svg`, `html` | `text` |
 | `-o`, `--out` | Output file path | stdout (`svg`/`html` on terminals require `--stdout`) |
 
-Visual diffs (`svg` / `html`) mark each change's kind with `+` / `−` / `~` and a faint tint, write type changes as `before → after`, and label risky cards with the highest default review severity and its count (`breaking 1`). Change kind and risk are independent: read the marker for *what* changed and the label for *how risky* it is.
+Visual diffs (`svg` / `html`) mark each change's kind with `+` / `−` / `~` and a faint tint, write type changes as `before → after`, and label risky cards with the highest default review severity and its count (`breaking 1`). Change kind and risk are independent: read the marker for *what* changed and the label for *how risky* it is. With `show_legend = true` under `[diff]`, the legend explains both.
 | `--stdout` | Allow raw `svg`/`html` on interactive stdout | off |
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` | `auto` |
 | `--exit-code` | Exit with code 10 if schema changes are detected (like `git diff --exit-code`) | off |

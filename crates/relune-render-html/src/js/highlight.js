@@ -63,6 +63,13 @@
       toColumns: edge.to_columns
     };
   }
+  function escapeKeyPart(part) {
+    return part.replaceAll(/[%(),>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  }
+  function relationKey(edge) {
+    const end = (table, columns) => `${escapeKeyPart(table)}(${columns.map(escapeKeyPart).join(",")})`;
+    return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
+  }
   function relationColumnPairs(edge) {
     const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
     if (pairCount === 0) {
@@ -72,6 +79,28 @@
       return [`${edge.from} \u2192 ${edge.to}`];
     }
     return edge.from_columns.slice(0, pairCount).map((column, index) => `${edge.from}.${column} \u2192 ${edge.to}.${edge.to_columns[index]}`);
+  }
+  function nextLineIndex(count, current, key, isFocusable) {
+    const scan = (start, step) => {
+      for (let index = start; index >= 0 && index < count; index += step) {
+        if (isFocusable(index)) return index;
+      }
+      return null;
+    };
+    switch (key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        return scan(current + 1, 1);
+      case "ArrowLeft":
+      case "ArrowUp":
+        return scan(current - 1, -1);
+      case "Home":
+        return scan(0, 1);
+      case "End":
+        return scan(count - 1, -1);
+      default:
+        return null;
+    }
   }
 
   // ts/metadata.ts
@@ -905,12 +934,18 @@
         renderHighlight();
         syncObjectBrowser();
       };
+      const selectedRelationKey = () => {
+        const edge = state.selectedEdge === null ? void 0 : state.edges[state.selectedEdge];
+        return edge === void 0 ? null : relationKey(edge);
+      };
       const setSelectedNode = (tableId) => {
         const previous = state.selectedNode;
+        const hadRelation = state.selectedEdge !== null;
         state.selectedNode = tableId;
         state.selectedEdge = null;
         state.hoveredNode = null;
         renderInteraction();
+        if (hadRelation) emitViewerEvent("relune:relation-cleared", void 0);
         if (previous === tableId) {
           return;
         }
@@ -923,12 +958,22 @@
       let relationOrigin = null;
       const setSelectedEdge = (edgeIndex, focusCard = false) => {
         const hadTable = state.selectedNode !== null;
+        const previous = state.selectedEdge;
         state.selectedNode = null;
         state.selectedEdge = edgeIndex;
         state.hoveredNode = null;
         relationOrigin = null;
         renderInteraction();
         if (hadTable) emitViewerEvent("relune:node-cleared", void 0);
+        if (edgeIndex !== null && isLineFocusable(edgeIndex)) setRovingLine(edgeIndex);
+        if (edgeIndex !== previous) {
+          const key = selectedRelationKey();
+          if (key === null) {
+            emitViewerEvent("relune:relation-cleared", void 0);
+          } else {
+            emitViewerEvent("relune:relation-selected", { key });
+          }
+        }
         if (focusCard && edgeIndex !== null) relationEls?.card.focus();
       };
       const selectRelation = (edge, focusCard = false) => {
@@ -970,28 +1015,62 @@
           }
         });
       });
+      const lineHint = document.createElement("p");
+      lineHint.id = "relation-line-hint";
+      lineHint.className = "visually-hidden";
+      lineHint.textContent = "Use the arrow keys to move between relationships.";
+      document.body.appendChild(lineHint);
+      const isLineFocusable = (index) => {
+        const line = edgeEls[index];
+        return line !== void 0 && !line.classList.contains("hidden-by-group") && !line.classList.contains("hidden-by-filter");
+      };
+      let rovingLine = -1;
+      const setRovingLine = (index) => {
+        if (index === rovingLine) return;
+        edgeEls[rovingLine]?.setAttribute("tabindex", "-1");
+        rovingLine = index;
+        edgeEls[index]?.setAttribute("tabindex", "0");
+      };
+      const syncRovingLine = () => {
+        if (isLineFocusable(rovingLine)) return;
+        const first = nextLineIndex(edgeEls.length, -1, "Home", isLineFocusable);
+        if (first !== null) setRovingLine(first);
+      };
       edgeEls.forEach((edgeEl, index) => {
         const toggle = (focusCard) => {
           setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
         };
         const edge = state.edges[index];
         if (edge !== void 0) {
-          edgeEl.setAttribute("tabindex", "0");
+          edgeEl.setAttribute("tabindex", "-1");
           edgeEl.setAttribute("role", "button");
           edgeEl.setAttribute("aria-label", `Relationship ${relationColumnPairs(edge).join(", ")}`);
+          edgeEl.setAttribute("aria-describedby", lineHint.id);
         }
+        edgeEl.addEventListener("focus", () => {
+          setRovingLine(index);
+        });
         edgeEl.addEventListener("click", (event) => {
           event.stopPropagation();
           toggle(false);
         });
         edgeEl.addEventListener("keydown", (event) => {
           const { key } = event;
-          if (key !== "Enter" && key !== " ") return;
+          if (key === "Enter" || key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+            toggle(true);
+            return;
+          }
+          const next = nextLineIndex(edgeEls.length, index, key, isLineFocusable);
+          if (next === null) return;
           event.preventDefault();
           event.stopPropagation();
-          toggle(true);
+          setRovingLine(next);
+          edgeEls[next]?.focus();
         });
       });
+      syncRovingLine();
       svgRoot.addEventListener("click", () => {
         if (state.selectedNode !== null || state.selectedEdge !== null) {
           setSelectedNode(null);
@@ -1027,6 +1106,7 @@
         setSelectedNode(null);
       });
       const handleVisibilityStateChange = () => {
+        syncRovingLine();
         if (state.selectedNode === null && state.hoveredNode !== null) {
           state.hoveredNode = null;
           renderInteraction();
@@ -1049,7 +1129,14 @@
         },
         getSelected() {
           return state.selectedNode;
-        }
+        },
+        selectRelation(key) {
+          const index = state.edges.findIndex((edge) => relationKey(edge) === key);
+          if (index < 0) return false;
+          setSelectedEdge(index);
+          return true;
+        },
+        getSelectedRelation: selectedRelationKey
       };
       markViewerModuleReady("selection");
       renderInteraction();
