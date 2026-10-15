@@ -44,6 +44,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const summaryRoot = summaryEl;
     const metadata = parseReluneMetadata();
     const tables: TableMetadata[] = metadata?.tables ?? [];
+    const tablesById = new Map(tables.map((table) => [table.id, table]));
     const state = createFilterEngineState(tables);
 
     if (state.facets.size === 0) {
@@ -98,7 +99,18 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
             }
           : undefined;
 
-      const details = buildFacetSection(facet, onChange, onSearchInput);
+      const onBulkChange = (values: string[], checked: boolean): void => {
+        for (const value of values) {
+          if (checked) {
+            facet.selectedValues.add(value);
+          } else {
+            facet.selectedValues.delete(value);
+          }
+        }
+        applyFilter();
+      };
+
+      const details = buildFacetSection(facet, onBulkChange, onSearchInput);
       if (facet.allValues.length <= 5) {
         details.open = true;
       }
@@ -136,7 +148,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
         nodes.forEach((node) => {
           const tableId = node.getAttribute('data-id') ?? node.getAttribute('data-table-id') ?? '';
-          const table = tables.find((t) => t.id === tableId);
+          const table = tablesById.get(tableId);
           const matches = table !== undefined && tableMatchesAllFacets(table, state);
           node.classList.toggle(dimClass, !matches);
           node.classList.remove(removeClass);

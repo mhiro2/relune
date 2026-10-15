@@ -965,46 +965,30 @@ async function runInspectMode(currentSerial: number): Promise<void> {
   }
 
   setStatus('Inspecting…');
-  const summaryResult = inspect_from_sql({
-    sql: sqlEditor.getValue(),
-    format: 'json',
-  }) as WasmInspectResult;
+  const requestedTable = inspectTableSelect.value;
+  const result = inspectSchema(sqlEditor.getValue(), requestedTable);
   if (currentSerial !== renderSerial) {
     return;
   }
 
-  const tableNames = summaryResult.summary.tables.map((table) => table.name);
-  const selectedTable = tableNames.includes(inspectTableSelect.value)
-    ? inspectTableSelect.value
-    : '';
+  const tableNames = result.summary.tables.map((table) => table.name);
+  const selectedTable = result.table ? requestedTable : '';
   populateInspectTableOptions(tableNames, selectedTable);
-
-  const detailResult =
-    selectedTable.length > 0
-      ? (inspect_from_sql({
-          sql: sqlEditor.getValue(),
-          table: selectedTable,
-          format: 'json',
-        }) as WasmInspectResult)
-      : summaryResult;
-  if (currentSerial !== renderSerial) {
-    return;
-  }
 
   inspectPanel.hidden = false;
   renderMetricCards([
-    ['Tables', `${summaryResult.summary.table_count}`],
-    ['Columns', `${summaryResult.summary.column_count}`],
-    ['FKs', `${summaryResult.summary.foreign_key_count}`],
-    ['Indexes', `${summaryResult.summary.index_count}`],
-    ['Views', `${summaryResult.summary.view_count}`],
-    ['Enums', `${summaryResult.summary.enum_count}`],
-    ['No PK', `${summaryResult.summary.tables_without_pk}`],
-    ['Isolated', `${summaryResult.summary.orphan_table_count}`],
+    ['Tables', `${result.summary.table_count}`],
+    ['Columns', `${result.summary.column_count}`],
+    ['FKs', `${result.summary.foreign_key_count}`],
+    ['Indexes', `${result.summary.index_count}`],
+    ['Views', `${result.summary.view_count}`],
+    ['Enums', `${result.summary.enum_count}`],
+    ['No PK', `${result.summary.tables_without_pk}`],
+    ['Isolated', `${result.summary.orphan_table_count}`],
   ]);
-  renderDiagnostics(detailResult.diagnostics);
-  renderInspectPanel(summaryResult.summary, detailResult.table ?? null, selectedTable);
-  const inspectJson = JSON.stringify(detailResult, null, 2);
+  renderDiagnostics(result.diagnostics);
+  renderInspectPanel(result.summary, result.table ?? null, selectedTable);
+  const inspectJson = JSON.stringify(result, null, 2);
   configureActions({
     copy: {
       label: 'Copy JSON',
@@ -1016,6 +1000,25 @@ async function runInspectMode(currentSerial: number): Promise<void> {
     },
   });
   setStatus(selectedTable ? `Inspected ${selectedTable}` : 'Inspected schema');
+}
+
+/**
+ * Inspects the schema, including details for `table` when it is non-empty.
+ * The summary is part of every response, so one call covers both views; it
+ * falls back to the summary alone when the table no longer exists in the SQL.
+ */
+function inspectSchema(sql: string, table: string): WasmInspectResult {
+  if (table.length === 0) {
+    return inspect_from_sql({ sql, format: 'json' }) as WasmInspectResult;
+  }
+  try {
+    return inspect_from_sql({ sql, table, format: 'json' }) as WasmInspectResult;
+  } catch (error) {
+    if (normalizeError(error).code !== 'TABLE_NOT_FOUND') {
+      throw error;
+    }
+    return inspect_from_sql({ sql, format: 'json' }) as WasmInspectResult;
+  }
 }
 
 async function runExportMode(currentSerial: number): Promise<void> {
