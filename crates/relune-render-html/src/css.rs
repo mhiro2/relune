@@ -14,12 +14,8 @@ pub(crate) fn build_css(
     enable_highlight: bool,
 ) -> String {
     let colors = get_colors(theme);
-    let accent_color = colors.glow_color;
-    // Blue-grey, so selection never reads as a table kind or a warning.
-    let selection_color = match theme {
-        Theme::Dark => "#93a8c9",
-        Theme::Light => "#4a6285",
-    };
+    let accent_color = colors.accent_color;
+    let selection_color = colors.selection_color;
     let (viewer_bg, panel_bg, panel_border, panel_shadow, accent_soft, grid_dot, grid_line) =
         match theme {
             Theme::Dark => (
@@ -861,17 +857,150 @@ pub(crate) fn build_css(
       stroke-width: 2px;
     }
 
-    .edge.highlighted-neighbor .edge-path,
-    .edge.hover-preview-edge .edge-path {
-      filter: drop-shadow(0 0 4px var(--accent-color));
+    /* A selected relationship: its line, ports, endpoint tables, and the
+       columns on both ends (every column of a composite key). */
+    .node.relation-endpoint {
+      opacity: 1 !important;
     }
 
-    .edge.highlighted-neighbor .edge-particles {
-      opacity: 0.92;
+    .node.relation-endpoint .table-body {
+      stroke: var(--selection-soft);
+      stroke-width: 1.5px;
     }
 
-    .edge.hover-preview-edge .edge-particles {
+    .relation-column-band {
+      fill: var(--selection-color);
+      fill-opacity: 0.16;
+      pointer-events: none;
+    }
+
+    .column-row.relation-column .column-name {
+      fill: var(--text-color);
+      font-weight: 700;
+    }
+
+    .edge.selected-edge {
+      opacity: 1 !important;
+    }
+
+    .edge.selected-edge .edge-path,
+    .edge.selected-edge .crow-inline {
+      stroke: var(--selection-color);
+      stroke-width: 2.4px;
+    }
+
+    .relation-port {
+      fill: var(--selection-color);
+      pointer-events: none;
+    }
+
+    /* Takes the detail drawer's place, which is closed while a
+       relationship is selected. */
+    .relation-card {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      width: min(340px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      padding: 12px 14px;
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      background: var(--panel-bg);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(16px);
+      z-index: 246;
+    }
+
+    .relation-card[hidden] {
+      display: none;
+    }
+
+    .relation-card:focus-visible {
+      outline: 2px solid var(--selection-color);
+      outline-offset: 2px;
+    }
+
+    .relation-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .relation-card-kicker {
+      margin: 0 0 2px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
       opacity: 0.72;
+    }
+
+    .relation-card-title {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .relation-card-name {
+      margin: 4px 0 0;
+      font-family: var(--mono-font);
+      font-size: 11px;
+      opacity: 0.72;
+    }
+
+    .relation-card-pairs {
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+      font-family: var(--mono-font);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
+    .relation-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .relation-card-open,
+    .relation-card-close {
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .relation-card-open {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .relation-card-close {
+      width: 26px;
+      height: 26px;
+      line-height: 1;
+      font-size: 16px;
+    }
+
+    .relation-card-open:hover,
+    .relation-card-open:focus-visible,
+    .relation-card-close:hover,
+    .relation-card-close:focus-visible {
+      border-color: var(--selection-color);
+      outline: none;
+    }
+
+    .edge.highlighted-neighbor .edge-path,
+    .edge.highlighted-neighbor .crow-inline,
+    .edge.hover-preview-edge .edge-path,
+    .edge.hover-preview-edge .crow-inline {
+      stroke: var(--selection-color);
     }
 
     @media (max-width: 960px) {
@@ -1484,6 +1613,38 @@ pub(crate) fn build_css(
     .canvas svg .edge {
       animation-name: relune-edge-enter;
       cursor: pointer;
+    }
+
+    /* Line labels stay out of the overview and appear only for the lines a
+       reader is looking at; the relation card carries the full mapping. */
+    .canvas svg .edge-label,
+    .canvas svg .edge-label-pill {
+      opacity: 0;
+      transition: opacity 0.15s;
+      /* Invisible pills must not catch clicks meant for the canvas. */
+      pointer-events: none;
+    }
+
+    .canvas svg .edge:focus-visible {
+      outline: none;
+    }
+
+    .canvas svg .edge:focus-visible .edge-path {
+      stroke: var(--selection-color);
+      stroke-width: 2.4px;
+    }
+
+    .canvas svg .edge:hover .edge-label,
+    .canvas svg .edge:hover .edge-label-pill,
+    .canvas svg .edge:focus-visible .edge-label,
+    .canvas svg .edge:focus-visible .edge-label-pill,
+    .canvas svg .edge.hover-preview-edge .edge-label,
+    .canvas svg .edge.hover-preview-edge .edge-label-pill,
+    .canvas svg .edge.highlighted-neighbor .edge-label,
+    .canvas svg .edge.highlighted-neighbor .edge-label-pill,
+    .canvas svg .edge.selected-edge .edge-label,
+    .canvas svg .edge.selected-edge .edge-label-pill {
+      opacity: 1;
     }
 
     .type-filter-overlay {

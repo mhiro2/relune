@@ -5,7 +5,7 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{EdgeKind, layout::RouteStyle};
+use relune_core::{EdgeKind, NodeKind, layout::RouteStyle};
 
 pub mod edge;
 mod error;
@@ -119,7 +119,7 @@ pub fn render_svg_with_overlay(
 
     // Render edges with enhanced options
     let edge_options = EdgeRenderOptions {
-        stroke_width: 2.0,
+        stroke_width: 1.4,
         show_tooltips: options.show_tooltips,
         ..EdgeRenderOptions::default()
     };
@@ -251,20 +251,15 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
         out,
         r"<defs>
 <style>
-.edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
-.edge-particle {{ fill: {glow_particle}; }}
-.edge:hover .edge-particles {{ opacity: 0.92; }}
-.edge:hover .edge-path {{ filter: drop-shadow(0 0 4px {glow_color}); }}
 .edge:hover .edge-path,
-.edge:hover .crow-inline {{ stroke: {glow_color}; }}
+.edge:hover .crow-inline {{ stroke: {hover_color}; }}
 .node:hover .table-body {{ stroke-width: 1.6px; }}
 .group-box,
 .group-band,
 .group-divider,
 .group-label {{ pointer-events: none; }}
 </style>",
-        glow_color = colors.glow_color,
-        glow_particle = colors.glow_particle,
+        hover_color = colors.selection_color,
     )?;
     write!(
         out,
@@ -420,15 +415,6 @@ fn render_edge_internal(
         }
     }
 
-    // The particle only runs while the edge is hovered, so idle diagrams keep
-    // no animation timers alive.
-    if edge.kind == EdgeKind::ForeignKey {
-        write!(
-            out,
-            r##"<g class="edge-particles" opacity="0"><circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" begin="edge-{index}.mouseenter" end="edge-{index}.mouseleave" repeatCount="indefinite" fill="freeze" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle></g>"##
-        )?;
-    }
-
     // For curved FK edges, draw Crow's Foot symbols as inline SVG
     // elements positioned along the actual curve path.
     if use_inline_markers {
@@ -556,36 +542,26 @@ const fn edge_kind_name(kind: EdgeKind) -> &'static str {
     }
 }
 
+/// FK lines use the theme's quiet edge colour; enum and view lines take the
+/// hue of the kind mark on the card they point to, dashed so they never read
+/// as foreign keys.
 const fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
-    match (kind, is_light_theme(colors)) {
-        (EdgeKind::ForeignKey, _) => EdgeStyle {
-            stroke: if is_light_theme(colors) {
-                "#64748b"
-            } else {
-                "#475569"
-            },
+    let light = is_light_theme(colors);
+    match kind {
+        EdgeKind::ForeignKey => EdgeStyle {
+            stroke: colors.edge_stroke,
             dasharray: None,
             label_fill: None,
         },
-        (EdgeKind::EnumReference, false) => EdgeStyle {
-            stroke: "#f59e0b",
+        EdgeKind::EnumReference => EdgeStyle {
+            stroke: node::node_kind_accent(NodeKind::Enum, colors),
             dasharray: Some("6,4"),
-            label_fill: Some("#fbbf24"),
+            label_fill: Some(if light { "#7e22ce" } else { "#d8b4fe" }),
         },
-        (EdgeKind::EnumReference, true) => EdgeStyle {
-            stroke: "#d97706",
-            dasharray: Some("6,4"),
-            label_fill: Some("#b45309"),
-        },
-        (EdgeKind::ViewDependency, false) => EdgeStyle {
-            stroke: "#2dd4bf",
+        EdgeKind::ViewDependency => EdgeStyle {
+            stroke: node::node_kind_accent(NodeKind::View, colors),
             dasharray: Some("4,4"),
-            label_fill: Some("#5eead4"),
-        },
-        (EdgeKind::ViewDependency, true) => EdgeStyle {
-            stroke: "#0f766e",
-            dasharray: Some("4,4"),
-            label_fill: Some("#115e59"),
+            label_fill: Some(if light { "#115e59" } else { "#5eead4" }),
         },
     }
 }
@@ -813,13 +789,15 @@ mod tests {
     }
 
     #[test]
-    fn test_render_svg_runs_fk_particles_only_while_hovered() {
+    fn test_render_svg_edges_have_no_glow_or_particles() {
         let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
 
         assert!(svg.contains(r#"<g id="edge-0" class="edge edge-kind-foreign-key""#));
-        assert_eq!(svg.matches("<animateMotion").count(), 1);
-        assert!(svg.contains(r#"begin="edge-0.mouseenter" end="edge-0.mouseleave""#));
-        assert!(!svg.contains("begin=\"-"));
+        assert!(!svg.contains("<animateMotion"));
+        assert!(!svg.contains("edge-particle"));
+        assert!(!svg.contains("drop-shadow"));
+        // Hover recolours the line in the selection colour instead.
+        assert!(svg.contains(".edge:hover .crow-inline { stroke: #93a8c9; }"));
     }
 
     #[test]
@@ -1152,7 +1130,6 @@ mod tests {
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
         assert!(svg.contains(r##"fill="#161b26""##));
-        assert!(svg.contains("edge-particles"));
     }
 
     #[test]
@@ -1483,7 +1460,7 @@ mod tests {
         );
         assert!(!svg.contains("marker-start=\"url(#cardinality-one-many)\""));
         assert!(svg.contains(
-            r##"stroke="#475569" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
+            r##"stroke="#56627a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
         ));
         assert!(!svg.contains(
             r##"stroke="#cbd5e1" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,

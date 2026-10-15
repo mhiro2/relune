@@ -1,18 +1,24 @@
-import { createEdgeParticles } from './edge_particles';
-import { computeHoverPreview, computeNeighborHighlights } from './highlight_actions';
+import {
+  computeHoverPreview,
+  computeNeighborHighlights,
+  computeRelationHighlight,
+  relationColumnPairs,
+} from './highlight_actions';
 import {
   createHighlightPainter,
   createObjectBrowser,
   hideHoverPopover,
   renderDrawer,
   renderHoverPopover,
+  renderRelationCard,
   type DrawerElements,
+  type RelationCardElements,
   type ObjectBrowserItem,
   type HoverPopoverElements,
   type PopoverPosition,
 } from './highlight_dom';
 import { createHighlightState } from './highlight_state';
-import { parseReluneMetadata, type TableMetadata } from './metadata';
+import { parseReluneMetadata, type EdgeMetadata, type TableMetadata } from './metadata';
 import { matchesTableQuery } from './search_actions';
 import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './viewer_api';
 
@@ -92,9 +98,30 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     return null;
   })();
 
+  const relationEls: RelationCardElements | null = (() => {
+    const card = document.getElementById('relation-card');
+    const kind = document.getElementById('relation-card-kind');
+    const title = document.getElementById('relation-card-title');
+    const name = document.getElementById('relation-card-name');
+    const pairs = document.getElementById('relation-card-pairs');
+    const openFrom = document.getElementById('relation-card-open-from');
+    const openTo = document.getElementById('relation-card-open-to');
+    if (
+      card instanceof HTMLElement &&
+      kind instanceof HTMLElement &&
+      title instanceof HTMLElement &&
+      name instanceof HTMLElement &&
+      pairs instanceof HTMLElement &&
+      openFrom instanceof HTMLButtonElement &&
+      openTo instanceof HTMLButtonElement
+    ) {
+      return { card, kind, title, name, pairs, openFrom, openTo };
+    }
+    return null;
+  })();
+
   if (svgRoot && drawerEls && hoverEls) {
     const runtime = getViewerRuntime();
-    const edgeParticles = createEdgeParticles(svgRoot);
 
     // Index the diagram once; hover and selection then touch only the
     // elements they change instead of re-querying the whole SVG.
@@ -103,10 +130,8 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       const id = node.getAttribute('data-id') ?? node.getAttribute('data-table-id');
       if (id !== null && !nodesById.has(id)) nodesById.set(id, node);
     });
-    const painter = createHighlightPainter({
-      nodesById,
-      edges: Array.from(svgRoot.querySelectorAll('.edge')),
-    });
+    const edgeEls = Array.from(svgRoot.querySelectorAll('.edge'));
+    const painter = createHighlightPainter({ nodesById, edges: edgeEls });
 
     const findNode = (nodeId: string): Element | undefined => nodesById.get(nodeId);
 
@@ -214,15 +239,30 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const renderHighlight = (): void => {
       painter.clear();
       hideHoverPopover(hoverEls);
+      const relation =
+        state.selectedEdge === null ? null : computeRelationHighlight(state.selectedEdge, state);
+      if (relationEls !== null) {
+        renderRelationCard(
+          relation === null ? undefined : state.edges[relation.edgeIndex],
+          state.tableById,
+          relationEls,
+        );
+      }
 
-      if (state.selectedNode !== null) {
+      if (relation !== null) {
+        painter.applyRelation(relation);
+        renderDrawer(undefined, state, drawerEls);
+        traversalEl?.setAttribute('hidden', '');
+      } else if (state.selectedNode !== null) {
         const highlight = computeNeighborHighlights(
           state.selectedNode,
           state,
           state.traversalDepth,
         );
         painter.applySelected(highlight);
-        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, navigateToTable);
+        renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, (edge) => {
+          selectRelation(edge, true);
+        });
         traversalEl?.removeAttribute('hidden');
         syncTraversalButtons();
       } else {
@@ -243,7 +283,6 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           }
         }
       }
-      edgeParticles.sync();
     };
 
     /** Full refresh for changes that also affect the object browser. */
@@ -255,6 +294,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const setSelectedNode = (tableId: string | null): void => {
       const previous = state.selectedNode;
       state.selectedNode = tableId;
+      state.selectedEdge = null;
       state.hoveredNode = null;
       renderInteraction();
 
@@ -267,6 +307,39 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       } else {
         emitViewerEvent('relune:node-selected', { nodeId: tableId });
       }
+    };
+
+    // Table whose drawer a relationship was opened from, so closing the
+    // relation card returns there instead of dropping keyboard focus.
+    let relationOrigin: string | null = null;
+
+    /**
+     * Selects one relationship, clearing any table selection. Keyboard paths
+     * move focus to the relation card, since the drawer they came from closes.
+     */
+    const setSelectedEdge = (edgeIndex: number | null, focusCard = false): void => {
+      const hadTable = state.selectedNode !== null;
+      state.selectedNode = null;
+      state.selectedEdge = edgeIndex;
+      state.hoveredNode = null;
+      relationOrigin = null;
+      renderInteraction();
+      if (hadTable) emitViewerEvent('relune:node-cleared', undefined);
+      if (focusCard && edgeIndex !== null) relationEls?.card.focus();
+    };
+
+    const selectRelation = (edge: EdgeMetadata, focusCard = false): void => {
+      const index = state.edges.indexOf(edge);
+      if (index < 0) return;
+      const origin = state.selectedNode;
+      setSelectedEdge(index, focusCard);
+      relationOrigin = origin;
+    };
+
+    /** Selects a table and moves focus into its drawer. */
+    const openTableDrawer = (tableId: string): void => {
+      navigateToTable(tableId);
+      drawerEls.drawer.focus();
     };
 
     const clearHoverPreview = (): void => {
@@ -308,19 +381,64 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
 
     // ── Edge click listeners ────────────────────────────────────────────
 
-    svgRoot.querySelectorAll('.edge').forEach((edgeEl) => {
+    // Edges render in metadata order, so a DOM index is a metadata index.
+    // Each line is also a keyboard button naming the mapping it selects.
+    edgeEls.forEach((edgeEl, index) => {
+      const toggle = (focusCard: boolean): void => {
+        setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
+      };
+      const edge = state.edges[index];
+      if (edge !== undefined) {
+        edgeEl.setAttribute('tabindex', '0');
+        edgeEl.setAttribute('role', 'button');
+        edgeEl.setAttribute('aria-label', `Relationship ${relationColumnPairs(edge).join(', ')}`);
+      }
       edgeEl.addEventListener('click', (event: Event) => {
         event.stopPropagation();
-        const fromId = edgeEl.getAttribute('data-from');
-        if (fromId === null) return;
-        navigateToTable(fromId);
+        toggle(false);
+      });
+      edgeEl.addEventListener('keydown', (event: Event) => {
+        const { key } = event as KeyboardEvent;
+        if (key !== 'Enter' && key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        toggle(true);
       });
     });
 
     svgRoot.addEventListener('click', () => {
-      if (state.selectedNode !== null) {
+      if (state.selectedNode !== null || state.selectedEdge !== null) {
         setSelectedNode(null);
       }
+    });
+
+    const openRelationEnd = (end: 'from' | 'to'): void => {
+      const edge = state.selectedEdge === null ? undefined : state.edges[state.selectedEdge];
+      if (edge !== undefined) openTableDrawer(edge[end]);
+    };
+    relationEls?.openFrom.addEventListener('click', () => {
+      openRelationEnd('from');
+    });
+    relationEls?.openTo.addEventListener('click', () => {
+      openRelationEnd('to');
+    });
+    /** Closes the relation card, returning to the drawer or line it came from. */
+    const closeRelationCard = (): void => {
+      const index = state.selectedEdge;
+      if (relationOrigin !== null) {
+        openTableDrawer(relationOrigin);
+        return;
+      }
+      setSelectedEdge(null);
+      if (index !== null) (edgeEls[index] as HTMLElement | SVGElement | undefined)?.focus();
+    };
+    document.getElementById('relation-card-close')?.addEventListener('click', closeRelationCard);
+    // Escape inside the card steps back instead of clearing the whole view.
+    relationEls?.card.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRelationCard();
     });
 
     drawerClose?.addEventListener('click', () => {
