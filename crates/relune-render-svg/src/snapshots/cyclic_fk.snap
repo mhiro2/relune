@@ -2,7 +2,7 @@
 source: crates/relune-render-svg/src/lib.rs
 expression: svg
 ---
-<svg xmlns="http://www.w3.org/2000/svg" width="1685" height="1532" viewBox="0 0 1685 1532" fill="none"><defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="1697" height="1532" viewBox="0 0 1697 1532" fill="none"><defs>
 <style>
 .edge:hover .edge-path,
 .edge:hover .crow-inline { stroke: #93a8c9; }

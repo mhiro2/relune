@@ -173,8 +173,9 @@ pub(super) fn mirror_positioned_nodes_for_direction(
 
 /// Room kept around route points for Crow's Foot markers.
 const CANVAS_MARKER_PAD: f32 = 24.0;
-/// Room kept around edge labels.
-const CANVAS_LABEL_PAD: f32 = 4.0;
+/// Room kept between edge or group labels and the canvas edge, so a pill
+/// never sits flush against it.
+const CANVAS_LABEL_PAD: f32 = 16.0;
 
 /// Fits the canvas to everything that is drawn: nodes, groups, edge routes
 /// (bypass lanes, self-loops and markers) and edge labels.

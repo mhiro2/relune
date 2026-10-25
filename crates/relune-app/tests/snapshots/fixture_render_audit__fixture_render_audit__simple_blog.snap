@@ -8,7 +8,7 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
     "edge_count": 3,
     "height": 804.0,
     "node_count": 3,
-    "width": 478.3999938964844
+    "width": 490.3999938964844
   },
   "patterns": {
     "long_detours": {
@@ -47,13 +47,13 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 402543,
+      "bytes": 402552,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 22272,
+      "bytes": 22281,
       "edge_groups": 13,
       "node_groups": 3
     }
