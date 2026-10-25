@@ -19,7 +19,8 @@ pub(super) struct DensityView<'a> {
 /// Removes the columns a card does not list at `density`.
 ///
 /// `Keys` lists primary key and foreign key columns and every column a
-/// relationship names at that end, so each line still meets a listed row.
+/// relationship names at that end, so each line still meets a listed row,
+/// plus every column a diff changed, so its marker stays visible.
 pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> DensityView<'_> {
     match density {
         CardDensity::Full => DensityView {
@@ -47,6 +48,7 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
             filter_columns(graph, true, |node_id, column| {
                 column.is_primary_key
                     || column.is_foreign_key
+                    || column.change.is_some()
                     || referenced
                         .get(node_id)
                         .is_some_and(|names| names.contains(&normalize_identifier(&column.name)))
@@ -204,6 +206,28 @@ mod tests {
 
         assert_eq!(listed(&view, "users"), ["id", "Email"]);
         assert_eq!(listed(&view, "posts"), ["id", "Author_Email"]);
+    }
+
+    #[test]
+    fn keys_density_keeps_columns_a_diff_changed() {
+        let mut graph = LayoutGraphBuilder::new().build(&schema());
+        let users = graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "users")
+            .expect("users node");
+        let name = users
+            .columns
+            .iter_mut()
+            .find(|column| column.name == "name")
+            .expect("name column");
+        name.change = Some(crate::overlay::ColumnChange::new(
+            relune_core::ChangeKind::Added,
+        ));
+        let view = apply_density(&graph, CardDensity::Keys);
+
+        assert_eq!(listed(&view, "users"), ["id", "email", "name"]);
+        assert_eq!(listed(&view, "posts"), ["id", "author_email"]);
     }
 
     #[test]

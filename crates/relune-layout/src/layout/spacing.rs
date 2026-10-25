@@ -39,7 +39,10 @@ pub(super) fn build_positioned_node(
             .map(|c| PositionedColumn {
                 name: c.name.clone(),
                 data_type: c.data_type.clone(),
-                previous_data_type: c.previous_data_type.clone(),
+                previous_data_type: c
+                    .change
+                    .as_ref()
+                    .and_then(|change| change.previous_type.clone()),
                 flags: column_flags(c),
             })
             .collect(),
@@ -111,7 +114,10 @@ fn estimate_node_width(
             column_row_width(
                 slots,
                 &column.name,
-                column.previous_data_type.as_deref(),
+                column
+                    .change
+                    .as_ref()
+                    .and_then(|change| change.previous_type.as_deref()),
                 &column.data_type,
             )
         })

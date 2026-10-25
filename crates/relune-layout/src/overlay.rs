@@ -300,18 +300,16 @@ impl DiagramOverlay {
             .insert(column.into(), change);
     }
 
-    /// Copies each column's previous type onto `graph`, so cards are sized
-    /// for and draw `previous → current` in the type slot.
-    pub fn apply_type_changes(&self, graph: &mut LayoutGraph) {
+    /// Copies each column's diff change onto `graph`, so cards are sized for
+    /// and draw `previous → current` in the type slot, and the keys density
+    /// keeps every changed column listed.
+    pub fn apply_column_changes(&self, graph: &mut LayoutGraph) {
         for node in &mut graph.nodes {
             let Some(node_overlay) = self.nodes.get(&node.id) else {
                 continue;
             };
             for column in &mut node.columns {
-                column.previous_data_type = node_overlay
-                    .column_changes
-                    .get(&column.name)
-                    .and_then(|change| change.previous_type.clone());
+                column.change = node_overlay.column_changes.get(&column.name).cloned();
             }
         }
     }

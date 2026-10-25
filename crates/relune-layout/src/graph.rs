@@ -295,10 +295,11 @@ pub struct LayoutColumn {
     /// Whether this column appears in an index.
     #[serde(default)]
     pub is_indexed: bool,
-    /// Type the column had before a diff changed it; cards show
-    /// `previous → data_type` in the type slot.
+    /// How a diff changed the column. Cards show `previous → data_type` in
+    /// the type slot for a type change, and the keys density lists every
+    /// changed column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_data_type: Option<String>,
+    pub change: Option<crate::overlay::ColumnChange>,
 }
 
 /// An edge in the layout graph.
@@ -530,7 +531,7 @@ impl LayoutGraphBuilder {
                         is_primary_key: c.is_primary_key,
                         is_foreign_key: foreign_key_columns.contains(&c.name),
                         is_indexed: indexed_columns.contains(&c.name),
-                        previous_data_type: None,
+                        change: None,
                     })
                     .collect(),
                 inbound_count: 0,
@@ -623,7 +624,7 @@ impl LayoutGraphBuilder {
                         is_primary_key: false,
                         is_foreign_key: false,
                         is_indexed: false,
-                        previous_data_type: None,
+                        change: None,
                     })
                     .collect(),
                 inbound_count: 0,
@@ -708,7 +709,7 @@ impl LayoutGraphBuilder {
                         is_primary_key: false,
                         is_foreign_key: false,
                         is_indexed: false,
-                        previous_data_type: None,
+                        change: None,
                     })
                     .collect(),
                 inbound_count: 0,

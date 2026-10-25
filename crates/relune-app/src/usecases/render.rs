@@ -168,8 +168,9 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     })
 }
 
-/// Builds the layout graph for `request`, with the overlay's previous column
-/// types applied so cards are sized for `before → after`.
+/// Builds the layout graph for `request`, with the overlay's column changes
+/// applied so cards are sized for `before → after` and the keys density
+/// keeps changed columns.
 pub(crate) fn build_graph(
     request: &RenderRequest,
     schema: &relune_core::Schema,
@@ -185,7 +186,7 @@ pub(crate) fn build_graph(
             .map_err(relune_layout::LayoutError::from)?;
     }
     if let Some(overlay) = &request.overlay {
-        overlay.apply_type_changes(&mut graph);
+        overlay.apply_column_changes(&mut graph);
     }
     Ok((graph, diagnostics))
 }

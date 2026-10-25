@@ -7,13 +7,22 @@
 use std::path::PathBuf;
 
 use relune_app::{DiffFormat, DiffRequest, InputSource, diff};
+use relune_core::{CardDensity, LayoutSpec};
 
 fn render(format: DiffFormat) -> String {
+    render_at(format, None)
+}
+
+fn render_at(format: DiffFormat, density: Option<CardDensity>) -> String {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/diff/change-risk");
     let request = DiffRequest {
         before: InputSource::sql_file(fixture.join("before.sql")),
         after: InputSource::sql_file(fixture.join("after.sql")),
         format,
+        layout: LayoutSpec {
+            density,
+            ..LayoutSpec::default()
+        },
         ..Default::default()
     };
     diff(request)
@@ -88,6 +97,21 @@ fn rows_show_change_kind_and_type_changes() {
         );
         assert!(svg.contains(&change), "missing {before} → {after}");
     }
+}
+
+#[test]
+fn keys_density_keeps_changed_columns_listed() {
+    let svg = render_at(DiffFormat::Svg, Some(CardDensity::Keys));
+
+    // None of these are keys, yet each changed, so its row and marker stay.
+    assert_eq!(row_class(&svg, "status"), "column-row diff-added");
+    assert_eq!(row_class(&svg, "legacy_code"), "column-row diff-removed");
+    assert_eq!(row_class(&svg, "note"), "column-row diff-modified");
+    assert_eq!(row_class(&svg, "shipped_at"), "column-row diff-added");
+    assert!(svg.contains(r#"<tspan class="column-type-previous">VARCHAR(500)</tspan>"#));
+    // Unchanged non-key columns are still counted instead of listed.
+    assert!(!svg.contains(r#"data-column-name="code""#));
+    assert!(svg.contains(">+1 column</text>"));
 }
 
 #[test]
