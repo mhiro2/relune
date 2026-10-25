@@ -14,7 +14,7 @@ use crate::channel::{
 use crate::graph::LayoutGraph;
 use crate::port::{EdgePortAssignment, RegularPortAssignment, assign_edge_ports};
 use crate::route::{
-    AttachmentSide, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
+    AttachmentSide, BORDER_OUTSET, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
     detour_around_obstacles_with_endpoint_sizes, estimate_label_half_width, nudge_label,
     point_along_route, rebuild_route_from_points, route_edge_with_assigned_ports, route_points,
     route_self_loop_with_offset, sample_route_obstacles, step_from_attachment,
@@ -34,8 +34,9 @@ const ROUTE_CLEARANCE_TARGET: f32 = 14.0;
 pub(super) const HARD_OBSTACLE_PADDING: f32 = 1.5;
 /// Maximum gap between nearby channel candidates that may share one visual bundle.
 const BUNDLE_CHANNEL_TOLERANCE: f32 = 36.0;
-/// Distance used to preserve endpoint approach direction while entering a bypass channel.
-const ROUTE_STUB_DISTANCE: f32 = 28.0;
+/// Distance used to preserve endpoint approach direction while entering a
+/// bypass channel; past the endpoint marker, plus the port's own offset.
+const ROUTE_STUB_DISTANCE: f32 = MIN_ENDPOINT_STUB + 4.0;
 /// Margin added when probing side corridors outside the endpoint nodes.
 const BYPASS_CHANNEL_MARGIN: f32 = 24.0;
 /// Distance between adjacent outer bypass lanes.
@@ -69,6 +70,9 @@ const FK_MARKER_CLEARANCE: f32 = 30.0;
 const ARROW_MARKER_CLEARANCE: f32 = 14.0;
 /// Half-thickness of the axis-aligned obstacle reserved for endpoint markers.
 const ENDPOINT_MARKER_HALF_THICKNESS: f32 = 14.0;
+/// Shortest straight run a route keeps at each card before its first bend,
+/// so a Crow's Foot marker never folds over the elbow.
+const MIN_ENDPOINT_STUB: f32 = FK_MARKER_CLEARANCE;
 
 /// Route all edges in the graph.
 #[cfg_attr(not(test), allow(dead_code))] // Test helpers exercise the wrapper directly.
@@ -793,7 +797,8 @@ fn bundle_anchor_distance(density: f32, cluster_size: usize) -> f32 {
     #[allow(clippy::cast_precision_loss)]
     let extra = cluster_size.saturating_sub(2) as f32;
     let base = if density >= 1.5 { 14.0 } else { 18.0 };
-    base + (extra * 4.0).min(12.0)
+    // Bundled lines still need room for their endpoint markers.
+    (base + (extra * 4.0).min(12.0)).max(MIN_ENDPOINT_STUB)
 }
 
 fn bundle_cluster_stats(
@@ -1187,6 +1192,9 @@ pub(super) fn channel_candidates(
     rank_bounds: &[RankAxisBounds],
 ) -> Vec<ObstacleAwareChannelCandidate> {
     let mut candidates = Vec::with_capacity(plan.class.search_offsets().len());
+    let stub_range = (plan.class == ChannelCandidateClass::InterRank)
+        .then(|| inter_rank_stub_range(source_rank, target_rank, rank_bounds))
+        .flatten();
 
     for (stable_order, offset) in plan.class.search_offsets().iter().copied().enumerate() {
         let coordinate = plan.baseline + offset;
@@ -1205,6 +1213,37 @@ pub(super) fn channel_candidates(
         });
     }
 
+    // Lanes inside the part of the gap that keeps endpoint markers clear of
+    // the elbow, so edges sharing a gap can each keep their markers whole
+    // without stacking on one channel.
+    if let Some((lower, upper)) = stub_range {
+        let center = f32::midpoint(lower, upper);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let steps = (((center - lower) / STUB_RANGE_LANE_STEP).floor() as usize)
+            .min(STUB_RANGE_LANES_PER_SIDE);
+        let mut lanes = Vec::with_capacity(steps * 2 + 4);
+        #[allow(clippy::cast_precision_loss)]
+        for step in (0..=steps).map(|index| index as f32 * STUB_RANGE_LANE_STEP) {
+            lanes.extend([center - step, center + step]);
+        }
+        // The range edges keep the most room from cards in the middle.
+        lanes.extend([lower, upper]);
+        for coordinate in lanes {
+            let duplicate = candidates
+                .iter()
+                .any(|candidate| (candidate.coordinate - coordinate).abs() < 1.0);
+            if coordinate <= upper && !duplicate {
+                #[allow(clippy::cast_possible_truncation)]
+                candidates.push(ObstacleAwareChannelCandidate {
+                    axis: plan.axis,
+                    coordinate,
+                    baseline: plan.baseline,
+                    stable_order: candidates.len() as u32,
+                });
+            }
+        }
+    }
+
     if candidates.is_empty() {
         candidates.push(ObstacleAwareChannelCandidate {
             axis: plan.axis,
@@ -1215,6 +1254,46 @@ pub(super) fn channel_candidates(
     }
 
     candidates
+}
+
+/// Spacing of the extra channel lanes tried inside a gap's marker-safe range.
+const STUB_RANGE_LANE_STEP: f32 = 10.0;
+/// Extra lanes tried on each side of the range's center; long edges across
+/// many ranks would otherwise add a lane for every 10px of their gap.
+const STUB_RANGE_LANES_PER_SIDE: usize = 6;
+
+/// Endpoints whose straight run before the first bend is too short for the
+/// endpoint marker; zero for a route without bends.
+fn short_endpoint_stubs(route: &EdgeRoute) -> u16 {
+    let points = route_points(route);
+    if points.len() < 3 {
+        return 0;
+    }
+    let length = |a: (f32, f32), b: (f32, f32)| (b.0 - a.0).hypot(b.1 - a.1);
+    let first = length(points[0], points[1]);
+    let last = length(points[points.len() - 2], points[points.len() - 1]);
+    u16::from(first + 0.5 < MIN_ENDPOINT_STUB) + u16::from(last + 0.5 < MIN_ENDPOINT_STUB)
+}
+
+/// Range of the gap between two ranks whose channels leave every card in
+/// either rank at least [`MIN_ENDPOINT_STUB`] of straight line, or `None`
+/// when the gap is too narrow to keep it on both sides.
+fn inter_rank_stub_range(
+    source_rank: usize,
+    target_rank: usize,
+    rank_bounds: &[RankAxisBounds],
+) -> Option<(f32, f32)> {
+    let source = rank_bounds.get(source_rank).copied()?;
+    let target = rank_bounds.get(target_rank).copied()?;
+    let (lower, upper) = if source.min <= target.min {
+        (source.max, target.min)
+    } else {
+        (target.max, source.min)
+    };
+    // Ports sit just outside the card border, so the stub starts there.
+    let reach = MIN_ENDPOINT_STUB + BORDER_OUTSET;
+    let range = (lower + reach, upper - reach);
+    (range.0 <= range.1).then_some(range)
 }
 
 /// Candidates in the outer corridors on both sides of an edge.
@@ -1497,6 +1576,7 @@ fn score_channel_candidate(
 
     ChannelCandidateScore {
         hard_constraint_violations,
+        short_endpoint_stubs: short_endpoint_stubs(route),
         clearance_penalty: route_clearance_penalty(route, &obstacles, ROUTE_CLEARANCE_TARGET),
         total_length: rounded_metric(approximate_route_length(route)),
         bend_count: clipped_u16(route.control_points.len()),

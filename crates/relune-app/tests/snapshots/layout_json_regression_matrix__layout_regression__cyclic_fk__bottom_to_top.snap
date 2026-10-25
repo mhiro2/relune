@@ -94,11 +94,11 @@ expression: snapshot
           "control_points": [
             [
               230.5,
-              1060.0
+              1076.0
             ],
             [
               223.5,
-              1060.0
+              1076.0
             ]
           ],
           "end": [
@@ -258,11 +258,11 @@ expression: snapshot
           "control_points": [
             [
               838.7000122070313,
-              1108.0
+              1092.0
             ],
             [
               831.7000122070313,
-              1108.0
+              1092.0
             ]
           ],
           "end": [
@@ -276,7 +276,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "owner_user_id",
           "label_x": 767.0029907226563,
-          "label_y": 1073.7030029296875,
+          "label_y": 1074.81005859375,
           "nullable": false,
           "route_label_position": [
             838.7000122070313,
@@ -381,11 +381,11 @@ expression: snapshot
           "control_points": [
             [
               845.7000122070313,
-              782.0
+              798.0
             ],
             [
               838.7000122070313,
-              782.0
+              798.0
             ]
           ],
           "end": [
@@ -399,7 +399,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "fk_teams_organization",
           "label_x": 922.5980224609375,
-          "label_y": 839.1389770507813,
+          "label_y": 820.0170288085938,
           "nullable": false,
           "route_label_position": [
             838.7000122070313,
@@ -730,11 +730,11 @@ expression: snapshot
           "control_points": [
             [
               230.5,
-              1060.0
+              1076.0
             ],
             [
               223.5,
-              1060.0
+              1076.0
             ]
           ],
           "end": [
@@ -894,11 +894,11 @@ expression: snapshot
           "control_points": [
             [
               838.7000122070313,
-              1108.0
+              1092.0
             ],
             [
               831.7000122070313,
-              1108.0
+              1092.0
             ]
           ],
           "end": [
@@ -912,7 +912,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "owner_user_id",
           "label_x": 767.0029907226563,
-          "label_y": 1073.7030029296875,
+          "label_y": 1074.81005859375,
           "nullable": false,
           "route_label_position": [
             838.7000122070313,
@@ -1017,11 +1017,11 @@ expression: snapshot
           "control_points": [
             [
               845.7000122070313,
-              782.0
+              798.0
             ],
             [
               838.7000122070313,
-              782.0
+              798.0
             ]
           ],
           "end": [
@@ -1035,7 +1035,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "fk_teams_organization",
           "label_x": 922.5980224609375,
-          "label_y": 839.1389770507813,
+          "label_y": 820.0170288085938,
           "nullable": false,
           "route_label_position": [
             838.7000122070313,

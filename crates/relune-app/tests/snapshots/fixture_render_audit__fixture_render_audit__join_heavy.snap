@@ -16,7 +16,7 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       "worst_examples": [
         "attachments[tenant_id] -> tenants[id] (1.90x)",
         "task_watchers[user_id] -> users[id] (1.79x)",
-        "project_watchers[user_id] -> users[id] (1.69x)"
+        "tasks[assignee_id] -> users[id] (1.59x)"
       ]
     },
     "parallel_groups": {
@@ -43,23 +43,23 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 9,
+      "count_under_24px": 6,
       "worst_examples": [
         "role_permissions[permission_id] -> permissions[id] (15.0px)",
         "role_permissions[role_id] -> roles[id] (16.0px)",
-        "task_tags[task_id] -> tasks[id] (16.0px)"
+        "task_watchers[user_id] -> users[id] (16.1px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 613987,
+      "bytes": 609306,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 208196,
+      "bytes": 203515,
       "edge_groups": 160,
       "node_groups": 23
     }

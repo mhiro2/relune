@@ -39,23 +39,23 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 1,
+      "count_under_24px": 0,
       "worst_examples": [
-        "product_categories[category_id] -> categories[id] (16.0px)",
         "order_items[product_id] -> products[id] (24.0px)",
+        "product_categories[category_id] -> categories[id] (32.0px)",
         "addresses[customer_id] -> customers[id] (40.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 448483,
+      "bytes": 447987,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 61483,
+      "bytes": 60987,
       "edge_groups": 28,
       "node_groups": 7
     }

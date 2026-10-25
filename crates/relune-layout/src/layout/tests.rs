@@ -2546,8 +2546,13 @@ fn test_route_edges_shift_reverse_channel_away_from_obstacle() {
     .expect("reverse-channel routing should succeed");
     let edge = edges.first().expect("edge");
 
+    // The channel clears the blocker (bottom at 170) and still leaves both
+    // endpoint markers a full straight run before the elbow.
+    let channel = edge.route.control_points[0].1;
     assert_eq!(diagnostics.non_self_loop_detour_activations, 0);
-    assert!((edge.route.control_points[0].1 - 198.0).abs() < 0.001);
+    assert!(channel >= 184.0, "channel {channel} hugs the blocker");
+    assert!(edge.route.y1 - channel >= 30.0, "source stub too short");
+    assert!(channel - edge.route.y2 >= 30.0, "target stub too short");
 }
 
 #[test]

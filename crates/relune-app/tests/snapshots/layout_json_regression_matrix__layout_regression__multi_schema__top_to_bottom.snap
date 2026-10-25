@@ -29,8 +29,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 1478.9000244140625,
-          "label_y": 321.19000244140625,
+          "label_x": 1418.470947265625,
+          "label_y": 316.0,
           "nullable": false,
           "route_label_position": [
             1418.470947265625,
@@ -53,11 +53,11 @@ expression: snapshot
           "control_points": [
             [
               237.5,
-              292.0
+              308.0
             ],
             [
               538.0999755859375,
-              292.0
+              308.0
             ]
           ],
           "end": [
@@ -70,12 +70,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "author_id",
-          "label_x": 385.79998779296875,
-          "label_y": 292.0,
+          "label_x": 401.79998779296875,
+          "label_y": 308.0,
           "nullable": false,
           "route_label_position": [
-            385.79998779296875,
-            292.0
+            401.79998779296875,
+            308.0
           ],
           "source_side": "north",
           "start": [
@@ -94,19 +94,11 @@ expression: snapshot
           "control_points": [
             [
               1230.1820068359375,
-              628.0
-            ],
-            [
-              1695.4000244140625,
-              628.0
-            ],
-            [
-              1695.4000244140625,
-              304.0
+              308.0
             ],
             [
               1344.041015625,
-              304.0
+              308.0
             ]
           ],
           "end": [
@@ -119,12 +111,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 1695.4000244140625,
-          "label_y": 622.3109741210938,
+          "label_x": 1230.1820068359375,
+          "label_y": 409.0710144042969,
           "nullable": false,
           "route_label_position": [
-            1695.4000244140625,
-            522.9290161132813
+            1230.1820068359375,
+            409.0710144042969
           ],
           "source_side": "north",
           "start": [
@@ -184,11 +176,11 @@ expression: snapshot
           "control_points": [
             [
               852.7000122070313,
-              340.0
+              324.0
             ],
             [
               552.0999755859375,
-              340.0
+              324.0
             ]
           ],
           "end": [
@@ -201,12 +193,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 656.4000244140625,
-          "label_y": 340.0,
+          "label_x": 672.4000244140625,
+          "label_y": 324.0,
           "nullable": false,
           "route_label_position": [
-            656.4000244140625,
-            340.0
+            672.4000244140625,
+            324.0
           ],
           "source_side": "north",
           "start": [
@@ -225,11 +217,11 @@ expression: snapshot
           "control_points": [
             [
               607.9819946289063,
-              592.0
+              608.0
             ],
             [
               845.7000122070313,
-              592.0
+              608.0
             ]
           ],
           "end": [
@@ -242,12 +234,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "order_id",
-          "label_x": 702.8410034179688,
-          "label_y": 592.0,
+          "label_x": 718.8410034179688,
+          "label_y": 608.0,
           "nullable": false,
           "route_label_position": [
-            702.8410034179688,
-            592.0
+            718.8410034179688,
+            608.0
           ],
           "source_side": "north",
           "start": [
@@ -346,7 +338,7 @@ expression: snapshot
         "edge_count": 6,
         "height": 954.0,
         "node_count": 7,
-        "width": 1740.4000244140625
+        "width": 1727.4000244140625
       }
     },
     "orthogonal": {
@@ -372,8 +364,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 1478.9000244140625,
-          "label_y": 321.19000244140625,
+          "label_x": 1418.470947265625,
+          "label_y": 316.0,
           "nullable": false,
           "route_label_position": [
             1418.470947265625,
@@ -396,11 +388,11 @@ expression: snapshot
           "control_points": [
             [
               237.5,
-              292.0
+              308.0
             ],
             [
               538.0999755859375,
-              292.0
+              308.0
             ]
           ],
           "end": [
@@ -413,12 +405,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "author_id",
-          "label_x": 385.79998779296875,
-          "label_y": 292.0,
+          "label_x": 401.79998779296875,
+          "label_y": 308.0,
           "nullable": false,
           "route_label_position": [
-            385.79998779296875,
-            292.0
+            401.79998779296875,
+            308.0
           ],
           "source_side": "north",
           "start": [
@@ -437,19 +429,11 @@ expression: snapshot
           "control_points": [
             [
               1230.1820068359375,
-              628.0
-            ],
-            [
-              1695.4000244140625,
-              628.0
-            ],
-            [
-              1695.4000244140625,
-              304.0
+              308.0
             ],
             [
               1344.041015625,
-              304.0
+              308.0
             ]
           ],
           "end": [
@@ -462,12 +446,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 1695.4000244140625,
-          "label_y": 622.3109741210938,
+          "label_x": 1230.1820068359375,
+          "label_y": 409.0710144042969,
           "nullable": false,
           "route_label_position": [
-            1695.4000244140625,
-            522.9290161132813
+            1230.1820068359375,
+            409.0710144042969
           ],
           "source_side": "north",
           "start": [
@@ -527,11 +511,11 @@ expression: snapshot
           "control_points": [
             [
               852.7000122070313,
-              340.0
+              324.0
             ],
             [
               552.0999755859375,
-              340.0
+              324.0
             ]
           ],
           "end": [
@@ -544,12 +528,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "customer_id",
-          "label_x": 656.4000244140625,
-          "label_y": 340.0,
+          "label_x": 672.4000244140625,
+          "label_y": 324.0,
           "nullable": false,
           "route_label_position": [
-            656.4000244140625,
-            340.0
+            672.4000244140625,
+            324.0
           ],
           "source_side": "north",
           "start": [
@@ -568,11 +552,11 @@ expression: snapshot
           "control_points": [
             [
               607.9819946289063,
-              592.0
+              608.0
             ],
             [
               845.7000122070313,
-              592.0
+              608.0
             ]
           ],
           "end": [
@@ -585,12 +569,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "order_id",
-          "label_x": 702.8410034179688,
-          "label_y": 592.0,
+          "label_x": 718.8410034179688,
+          "label_y": 608.0,
           "nullable": false,
           "route_label_position": [
-            702.8410034179688,
-            592.0
+            718.8410034179688,
+            608.0
           ],
           "source_side": "north",
           "start": [
@@ -689,7 +673,7 @@ expression: snapshot
         "edge_count": 6,
         "height": 954.0,
         "node_count": 7,
-        "width": 1740.4000244140625
+        "width": 1727.4000244140625
       }
     },
     "straight": {
