@@ -23,7 +23,7 @@ const MAX_SLOT_GAP: f32 = 28.0;
 /// Additional distance treated as a near-neighbor case on the primary flow axis.
 const NEAR_NODE_PADDING: f32 = 24.0;
 /// Distance kept between the outermost port and the corner of its node side.
-const PORT_CORNER_INSET: f32 = 4.0;
+pub(crate) const PORT_CORNER_INSET: f32 = 4.0;
 
 #[derive(Debug, Clone)]
 pub(crate) enum EdgePortAssignment {

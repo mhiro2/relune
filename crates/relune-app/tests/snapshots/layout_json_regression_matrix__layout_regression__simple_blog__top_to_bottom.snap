@@ -9,18 +9,9 @@ expression: snapshot
     "curved": {
       "edges": [
         {
-          "control_points": [
-            [
-              252.79100036621094,
-              542.0
-            ],
-            [
-              240.89999389648438,
-              542.0
-            ]
-          ],
+          "control_points": [],
           "end": [
-            240.89999389648438,
+            252.79100036621094,
             492.0
           ],
           "from": "comments",
@@ -29,11 +20,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 240.89999389648438,
-          "label_y": 538.6209716796875,
+          "label_x": 252.79100036621094,
+          "label_y": 533.6669921875,
           "nullable": false,
           "route_label_position": [
-            246.84500122070313,
+            252.79100036621094,
             542.0
           ],
           "source_side": "north",
@@ -99,16 +90,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              240.89999389648438,
-              240.0
-            ],
-            [
-              252.84500122070313,
-              240.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             252.84500122070313,
             190.0
@@ -119,16 +101,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 271.07598876953125,
-          "label_y": 242.8470001220703,
+          "label_x": 276.8450012207031,
+          "label_y": 240.0,
           "nullable": false,
           "route_label_position": [
-            246.8730010986328,
+            252.84500122070313,
             240.0
           ],
           "source_side": "north",
           "start": [
-            240.89999389648438,
+            252.84500122070313,
             290.0
           ],
           "style": "Curved",
@@ -185,18 +167,9 @@ expression: snapshot
     "orthogonal": {
       "edges": [
         {
-          "control_points": [
-            [
-              252.79100036621094,
-              542.0
-            ],
-            [
-              240.89999389648438,
-              542.0
-            ]
-          ],
+          "control_points": [],
           "end": [
-            240.89999389648438,
+            252.79100036621094,
             492.0
           ],
           "from": "comments",
@@ -205,11 +178,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 240.89999389648438,
-          "label_y": 538.6209716796875,
+          "label_x": 252.79100036621094,
+          "label_y": 533.6669921875,
           "nullable": false,
           "route_label_position": [
-            246.84500122070313,
+            252.79100036621094,
             542.0
           ],
           "source_side": "north",
@@ -275,16 +248,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              240.89999389648438,
-              240.0
-            ],
-            [
-              252.84500122070313,
-              240.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             252.84500122070313,
             190.0
@@ -295,16 +259,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 271.07598876953125,
-          "label_y": 242.8470001220703,
+          "label_x": 276.8450012207031,
+          "label_y": 240.0,
           "nullable": false,
           "route_label_position": [
-            246.8730010986328,
+            252.84500122070313,
             240.0
           ],
           "source_side": "north",
           "start": [
-            240.89999389648438,
+            252.84500122070313,
             290.0
           ],
           "style": "Orthogonal",

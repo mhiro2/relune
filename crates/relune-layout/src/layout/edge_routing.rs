@@ -12,7 +12,9 @@ use crate::channel::{
     compare_cached_channel_candidate_scores,
 };
 use crate::graph::LayoutGraph;
-use crate::port::{EdgePortAssignment, RegularPortAssignment, assign_edge_ports};
+use crate::port::{
+    EdgePortAssignment, MIN_SLOT_GAP, PORT_CORNER_INSET, RegularPortAssignment, assign_edge_ports,
+};
 use crate::route::{
     AttachmentSide, BORDER_OUTSET, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
     detour_around_obstacles_with_endpoint_sizes, estimate_label_half_width, nudge_label,
@@ -662,6 +664,7 @@ pub(super) fn route_edges_around(
     }
 
     apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph, fixed_obstacles);
+    straighten_small_jogs(&mut routed_edges, graph, positioned_nodes, &node_obstacles);
 
     let mut edges = vec![None; graph.edges.len()];
     let mut placed_labels = PlacedLabels::new();
@@ -774,6 +777,102 @@ fn apply_parallel_edge_bundling(
             }
 
             cluster_start = cluster_end;
+        }
+    }
+}
+
+/// Sideways step below which a vertical route reads as one line drawn
+/// slightly off, rather than as a deliberate bend; it covers the half slot
+/// gap that two centered port groups leave between nearly aligned ports.
+const SMALL_JOG: f32 = 16.0;
+
+/// Straightens vertical routes whose ends are only a few pixels apart.
+///
+/// Port slots are spread per card side, so two nearly aligned ports can
+/// leave a route with a tiny sideways step between its channel bends. When
+/// one endpoint can slide along its top or bottom side to line up with the
+/// other, without crowding another port or crossing a card, the route
+/// becomes a single straight line. Side ports stay put: their height names
+/// a column row.
+fn straighten_small_jogs(
+    routed_edges: &mut [Option<RoutedEdgeDraft>],
+    graph: &LayoutGraph,
+    positioned_nodes: &[PositionedNode],
+    obstacles: &NodeObstacleIndex<'_>,
+) {
+    let node_by_id: BTreeMap<&str, &PositionedNode> = positioned_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let mut ports: Vec<(usize, &str, (f32, f32))> = Vec::new();
+    for (index, draft) in routed_edges.iter().enumerate() {
+        let Some(draft) = draft else { continue };
+        let edge = &graph.edges[draft.edge_index];
+        ports.push((index, edge.from.as_str(), (draft.route.x1, draft.route.y1)));
+        ports.push((index, edge.to.as_str(), (draft.route.x2, draft.route.y2)));
+    }
+
+    for (index, slot) in routed_edges.iter_mut().enumerate() {
+        let Some(draft) = slot.as_mut() else {
+            continue;
+        };
+        let edge = &graph.edges[draft.edge_index];
+        if edge.is_self_loop || draft.route.style == RouteStyle::Straight {
+            continue;
+        }
+        let points = route_points(&draft.route);
+        let [source, bend_a, bend_b, target] = points[..] else {
+            continue;
+        };
+        let vertical_z = (source.0 - bend_a.0).abs() < 0.01
+            && (bend_b.0 - target.0).abs() < 0.01
+            && (bend_a.1 - bend_b.1).abs() < 0.01;
+        let jog = (source.0 - target.0).abs();
+        if !vertical_z || !(0.01..SMALL_JOG).contains(&jog) {
+            continue;
+        }
+
+        // Prefer moving the target end, which carries the lighter marker.
+        let moves = [
+            (edge.to.as_str(), target, source.0),
+            (edge.from.as_str(), source, target.0),
+        ];
+        let straightened = moves.into_iter().find_map(|(node_id, port, new_x)| {
+            let node = node_by_id.get(node_id)?;
+            let within_side = new_x >= node.x + PORT_CORNER_INSET
+                && new_x <= node.x + node.width - PORT_CORNER_INSET;
+            let crowds_neighbour = ports.iter().any(|&(other, other_node, other_port)| {
+                other != index
+                    && other_node == node_id
+                    && (other_port.1 - port.1).abs() < 0.5
+                    && (other_port.0 - new_x).abs() < MIN_SLOT_GAP
+            });
+            if !within_side || crowds_neighbour {
+                return None;
+            }
+            let points = if port == target {
+                [source, (new_x, target.1)]
+            } else {
+                [(new_x, source.1), target]
+            };
+            let route = rebuild_route_from_points(&points, draft.route.style);
+            let edge_obstacles = EdgeObstacles::new(obstacles, &edge.from, &edge.to);
+            let nearby = edge_obstacles.near_route(&route, ROUTE_CLEARANCE_TARGET);
+            (route_obstacle_hit_count(&route, &nearby, HARD_OBSTACLE_PADDING) == 0).then_some((
+                route,
+                port == target,
+                new_x,
+            ))
+        });
+
+        if let Some((route, moved_target, new_x)) = straightened {
+            for port in &mut ports {
+                if port.0 == index && (port.2 == if moved_target { target } else { source }) {
+                    port.2.0 = new_x;
+                }
+            }
+            draft.route = route;
+            draft.bundle_metadata = None;
         }
     }
 }

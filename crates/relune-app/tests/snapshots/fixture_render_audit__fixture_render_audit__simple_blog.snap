@@ -27,9 +27,9 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
     "reverse_edges": {
       "count": 3,
       "examples": [
-        "comments[post_id] -> posts[id] (rank 2 -> 1, bends 2)",
+        "comments[post_id] -> posts[id] (rank 2 -> 1, bends 0)",
         "comments[user_id] -> users[id] (rank 2 -> 0, bends 4)",
-        "posts[user_id] -> users[id] (rank 1 -> 0, bends 2)"
+        "posts[user_id] -> users[id] (rank 1 -> 0, bends 0)"
       ]
     },
     "same_rank_edges": {
@@ -47,13 +47,13 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 403587,
+      "bytes": 402543,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 23289,
+      "bytes": 22245,
       "edge_groups": 12,
       "node_groups": 3
     }
