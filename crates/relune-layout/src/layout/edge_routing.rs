@@ -1465,7 +1465,9 @@ fn candidate_channel_anchors(
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            if context.source_rank < context.target_rank {
+            // Step out of each rank on the side facing the other one; rank
+            // order says nothing about which side that is in bottom-to-top.
+            if source_bounds.min <= target_bounds.min {
                 (
                     (source.0, source_bounds.max + ROUTE_STUB_DISTANCE),
                     (target.0, target_bounds.min - ROUTE_STUB_DISTANCE),
@@ -1494,7 +1496,7 @@ fn candidate_channel_anchors(
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            if context.source_rank < context.target_rank {
+            if source_bounds.min <= target_bounds.min {
                 (
                     (source_bounds.max + ROUTE_STUB_DISTANCE, source.1),
                     (target_bounds.min - ROUTE_STUB_DISTANCE, target.1),

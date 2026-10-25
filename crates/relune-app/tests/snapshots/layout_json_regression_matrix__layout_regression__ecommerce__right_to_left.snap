@@ -70,8 +70,8 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1224.4000244140625,
-          "label_y": 534.0,
+          "label_x": 1236.4000244140625,
+          "label_y": 520.6669921875,
           "nullable": true,
           "route_label_position": [
             1236.4000244140625,
@@ -134,11 +134,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              437.0,
+              439.0,
               528.0
             ],
             [
-              437.0,
+              439.0,
+              411.0
+            ],
+            [
+              1238.4000244140625,
+              411.0
+            ],
+            [
+              1238.4000244140625,
               768.0
             ]
           ],
@@ -152,12 +160,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 728.7000122070313,
-          "label_y": 768.0,
+          "label_x": 968.7000122070313,
+          "label_y": 411.0,
           "nullable": false,
           "route_label_position": [
-            728.7000122070313,
-            768.0
+            968.7000122070313,
+            411.0
           ],
           "source_side": "east",
           "start": [
@@ -446,8 +454,8 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1224.4000244140625,
-          "label_y": 534.0,
+          "label_x": 1236.4000244140625,
+          "label_y": 520.6669921875,
           "nullable": true,
           "route_label_position": [
             1236.4000244140625,
@@ -510,11 +518,19 @@ expression: snapshot
         {
           "control_points": [
             [
-              437.0,
+              439.0,
               528.0
             ],
             [
-              437.0,
+              439.0,
+              411.0
+            ],
+            [
+              1238.4000244140625,
+              411.0
+            ],
+            [
+              1238.4000244140625,
               768.0
             ]
           ],
@@ -528,12 +544,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 728.7000122070313,
-          "label_y": 768.0,
+          "label_x": 968.7000122070313,
+          "label_y": 411.0,
           "nullable": false,
           "route_label_position": [
-            728.7000122070313,
-            768.0
+            968.7000122070313,
+            411.0
           ],
           "source_side": "east",
           "start": [
