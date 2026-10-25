@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { computeRelationHighlight, relationColumnPairs } from './highlight_actions';
-import { createHighlightPainter, pathEndpoints, renderRelationCard } from './highlight_dom';
+import {
+  addEdgeHitArea,
+  createHighlightPainter,
+  pathEndpoints,
+  renderRelationCard,
+} from './highlight_dom';
 import { createHighlightState } from './highlight_state';
 import { edge, table } from './test_fixtures';
 
@@ -69,6 +74,19 @@ describe('relationColumnPairs', () => {
     expect(relationColumnPairs(edges[1] as (typeof edges)[number])).toEqual([
       'tags → warehouse_bins',
     ]);
+  });
+});
+
+describe('addEdgeHitArea', () => {
+  it('puts one hit path under the drawn line, sharing its shape', () => {
+    const { edgeEls } = renderDiagram();
+    const edgeEl = edgeEls[0] as Element;
+    addEdgeHitArea(edgeEl);
+    addEdgeHitArea(edgeEl);
+    const hits = edgeEl.querySelectorAll('.edge-hit');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.getAttribute('d')).toBe(edgeEl.querySelector('.edge-path')?.getAttribute('d'));
+    expect(hits[0]?.nextElementSibling?.classList.contains('edge-path')).toBe(true);
   });
 });
 

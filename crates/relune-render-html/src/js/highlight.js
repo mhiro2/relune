@@ -156,6 +156,16 @@
   function numericAttribute(element, name) {
     return Number.parseFloat(element?.getAttribute(name) ?? "") || 0;
   }
+  function addEdgeHitArea(edge) {
+    const path = edge.querySelector(".edge-path");
+    const d = path?.getAttribute("d");
+    if (path == null || d == null || edge.querySelector(".edge-hit") !== null) return;
+    const hit = document.createElementNS(SVG_NS, "path");
+    hit.setAttribute("class", "edge-hit");
+    hit.setAttribute("d", d);
+    hit.setAttribute("aria-hidden", "true");
+    path.before(hit);
+  }
   function pathEndpoints(d) {
     const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
     if (numbers.length < 4) return null;
@@ -942,6 +952,7 @@
         });
       });
       edgeEls.forEach((edgeEl, index) => {
+        addEdgeHitArea(edgeEl);
         const toggle = (focusCard) => {
           setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
         };

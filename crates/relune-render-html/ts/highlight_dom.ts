@@ -112,6 +112,21 @@ function numericAttribute(element: Element | null | undefined, name: string): nu
   return Number.parseFloat(element?.getAttribute(name) ?? '') || 0;
 }
 
+/**
+ * Puts a wide, invisible copy of a line's path under it, so the thin drawn
+ * stroke is still easy to click. Static SVG output stays free of it.
+ */
+export function addEdgeHitArea(edge: Element): void {
+  const path = edge.querySelector('.edge-path');
+  const d = path?.getAttribute('d');
+  if (path == null || d == null || edge.querySelector('.edge-hit') !== null) return;
+  const hit = document.createElementNS(SVG_NS, 'path');
+  hit.setAttribute('class', 'edge-hit');
+  hit.setAttribute('d', d);
+  hit.setAttribute('aria-hidden', 'true');
+  path.before(hit);
+}
+
 /** First and last points of an SVG path's `d` attribute. */
 export function pathEndpoints(d: string): [[number, number], [number, number]] | null {
   const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);

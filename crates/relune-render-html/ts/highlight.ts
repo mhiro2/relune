@@ -5,6 +5,7 @@ import {
   relationColumnPairs,
 } from './highlight_actions';
 import {
+  addEdgeHitArea,
   createHighlightPainter,
   createObjectBrowser,
   hideHoverPopover,
@@ -384,6 +385,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     // Edges render in metadata order, so a DOM index is a metadata index.
     // Each line is also a keyboard button naming the mapping it selects.
     edgeEls.forEach((edgeEl, index) => {
+      addEdgeHitArea(edgeEl);
       const toggle = (focusCard: boolean): void => {
         setSelectedEdge(state.selectedEdge === index ? null : index, focusCard);
       };

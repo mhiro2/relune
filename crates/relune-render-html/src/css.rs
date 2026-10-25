@@ -1622,6 +1622,16 @@ pub(crate) fn build_css(
       cursor: pointer;
     }
 
+    /* Lines are drawn thin, so a wide transparent stroke under each one takes
+       the clicks; non-scaling keeps it about 12 screen pixels at any zoom. */
+    .canvas svg .edge-hit {
+      fill: none;
+      stroke: transparent;
+      stroke-width: 12px;
+      vector-effect: non-scaling-stroke;
+      pointer-events: stroke;
+    }
+
     /* Line labels stay out of the overview and appear only for the lines a
        reader is looking at; the relation card carries the full mapping. */
     .canvas svg .edge-label,
