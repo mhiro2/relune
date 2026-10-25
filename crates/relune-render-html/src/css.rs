@@ -816,8 +816,15 @@ pub(crate) fn build_css(
     }
 
     .node.hover-preview-neighbor .table-body {
-      stroke: var(--selection-soft);
-      stroke-width: 1.5px;
+      stroke: var(--selection-color);
+      stroke-width: 1.4px;
+    }
+
+    /* Tables that reference the focused one get a dashed outline, so the
+       direction of each relationship reads without a second hue. */
+    .node.hover-preview-neighbor.hover-inbound .table-body,
+    .node.highlighted-neighbor.inbound .table-body {
+      stroke-dasharray: 5 3;
     }
 
     .edge.hover-preview-edge {
@@ -836,8 +843,8 @@ pub(crate) fn build_css(
     }
 
     .node.highlighted-neighbor .table-body {
-      stroke: var(--selection-soft);
-      stroke-width: 1.5px;
+      stroke: var(--selection-color);
+      stroke-width: 1.4px;
     }
 
     .node.dimmed-by-highlight {
@@ -858,7 +865,7 @@ pub(crate) fn build_css(
 
     .node.selected-node .table-body {
       stroke: var(--selection-color);
-      stroke-width: 2px;
+      stroke-width: 2.4px;
     }
 
     .edge.highlighted-neighbor .edge-path,
