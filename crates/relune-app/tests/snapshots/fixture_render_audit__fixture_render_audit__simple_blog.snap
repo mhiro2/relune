@@ -6,7 +6,7 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
   "fixture": "simple_blog.sql",
   "layout": {
     "edge_count": 3,
-    "height": 756.0,
+    "height": 804.0,
     "node_count": 3,
     "width": 478.3999938964844
   },
@@ -14,7 +14,7 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
     "long_detours": {
       "count_over_1_8x": 1,
       "worst_examples": [
-        "comments[user_id] -> users[id] (2.12x)",
+        "comments[user_id] -> users[id] (1.99x)",
         "comments[post_id] -> posts[id] (1.00x)",
         "posts[user_id] -> users[id] (1.00x)"
       ]
@@ -40,8 +40,8 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
       "count_under_24px": 0,
       "worst_examples": [
         "comments[user_id] -> users[id] (24.0px)",
-        "comments[post_id] -> posts[id] (280.0px)",
-        "posts[user_id] -> users[id] (280.0px)"
+        "comments[post_id] -> posts[id] (304.0px)",
+        "posts[user_id] -> users[id] (304.0px)"
       ]
     }
   },

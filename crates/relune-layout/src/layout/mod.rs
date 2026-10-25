@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{Level, debug, info, span};
 
+use relune_core::config::MARKER_SAFE_RANK_GAP;
 use relune_core::diagnostic::codes;
 use relune_core::layout::{EdgeRoute, RouteStyle};
 use relune_core::{
@@ -371,8 +372,13 @@ impl LayoutConfig {
 
         self.horizontal_spacing =
             (self.horizontal_spacing * combined).max(self.compaction.min_horizontal_spacing);
-        self.vertical_spacing =
-            (self.vertical_spacing * combined).max(self.compaction.min_vertical_spacing);
+        // Auto-tuning never squeezes ranks below the gap that fits a marker
+        // at each end of a line and its label, unless the spacing asked for
+        // is already tighter; compaction handles large schemas separately.
+        let marker_floor = self.vertical_spacing.min(MARKER_SAFE_RANK_GAP);
+        self.vertical_spacing = (self.vertical_spacing * combined)
+            .max(self.compaction.min_vertical_spacing)
+            .max(marker_floor);
 
         self
     }

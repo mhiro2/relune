@@ -6,7 +6,7 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
   "fixture": "multi_schema.sql",
   "layout": {
     "edge_count": 6,
-    "height": 954.0,
+    "height": 1002.0,
     "node_count": 7,
     "width": 1727.4000244140625
   },
@@ -39,21 +39,21 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
     "tight_clearance": {
       "count_under_24px": 0,
       "worst_examples": [
-        "sales.order_items[product_id] -> inventory.products[id] (48.0px)",
-        "sales.order_items[order_id] -> sales.orders[id] (81.6px)",
-        "sales.orders[customer_id] -> public.users[id] (137.2px)"
+        "sales.order_items[product_id] -> inventory.products[id] (56.2px)",
+        "sales.order_items[order_id] -> sales.orders[id] (88.5px)",
+        "sales.orders[customer_id] -> public.users[id] (139.9px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 442595,
+      "bytes": 441609,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 56343,
+      "bytes": 55357,
       "edge_groups": 24,
       "node_groups": 7
     }

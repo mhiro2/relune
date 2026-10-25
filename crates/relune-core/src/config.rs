@@ -201,8 +201,12 @@ pub enum LayoutAlgorithm {
 const fn default_horizontal_spacing() -> f32 {
     320.0
 }
+/// Gap between ranks that fits a full Crow's Foot marker at each end of a
+/// line (about 32px each) with a label pill between them.
+pub const MARKER_SAFE_RANK_GAP: f32 = 104.0;
+
 const fn default_vertical_spacing() -> f32 {
-    80.0
+    MARKER_SAFE_RANK_GAP
 }
 const fn default_force_iterations() -> usize {
     150

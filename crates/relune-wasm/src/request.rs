@@ -145,9 +145,17 @@ impl WasmRenderRequest {
             strategy: self.group_by.unwrap_or_default().into(),
         };
 
-        let horizontal_spacing =
-            validated_spacing(self.horizontal_spacing, 320.0, "horizontalSpacing")?;
-        let vertical_spacing = validated_spacing(self.vertical_spacing, 80.0, "verticalSpacing")?;
+        let defaults = LayoutSpec::default();
+        let horizontal_spacing = validated_spacing(
+            self.horizontal_spacing,
+            defaults.horizontal_spacing,
+            "horizontalSpacing",
+        )?;
+        let vertical_spacing = validated_spacing(
+            self.vertical_spacing,
+            defaults.vertical_spacing,
+            "verticalSpacing",
+        )?;
         let force_iterations = validated_force_iterations(self.force_iterations)?;
 
         let layout = LayoutSpec {

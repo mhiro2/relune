@@ -12,16 +12,16 @@ expression: snapshot
           "control_points": [
             [
               244.39100646972656,
-              250.0
+              262.0
             ],
             [
               237.5,
-              250.0
+              262.0
             ]
           ],
           "end": [
             237.5,
-            288.0
+            312.0
           ],
           "from": "comments",
           "from_columns": [
@@ -29,12 +29,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 177.7449951171875,
-          "label_y": 244.59100341796875,
+          "label_x": 292.2770080566406,
+          "label_y": 256.09600830078125,
           "nullable": false,
           "route_label_position": [
             240.94500732421875,
-            250.0
+            262.0
           ],
           "source_side": "south",
           "start": [
@@ -53,7 +53,7 @@ expression: snapshot
           "control_points": [],
           "end": [
             230.44500732421875,
-            566.0
+            614.0
           ],
           "from": "comments",
           "from_columns": [
@@ -61,12 +61,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 230.4340057373047,
-          "label_y": 492.25,
+          "label_x": 182.39999389648438,
+          "label_y": 279.0069885253906,
           "nullable": false,
           "route_label_position": [
             230.41799926757813,
-            389.0
+            413.0
           ],
           "source_side": "south",
           "start": [
@@ -85,16 +85,16 @@ expression: snapshot
           "control_points": [
             [
               237.5,
-              528.0
+              564.0
             ],
             [
               244.44500732421875,
-              528.0
+              564.0
             ]
           ],
           "end": [
             244.44500732421875,
-            566.0
+            614.0
           ],
           "from": "posts",
           "from_columns": [
@@ -102,17 +102,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 177.76600646972656,
-          "label_y": 533.4600219726563,
+          "label_x": 280.3590087890625,
+          "label_y": 562.489013671875,
           "nullable": false,
           "route_label_position": [
             240.97300720214844,
-            528.0
+            564.0
           ],
           "source_side": "south",
           "start": [
             237.5,
-            490.0
+            514.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -144,7 +144,7 @@ expression: snapshot
           "kind": "Table",
           "width": 363.0,
           "x": 56.0,
-          "y": 290.0
+          "y": 314.0
         },
         {
           "column_count": 4,
@@ -155,12 +155,12 @@ expression: snapshot
           "kind": "Table",
           "width": 329.0,
           "x": 72.94499969482422,
-          "y": 568.0
+          "y": 616.0
         }
       ],
       "summary": {
         "edge_count": 3,
-        "height": 756.0,
+        "height": 804.0,
         "node_count": 3,
         "width": 475.0
       }
@@ -171,16 +171,16 @@ expression: snapshot
           "control_points": [
             [
               244.39100646972656,
-              250.0
+              262.0
             ],
             [
               237.5,
-              250.0
+              262.0
             ]
           ],
           "end": [
             237.5,
-            288.0
+            312.0
           ],
           "from": "comments",
           "from_columns": [
@@ -188,12 +188,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 177.7449951171875,
-          "label_y": 244.59100341796875,
+          "label_x": 292.2770080566406,
+          "label_y": 256.09600830078125,
           "nullable": false,
           "route_label_position": [
             240.94500732421875,
-            250.0
+            262.0
           ],
           "source_side": "south",
           "start": [
@@ -212,7 +212,7 @@ expression: snapshot
           "control_points": [],
           "end": [
             230.44500732421875,
-            566.0
+            614.0
           ],
           "from": "comments",
           "from_columns": [
@@ -220,12 +220,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 230.4340057373047,
-          "label_y": 492.25,
+          "label_x": 182.39999389648438,
+          "label_y": 279.0069885253906,
           "nullable": false,
           "route_label_position": [
             230.41799926757813,
-            389.0
+            413.0
           ],
           "source_side": "south",
           "start": [
@@ -244,16 +244,16 @@ expression: snapshot
           "control_points": [
             [
               237.5,
-              528.0
+              564.0
             ],
             [
               244.44500732421875,
-              528.0
+              564.0
             ]
           ],
           "end": [
             244.44500732421875,
-            566.0
+            614.0
           ],
           "from": "posts",
           "from_columns": [
@@ -261,17 +261,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 177.76600646972656,
-          "label_y": 533.4600219726563,
+          "label_x": 280.3590087890625,
+          "label_y": 562.489013671875,
           "nullable": false,
           "route_label_position": [
             240.97300720214844,
-            528.0
+            564.0
           ],
           "source_side": "south",
           "start": [
             237.5,
-            490.0
+            514.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -303,7 +303,7 @@ expression: snapshot
           "kind": "Table",
           "width": 363.0,
           "x": 56.0,
-          "y": 290.0
+          "y": 314.0
         },
         {
           "column_count": 4,
@@ -314,12 +314,12 @@ expression: snapshot
           "kind": "Table",
           "width": 329.0,
           "x": 72.94499969482422,
-          "y": 568.0
+          "y": 616.0
         }
       ],
       "summary": {
         "edge_count": 3,
-        "height": 756.0,
+        "height": 804.0,
         "node_count": 3,
         "width": 475.0
       }
@@ -330,7 +330,7 @@ expression: snapshot
           "control_points": [],
           "end": [
             237.5,
-            288.0
+            312.0
           ],
           "from": "comments",
           "from_columns": [
@@ -338,12 +338,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 300.70001220703125,
-          "label_y": 255.41799926757813,
+          "label_x": 277.4339904785156,
+          "label_y": 256.1409912109375,
           "nullable": false,
           "route_label_position": [
             240.94500732421875,
-            250.0
+            262.0
           ],
           "source_side": "south",
           "start": [
@@ -362,7 +362,7 @@ expression: snapshot
           "control_points": [],
           "end": [
             230.44500732421875,
-            566.0
+            614.0
           ],
           "from": "comments",
           "from_columns": [
@@ -370,12 +370,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 230.4340057373047,
-          "label_y": 492.25,
+          "label_x": 182.39999389648438,
+          "label_y": 279.0069885253906,
           "nullable": false,
           "route_label_position": [
             230.41799926757813,
-            389.0
+            413.0
           ],
           "source_side": "south",
           "start": [
@@ -394,7 +394,7 @@ expression: snapshot
           "control_points": [],
           "end": [
             244.44500732421875,
-            566.0
+            614.0
           ],
           "from": "posts",
           "from_columns": [
@@ -402,17 +402,17 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 288.77301025390625,
-          "label_y": 523.6320190429688,
+          "label_x": 276.885986328125,
+          "label_y": 561.5059814453125,
           "nullable": false,
           "route_label_position": [
             240.97300720214844,
-            528.0
+            564.0
           ],
           "source_side": "south",
           "start": [
             237.5,
-            490.0
+            514.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
@@ -444,7 +444,7 @@ expression: snapshot
           "kind": "Table",
           "width": 363.0,
           "x": 56.0,
-          "y": 290.0
+          "y": 314.0
         },
         {
           "column_count": 4,
@@ -455,12 +455,12 @@ expression: snapshot
           "kind": "Table",
           "width": 329.0,
           "x": 72.94499969482422,
-          "y": 568.0
+          "y": 616.0
         }
       ],
       "summary": {
         "edge_count": 3,
-        "height": 756.0,
+        "height": 804.0,
         "node_count": 3,
         "width": 475.0
       }
