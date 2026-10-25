@@ -19,7 +19,7 @@ use crate::route::{
     AttachmentSide, BORDER_OUTSET, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
     detour_around_obstacles_with_endpoint_sizes, estimate_label_half_width, nudge_label,
     point_along_route, rebuild_route_from_points, route_edge_with_assigned_ports, route_points,
-    route_self_loop_with_offset, sample_route_obstacles, step_from_attachment,
+    route_self_loop_at_rows, sample_route_obstacles, step_from_attachment,
 };
 
 use super::routing_debug::{build_regular_edge_debug, channel_axis_name};
@@ -177,7 +177,7 @@ fn route_single_edge(
                 detail: "source node position missing for self-loop",
             });
         };
-        route_self_loop_with_offset(
+        route_self_loop_at_rows(
             x,
             y,
             w,
@@ -185,6 +185,8 @@ fn route_single_edge(
             ctx.config.edge_style,
             ctx.config.direction,
             assignment.radius_offset,
+            assignment.rows,
+            Some(assignment.side),
         )
     } else if let (
         EdgePortAssignment::Regular(assignment),
@@ -321,13 +323,17 @@ fn route_single_edge(
                 (Some(&(_, _, w, h)), _) | (_, Some(&(_, _, w, h))) => Some((w, h)),
                 _ => None,
             };
+            let loop_side = match port_assignment {
+                EdgePortAssignment::SelfLoop(assignment) => assignment.side,
+                EdgePortAssignment::Regular(_) => AttachmentSide::East,
+            };
             // Detours may wander arbitrarily far from the loop, so self-loops
             // (rare in practice) check against every node.
             detour_around_obstacles_with_endpoint_sizes(
                 &route,
                 &ctx.obstacles.all(),
-                Some(AttachmentSide::East),
-                Some(AttachmentSide::East),
+                Some(loop_side),
+                Some(loop_side),
                 self_size,
                 self_size,
             )

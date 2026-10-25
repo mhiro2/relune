@@ -192,16 +192,16 @@ expression: snapshot
           "control_points": [
             [
               1644.0,
-              951.5
+              951.0
             ],
             [
               1644.0,
-              830.5
+              819.0
             ]
           ],
           "end": [
             1608.0,
-            830.5
+            819.0
           ],
           "from": "comments",
           "from_columns": [
@@ -210,16 +210,16 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 1740.0,
-          "label_y": 891.0,
+          "label_y": 865.6199951171875,
           "nullable": true,
           "route_label_position": [
             1644.0,
-            891.0
+            885.0
           ],
           "source_side": "east",
           "start": [
             1608.0,
-            951.5
+            951.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -2208,16 +2208,16 @@ expression: snapshot
           "control_points": [
             [
               1644.0,
-              951.5
+              951.0
             ],
             [
               1644.0,
-              830.5
+              819.0
             ]
           ],
           "end": [
             1608.0,
-            830.5
+            819.0
           ],
           "from": "comments",
           "from_columns": [
@@ -2226,16 +2226,16 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 1740.0,
-          "label_y": 891.0,
+          "label_y": 865.6199951171875,
           "nullable": true,
           "route_label_position": [
             1644.0,
-            891.0
+            885.0
           ],
           "source_side": "east",
           "start": [
             1608.0,
-            951.5
+            951.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -4172,16 +4172,16 @@ expression: snapshot
           "control_points": [
             [
               1644.0,
-              951.5
+              951.0
             ],
             [
               1644.0,
-              830.5
+              819.0
             ]
           ],
           "end": [
             1608.0,
-            830.5
+            819.0
           ],
           "from": "comments",
           "from_columns": [
@@ -4190,16 +4190,16 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 1652.0,
-          "label_y": 891.0,
+          "label_y": 885.0,
           "nullable": true,
           "route_label_position": [
             1644.0,
-            891.0
+            885.0
           ],
           "source_side": "east",
           "start": [
             1608.0,
-            951.5
+            951.0
           ],
           "style": "Straight",
           "target_cardinality": "One",

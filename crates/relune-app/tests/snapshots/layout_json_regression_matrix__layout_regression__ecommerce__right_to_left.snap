@@ -52,17 +52,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              1236.4000244140625,
-              490.0
+              1657.4000244140625,
+              583.0
             ],
             [
-              1236.4000244140625,
-              578.0
+              1657.4000244140625,
+              495.0
             ]
           ],
           "end": [
-            1272.4000244140625,
-            578.0
+            1621.4000244140625,
+            495.0
           ],
           "from": "categories",
           "from_columns": [
@@ -70,21 +70,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1236.4000244140625,
-          "label_y": 534.0,
+          "label_x": 1665.4000244140625,
+          "label_y": 539.0,
           "nullable": true,
           "route_label_position": [
-            1236.4000244140625,
-            534.0
+            1657.4000244140625,
+            539.0
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1272.4000244140625,
-            490.0
+            1621.4000244140625,
+            583.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
-          "target_side": "west",
+          "target_side": "east",
           "to": "categories",
           "to_columns": [
             "id"
@@ -387,7 +387,7 @@ expression: snapshot
         "edge_count": 7,
         "height": 1046.0,
         "node_count": 7,
-        "width": 1677.4000244140625
+        "width": 1707.199951171875
       }
     },
     "orthogonal": {
@@ -436,17 +436,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              1236.4000244140625,
-              490.0
+              1657.4000244140625,
+              583.0
             ],
             [
-              1236.4000244140625,
-              578.0
+              1657.4000244140625,
+              495.0
             ]
           ],
           "end": [
-            1272.4000244140625,
-            578.0
+            1621.4000244140625,
+            495.0
           ],
           "from": "categories",
           "from_columns": [
@@ -454,21 +454,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1236.4000244140625,
-          "label_y": 534.0,
+          "label_x": 1665.4000244140625,
+          "label_y": 539.0,
           "nullable": true,
           "route_label_position": [
-            1236.4000244140625,
-            534.0
+            1657.4000244140625,
+            539.0
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1272.4000244140625,
-            490.0
+            1621.4000244140625,
+            583.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
-          "target_side": "west",
+          "target_side": "east",
           "to": "categories",
           "to_columns": [
             "id"
@@ -771,7 +771,7 @@ expression: snapshot
         "edge_count": 7,
         "height": 1046.0,
         "node_count": 7,
-        "width": 1677.4000244140625
+        "width": 1707.199951171875
       }
     },
     "straight": {
@@ -811,17 +811,17 @@ expression: snapshot
         {
           "control_points": [
             [
-              1236.4000244140625,
-              490.0
+              1657.4000244140625,
+              583.0
             ],
             [
-              1236.4000244140625,
-              578.0
+              1657.4000244140625,
+              495.0
             ]
           ],
           "end": [
-            1272.4000244140625,
-            578.0
+            1621.4000244140625,
+            495.0
           ],
           "from": "categories",
           "from_columns": [
@@ -829,21 +829,21 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 1196.4000244140625,
-          "label_y": 527.3330078125,
+          "label_x": 1665.4000244140625,
+          "label_y": 539.0,
           "nullable": true,
           "route_label_position": [
-            1236.4000244140625,
-            534.0
+            1657.4000244140625,
+            539.0
           ],
-          "source_side": "west",
+          "source_side": "east",
           "start": [
-            1272.4000244140625,
-            490.0
+            1621.4000244140625,
+            583.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
-          "target_side": "west",
+          "target_side": "east",
           "to": "categories",
           "to_columns": [
             "id"
@@ -1093,7 +1093,7 @@ expression: snapshot
         "edge_count": 7,
         "height": 1046.0,
         "node_count": 7,
-        "width": 1677.4000244140625
+        "width": 1707.199951171875
       }
     }
   }

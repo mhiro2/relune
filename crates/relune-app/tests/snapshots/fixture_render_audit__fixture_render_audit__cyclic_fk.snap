@@ -8,7 +8,7 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
     "edge_count": 12,
     "height": 1430.0,
     "node_count": 12,
-    "width": 1677.4000244140625
+    "width": 1685.0
   },
   "patterns": {
     "long_detours": {
@@ -53,13 +53,13 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 471240,
+      "bytes": 471232,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 81623,
+      "bytes": 81615,
       "edge_groups": 49,
       "node_groups": 12
     }

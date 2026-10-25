@@ -53,16 +53,16 @@ expression: snapshot
           "control_points": [
             [
               1029.199951171875,
-              990.0
+              995.0
             ],
             [
               1029.199951171875,
-              902.0
+              907.0
             ]
           ],
           "end": [
             993.2000122070313,
-            902.0
+            907.0
           ],
           "from": "categories",
           "from_columns": [
@@ -71,16 +71,16 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 1037.199951171875,
-          "label_y": 946.0,
+          "label_y": 951.0,
           "nullable": true,
           "route_label_position": [
             1029.199951171875,
-            946.0
+            951.0
           ],
           "source_side": "east",
           "start": [
             993.2000122070313,
-            990.0
+            995.0
           ],
           "style": "Curved",
           "target_cardinality": "One",
@@ -437,16 +437,16 @@ expression: snapshot
           "control_points": [
             [
               1029.199951171875,
-              990.0
+              995.0
             ],
             [
               1029.199951171875,
-              902.0
+              907.0
             ]
           ],
           "end": [
             993.2000122070313,
-            902.0
+            907.0
           ],
           "from": "categories",
           "from_columns": [
@@ -455,16 +455,16 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 1037.199951171875,
-          "label_y": 946.0,
+          "label_y": 951.0,
           "nullable": true,
           "route_label_position": [
             1029.199951171875,
-            946.0
+            951.0
           ],
           "source_side": "east",
           "start": [
             993.2000122070313,
-            990.0
+            995.0
           ],
           "style": "Orthogonal",
           "target_cardinality": "One",
@@ -812,16 +812,16 @@ expression: snapshot
           "control_points": [
             [
               1029.199951171875,
-              990.0
+              995.0
             ],
             [
               1029.199951171875,
-              902.0
+              907.0
             ]
           ],
           "end": [
             993.2000122070313,
-            902.0
+            907.0
           ],
           "from": "categories",
           "from_columns": [
@@ -830,16 +830,16 @@ expression: snapshot
           "is_self_loop": true,
           "label": "parent_id",
           "label_x": 1037.199951171875,
-          "label_y": 946.0,
+          "label_y": 951.0,
           "nullable": true,
           "route_label_position": [
             1029.199951171875,
-            946.0
+            951.0
           ],
           "source_side": "east",
           "start": [
             993.2000122070313,
-            990.0
+            995.0
           ],
           "style": "Straight",
           "target_cardinality": "One",
