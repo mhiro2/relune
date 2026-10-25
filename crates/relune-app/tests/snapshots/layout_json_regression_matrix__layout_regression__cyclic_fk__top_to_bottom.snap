@@ -181,16 +181,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              1458.9000244140625,
-              262.0
-            ],
-            [
-              1434.9000244140625,
-              262.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             1434.9000244140625,
             312.0
@@ -201,16 +192,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 1457.2330322265625,
-          "label_y": 262.0,
+          "label_x": 1338.9000244140625,
+          "label_y": 270.3330078125,
           "nullable": true,
           "route_label_position": [
-            1446.9000244140625,
+            1434.9000244140625,
             262.0
           ],
           "source_side": "south",
           "start": [
-            1458.9000244140625,
+            1434.9000244140625,
             212.0
           ],
           "style": "Curved",
@@ -345,18 +336,9 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              1458.9000244140625,
-              242.0
-            ],
-            [
-              1434.9000244140625,
-              242.0
-            ]
-          ],
+          "control_points": [],
           "end": [
-            1434.9000244140625,
+            1458.9000244140625,
             212.0
           ],
           "from": "projects",
@@ -365,12 +347,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "department_id",
-          "label_x": 1451.4000244140625,
-          "label_y": 242.0,
+          "label_x": 1506.9000244140625,
+          "label_y": 253.66700744628906,
           "nullable": false,
           "route_label_position": [
             1458.9000244140625,
-            250.0
+            262.0
           ],
           "source_side": "north",
           "start": [
@@ -833,16 +815,7 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              1458.9000244140625,
-              262.0
-            ],
-            [
-              1434.9000244140625,
-              262.0
-            ]
-          ],
+          "control_points": [],
           "end": [
             1434.9000244140625,
             312.0
@@ -853,16 +826,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 1457.2330322265625,
-          "label_y": 262.0,
+          "label_x": 1338.9000244140625,
+          "label_y": 270.3330078125,
           "nullable": true,
           "route_label_position": [
-            1446.9000244140625,
+            1434.9000244140625,
             262.0
           ],
           "source_side": "south",
           "start": [
-            1458.9000244140625,
+            1434.9000244140625,
             212.0
           ],
           "style": "Orthogonal",
@@ -997,18 +970,9 @@ expression: snapshot
           ]
         },
         {
-          "control_points": [
-            [
-              1458.9000244140625,
-              242.0
-            ],
-            [
-              1434.9000244140625,
-              242.0
-            ]
-          ],
+          "control_points": [],
           "end": [
-            1434.9000244140625,
+            1458.9000244140625,
             212.0
           ],
           "from": "projects",
@@ -1017,12 +981,12 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "department_id",
-          "label_x": 1451.4000244140625,
-          "label_y": 242.0,
+          "label_x": 1506.9000244140625,
+          "label_y": 253.66700744628906,
           "nullable": false,
           "route_label_position": [
             1458.9000244140625,
-            250.0
+            262.0
           ],
           "source_side": "north",
           "start": [
@@ -1461,16 +1425,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 1444.9000244140625,
+          "label_x": 1338.9000244140625,
           "label_y": 270.3330078125,
           "nullable": true,
           "route_label_position": [
-            1446.9000244140625,
+            1434.9000244140625,
             262.0
           ],
           "source_side": "south",
           "start": [
-            1458.9000244140625,
+            1434.9000244140625,
             212.0
           ],
           "style": "Straight",
@@ -1598,7 +1562,7 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            1434.9000244140625,
+            1458.9000244140625,
             212.0
           ],
           "from": "projects",
@@ -1607,11 +1571,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "department_id",
-          "label_x": 1442.9000244140625,
-          "label_y": 245.33299255371094,
+          "label_x": 1506.9000244140625,
+          "label_y": 253.66700744628906,
           "nullable": false,
           "route_label_position": [
-            1446.9000244140625,
+            1458.9000244140625,
             262.0
           ],
           "source_side": "north",

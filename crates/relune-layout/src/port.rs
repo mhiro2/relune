@@ -162,10 +162,20 @@ pub(crate) fn assign_edge_ports(
     }
 
     for ((node_id, side), candidates) in &mut endpoint_groups {
+        // Column rows only place ports on left and right sides. On top and
+        // bottom sides they would order two cards' shared edges differently
+        // at each end, so lines between the same pair of cards would cross.
+        let orders_by_row = side.is_horizontal();
         candidates.sort_by(|left, right| {
             left.remote_order
                 .total_cmp(&right.remote_order)
-                .then_with(|| left.row_order.total_cmp(&right.row_order))
+                .then_with(|| {
+                    if orders_by_row {
+                        left.row_order.total_cmp(&right.row_order)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
                 .then_with(|| left.remote_primary.total_cmp(&right.remote_primary))
                 .then_with(|| left.stable_key.cmp(&right.stable_key))
         });
