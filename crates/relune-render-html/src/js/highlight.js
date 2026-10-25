@@ -64,11 +64,23 @@
     };
   }
   function escapeKeyPart(part) {
-    return part.replaceAll(/[%(),>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+    return part.replaceAll(
+      /[%(),>~]/g,
+      (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+    );
   }
   function relationKey(edge) {
     const end = (table, columns) => `${escapeKeyPart(table)}(${columns.map(escapeKeyPart).join(",")})`;
     return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
+  }
+  function relationKeys(edges) {
+    const seen = /* @__PURE__ */ new Map();
+    return edges.map((edge) => {
+      const key = relationKey(edge);
+      const count = (seen.get(key) ?? 0) + 1;
+      seen.set(key, count);
+      return count === 1 ? key : `${key}~${count}`;
+    });
   }
   function relationColumnPairs(edge) {
     const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
@@ -944,10 +956,8 @@
         renderHighlight();
         syncObjectBrowser();
       };
-      const selectedRelationKey = () => {
-        const edge = state.selectedEdge === null ? void 0 : state.edges[state.selectedEdge];
-        return edge === void 0 ? null : relationKey(edge);
-      };
+      const lineKeys = relationKeys(state.edges);
+      const selectedRelationKey = () => state.selectedEdge === null ? null : lineKeys[state.selectedEdge] ?? null;
       const setSelectedNode = (tableId) => {
         const previous = state.selectedNode;
         const hadRelation = state.selectedEdge !== null;
@@ -1152,7 +1162,7 @@
           return state.selectedNode;
         },
         selectRelation(key) {
-          const index = state.edges.findIndex((edge) => relationKey(edge) === key);
+          const index = lineKeys.indexOf(key);
           if (index < 0) return false;
           setSelectedEdge(index);
           return true;

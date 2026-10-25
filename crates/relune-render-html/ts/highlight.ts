@@ -4,7 +4,7 @@ import {
   computeRelationHighlight,
   nextLineIndex,
   relationColumnPairs,
-  relationKey,
+  relationKeys,
 } from './highlight_actions';
 import {
   addEdgeHitArea,
@@ -296,10 +296,9 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       syncObjectBrowser();
     };
 
-    const selectedRelationKey = (): string | null => {
-      const edge = state.selectedEdge === null ? undefined : state.edges[state.selectedEdge];
-      return edge === undefined ? null : relationKey(edge);
-    };
+    const lineKeys = relationKeys(state.edges);
+    const selectedRelationKey = (): string | null =>
+      state.selectedEdge === null ? null : (lineKeys[state.selectedEdge] ?? null);
 
     const setSelectedNode = (tableId: string | null): void => {
       const previous = state.selectedNode;
@@ -565,7 +564,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         return state.selectedNode;
       },
       selectRelation(key: string): boolean {
-        const index = state.edges.findIndex((edge) => relationKey(edge) === key);
+        const index = lineKeys.indexOf(key);
         if (index < 0) return false;
         setSelectedEdge(index);
         return true;

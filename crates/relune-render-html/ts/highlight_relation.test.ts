@@ -5,6 +5,7 @@ import {
   nextLineIndex,
   relationColumnPairs,
   relationKey,
+  relationKeys,
 } from './highlight_actions';
 import {
   addEdgeHitArea,
@@ -83,6 +84,20 @@ describe('relationColumnPairs', () => {
     expect(relationKey(composite)).toBe('posts(a,b)>users(x,y)');
     expect(relationKey(quoted)).toBe('posts(a%2Cb)>users(x%2Cy)');
     expect(relationKey(edge('a>b', 'c(d)'))).toBe('a%3Eb()>c%28d%29()');
+  });
+
+  it('numbers duplicate foreign keys on the same columns apart', () => {
+    const first = edge('posts', 'users', { from_columns: ['user_id'], to_columns: ['id'] });
+    const duplicate = edge('posts', 'users', { from_columns: ['user_id'], to_columns: ['id'] });
+    const other = edge('posts', 'users', { from_columns: ['editor_id'], to_columns: ['id'] });
+    const tilde = edge('a~2', 'b');
+
+    expect(relationKeys([first, other, duplicate, tilde])).toEqual([
+      'posts(user_id)>users(id)',
+      'posts(editor_id)>users(id)',
+      'posts(user_id)>users(id)~2',
+      'a%7E2()>b()',
+    ]);
   });
 
   it('lists one mapping per column pair of a composite key', () => {

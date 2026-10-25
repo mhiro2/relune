@@ -154,7 +154,7 @@ The sidebar leads with search and the object list; **Filters** and **Groups** ar
 | `+` / `-` | Zoom in / out |
 | `Esc` | Clear search, filters, and selection |
 
-Relationship lines share one Tab stop: Tab onto a line, move between lines with the arrow keys, Home, or End, and press Enter or Space to select one. The URL hash records the search, filters, hidden groups, viewport, minimap, and the selected table or relationship (`r=orders(customer_id)>customers(id)`), so a copied link reopens the same view.
+Relationship lines share one Tab stop: Tab onto a line, move between lines with the arrow keys, Home, or End, and press Enter or Space to select one. The URL hash records the search, filters, hidden groups, viewport, minimap, and the selected table or relationship (`r=orders(customer_id)>customers(id)`, with `~2` added for a second foreign key on the same columns), so a copied link reopens the same view.
 
 ---
 

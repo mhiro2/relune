@@ -113,13 +113,12 @@ export function computeRelationHighlight(
   };
 }
 
-/**
- * Column correspondences of a relationship, one `from.col → to.col` line per
- * column pair, so a composite key reads as its full set of pairs.
- */
 /** Percent-escapes the characters a relationship key uses as delimiters. */
 function escapeKeyPart(part: string): string {
-  return part.replaceAll(/[%(),>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return part.replaceAll(
+    /[%(),>~]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 /**
@@ -134,6 +133,26 @@ export function relationKey(edge: EdgeMetadata): string {
   return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
 }
 
+/**
+ * Keys for every relationship, by edge index. Relationships that join the
+ * same columns (duplicate foreign keys) share a `relationKey`, so the second
+ * and later ones get a `~2`, `~3`, ... suffix in metadata order and a shared
+ * link still names exactly one line.
+ */
+export function relationKeys(edges: readonly EdgeMetadata[]): string[] {
+  const seen = new Map<string, number>();
+  return edges.map((edge) => {
+    const key = relationKey(edge);
+    const count = (seen.get(key) ?? 0) + 1;
+    seen.set(key, count);
+    return count === 1 ? key : `${key}~${count}`;
+  });
+}
+
+/**
+ * Column correspondences of a relationship, one `from.col → to.col` line per
+ * column pair, so a composite key reads as its full set of pairs.
+ */
 export function relationColumnPairs(edge: EdgeMetadata): string[] {
   const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
   if (pairCount === 0) {
