@@ -109,6 +109,36 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
     }
 }
 
+/// WCAG 2 contrast ratio between two opaque `#rrggbb` colors.
+///
+/// # Panics
+///
+/// Panics when either color is not a six-digit hex color.
+#[must_use]
+pub fn contrast_ratio(a: &str, b: &str) -> f64 {
+    let (la, lb) = (relative_luminance(a), relative_luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+fn relative_luminance(hex: &str) -> f64 {
+    assert!(
+        hex.len() == 7 && hex.starts_with('#'),
+        "expected a #rrggbb color, got {hex}"
+    );
+    let channel = |index: usize| {
+        let value = f64::from(u8::from_str_radix(&hex[index..index + 2], 16).unwrap()) / 255.0;
+        if value <= 0.039_28 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.0722f64.mul_add(
+        channel(5),
+        0.2126f64.mul_add(channel(1), 0.7152 * channel(3)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +168,38 @@ mod tests {
         assert_eq!(colors.node_fill, "#ffffff");
         assert_eq!(colors.header_fill, "#f8fafc");
         assert_eq!(colors.text_primary, "#1e293b");
+    }
+
+    #[test]
+    fn card_text_meets_aa_on_card_surfaces() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            for text in [
+                colors.text_primary,
+                colors.text_secondary,
+                colors.text_muted,
+            ] {
+                for surface in [colors.node_fill, colors.header_fill] {
+                    let ratio = contrast_ratio(text, surface);
+                    assert!(ratio >= 4.5, "{theme:?} {text} on {surface}: {ratio:.2}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn card_border_stands_out_from_the_canvas() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            let ratio = contrast_ratio(colors.node_stroke, colors.background);
+            assert!(ratio >= 3.0, "{theme:?} border: {ratio:.2}");
+        }
+    }
+
+    #[test]
+    fn contrast_ratio_spans_one_to_twenty_one() {
+        assert!((contrast_ratio("#000000", "#ffffff") - 21.0).abs() < 1e-9);
+        assert!((contrast_ratio("#777777", "#777777") - 1.0).abs() < 1e-9);
     }
 
     #[test]

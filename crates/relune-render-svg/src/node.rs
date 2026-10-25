@@ -445,3 +445,23 @@ pub(crate) fn render_node_internal(
     out.push_str("</g>");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use relune_core::NodeKind;
+    use relune_render_theme::{Theme, contrast_ratio, get_colors};
+
+    use super::node_kind_accent;
+
+    #[test]
+    fn kind_marks_stand_out_from_the_header() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            for kind in [NodeKind::Table, NodeKind::View, NodeKind::Enum] {
+                let mark = node_kind_accent(kind, &colors);
+                let ratio = contrast_ratio(mark, colors.header_fill);
+                assert!(ratio >= 3.0, "{theme:?} {kind:?} {mark}: {ratio:.2}");
+            }
+        }
+    }
+}
