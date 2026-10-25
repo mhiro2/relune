@@ -1100,6 +1100,19 @@ pub(crate) fn build_css(
       top: 61px;
     }
 
+    /* Below this width the centered bar would cover the sidebar's open
+       button, the only way back to the sidebar on touch screens, so the
+       bar moves under it. */
+    @media (max-width: 760px) {
+      .filter-reset-bar {
+        top: 54px;
+      }
+
+      body:has(h1) .filter-reset-bar {
+        top: 103px;
+      }
+    }
+
     .filter-reset-copy {
       flex: 1;
       min-width: 0;
@@ -1188,8 +1201,9 @@ pub(crate) fn build_css(
       opacity: 1;
     }
 
-    /* The minimap sits in the bottom-right corner and steps left of the
-       detail drawer while one is open. */
+    /* The minimap sits in the bottom-right corner. While the detail drawer
+       is open it steps left of the drawer and up above the zoom controls,
+       which it would otherwise cover on mid-width screens. */
     .minimap-shell {
       position: fixed;
       right: 12px;
@@ -1210,6 +1224,7 @@ pub(crate) fn build_css(
 
     body:has(#detail-drawer:not([hidden])) .minimap-shell {
       right: calc(min(320px, 100vw - 24px) + 24px);
+      bottom: 74px;
     }
 
     .minimap {
