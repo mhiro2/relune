@@ -86,6 +86,16 @@ pub const GROUP_LABEL_LETTER_SPACING_EM: f32 = 0.12;
 /// Letter spacing of the group label, in pixels.
 pub const GROUP_LABEL_LETTER_SPACING: f32 = GROUP_LABEL_FONT_SIZE * GROUP_LABEL_LETTER_SPACING_EM;
 
+/// Estimated width of a group label, including its letter spacing.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // Label lengths are small.
+pub fn group_label_width(label: &str) -> f32 {
+    (label.chars().count() as f32).mul_add(
+        GROUP_LABEL_LETTER_SPACING,
+        estimate_text_width(label, GROUP_LABEL_FONT_SIZE),
+    )
+}
+
 /// Height of the edge label pill.
 pub const EDGE_LABEL_HEIGHT: f32 = 18.0;
 /// Horizontal padding inside the edge label pill, both sides combined.

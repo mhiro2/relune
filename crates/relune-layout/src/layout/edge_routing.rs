@@ -440,7 +440,8 @@ pub(super) struct NodeObstacleIndex<'a> {
 }
 
 impl<'a> NodeObstacleIndex<'a> {
-    pub(super) fn from_nodes(nodes: &'a [PositionedNode]) -> Self {
+    /// Indexes every node plus anonymous `rects` that no edge may cross.
+    pub(super) fn from_nodes_and_rects(nodes: &'a [PositionedNode], rects: &[Rect]) -> Self {
         Self::build(
             nodes
                 .iter()
@@ -455,6 +456,7 @@ impl<'a> NodeObstacleIndex<'a> {
                         },
                     )
                 })
+                .chain(rects.iter().map(|rect| ("", *rect)))
                 .collect(),
         )
     }
@@ -572,6 +574,18 @@ pub(super) fn route_edges_with_diagnostics(
     config: &LayoutConfig,
     node_ranks: Option<&[usize]>,
 ) -> Result<(Vec<PositionedEdge>, RoutingDiagnostics), LayoutError> {
+    route_edges_around(graph, positioned_nodes, config, node_ranks, &[])
+}
+
+/// Routes all edges, keeping lines and labels off `fixed_obstacles` (such as
+/// group headings) as well as off every card.
+pub(super) fn route_edges_around(
+    graph: &LayoutGraph,
+    positioned_nodes: &[PositionedNode],
+    config: &LayoutConfig,
+    node_ranks: Option<&[usize]>,
+    fixed_obstacles: &[Rect],
+) -> Result<(Vec<PositionedEdge>, RoutingDiagnostics), LayoutError> {
     let node_positions: BTreeMap<&str, (f32, f32, f32, f32)> = positioned_nodes
         .iter()
         .map(|node| (node.id.as_str(), (node.x, node.y, node.width, node.height)))
@@ -586,7 +600,7 @@ pub(super) fn route_edges_with_diagnostics(
 
     let mut routed_edges = vec![None; graph.edges.len()];
 
-    let node_obstacles = NodeObstacleIndex::from_nodes(positioned_nodes);
+    let node_obstacles = NodeObstacleIndex::from_nodes_and_rects(positioned_nodes, fixed_obstacles);
 
     for &edge_index in &routing_order {
         let edge = &graph.edges[edge_index];
@@ -643,7 +657,7 @@ pub(super) fn route_edges_with_diagnostics(
         });
     }
 
-    apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph);
+    apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph, fixed_obstacles);
 
     let mut edges = vec![None; graph.edges.len()];
     let mut placed_labels = PlacedLabels::new();
@@ -669,7 +683,7 @@ pub(super) fn route_edges_with_diagnostics(
     }
 
     let mut edges: Vec<_> = edges.into_iter().flatten().collect();
-    resolve_edge_label_collisions(&mut edges, positioned_nodes);
+    resolve_edge_label_collisions(&mut edges, positioned_nodes, fixed_obstacles);
     Ok((edges, diagnostics))
 }
 
@@ -677,6 +691,7 @@ fn apply_parallel_edge_bundling(
     routed_edges: &mut [Option<RoutedEdgeDraft>],
     positioned_nodes: &[PositionedNode],
     graph: &LayoutGraph,
+    fixed_obstacles: &[Rect],
 ) {
     let mut groups: BTreeMap<BundleGroupKey, Vec<usize>> = BTreeMap::new();
 
@@ -747,6 +762,7 @@ fn apply_parallel_edge_bundling(
                         edge,
                         bundle_metadata,
                         positioned_nodes,
+                        fixed_obstacles,
                     ) {
                         edge.route = candidate;
                     }
@@ -869,6 +885,7 @@ fn bundled_route_is_valid(
     edge: &RoutedEdgeDraft,
     metadata: BundleRouteMetadata,
     positioned_nodes: &[PositionedNode],
+    fixed_obstacles: &[Rect],
 ) -> bool {
     let source_edge = &graph.edges[edge.edge_index];
     if endpoint_side_violations(route, metadata.source_side, metadata.target_side) > 0 {
@@ -884,6 +901,7 @@ fn bundled_route_is_valid(
             w: node.width,
             h: node.height,
         })
+        .chain(fixed_obstacles.iter().copied())
         .collect::<Vec<_>>();
 
     route_obstacle_hit_count(route, &obstacles, HARD_OBSTACLE_PADDING) == 0
@@ -2005,6 +2023,7 @@ fn estimate_route_parameter(route: &EdgeRoute, point: (f32, f32)) -> f32 {
 fn resolve_edge_label_collisions(
     edges: &mut [PositionedEdge],
     positioned_nodes: &[PositionedNode],
+    fixed_obstacles: &[Rect],
 ) {
     if edges.is_empty() {
         return;
@@ -2018,6 +2037,7 @@ fn resolve_edge_label_collisions(
             w: node.width,
             h: node.height,
         })
+        .chain(fixed_obstacles.iter().copied())
         .collect();
     let route_obstacles: Vec<Vec<Rect>> = edges
         .iter()

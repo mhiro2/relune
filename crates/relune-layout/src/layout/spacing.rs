@@ -8,10 +8,9 @@ use super::{
     PositionedEdge, PositionedGroup, PositionedNode,
 };
 use crate::metrics::{
-    ColumnSlots, GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING,
-    NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
-    NODE_TEXT_INSET, column_row_width, estimate_mono_text_width, estimate_text_width, node_height,
-    omitted_columns_label,
+    ColumnSlots, GROUP_LABEL_INSET, NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE,
+    NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE, NODE_TEXT_INSET, column_row_width,
+    estimate_mono_text_width, group_label_width, node_height, omitted_columns_label,
 };
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
@@ -208,11 +207,7 @@ pub(super) fn fit_canvas_to_content(
             h: group.height,
         });
         // Group labels are not clipped to their container.
-        #[allow(clippy::cast_precision_loss)] // Label lengths are small.
-        let label_width = (group.label.chars().count() as f32).mul_add(
-            GROUP_LABEL_LETTER_SPACING,
-            estimate_text_width(&group.label, GROUP_LABEL_FONT_SIZE),
-        );
+        let label_width = group_label_width(&group.label);
         bounds.include_rect(&Rect {
             x: group.x,
             y: group.y,

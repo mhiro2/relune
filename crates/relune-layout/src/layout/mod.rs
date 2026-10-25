@@ -30,9 +30,9 @@ mod spacing;
 mod spatial;
 
 use density::{DensityView, apply_density};
-use edge_routing::route_edges_with_diagnostics;
+use edge_routing::route_edges_around;
 use force::apply_force_layout;
-use groups::position_groups;
+use groups::{group_heading_rect, position_groups};
 use hierarchical::{HierarchicalPlacement, RowAlignment, assign_coordinates};
 use spacing::{fit_canvas_to_content, measure_node_sizes};
 
@@ -764,16 +764,21 @@ pub fn build_layout_from_graph_with_config(
         node_rows,
     } = placement;
 
-    // Step 4: Route edges
-    let (positioned_edges, routing_diagnostics) = route_edges_with_diagnostics(
+    // Step 4: Position groups, whose headings lines and labels must avoid
+    let mut positioned_groups = position_groups(&graph.groups, &positioned_nodes);
+    let headings: Vec<_> = positioned_groups
+        .iter()
+        .filter_map(group_heading_rect)
+        .collect();
+
+    // Step 5: Route edges
+    let (positioned_edges, routing_diagnostics) = route_edges_around(
         graph,
         &positioned_nodes,
         &effective_config,
         Some(&node_rows),
+        &headings,
     )?;
-
-    // Step 5: Position groups
-    let mut positioned_groups = position_groups(&graph.groups, &positioned_nodes);
 
     // Fit the canvas to routes and labels so nothing is clipped.
     let mut positioned_nodes = positioned_nodes;
