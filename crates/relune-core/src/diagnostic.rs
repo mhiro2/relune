@@ -225,4 +225,11 @@ pub mod codes {
     pub fn review_dialect_mismatch() -> DiagnosticCode {
         DiagnosticCode::new("REVIEW", 2)
     }
+
+    /// Returns the code emitted when a large schema without an explicit card
+    /// density is laid out at the overview density.
+    #[must_use]
+    pub fn layout_density_fallback() -> DiagnosticCode {
+        DiagnosticCode::new("LAYOUT", 1)
+    }
 }

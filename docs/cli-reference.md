@@ -134,7 +134,7 @@ relune render --schema-json schema.json -o from-json.svg
 | `keys` | Primary key and foreign key columns, plus every column a relationship names; a `+N columns` row counts the rest | Read how tables connect |
 | `full` | Every column with its type and constraints | Check definitions |
 
-Without `--density` (or a `density` config key), cards list every column, except that diagrams with more than 100 objects (tables, views, and enums) fall back to `overview`. An explicit density always wins. Zooming the HTML viewer never changes the density or the layout.
+Without `--density` (or a `density` config key), cards list every column, except that diagrams with more than 100 objects (tables, views, and enums) fall back to `overview`, and an info diagnostic (`LAYOUT001`) says so. An explicit density always wins. Zooming the HTML viewer never changes the density or the layout.
 
 ---
 

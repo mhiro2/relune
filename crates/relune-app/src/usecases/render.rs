@@ -72,6 +72,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
                 build_graph(&request, &schema)?
             };
             diagnostics.extend(graph_diagnostics);
+            diagnostics.extend(layout_config.density_fallback_notice(graph.nodes.len()));
             let graph_time = graph_start.elapsed();
             let layout_start = Instant::now();
             let positioned = {
@@ -87,6 +88,7 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
                 build_graph(&request, &schema)?
             };
             diagnostics.extend(graph_diagnostics);
+            diagnostics.extend(layout_config.density_fallback_notice(graph.nodes.len()));
             let graph_time = graph_start.elapsed();
             let layout_start = Instant::now();
             let positioned = {

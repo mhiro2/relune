@@ -1178,9 +1178,19 @@ fn test_compaction_respects_layout_spec_overrides() {
 
     let explicit = LayoutConfig {
         density: Some(CardDensity::Keys),
-        ..config
+        ..config.clone()
     };
     assert_eq!(explicit.effective_density(31), CardDensity::Keys);
+    assert!(explicit.density_fallback_notice(31).is_none());
+
+    assert!(config.density_fallback_notice(30).is_none());
+    let notice = config
+        .density_fallback_notice(31)
+        .expect("an unset density past the limit is reported");
+    assert_eq!(notice.severity, relune_core::Severity::Info);
+    assert_eq!(notice.code.full_code(), "LAYOUT001");
+    assert!(notice.message.contains("31 objects"), "{}", notice.message);
+    assert!(notice.message.contains("--density"), "{}", notice.message);
 }
 
 #[test]

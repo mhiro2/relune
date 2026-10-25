@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{Level, debug, info, span};
 
+use relune_core::diagnostic::codes;
 use relune_core::layout::{EdgeRoute, RouteStyle};
 use relune_core::{
-    CardDensity, EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection, LayoutSpec,
-    NodeKind, Schema,
+    CardDensity, Diagnostic, EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection,
+    LayoutSpec, NodeKind, Schema,
 };
 
 use crate::focus::FocusExtractor;
@@ -292,14 +293,41 @@ impl LayoutConfig {
     #[must_use]
     pub fn effective_density(&self, node_count: usize) -> CardDensity {
         self.density.unwrap_or_else(|| {
-            let multiplier = self.compaction.hide_columns_threshold_multiplier;
-            let limit = self.compaction.threshold.saturating_mul(multiplier);
-            if limit > 0 && node_count > limit {
+            if self.density_falls_back(node_count) {
                 CardDensity::Overview
             } else {
                 CardDensity::Full
             }
         })
+    }
+
+    /// Info diagnostic explaining that cards fell back to the overview
+    /// because the schema is large and no density was chosen, so the switch
+    /// is never silent. `None` when the chosen or default density applies.
+    #[must_use]
+    pub fn density_fallback_notice(&self, node_count: usize) -> Option<Diagnostic> {
+        (self.density.is_none() && self.density_falls_back(node_count)).then(|| {
+            Diagnostic::info(
+                codes::layout_density_fallback(),
+                format!(
+                    "{node_count} objects exceed the overview limit of {}, so cards show headers only; \
+                     set the density to keys or full (--density or the `density` config key) \
+                     to list columns",
+                    self.density_fallback_limit()
+                ),
+            )
+        })
+    }
+
+    const fn density_fallback_limit(&self) -> usize {
+        self.compaction
+            .threshold
+            .saturating_mul(self.compaction.hide_columns_threshold_multiplier)
+    }
+
+    const fn density_falls_back(&self, node_count: usize) -> bool {
+        let limit = self.density_fallback_limit();
+        limit > 0 && node_count > limit
     }
 
     /// Check if compact mode should be enabled based on node count.

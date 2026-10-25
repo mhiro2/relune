@@ -44,7 +44,7 @@ const fn export_format_uses_graph(format: ExportFormat) -> bool {
 #[allow(clippy::needless_pass_by_value)] // Owned request matches other usecases and CLI call sites.
 pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
     // Parse input
-    let (schema, diagnostics) = schema_from_input(&request.input)?;
+    let (schema, mut diagnostics) = schema_from_input(&request.input)?;
     let stats = schema.stats();
     let graph = export_format_uses_graph(request.format)
         .then(|| graph_for_export(&request, &schema))
@@ -67,6 +67,7 @@ pub fn export(request: ExportRequest) -> Result<ExportResult, AppError> {
                 .as_ref()
                 .ok_or_else(|| AppError::other("export", "layout json requires graph"))?;
             let config = LayoutConfig::from(&request.layout);
+            diagnostics.extend(config.density_fallback_notice(g.nodes.len()));
             let positioned = build_layout_from_graph_with_config(g, &config)?;
             serde_json::to_string_pretty(&positioned)?
         }

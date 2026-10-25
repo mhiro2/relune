@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use relune_core::diff::{EnumDiff, TableDiff, ViewDiff};
-use relune_core::{ChangeKind, Enum as SchemaEnum, Schema, Table, View, diff_schemas};
+use relune_core::{ChangeKind, Diagnostic, Enum as SchemaEnum, Schema, Table, View, diff_schemas};
 use relune_layout::{Annotation, DiagramOverlay, OverlaySeverity};
 
 use crate::error::AppError;
@@ -41,8 +41,9 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     // Step 3: Render visual output if requested
     let rendered = match request.format {
         DiffFormat::Svg | DiffFormat::Html => {
-            let content =
+            let (content, notice) =
                 render_diff_visual(&before_schema, &after_schema, &schema_diff, &request)?;
+            diagnostics.extend(notice);
             Some(content)
         }
         DiffFormat::Text | DiffFormat::Json | DiffFormat::Markdown => None,
@@ -55,13 +56,14 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     })
 }
 
-/// Render a diff as SVG or HTML using the merged schema and diff overlay.
+/// Render a diff as SVG or HTML using the merged schema and diff overlay,
+/// along with the density fallback notice when cards fell back to overview.
 fn render_diff_visual(
     before: &Schema,
     after: &Schema,
     schema_diff: &relune_core::SchemaDiff,
     request: &DiffRequest,
-) -> Result<String, AppError> {
+) -> Result<(String, Option<Diagnostic>), AppError> {
     use crate::request::{DiffFormat, OutputFormat, RenderRequest};
 
     let merged = build_diff_schema(before, after, schema_diff);
@@ -93,7 +95,7 @@ fn render_diff_visual(
 fn render_with_schema(
     schema: &Schema,
     request: &crate::request::RenderRequest,
-) -> Result<String, AppError> {
+) -> Result<(String, Option<Diagnostic>), AppError> {
     use relune_layout::{
         FocusExtractor, LayoutConfig, LayoutGraphBuilder, build_layout_from_graph_with_config,
     };
@@ -114,6 +116,7 @@ fn render_with_schema(
             .map_err(relune_layout::LayoutError::from)?;
     }
 
+    let notice = layout_config.density_fallback_notice(graph.nodes.len());
     let positioned = build_layout_from_graph_with_config(&graph, &layout_config)?;
 
     let svg_theme = match request.options.theme {
@@ -130,7 +133,7 @@ fn render_with_schema(
     let svg = render_svg_with_overlay(&positioned, svg_options, request.overlay.as_ref())?;
 
     match request.output_format {
-        OutputFormat::Svg => Ok(svg.into_string()),
+        OutputFormat::Svg => Ok((svg.into_string(), notice)),
         OutputFormat::Html => {
             let html_theme = match request.options.theme {
                 RenderTheme::Light => HtmlTheme::Light,
@@ -146,7 +149,7 @@ fn render_with_schema(
                 &html_options,
                 request.overlay.as_ref(),
             )?;
-            Ok(html)
+            Ok((html, notice))
         }
         _ => unreachable!(),
     }
