@@ -1683,6 +1683,11 @@ fn score_channel_candidate(
 
     ChannelCandidateScore {
         hard_constraint_violations,
+        tight_obstacles: clipped_u16(route_obstacle_hit_count(
+            route,
+            &obstacles,
+            ROUTE_CLEARANCE_TARGET,
+        )),
         short_endpoint_stubs: short_endpoint_stubs(route),
         clearance_penalty: route_clearance_penalty(route, &obstacles, ROUTE_CLEARANCE_TARGET),
         total_length: rounded_metric(approximate_route_length(route)),
@@ -1810,16 +1815,22 @@ fn segment_matches_side(start: (f32, f32), next: (f32, f32), side: AttachmentSid
     }
 }
 
+/// Distance within which two parallel channels read as one doubled line.
+const NEAR_CHANNEL_DISTANCE: f32 = 9.0;
+
+/// Penalty for a channel on top of, or within [`NEAR_CHANNEL_DISTANCE`] of,
+/// channels other edges already use.
 fn channel_congestion_penalty(
     channel_usage: &BTreeMap<(ChannelAxis, i32), u32>,
     axis: ChannelAxis,
     coordinate: f32,
 ) -> u32 {
-    let quantized = quantize_channel_coordinate(coordinate);
+    let low = quantize_channel_coordinate(coordinate - NEAR_CHANNEL_DISTANCE);
+    let high = quantize_channel_coordinate(coordinate + NEAR_CHANNEL_DISTANCE);
     channel_usage
-        .get(&(axis, quantized))
-        .copied()
-        .unwrap_or(0)
+        .range((axis, low)..=(axis, high))
+        .map(|(_, &count)| count)
+        .sum::<u32>()
         .saturating_mul(2)
 }
 
