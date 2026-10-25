@@ -32,8 +32,10 @@ pub struct DiffColors {
 
 /// Solid fills of the review risk labels, with one text color for all.
 ///
-/// Solid fills keep risk labels apart from the faint change tints; every
-/// fill meets AA contrast with `text`.
+/// Solid fills keep risk labels apart from the faint change tints, and the
+/// hues (magenta, orange, indigo, slate) never repeat a change kind's green,
+/// red, or amber, so a removed card's outline and a `breaking` label read as
+/// two signals. Every fill meets AA contrast with `text`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RiskColors {
     /// `breaking` findings.
@@ -125,9 +127,9 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
                 modified: "#facc15",
             },
             risk: RiskColors {
-                breaking: "#f87171",
+                breaking: "#f472b6",
                 caution: "#fb923c",
-                warning: "#facc15",
+                warning: "#a5b4fc",
                 info: "#94a3b8",
                 text: "#0c0f1a",
             },
@@ -158,9 +160,9 @@ pub const fn get_colors(theme: Theme) -> ThemeColors {
                 modified: "#a16207",
             },
             risk: RiskColors {
-                breaking: "#b91c1c",
+                breaking: "#be185d",
                 caution: "#c2410c",
-                warning: "#a16207",
+                warning: "#4338ca",
                 info: "#475569",
                 text: "#ffffff",
             },
@@ -230,33 +232,53 @@ mod tests {
         assert_eq!(colors.text_primary, "#1e293b");
     }
 
-    fn relative_luminance(hex: &str) -> f64 {
-        let channel = |index: usize| {
-            let value = f64::from(u8::from_str_radix(&hex[index..index + 2], 16).unwrap()) / 255.0;
-            if value <= 0.039_28 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.0722f64.mul_add(
-            channel(5),
-            0.2126f64.mul_add(channel(1), 0.7152 * channel(3)),
-        )
-    }
-
-    fn contrast(a: &str, b: &str) -> f64 {
-        let (la, lb) = (relative_luminance(a), relative_luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-    }
-
     #[test]
     fn diff_colors_meet_text_contrast_on_cards() {
         for theme in [Theme::Light, Theme::Dark] {
             let colors = get_colors(theme);
             for color in [colors.diff.added, colors.diff.removed, colors.diff.modified] {
-                let ratio = contrast(color, colors.node_fill);
+                let ratio = contrast_ratio(color, colors.node_fill);
                 assert!(ratio >= 4.5, "{theme:?} {color}: {ratio:.2}");
+            }
+        }
+    }
+
+    /// Hue of a `#rrggbb` color in degrees.
+    fn hue(hex: &str) -> f64 {
+        let channel = |index: usize| {
+            f64::from(u8::from_str_radix(&hex[index..index + 2], 16).unwrap()) / 255.0
+        };
+        let (r, g, b) = (channel(1), channel(3), channel(5));
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let delta = max - min;
+        let sector = if delta == 0.0 {
+            0.0
+        } else if (max - r).abs() < f64::EPSILON {
+            ((g - b) / delta).rem_euclid(6.0)
+        } else if (max - g).abs() < f64::EPSILON {
+            (b - r) / delta + 2.0
+        } else {
+            (r - g) / delta + 4.0
+        };
+        sector * 60.0
+    }
+
+    #[test]
+    fn risk_fills_never_share_a_change_hue() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let colors = get_colors(theme);
+            let risk = &colors.risk;
+            let changes = [colors.diff.added, colors.diff.removed, colors.diff.modified];
+            // `info` is a neutral slate, so only the hued fills are compared.
+            for fill in [risk.breaking, risk.caution, risk.warning] {
+                for change in changes {
+                    let distance = (hue(fill) - hue(change)).abs();
+                    let distance = distance.min(360.0 - distance);
+                    assert!(
+                        distance >= 15.0,
+                        "{theme:?} {fill} vs {change}: {distance:.0} degrees"
+                    );
+                }
             }
         }
     }
@@ -267,7 +289,7 @@ mod tests {
             let colors = get_colors(theme);
             let risk = &colors.risk;
             for fill in [risk.breaking, risk.caution, risk.warning, risk.info] {
-                let ratio = contrast(fill, risk.text);
+                let ratio = contrast_ratio(fill, risk.text);
                 assert!(ratio >= 4.5, "{theme:?} {fill}: {ratio:.2}");
             }
         }
