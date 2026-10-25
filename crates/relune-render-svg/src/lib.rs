@@ -72,6 +72,10 @@ impl AsRef<str> for SvgArtifact {
     }
 }
 
+/// Distance from a label pill's center down to its text baseline, which
+/// centers 11px text in the pill that layout centers on `label_y`.
+const EDGE_LABEL_BASELINE_DROP: f32 = 4.0;
+
 /// When any backbone segment is shorter than this, Crow's Foot `<marker>` geometry
 /// (refX up to ~26px) intrudes past orthogonal elbows; draw inline symbols instead.
 const MIN_SVG_MARKER_BACKBONE_SEGMENT: f32 = 32.0;
@@ -124,10 +128,15 @@ pub fn render_svg_with_overlay(
         show_tooltips: options.show_tooltips,
         ..EdgeRenderOptions::default()
     };
+    let label_layer = edge_options.show_labels && options.labels_on_top;
+    let group_options = EdgeRenderOptions {
+        show_labels: edge_options.show_labels && !label_layer,
+        ..edge_options
+    };
     for (index, edge) in graph.edges.iter().enumerate() {
         let edge_overlay = overlay
             .and_then(|o| o.edge(&edge.from, &edge.to, &edge.from_columns, &edge.to_columns));
-        render_edge_internal(&mut out, edge, &colors, &edge_options, index, edge_overlay)?;
+        render_edge_internal(&mut out, edge, &colors, &group_options, index, edge_overlay)?;
     }
 
     // Render nodes
@@ -141,6 +150,15 @@ pub fn render_svg_with_overlay(
             index,
             node_overlay,
         )?;
+    }
+
+    // Edge labels go above every line and card, so none is cut through.
+    if label_layer {
+        out.push_str(r#"<g class="edge-labels">"#);
+        for edge in &graph.edges {
+            render_edge_label(&mut out, edge, &colors)?;
+        }
+        out.push_str("</g>");
     }
 
     // Render group labels after nodes so schema titles remain readable even
@@ -435,33 +453,44 @@ fn render_edge_internal(
         )?;
     }
 
-    // Render the label if enabled
-    if options.show_labels && !edge.label.is_empty() {
-        let label_x = edge.label_x;
-        let label_y = edge.label_y;
-        let label_width = estimate_edge_label_width(&edge.label);
-        write!(
-            out,
-            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="{EDGE_LABEL_HEIGHT}" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
-            label_width.mul_add(-0.5, label_x),
-            label_y - 12.0,
-            label_width,
-            node_label_background(colors),
-            edge_style.stroke
-        )?;
-
-        write!(
-            out,
-            r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="{}">{}</text>"#,
-            label_x,
-            label_y,
-            edge_style.label_fill.unwrap_or(colors.text_muted),
-            escape_text(&edge.label)
-        )?;
+    if options.show_labels {
+        render_edge_label(out, edge, colors)?;
     }
 
     out.push_str("</g>");
     Ok(())
+}
+
+/// Draws an edge's label pill and text, if it has a label.
+fn render_edge_label(
+    out: &mut String,
+    edge: &relune_layout::PositionedEdge,
+    colors: &ThemeColors,
+) -> fmt::Result {
+    if edge.label.is_empty() {
+        return Ok(());
+    }
+    let edge_style = edge_style(edge.kind, colors);
+    let label_x = edge.label_x;
+    let label_y = edge.label_y;
+    let label_width = estimate_edge_label_width(&edge.label);
+    write!(
+        out,
+        r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="{EDGE_LABEL_HEIGHT}" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
+        label_width.mul_add(-0.5, label_x),
+        EDGE_LABEL_HEIGHT.mul_add(-0.5, label_y),
+        label_width,
+        node_label_background(colors),
+        edge_style.stroke
+    )?;
+    write!(
+        out,
+        r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="{}">{}</text>"#,
+        label_x,
+        label_y + EDGE_LABEL_BASELINE_DROP,
+        edge_style.label_fill.unwrap_or(colors.text_muted),
+        escape_text(&edge.label)
+    )
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -750,6 +779,35 @@ mod tests {
             1
         );
         assert_eq!(svg.matches("url(#node-0-columns-clip)").count(), 4);
+    }
+
+    #[test]
+    fn test_render_svg_draws_edge_labels_above_cards_when_asked() {
+        let graph = multi_node_graph();
+        let labelled = graph
+            .edges
+            .iter()
+            .filter(|edge| !edge.label.is_empty())
+            .count();
+        assert!(labelled > 0);
+
+        let on_top = render_svg(
+            &graph,
+            SvgRenderOptions {
+                labels_on_top: true,
+                ..SvgRenderOptions::default()
+            },
+        );
+        let layer = on_top
+            .find(r#"<g class="edge-labels">"#)
+            .expect("label layer");
+        let last_node = on_top.rfind(r#"class="table-node"#).expect("node");
+        assert!(layer > last_node, "labels come after every card");
+        assert_eq!(on_top[layer..].matches("edge-label-pill").count(), labelled);
+
+        let grouped = render_svg(&graph, SvgRenderOptions::default());
+        assert!(!grouped.contains(r#"<g class="edge-labels">"#));
+        assert_eq!(grouped.matches("edge-label-pill").count(), labelled);
     }
 
     #[test]

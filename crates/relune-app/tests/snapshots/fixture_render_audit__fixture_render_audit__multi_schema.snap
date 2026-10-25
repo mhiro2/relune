@@ -53,8 +53,8 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 55357,
-      "edge_groups": 24,
+      "bytes": 55384,
+      "edge_groups": 25,
       "node_groups": 7
     }
   }

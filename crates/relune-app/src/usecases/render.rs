@@ -204,6 +204,8 @@ fn render_svg_output(
         show_stats: options.show_stats,
         embed_css: true,
         show_tooltips: true,
+        // Standalone SVG shows every label, so none may be cut through.
+        labels_on_top: true,
     };
     Ok(render_svg_with_overlay(positioned, options, overlay)?.into_string())
 }
@@ -223,6 +225,8 @@ fn render_html_output(
         show_stats: options.show_stats,
         embed_css: true,
         show_tooltips: true,
+        // The viewer shows labels per line and styles them through the edge.
+        labels_on_top: false,
     };
     let svg = render_svg_with_overlay(positioned, svg_options, overlay)?;
 

@@ -55,8 +55,8 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 60992,
-      "edge_groups": 28,
+      "bytes": 61019,
+      "edge_groups": 29,
       "node_groups": 7
     }
   }

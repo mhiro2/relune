@@ -59,8 +59,8 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 81596,
-      "edge_groups": 48,
+      "bytes": 81623,
+      "edge_groups": 49,
       "node_groups": 12
     }
   }

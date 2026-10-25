@@ -59,8 +59,8 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 201514,
-      "edge_groups": 160,
+      "bytes": 201541,
+      "edge_groups": 161,
       "node_groups": 23
     }
   }

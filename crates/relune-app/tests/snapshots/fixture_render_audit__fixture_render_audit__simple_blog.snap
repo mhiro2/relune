@@ -53,8 +53,8 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 22245,
-      "edge_groups": 12,
+      "bytes": 22272,
+      "edge_groups": 13,
       "node_groups": 3
     }
   }

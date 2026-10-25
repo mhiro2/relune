@@ -27,6 +27,13 @@ pub struct SvgRenderOptions {
     /// Tooltips display metadata like table name, column count, and foreign key info.
     #[serde(default)]
     pub show_tooltips: bool,
+
+    /// Whether edge labels are drawn above every line and card, so no line
+    /// cuts through a label. Off by default, which keeps each label inside
+    /// its edge group, where the HTML viewer's hover and selection styles
+    /// reach it; standalone SVG output turns it on.
+    #[serde(default)]
+    pub labels_on_top: bool,
 }
 
 const fn default_embed_css() -> bool {
@@ -41,6 +48,7 @@ impl Default for SvgRenderOptions {
             show_stats: false,
             embed_css: true,
             show_tooltips: false,
+            labels_on_top: false,
         }
     }
 }
@@ -134,6 +142,7 @@ mod tests {
             show_stats: true,
             embed_css: false,
             show_tooltips: true,
+            labels_on_top: true,
         };
         assert_eq!(opts.theme, Theme::Light);
         assert!(opts.show_legend);
@@ -150,6 +159,7 @@ mod tests {
             show_stats: false,
             embed_css: true,
             show_tooltips: true,
+            labels_on_top: true,
         };
         let cloned = opts;
         assert_eq!(opts, cloned);
@@ -172,6 +182,7 @@ mod tests {
             show_stats: false,
             embed_css: true,
             show_tooltips: true,
+            labels_on_top: true,
         };
         let json = serde_json::to_string(&opts).unwrap();
         assert!(json.contains("\"theme\":\"light\""));
