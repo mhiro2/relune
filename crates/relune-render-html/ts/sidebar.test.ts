@@ -39,6 +39,25 @@ describe('explorer sidebar', () => {
     expect(getViewerRuntime().sidebar?.isCollapsed()).toBe(false);
   });
 
+  it('keeps focus when the shortcut hides the sidebar from inside it', async () => {
+    await loadSidebar();
+    const collapseButton = document.getElementById('sidebar-collapse') as HTMLButtonElement;
+    collapseButton.focus();
+
+    getViewerRuntime().sidebar?.setCollapsed(true);
+    expect(document.activeElement).toBe(document.getElementById('sidebar-open'));
+  });
+
+  it('leaves focus alone when the sidebar hides while focus is elsewhere', async () => {
+    await loadSidebar();
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+
+    getViewerRuntime().sidebar?.setCollapsed(true);
+    expect(document.activeElement).toBe(outside);
+  });
+
   it('remembers a hidden sidebar for the tab', async () => {
     await loadSidebar();
     getViewerRuntime().sidebar?.setCollapsed(true);

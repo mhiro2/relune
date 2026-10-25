@@ -84,11 +84,13 @@
       const isCollapsed = () => panel.hasAttribute("hidden");
       const setCollapsed = (collapsed) => {
         if (collapsed === isCollapsed()) return;
+        const hadFocus = collapsed && panel.contains(document.activeElement);
         panel.toggleAttribute("hidden", collapsed);
         openButton.toggleAttribute("hidden", !collapsed);
         collapseButton?.setAttribute("aria-expanded", String(!collapsed));
         openButton.setAttribute("aria-expanded", String(!collapsed));
         writeSessionFlag(COLLAPSED_KEY, collapsed);
+        if (hadFocus) openButton.focus();
       };
       collapseButton?.addEventListener("click", () => {
         setCollapsed(true);

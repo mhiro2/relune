@@ -184,6 +184,27 @@ describe('moving between relationship lines', () => {
     expect(tabStops()).toEqual([1]);
   });
 
+  it('hands focus on when the focused line is hidden', () => {
+    const [first, , third] = lines();
+    third?.focus();
+    third?.classList.add('hidden-by-group');
+    document.dispatchEvent(new CustomEvent('relune:groups-changed'));
+
+    expect(tabStops()).toEqual([0]);
+    expect(document.activeElement).toBe(first);
+  });
+
+  it('leaves focus elsewhere alone when a line is hidden', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    lines()[0]?.classList.add('hidden-by-group');
+    document.dispatchEvent(new CustomEvent('relune:groups-changed'));
+
+    expect(tabStops()).toEqual([1]);
+    expect(document.activeElement).toBe(outside);
+  });
+
   it('moves the Tab stop to a relationship selected elsewhere', () => {
     getViewerRuntime().selection?.selectRelation('posts(editor_1_id)>users(id)');
     expect(tabStops()).toEqual([2]);

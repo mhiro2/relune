@@ -1044,9 +1044,18 @@
       };
       const syncRovingLine = () => {
         if (isLineFocusable(rovingLine)) return;
+        const hidden = edgeEls[rovingLine];
+        const active = document.activeElement;
+        const lostFocus = hidden !== void 0 && (active === hidden || active === null || active === document.body);
         const first = nextLineIndex(edgeEls.length, -1, "Home", isLineFocusable);
-        if (first !== null) setRovingLine(first);
+        if (first === null) return;
+        setRovingLine(first);
+        if (lostFocus && lineHadFocus) edgeEls[first].focus();
       };
+      let lineHadFocus = false;
+      document.addEventListener("focusin", (event) => {
+        lineHadFocus = event.target instanceof Element && edgeEls.includes(event.target);
+      });
       edgeEls.forEach((edgeEl, index) => {
         addEdgeHitArea(edgeEl);
         const toggle = (focusCard) => {

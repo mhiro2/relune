@@ -434,12 +434,28 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       rovingLine = index;
       edgeEls[index]?.setAttribute('tabindex', '0');
     };
-    /** Keeps the Tab stop on a line that is still on the diagram. */
+    /**
+     * Keeps the Tab stop on a line that is still on the diagram. When the
+     * focused line is hidden (its group or a filter), focus follows the Tab
+     * stop instead of falling back to the page.
+     */
     const syncRovingLine = (): void => {
       if (isLineFocusable(rovingLine)) return;
+      const hidden = edgeEls[rovingLine];
+      const active = document.activeElement;
+      const lostFocus =
+        hidden !== undefined && (active === hidden || active === null || active === document.body);
       const first = nextLineIndex(edgeEls.length, -1, 'Home', isLineFocusable);
-      if (first !== null) setRovingLine(first);
+      if (first === null) return;
+      setRovingLine(first);
+      if (lostFocus && lineHadFocus) (edgeEls[first] as HTMLElement | SVGElement).focus();
     };
+    // Whether keyboard focus was last on a line, so a line hidden under it
+    // can hand focus on even after the browser moved it to the page.
+    let lineHadFocus = false;
+    document.addEventListener('focusin', (event: FocusEvent) => {
+      lineHadFocus = event.target instanceof Element && edgeEls.includes(event.target);
+    });
 
     edgeEls.forEach((edgeEl, index) => {
       addEdgeHitArea(edgeEl);
