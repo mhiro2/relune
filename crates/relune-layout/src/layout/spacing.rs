@@ -4,14 +4,14 @@ use relune_core::LayoutDirection;
 
 use super::spatial::BBox;
 use super::{
-    ColumnFlags, ColumnRelationFlags, LayoutConfig, NodeSize, PositionedColumn, PositionedEdge,
-    PositionedGroup, PositionedNode,
+    ColumnFlags, ColumnRelationFlags, LayoutConfig, NodeSize, OmittedColumns, PositionedColumn,
+    PositionedEdge, PositionedGroup, PositionedNode,
 };
 use crate::metrics::{
     ColumnSlots, GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING,
     NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
     NODE_TEXT_INSET, column_row_width, estimate_mono_text_width, estimate_text_width, node_height,
-    omitted_columns_label, shows_omitted_columns_row,
+    omitted_columns_label,
 };
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
@@ -27,7 +27,7 @@ pub(super) fn build_positioned_node(
     y: f32,
     width: f32,
     height: f32,
-    omitted_columns: usize,
+    omitted: Option<OmittedColumns>,
 ) -> PositionedNode {
     PositionedNode {
         id: node.id.clone(),
@@ -42,7 +42,7 @@ pub(super) fn build_positioned_node(
                 flags: column_flags(c),
             })
             .collect(),
-        omitted_columns,
+        omitted,
         x,
         y,
         width,
@@ -54,20 +54,23 @@ pub(super) fn build_positioned_node(
 }
 
 /// Sizes every card for the columns it lists and the ones it leaves out
-/// (`omitted_columns`, by node index).
+/// (`omitted`, by node index).
 pub(super) fn measure_node_sizes(
     graph: &crate::graph::LayoutGraph,
-    omitted_columns: &[usize],
+    omitted: &[Option<OmittedColumns>],
     config: &LayoutConfig,
 ) -> Vec<NodeSize> {
     graph
         .nodes
         .iter()
-        .zip(omitted_columns)
-        .map(|(node, &omitted)| NodeSize {
-            width: estimate_node_width(node, omitted, config),
-            height: node_height(node.columns.len(), omitted),
-            omitted_columns: omitted,
+        .zip(omitted)
+        .map(|(node, &omitted)| {
+            let counted = omitted.and_then(OmittedColumns::row_count);
+            NodeSize {
+                width: estimate_node_width(node, counted, config),
+                height: node_height(node.columns.len(), counted.is_some()),
+                omitted,
+            }
         })
         .collect()
 }
@@ -85,7 +88,7 @@ const fn column_flags(column: &crate::graph::LayoutColumn) -> ColumnFlags {
 
 fn estimate_node_width(
     node: &crate::graph::LayoutNode,
-    omitted_columns: usize,
+    counted_columns: Option<usize>,
     config: &LayoutConfig,
 ) -> f32 {
     let minimum_width = (config.node_width * MIN_NODE_WIDTH_FACTOR).max(160.0);
@@ -94,7 +97,7 @@ fn estimate_node_width(
         estimate_mono_text_width(&node.label, NODE_HEADER_FONT_SIZE),
     ) + NODE_HEADER_NAME_OFFSET
         + HEADER_KIND_LABEL_RESERVE;
-    if node.columns.is_empty() {
+    if node.columns.is_empty() && counted_columns.is_none() {
         return header_width.max(minimum_width).ceil();
     }
 
@@ -105,15 +108,10 @@ fn estimate_node_width(
         .iter()
         .map(|column| column_row_width(slots, &column.name, &column.data_type))
         .fold(0.0, f32::max);
-    let omitted_row_width = if shows_omitted_columns_row(node.columns.len(), omitted_columns) {
+    let omitted_row_width = counted_columns.map_or(0.0, |count| {
         slots.key_gutter()
-            + estimate_mono_text_width(
-                &omitted_columns_label(omitted_columns),
-                NODE_DETAIL_FONT_SIZE,
-            )
-    } else {
-        0.0
-    };
+            + estimate_mono_text_width(&omitted_columns_label(count), NODE_DETAIL_FONT_SIZE)
+    });
     let column_width = column_width.max(omitted_row_width);
 
     header_width

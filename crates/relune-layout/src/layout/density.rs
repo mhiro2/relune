@@ -5,14 +5,15 @@ use std::collections::{HashMap, HashSet};
 
 use relune_core::{CardDensity, normalize_identifier};
 
+use super::OmittedColumns;
 use crate::graph::{LayoutColumn, LayoutGraph};
 
 /// A graph whose nodes keep only the columns their cards list.
 pub(super) struct DensityView<'a> {
     /// The graph with unlisted columns removed.
     pub(super) graph: Cow<'a, LayoutGraph>,
-    /// Number of columns left out of each node's card, by node index.
-    pub(super) omitted_columns: Vec<usize>,
+    /// Columns left out of each node's card, by node index.
+    pub(super) omitted: Vec<Option<OmittedColumns>>,
 }
 
 /// Removes the columns a card does not list at `density`.
@@ -23,9 +24,9 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
     match density {
         CardDensity::Full => DensityView {
             graph: Cow::Borrowed(graph),
-            omitted_columns: vec![0; graph.nodes.len()],
+            omitted: vec![None; graph.nodes.len()],
         },
-        CardDensity::Overview => filter_columns(graph, |_, _| false),
+        CardDensity::Overview => filter_columns(graph, false, |_, _| false),
         CardDensity::Keys => {
             // Relationships may name columns in a different case than the
             // table declares them, so names are compared normalized.
@@ -41,7 +42,9 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
                         .extend(columns.iter().map(|name| normalize_identifier(name)));
                 }
             }
-            filter_columns(graph, |node_id, column| {
+            // A keys card that lists nothing (a view without keys) still
+            // counts its columns, so it never reads as an overview card.
+            filter_columns(graph, true, |node_id, column| {
                 column.is_primary_key
                     || column.is_foreign_key
                     || referenced
@@ -54,22 +57,32 @@ pub(super) fn apply_density(graph: &LayoutGraph, density: CardDensity) -> Densit
 
 fn filter_columns(
     graph: &LayoutGraph,
+    counted_row: bool,
     keep: impl Fn(&str, &LayoutColumn) -> bool,
 ) -> DensityView<'_> {
     let mut filtered = graph.clone();
-    let omitted_columns = filtered
+    let omitted = filtered
         .nodes
         .iter_mut()
         .map(|node| {
-            let total = node.columns.len();
             let node_id = node.id.as_str();
-            node.columns.retain(|column| keep(node_id, column));
-            total - node.columns.len()
+            let (listed, left_out): (Vec<_>, Vec<_>) = std::mem::take(&mut node.columns)
+                .into_iter()
+                .partition(|column| keep(node_id, column));
+            node.columns = listed;
+            (!left_out.is_empty()).then(|| OmittedColumns {
+                count: left_out.len(),
+                primary_keys: left_out
+                    .iter()
+                    .filter(|column| column.is_primary_key)
+                    .count(),
+                counted_row,
+            })
         })
         .collect();
     DensityView {
         graph: Cow::Owned(filtered),
-        omitted_columns,
+        omitted,
     }
 }
 
@@ -163,7 +176,7 @@ mod tests {
         let view = apply_density(&graph, CardDensity::Full);
 
         assert!(matches!(view.graph, Cow::Borrowed(_)));
-        assert_eq!(view.omitted_columns, vec![0, 0]);
+        assert_eq!(view.omitted, vec![None, None]);
     }
 
     #[test]
@@ -173,7 +186,12 @@ mod tests {
 
         assert_eq!(listed(&view, "users"), ["id", "email"]);
         assert_eq!(listed(&view, "posts"), ["id", "author_email"]);
-        assert_eq!(view.omitted_columns, vec![1, 1]);
+        let counted = Some(OmittedColumns {
+            count: 1,
+            primary_keys: 0,
+            counted_row: true,
+        });
+        assert_eq!(view.omitted, vec![counted, counted]);
     }
 
     #[test]
@@ -189,12 +207,47 @@ mod tests {
     }
 
     #[test]
+    fn keys_density_counts_the_columns_of_a_card_that_lists_none() {
+        let mut schema = schema();
+        schema.views.push(relune_core::View {
+            id: "recent_posts".to_string(),
+            schema_name: None,
+            name: "recent_posts".to_string(),
+            columns: vec![column(7, "title", false), column(8, "published_at", false)],
+            definition: None,
+        });
+        let graph = LayoutGraphBuilder::new().build(&schema);
+        let view = apply_density(&graph, CardDensity::Keys);
+
+        assert!(listed(&view, "recent_posts").is_empty());
+        let index = view
+            .graph
+            .nodes
+            .iter()
+            .position(|node| node.id == "recent_posts")
+            .expect("view node");
+        assert_eq!(
+            view.omitted[index],
+            Some(OmittedColumns {
+                count: 2,
+                primary_keys: 0,
+                counted_row: true,
+            })
+        );
+    }
+
+    #[test]
     fn overview_density_lists_no_columns() {
         let graph = LayoutGraphBuilder::new().build(&schema());
         let view = apply_density(&graph, CardDensity::Overview);
 
         assert!(view.graph.nodes.iter().all(|node| node.columns.is_empty()));
-        assert_eq!(view.omitted_columns, vec![3, 3]);
+        let header_only = Some(OmittedColumns {
+            count: 3,
+            primary_keys: 1,
+            counted_row: false,
+        });
+        assert_eq!(view.omitted, vec![header_only, header_only]);
         assert_eq!(graph.nodes[0].columns.len(), 3, "input graph is untouched");
     }
 }

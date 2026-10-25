@@ -9,7 +9,6 @@ use relune_layout::metrics::{
     NODE_CORNER_RADIUS, NODE_DETAIL_FONT_SIZE, NODE_FIRST_ROW_TOP, NODE_HEADER_BASELINE,
     NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE,
     NODE_KIND_MARK_SIZE, NODE_ROW_BASELINE, NODE_TEXT_INSET, omitted_columns_label,
-    shows_omitted_columns_row,
 };
 
 use crate::escape::{escape_attribute, escape_text};
@@ -321,12 +320,14 @@ pub(crate) fn render_node_internal(
 
     // Add tooltip if enabled (with overlay annotations appended)
     if show_tooltips {
-        let column_count = node.columns.len() + node.omitted_columns;
+        // Count every column, listed or left out at the card's density.
+        let column_count = node.columns.len() + node.omitted.map_or(0, |o| o.count);
         let pk_count = node
             .columns
             .iter()
             .filter(|c| c.flags.relation.is_primary_key)
-            .count();
+            .count()
+            + node.omitted.map_or(0, |o| o.primary_keys);
         let mut tooltip_parts = vec![
             format!("{} {}", node.label, node_label),
             format!(
@@ -387,7 +388,7 @@ pub(crate) fn render_node_internal(
         node.width,
         colors.header_fill
     )?;
-    if !node.columns.is_empty() {
+    if node.has_rows() {
         write!(
             out,
             r#"<line class="table-header-divider" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.6" stroke-width="1"/>"#,
@@ -437,26 +438,28 @@ pub(crate) fn render_node_internal(
         )?;
     }
 
-    if !node.columns.is_empty() {
+    if node.has_rows() {
         let geometry = RowGeometry::new(node);
-        // Names and types share one clip so neither can spill past the
-        // node's trailing marks, whatever the font actually measures.
-        let clip_id = format!("node-{index}-columns-clip");
-        write!(
-            out,
-            r#"<clipPath id="{clip_id}"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}"/></clipPath>"#,
-            geometry.name_x,
-            node.y,
-            (geometry.type_end_x - geometry.name_x).max(0.0),
-            node.height
-        )?;
         let mut row_top = node.y + NODE_FIRST_ROW_TOP;
-        for column in &node.columns {
-            render_column_row(out, column, &geometry, row_top, &clip_id, colors)?;
-            row_top += NODE_COLUMN_HEIGHT;
+        if !node.columns.is_empty() {
+            // Names and types share one clip so neither can spill past the
+            // node's trailing marks, whatever the font actually measures.
+            let clip_id = format!("node-{index}-columns-clip");
+            write!(
+                out,
+                r#"<clipPath id="{clip_id}"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}"/></clipPath>"#,
+                geometry.name_x,
+                node.y,
+                (geometry.type_end_x - geometry.name_x).max(0.0),
+                node.height
+            )?;
+            for column in &node.columns {
+                render_column_row(out, column, &geometry, row_top, &clip_id, colors)?;
+                row_top += NODE_COLUMN_HEIGHT;
+            }
         }
-        if shows_omitted_columns_row(node.columns.len(), node.omitted_columns) {
-            render_omitted_columns_row(out, node.omitted_columns, &geometry, row_top, colors)?;
+        if let Some(count) = node.counted_omitted_columns() {
+            render_omitted_columns_row(out, count, &geometry, row_top, colors)?;
         }
     }
     write!(

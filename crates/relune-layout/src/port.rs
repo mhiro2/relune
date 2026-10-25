@@ -514,7 +514,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32) -> PositionedNode {
         PositionedNode {
-            omitted_columns: 0,
+            omitted: None,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn test_column_y_offset_from_center_uses_matching_column_row() {
         let node = PositionedNode {
-            omitted_columns: 0,
+            omitted: None,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -812,7 +812,7 @@ mod tests {
             NODE_FIRST_ROW_TOP + NODE_ROWS_BOTTOM_PADDING,
         );
         PositionedNode {
-            omitted_columns: 0,
+            omitted: None,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,

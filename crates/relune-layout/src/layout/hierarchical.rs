@@ -92,7 +92,7 @@ pub(super) fn assign_coordinates(
                 y,
                 size.width,
                 size.height,
-                size.omitted_columns,
+                size.omitted,
             ));
             node_rows[node_idx] = row_idx;
             row_extent = row_extent.max(axes.primary_extent(size));

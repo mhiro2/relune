@@ -685,7 +685,7 @@ mod export_tests {
         let posts = keys.nodes.iter().find(|node| node.id == "posts").unwrap();
         let listed: Vec<&str> = posts.columns.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(listed, ["id", "user_id"]);
-        assert_eq!(posts.omitted_columns, 5);
+        assert_eq!(posts.omitted.map(|omitted| omitted.count), Some(5));
     }
 
     #[test]

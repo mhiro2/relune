@@ -51,7 +51,7 @@ pub(super) struct NodeSize {
     pub(super) width: f32,
     pub(super) height: f32,
     /// Columns the card leaves out at the chosen density.
-    pub(super) omitted_columns: usize,
+    pub(super) omitted: Option<OmittedColumns>,
 }
 
 /// Configuration for layout.
@@ -437,9 +437,10 @@ pub struct PositionedNode {
     pub kind: NodeKind,
     /// Columns the card lists, in table order.
     pub columns: Vec<PositionedColumn>,
-    /// Columns the card leaves out at the chosen density.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub omitted_columns: usize,
+    /// Columns the card leaves out at the chosen density; `None` when it
+    /// lists every column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<OmittedColumns>,
     /// X coordinate (top-left corner).
     pub x: f32,
     /// Y coordinate (top-left corner).
@@ -457,8 +458,43 @@ pub struct PositionedNode {
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if requires &T
-const fn is_zero(value: &usize) -> bool {
-    *value == 0
+impl PositionedNode {
+    /// Columns counted by the card's closing `+N columns` row, if it has one.
+    #[must_use]
+    pub fn counted_omitted_columns(&self) -> Option<usize> {
+        self.omitted.and_then(OmittedColumns::row_count)
+    }
+
+    /// Whether the card draws any rows below its header.
+    #[must_use]
+    pub fn has_rows(&self) -> bool {
+        !self.columns.is_empty() || self.counted_omitted_columns().is_some()
+    }
+}
+
+/// Columns a card leaves out at its density.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OmittedColumns {
+    /// Number of columns left out.
+    pub count: usize,
+    /// Primary key columns among them, so tooltips can still count keys.
+    pub primary_keys: usize,
+    /// Whether the card ends with a `+N columns` row. Overview cards are a
+    /// header alone; any other card that leaves columns out counts them.
+    pub counted_row: bool,
+}
+
+impl OmittedColumns {
+    /// Columns the closing `+N columns` row counts, or `None` when the card
+    /// has no such row.
+    #[must_use]
+    pub const fn row_count(self) -> Option<usize> {
+        if self.counted_row {
+            Some(self.count)
+        } else {
+            None
+        }
+    }
 }
 
 /// Shared flag set for rendered columns.
@@ -694,14 +730,11 @@ pub fn build_layout_from_graph_with_config(
 
     let density = effective_config.effective_density(graph.nodes.len());
     debug!("Laying out cards at {density:?} density");
-    let DensityView {
-        graph,
-        omitted_columns,
-    } = apply_density(graph, density);
+    let DensityView { graph, omitted } = apply_density(graph, density);
     let graph = graph.as_ref();
 
     // Step 3: Assign coordinates based on layout mode
-    let node_sizes = measure_node_sizes(graph, &omitted_columns, &effective_config);
+    let node_sizes = measure_node_sizes(graph, &omitted, &effective_config);
     let ranks = assign_ranks(graph);
     debug!("Assigned {} ranks", ranks.num_ranks);
     let ordered_nodes = order_nodes_within_layers(graph, &ranks);

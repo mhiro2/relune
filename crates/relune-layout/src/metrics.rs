@@ -77,15 +77,6 @@ pub const EDGE_LABEL_HEIGHT: f32 = 18.0;
 /// Horizontal padding inside the edge label pill, both sides combined.
 pub const EDGE_LABEL_PADDING: f32 = 18.0;
 
-/// Whether a card ends with a row counting the columns it leaves out.
-///
-/// Only a card that lists some columns gets the row; a card that lists none
-/// is a header alone, as in the overview density.
-#[must_use]
-pub const fn shows_omitted_columns_row(listed: usize, omitted: usize) -> bool {
-    listed > 0 && omitted > 0
-}
-
 /// Label of the row counting the columns a card leaves out.
 #[must_use]
 pub fn omitted_columns_label(omitted: usize) -> String {
@@ -96,11 +87,12 @@ pub fn omitted_columns_label(omitted: usize) -> String {
     }
 }
 
-/// Height of a card that lists `listed` columns and leaves out `omitted`.
+/// Height of a card that lists `listed` columns, plus a closing row counting
+/// the rest when `counted_row` is set.
 #[must_use]
 #[allow(clippy::cast_precision_loss)] // Row counts are small layout values.
-pub fn node_height(listed: usize, omitted: usize) -> f32 {
-    let rows = listed + usize::from(shows_omitted_columns_row(listed, omitted));
+pub fn node_height(listed: usize, counted_row: bool) -> f32 {
+    let rows = listed + usize::from(counted_row);
     if rows == 0 {
         return NODE_HEADER_HEIGHT;
     }
@@ -312,12 +304,12 @@ mod tests {
     }
 
     #[test]
-    fn node_height_adds_a_row_only_for_cards_listing_some_columns() {
-        let listed = node_height(2, 0);
+    fn node_height_adds_a_row_for_the_counted_columns() {
+        let listed = node_height(2, false);
 
-        assert!((node_height(0, 0) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
-        assert!((node_height(0, 5) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
-        assert!((node_height(2, 3) - listed - NODE_COLUMN_HEIGHT).abs() < f32::EPSILON);
+        assert!((node_height(0, false) - NODE_HEADER_HEIGHT).abs() < f32::EPSILON);
+        assert!((node_height(0, true) - node_height(1, false)).abs() < f32::EPSILON);
+        assert!((node_height(2, true) - listed - NODE_COLUMN_HEIGHT).abs() < f32::EPSILON);
         assert_eq!(omitted_columns_label(1), "+1 column");
         assert_eq!(omitted_columns_label(4), "+4 columns");
     }

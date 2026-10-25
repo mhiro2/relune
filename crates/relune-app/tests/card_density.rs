@@ -189,7 +189,7 @@ fn keys_cards_list_every_column_a_relationship_names() {
             }
         }
         for node in &keys.nodes {
-            let total = node.columns.len() + node.omitted_columns;
+            let total = node.columns.len() + node.omitted.map_or(0, |omitted| omitted.count);
             assert_eq!(
                 total,
                 self::node(&full, &node.id).columns.len(),
