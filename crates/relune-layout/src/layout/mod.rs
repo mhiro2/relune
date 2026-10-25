@@ -61,7 +61,8 @@ pub struct LayoutConfig {
     pub vertical_spacing: f32,
     /// Node width.
     pub node_width: f32,
-    /// Padding inside nodes.
+    /// Clearance kept around each node when force-directed layout pushes
+    /// overlapping nodes apart. Card size comes from the shared row metrics.
     pub node_padding: f32,
     /// Layout direction.
     pub direction: LayoutDirection,
@@ -236,7 +237,7 @@ pub struct CompactedConfig {
     pub vertical_spacing: f32,
     /// Compacted node width.
     pub node_width: f32,
-    /// Compacted padding inside nodes.
+    /// Compacted clearance kept around each node in force-directed layout.
     pub node_padding: f32,
     /// Whether columns should be hidden.
     pub hide_columns: bool,

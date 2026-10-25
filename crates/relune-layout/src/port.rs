@@ -502,7 +502,7 @@ mod tests {
     use crate::layout::{
         ColumnFlags, ColumnRelationFlags, LayoutConfig, PositionedColumn, PositionedNode,
     };
-    use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT};
+    use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP, NODE_ROWS_BOTTOM_PADDING};
     use crate::route::AttachmentSide;
     use relune_core::{EdgeKind, LayoutDirection, layout::Cardinality};
 
@@ -787,9 +787,12 @@ mod tests {
         width: f32,
         columns: &[&str],
     ) -> PositionedNode {
-        // Match the default node_padding (8) and the shared header/column metrics.
+        // Match the card height layout derives from the shared row metrics.
         #[allow(clippy::cast_precision_loss)]
-        let height = (columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, 16.0 + NODE_HEADER_HEIGHT);
+        let height = (columns.len() as f32).mul_add(
+            NODE_COLUMN_HEIGHT,
+            NODE_FIRST_ROW_TOP + NODE_ROWS_BOTTOM_PADDING,
+        );
         PositionedNode {
             id: id.to_string(),
             label: id.to_string(),

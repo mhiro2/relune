@@ -115,7 +115,8 @@ pub struct LayoutCompactionSpec {
     /// Minimum node width when compaction is active.
     #[serde(default = "default_compact_node_width")]
     pub min_node_width: f32,
-    /// Minimum node padding when compaction is active.
+    /// Minimum clearance kept around each node in force-directed layout when
+    /// compaction is active.
     #[serde(default = "default_compact_node_padding")]
     pub min_node_padding: f32,
     /// Multiplier applied to `threshold` to decide when columns are hidden automatically.
