@@ -29,7 +29,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 2277.60009765625,
+          "label_x": 2273.60009765625,
           "label_y": 166.0,
           "nullable": true,
           "route_label_position": [
@@ -120,7 +120,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "cycle_a_id",
           "label_x": 524.5999755859375,
-          "label_y": 137.0,
+          "label_y": 124.53299713134766,
           "nullable": true,
           "route_label_position": [
             524.5999755859375,
@@ -201,8 +201,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 535.7410278320313,
-          "label_y": 575.7639770507813,
+          "label_x": 534.5999755859375,
+          "label_y": 605.2329711914063,
           "nullable": true,
           "route_label_position": [
             534.5999755859375,
@@ -324,7 +324,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_org_id",
-          "label_x": 2289.60009765625,
+          "label_x": 2285.60009765625,
           "label_y": 457.0,
           "nullable": true,
           "route_label_position": [
@@ -365,8 +365,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "department_id",
-          "label_x": 482.4840087890625,
-          "label_y": 549.2659912109375,
+          "label_x": 569.7999877929688,
+          "label_y": 643.0,
           "nullable": false,
           "route_label_position": [
             523.5999755859375,
@@ -447,7 +447,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_comment_id",
-          "label_x": 2301.60009765625,
+          "label_x": 2297.60009765625,
           "label_y": 737.0,
           "nullable": true,
           "route_label_position": [
@@ -655,7 +655,7 @@ expression: snapshot
         "edge_count": 12,
         "height": 1128.0,
         "node_count": 12,
-        "width": 2369.0
+        "width": 2365.0
       }
     },
     "orthogonal": {
@@ -681,7 +681,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 2277.60009765625,
+          "label_x": 2273.60009765625,
           "label_y": 166.0,
           "nullable": true,
           "route_label_position": [
@@ -772,7 +772,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "cycle_a_id",
           "label_x": 524.5999755859375,
-          "label_y": 137.0,
+          "label_y": 124.53299713134766,
           "nullable": true,
           "route_label_position": [
             524.5999755859375,
@@ -853,8 +853,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 535.7410278320313,
-          "label_y": 575.7639770507813,
+          "label_x": 534.5999755859375,
+          "label_y": 605.2329711914063,
           "nullable": true,
           "route_label_position": [
             534.5999755859375,
@@ -976,7 +976,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_org_id",
-          "label_x": 2289.60009765625,
+          "label_x": 2285.60009765625,
           "label_y": 457.0,
           "nullable": true,
           "route_label_position": [
@@ -1017,8 +1017,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "department_id",
-          "label_x": 482.4840087890625,
-          "label_y": 549.2659912109375,
+          "label_x": 569.7999877929688,
+          "label_y": 643.0,
           "nullable": false,
           "route_label_position": [
             523.5999755859375,
@@ -1099,7 +1099,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_comment_id",
-          "label_x": 2301.60009765625,
+          "label_x": 2297.60009765625,
           "label_y": 737.0,
           "nullable": true,
           "route_label_position": [
@@ -1307,7 +1307,7 @@ expression: snapshot
         "edge_count": 12,
         "height": 1128.0,
         "node_count": 12,
-        "width": 2369.0
+        "width": 2365.0
       }
     },
     "straight": {
@@ -1333,7 +1333,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 2277.60009765625,
+          "label_x": 2273.60009765625,
           "label_y": 166.0,
           "nullable": true,
           "route_label_position": [
@@ -1365,8 +1365,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_c_id",
-          "label_x": 552.1209716796875,
-          "label_y": 165.63600158691406,
+          "label_x": 557.469970703125,
+          "label_y": 157.35299682617188,
           "nullable": true,
           "route_label_position": [
             838.7000122070313,
@@ -1397,8 +1397,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_a_id",
-          "label_x": 492.0669860839844,
-          "label_y": 119.66699981689453,
+          "label_x": 513.3330078125,
+          "label_y": 123.33300018310547,
           "nullable": true,
           "route_label_position": [
             534.5999755859375,
@@ -1429,8 +1429,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_b_id",
-          "label_x": 1185.3330078125,
-          "label_y": 134.33299255371094,
+          "label_x": 1164.0670166015625,
+          "label_y": 130.66700744628906,
           "nullable": true,
           "route_label_position": [
             1142.800048828125,
@@ -1461,8 +1461,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 577.3679809570313,
-          "label_y": 534.176025390625,
+          "label_x": 516.02099609375,
+          "label_y": 698.7789916992188,
           "nullable": true,
           "route_label_position": [
             534.5999755859375,
@@ -1575,7 +1575,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_org_id",
-          "label_x": 2289.60009765625,
+          "label_x": 2285.60009765625,
           "label_y": 457.0,
           "nullable": true,
           "route_label_position": [
@@ -1607,8 +1607,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "department_id",
-          "label_x": 473.8919982910156,
-          "label_y": 590.6329956054688,
+          "label_x": 492.0669860839844,
+          "label_y": 628.3330078125,
           "nullable": false,
           "route_label_position": [
             534.5999755859375,
@@ -1639,8 +1639,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_teams_organization",
-          "label_x": 1169.8609619140625,
-          "label_y": 428.74798583984375,
+          "label_x": 1159.9520263671875,
+          "label_y": 394.7919921875,
           "nullable": false,
           "route_label_position": [
             1130.800048828125,
@@ -1680,7 +1680,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_comment_id",
-          "label_x": 2301.60009765625,
+          "label_x": 2297.60009765625,
           "label_y": 737.0,
           "nullable": true,
           "route_label_position": [
@@ -1712,8 +1712,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_users_default_team",
-          "label_x": 553.1890258789063,
-          "label_y": 433.760986328125,
+          "label_x": 1126.5,
+          "label_y": 361.1669921875,
           "nullable": true,
           "route_label_position": [
             838.7000122070313,
@@ -1871,7 +1871,7 @@ expression: snapshot
         "edge_count": 12,
         "height": 1128.0,
         "node_count": 12,
-        "width": 2369.0
+        "width": 2365.0
       }
     }
   }

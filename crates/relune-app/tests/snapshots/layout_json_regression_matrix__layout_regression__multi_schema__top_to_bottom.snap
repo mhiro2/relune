@@ -754,8 +754,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 1261.14697265625,
-          "label_y": 596.0,
+          "label_x": 1265.4749755859375,
+          "label_y": 578.3330078125,
           "nullable": false,
           "route_label_position": [
             1287.112060546875,

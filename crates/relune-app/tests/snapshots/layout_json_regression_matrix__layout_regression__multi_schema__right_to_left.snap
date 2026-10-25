@@ -111,8 +111,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 870.7000122070313,
-          "label_y": 646.6900024414063,
+          "label_x": 800.6640014648438,
+          "label_y": 652.5859985351563,
           "nullable": false,
           "route_label_position": [
             870.7000122070313,
@@ -446,8 +446,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "product_id",
-          "label_x": 870.7000122070313,
-          "label_y": 646.6900024414063,
+          "label_x": 800.6640014648438,
+          "label_y": 652.5859985351563,
           "nullable": false,
           "route_label_position": [
             870.7000122070313,

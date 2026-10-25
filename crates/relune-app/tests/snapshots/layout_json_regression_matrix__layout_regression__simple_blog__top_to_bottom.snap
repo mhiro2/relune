@@ -21,7 +21,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "post_id",
           "label_x": 252.79100036621094,
-          "label_y": 533.6669921875,
+          "label_y": 542.0,
           "nullable": false,
           "route_label_position": [
             252.79100036621094,
@@ -101,7 +101,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 276.8450012207031,
+          "label_x": 252.84500122070313,
           "label_y": 240.0,
           "nullable": false,
           "route_label_position": [
@@ -179,7 +179,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "post_id",
           "label_x": 252.79100036621094,
-          "label_y": 533.6669921875,
+          "label_y": 542.0,
           "nullable": false,
           "route_label_position": [
             252.79100036621094,
@@ -259,7 +259,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 276.8450012207031,
+          "label_x": 252.84500122070313,
           "label_y": 240.0,
           "nullable": false,
           "route_label_position": [
@@ -336,8 +336,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 279.1929931640625,
-          "label_y": 537.7490234375,
+          "label_x": 267.2770080566406,
+          "label_y": 539.166015625,
           "nullable": false,
           "route_label_position": [
             243.44500732421875,
@@ -368,8 +368,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 177.39999389648438,
-          "label_y": 524.9940185546875,
+          "label_x": 177.43600463867188,
+          "label_y": 256.9930114746094,
           "nullable": false,
           "route_label_position": [
             225.41799926757813,
@@ -400,8 +400,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 290.13800048828125,
-          "label_y": 254.02699279785156,
+          "label_x": 264.3269958496094,
+          "label_y": 234.03900146484375,
           "nullable": false,
           "route_label_position": [
             243.47300720214844,

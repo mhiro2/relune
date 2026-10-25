@@ -29,7 +29,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 982.2000122070313,
+          "label_x": 978.2000122070313,
           "label_y": 962.0,
           "nullable": true,
           "route_label_position": [
@@ -110,8 +110,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_a_id",
-          "label_x": 278.5,
-          "label_y": 271.3330078125,
+          "label_x": 218.5,
+          "label_y": 261.1669921875,
           "nullable": true,
           "route_label_position": [
             218.5,
@@ -174,8 +174,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 1338.9000244140625,
-          "label_y": 270.3330078125,
+          "label_x": 1354.9000244140625,
+          "label_y": 257.8330078125,
           "nullable": true,
           "route_label_position": [
             1434.9000244140625,
@@ -247,7 +247,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "owner_user_id",
-          "label_x": 778.7000122070313,
+          "label_x": 826.7000122070313,
           "label_y": 262.0,
           "nullable": false,
           "route_label_position": [
@@ -288,7 +288,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_org_id",
-          "label_x": 1602.4000244140625,
+          "label_x": 1598.4000244140625,
           "label_y": 929.0,
           "nullable": true,
           "route_label_position": [
@@ -321,7 +321,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "department_id",
           "label_x": 1506.9000244140625,
-          "label_y": 253.66700744628906,
+          "label_y": 266.1669921875,
           "nullable": false,
           "route_label_position": [
             1458.9000244140625,
@@ -393,7 +393,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_comment_id",
-          "label_x": 477.0,
+          "label_x": 473.0,
           "label_y": 1275.0,
           "nullable": true,
           "route_label_position": [
@@ -627,7 +627,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 982.2000122070313,
+          "label_x": 978.2000122070313,
           "label_y": 962.0,
           "nullable": true,
           "route_label_position": [
@@ -708,8 +708,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_a_id",
-          "label_x": 278.5,
-          "label_y": 271.3330078125,
+          "label_x": 218.5,
+          "label_y": 261.1669921875,
           "nullable": true,
           "route_label_position": [
             218.5,
@@ -772,8 +772,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 1338.9000244140625,
-          "label_y": 270.3330078125,
+          "label_x": 1354.9000244140625,
+          "label_y": 257.8330078125,
           "nullable": true,
           "route_label_position": [
             1434.9000244140625,
@@ -845,7 +845,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "owner_user_id",
-          "label_x": 778.7000122070313,
+          "label_x": 826.7000122070313,
           "label_y": 262.0,
           "nullable": false,
           "route_label_position": [
@@ -886,7 +886,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_org_id",
-          "label_x": 1602.4000244140625,
+          "label_x": 1598.4000244140625,
           "label_y": 929.0,
           "nullable": true,
           "route_label_position": [
@@ -919,7 +919,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "department_id",
           "label_x": 1506.9000244140625,
-          "label_y": 253.66700744628906,
+          "label_y": 266.1669921875,
           "nullable": false,
           "route_label_position": [
             1458.9000244140625,
@@ -991,7 +991,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_comment_id",
-          "label_x": 477.0,
+          "label_x": 473.0,
           "label_y": 1275.0,
           "nullable": true,
           "route_label_position": [
@@ -1225,7 +1225,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_id",
-          "label_x": 982.2000122070313,
+          "label_x": 978.2000122070313,
           "label_y": 962.0,
           "nullable": true,
           "route_label_position": [
@@ -1257,8 +1257,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_c_id",
-          "label_x": 176.57699584960938,
-          "label_y": 505.2869873046875,
+          "label_x": 184.56399536132813,
+          "label_y": 505.739013671875,
           "nullable": true,
           "route_label_position": [
             230.5,
@@ -1289,8 +1289,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_a_id",
-          "label_x": 177.7310028076172,
-          "label_y": 265.864990234375,
+          "label_x": 185.69200134277344,
+          "label_y": 265.0820007324219,
           "nullable": true,
           "route_label_position": [
             224.5,
@@ -1321,8 +1321,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "cycle_b_id",
-          "label_x": 285.375,
-          "label_y": 541.3720092773438,
+          "label_x": 273.406005859375,
+          "label_y": 542.2379760742188,
           "nullable": true,
           "route_label_position": [
             236.5,
@@ -1353,8 +1353,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_departments_lead_project",
-          "label_x": 1338.9000244140625,
-          "label_y": 270.3330078125,
+          "label_x": 1354.9000244140625,
+          "label_y": 257.8330078125,
           "nullable": true,
           "route_label_position": [
             1434.9000244140625,
@@ -1426,8 +1426,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "owner_user_id",
-          "label_x": 762.2130126953125,
-          "label_y": 278.9119873046875,
+          "label_x": 785.0419921875,
+          "label_y": 267.718994140625,
           "nullable": false,
           "route_label_position": [
             832.7000122070313,
@@ -1467,7 +1467,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_org_id",
-          "label_x": 1602.4000244140625,
+          "label_x": 1598.4000244140625,
           "label_y": 929.0,
           "nullable": true,
           "route_label_position": [
@@ -1500,7 +1500,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "department_id",
           "label_x": 1506.9000244140625,
-          "label_y": 253.66700744628906,
+          "label_y": 266.1669921875,
           "nullable": false,
           "route_label_position": [
             1458.9000244140625,
@@ -1531,8 +1531,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_teams_organization",
-          "label_x": 926.52099609375,
-          "label_y": 497.8299865722656,
+          "label_x": 917.0130004882813,
+          "label_y": 532.7260131835938,
           "nullable": false,
           "route_label_position": [
             844.7000122070313,
@@ -1572,7 +1572,7 @@ expression: snapshot
           ],
           "is_self_loop": true,
           "label": "parent_comment_id",
-          "label_x": 477.0,
+          "label_x": 473.0,
           "label_y": 1275.0,
           "nullable": true,
           "route_label_position": [
@@ -1604,8 +1604,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "fk_users_default_team",
-          "label_x": 746.8489990234375,
-          "label_y": 541.9940185546875,
+          "label_x": 753.8419799804688,
+          "label_y": 491.9830017089844,
           "nullable": true,
           "route_label_position": [
             838.7000122070313,

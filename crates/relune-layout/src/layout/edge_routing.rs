@@ -63,7 +63,7 @@ const EDGE_LABEL_COLLISION_MARGIN: f32 = 4.0;
 /// Labels should stay away from edge endpoints and markers.
 pub(super) const MIN_LABEL_ROUTE_T: f32 = 0.16;
 /// Candidate stride when sliding labels along their own route.
-const LABEL_ROUTE_T_STEP: f32 = 0.08;
+const LABEL_ROUTE_T_STEP: f32 = 0.03;
 /// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
 const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
 /// Extra clearance reserved from a FK endpoint for Crow's Foot markers.
@@ -2113,6 +2113,7 @@ fn endpoint_marker_obstacle(endpoint: (f32, f32), toward: (f32, f32), clearance:
     }
 }
 
+#[cfg(test)]
 pub(super) fn rect_overlaps_any(label: Rect, obstacles: &[Rect], margin: f32) -> bool {
     obstacles.iter().any(|obstacle| {
         label.x + label.w + margin > obstacle.x
@@ -2145,42 +2146,145 @@ pub(super) fn place_label_on_route(
     margin: f32,
     label_half_w: f32,
 ) -> (f32, f32) {
-    let candidates = label_candidate_parameters(preferred_t);
-    let mut best = point_along_route(route, candidates[0]);
-    let mut best_overlap_area = f32::MAX;
+    place_label_avoiding(route, preferred_t, obstacles, &[], margin, label_half_w)
+}
 
-    for t in candidates {
-        let candidate = point_along_route(route, t);
-        let label = label_rect(candidate.0, candidate.1, label_half_w);
-        if !rect_overlaps_any(label, obstacles, margin) {
-            return candidate;
+/// Gap a nudged label may leave between its pill and its own line.
+const LABEL_NEAR_GAP: f32 = 4.0;
+/// Step of the sideways search near the line.
+const LABEL_NEAR_STEP: f32 = 4.0;
+/// Half size of the box kept clear around each bend of a label's own route,
+/// so a pill never hides the corner it sits on.
+const LABEL_BEND_HALF_SIZE: f32 = 4.0;
+
+/// Places a label on its route, off every `hard` obstacle (cards, headings,
+/// markers, other labels) and, when it can, off every `soft` one (other
+/// lines) and off its own bends.
+///
+/// A label first slides along its route. If no spot is fully clear, it
+/// steps sideways only as far as still keeps the pill on its line; a label
+/// that merely crosses another line stays on its own line rather than
+/// floating away. Only when every spot on the route would cover something
+/// hard does it move farther out.
+fn place_label_avoiding(
+    route: &EdgeRoute,
+    preferred_t: f32,
+    hard: &[Rect],
+    soft: &[Rect],
+    margin: f32,
+    label_half_w: f32,
+) -> (f32, f32) {
+    let points = route_points(route);
+    let bends: Vec<Rect> = points
+        .iter()
+        .skip(1)
+        .take(points.len().saturating_sub(2))
+        .map(|&(x, y)| Rect {
+            x: x - LABEL_BEND_HALF_SIZE,
+            y: y - LABEL_BEND_HALF_SIZE,
+            w: LABEL_BEND_HALF_SIZE * 2.0,
+            h: LABEL_BEND_HALF_SIZE * 2.0,
+        })
+        .collect();
+    let cost = |center: (f32, f32)| {
+        let label = label_rect(center.0, center.1, label_half_w);
+        (
+            overlap_area(label, hard, margin),
+            overlap_area(label, soft, 0.0) + overlap_area(label, &bends, 0.0),
+        )
+    };
+
+    let mut ranked: Vec<LabelSpot> = Vec::new();
+    for t in label_candidate_parameters(preferred_t) {
+        let center = point_along_route(route, t);
+        let candidate_cost = cost(center);
+        if candidate_cost == (0.0, 0.0) {
+            return center;
         }
+        ranked.push((candidate_cost, center, t));
+    }
+    // Stable sort keeps the preferred parameter first among equal costs.
+    ranked.sort_by(|left, right| {
+        left.0
+            .0
+            .total_cmp(&right.0.0)
+            .then_with(|| left.0.1.total_cmp(&right.0.1))
+    });
 
-        let overlap_area: f32 = obstacles
-            .iter()
-            .map(|obstacle| {
-                let overlap_w =
-                    (label.x + label.w).min(obstacle.x + obstacle.w) - label.x.max(obstacle.x);
-                let overlap_h =
-                    (label.y + label.h).min(obstacle.y + obstacle.h) - label.y.max(obstacle.y);
-                overlap_w.max(0.0) * overlap_h.max(0.0)
-            })
-            .sum();
-        if overlap_area < best_overlap_area {
-            best_overlap_area = overlap_area;
-            best = candidate;
+    for &(_, center, t) in &ranked {
+        let normal = route_normal_at(route, t);
+        // Half the pill's extent across the line: its width beside a
+        // vertical run, its height beside a horizontal one.
+        let extent = normal
+            .0
+            .abs()
+            .mul_add(label_half_w, normal.1.abs() * LABEL_HALF_H);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let steps = ((extent + LABEL_NEAR_GAP) / LABEL_NEAR_STEP).floor() as usize;
+        #[allow(clippy::cast_precision_loss)]
+        for offset in (1..=steps).map(|index| index as f32 * LABEL_NEAR_STEP) {
+            for sign in [1.0, -1.0] {
+                let shifted = (
+                    (normal.0 * sign).mul_add(offset, center.0),
+                    (normal.1 * sign).mul_add(offset, center.1),
+                );
+                if cost(shifted) == (0.0, 0.0) {
+                    return shifted;
+                }
+            }
         }
     }
 
+    let &((best_hard, _), best, best_t) = ranked
+        .first()
+        .expect("a route always yields at least one label candidate");
+    if best_hard == 0.0 {
+        return best;
+    }
+
+    let normal = route_normal_at(route, best_t);
+    let mut all = hard.to_vec();
+    all.extend_from_slice(soft);
     nudge_label(
         best,
-        (route.x1, route.y1),
-        (route.x2, route.y2),
-        obstacles,
+        (best.0 - normal.1, best.1 + normal.0),
+        (best.0 + normal.1, best.1 - normal.0),
+        &all,
         margin,
         label_half_w,
         LABEL_ROUTE_FALLBACK_MAX_OFFSET.max(label_half_w),
     )
+}
+
+/// A candidate label spot: its hard and soft overlap, its center, and its
+/// parameter along the route.
+type LabelSpot = ((f32, f32), (f32, f32), f32);
+
+/// Unit normal of the route around parameter `t`.
+fn route_normal_at(route: &EdgeRoute, t: f32) -> (f32, f32) {
+    let before = point_along_route(route, (t - 0.01).max(0.0));
+    let after = point_along_route(route, (t + 0.01).min(1.0));
+    let (dx, dy) = (after.0 - before.0, after.1 - before.1);
+    let length = dx.hypot(dy);
+    if length < f32::EPSILON {
+        (0.0, -1.0)
+    } else {
+        (-dy / length, dx / length)
+    }
+}
+
+/// Total area by which `label`, grown by `margin`, overlaps `obstacles`.
+fn overlap_area(label: Rect, obstacles: &[Rect], margin: f32) -> f32 {
+    obstacles
+        .iter()
+        .map(|obstacle| {
+            let overlap_w = (label.x + label.w + margin).min(obstacle.x + obstacle.w)
+                - (label.x - margin).max(obstacle.x);
+            let overlap_h = (label.y + label.h + margin).min(obstacle.y + obstacle.h)
+                - (label.y - margin).max(obstacle.y);
+            overlap_w.max(0.0) * overlap_h.max(0.0)
+        })
+        .sum()
 }
 
 fn estimate_route_parameter(route: &EdgeRoute, point: (f32, f32)) -> f32 {
@@ -2290,41 +2394,43 @@ fn resolve_edge_label_collisions(
             let nearby_nodes = node_grid.query_sorted(&query);
             let nearby_edges = edge_grid.query_sorted(&query);
 
-            // Preserve the original obstacle order (nodes, this edge's endpoint
-            // markers, then other edges in ascending index order) so the
-            // floating-point overlap-area accumulation is byte-for-byte
-            // identical to the exhaustive sweep.
-            let mut obstacles =
-                Vec::with_capacity(nearby_nodes.len() + nearby_edges.len().saturating_mul(4));
+            // Cards, headings, markers, and other labels are hard; other
+            // lines are soft, so a label may cross one rather than drift off
+            // its own line.
+            let mut hard =
+                Vec::with_capacity(nearby_nodes.len() + nearby_edges.len().saturating_mul(3));
+            let mut soft = Vec::new();
             for &node_index in &nearby_nodes {
-                obstacles.push(node_obstacles[node_index]);
+                hard.push(node_obstacles[node_index]);
             }
-            obstacles.extend_from_slice(&endpoint_marker_obstacles[index]);
+            hard.extend_from_slice(&endpoint_marker_obstacles[index]);
 
             for &other_index in &nearby_edges {
                 if other_index == index {
                     continue;
                 }
-                obstacles.push(label_rect(
+                hard.push(label_rect(
                     edges[other_index].label_x,
                     edges[other_index].label_y,
                     label_half_widths[other_index],
                 ));
-                obstacles.extend_from_slice(&route_obstacles[other_index]);
-                obstacles.extend_from_slice(&endpoint_marker_obstacles[other_index]);
+                hard.extend_from_slice(&endpoint_marker_obstacles[other_index]);
+                soft.extend_from_slice(&route_obstacles[other_index]);
             }
             // Nearby edges contribute every sample along their whole route;
             // samples outside the reachable region can never overlap a label.
-            obstacles.retain(|obstacle| query.intersects_rect(obstacle));
+            hard.retain(|obstacle| query.intersects_rect(obstacle));
+            soft.retain(|obstacle| query.intersects_rect(obstacle));
 
             let current_t = estimate_route_parameter(
                 &edges[index].route,
                 (edges[index].label_x, edges[index].label_y),
             );
-            let updated = place_label_on_route(
+            let updated = place_label_avoiding(
                 &edges[index].route,
                 current_t,
-                &obstacles,
+                &hard,
+                &soft,
                 EDGE_LABEL_COLLISION_MARGIN,
                 label_half_w,
             );

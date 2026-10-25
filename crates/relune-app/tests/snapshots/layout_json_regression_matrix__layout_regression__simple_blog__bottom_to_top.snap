@@ -21,7 +21,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "post_id",
           "label_x": 252.79100036621094,
-          "label_y": 270.3330078125,
+          "label_y": 262.0,
           "nullable": false,
           "route_label_position": [
             252.79100036621094,
@@ -101,7 +101,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 276.8450012207031,
+          "label_x": 252.84500122070313,
           "label_y": 564.0,
           "nullable": false,
           "route_label_position": [
@@ -179,7 +179,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "post_id",
           "label_x": 252.79100036621094,
-          "label_y": 270.3330078125,
+          "label_y": 262.0,
           "nullable": false,
           "route_label_position": [
             252.79100036621094,
@@ -259,7 +259,7 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 276.8450012207031,
+          "label_x": 252.84500122070313,
           "label_y": 564.0,
           "nullable": false,
           "route_label_position": [
@@ -336,8 +336,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 290.1189880371094,
-          "label_y": 276.0010070800781,
+          "label_x": 263.8009948730469,
+          "label_y": 260.19500732421875,
           "nullable": false,
           "route_label_position": [
             243.44500732421875,
@@ -400,8 +400,8 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 279.218994140625,
-          "label_y": 559.72998046875,
+          "label_x": 267.3030090332031,
+          "label_y": 561.1539916992188,
           "nullable": false,
           "route_label_position": [
             243.47300720214844,

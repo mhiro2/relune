@@ -115,8 +115,8 @@ expression: compact_layout_snapshot(&graph)
       ],
       "is_self_loop": false,
       "label": "user_id",
-      "label_x": 529.0,
-      "label_y": 138.43600463867188,
+      "label_x": 568.7100219726563,
+      "label_y": 127.0,
       "nullable": false,
       "route_label_position": [
         529.0,
