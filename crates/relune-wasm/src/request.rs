@@ -7,7 +7,8 @@ use relune_app::{
     DiffFormat, DiffRequest, ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec,
     LayoutDirection, LayoutSpec, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewSeverityOverride, RouteStyle,
+    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewRuleSettings,
+    ReviewSeverityOverride, RouteStyle,
 };
 use relune_core::{
     CardDensity, LintProfile, LintRuleCategory, ReviewSeverity, Severity, SqlDialect,
@@ -458,6 +459,8 @@ impl WasmDiffRequest {
                 compaction: LayoutCompactionSpec::default(),
                 ..Default::default()
             },
+            // The playground has no review config, so every rule ranks risk.
+            review: ReviewRuleSettings::default(),
             allow_invalid_schema: self.allow_invalid_schema,
         })
     }

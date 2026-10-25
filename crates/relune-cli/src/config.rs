@@ -85,6 +85,7 @@
 use std::path::Path;
 use std::{collections::BTreeMap, fmt::Write as _};
 
+use relune_app::ReviewRuleSettings;
 use relune_core::{ReviewRuleId, ReviewSeverity, ReviewSeverityOverride};
 use serde::{Deserialize, Serialize};
 
@@ -767,6 +768,13 @@ impl ReluneConfig {
         args: &crate::cli::DiffArgs,
     ) -> Result<MergedDiffConfig, ConfigError> {
         let viewpoint = self.resolve_viewpoint(self.diff.viewpoint.as_deref())?;
+        // Visual diffs rank risk with the same rule settings as `review`.
+        let review_rules = ReviewRuleSettings {
+            rules: self.review.rules.clone(),
+            except_rules: self.review.except_rules.clone(),
+            except_tables: self.review.except_tables.clone(),
+            severity_overrides: resolve_severity_overrides(&self.review.severity_overrides)?,
+        };
 
         Ok(MergedDiffConfig {
             format: args.format.or(self.diff.format).unwrap_or_default(),
@@ -801,6 +809,7 @@ impl ReluneConfig {
             fail_on_warning: args.fail_on_warning || self.diff.fail_on_warning.unwrap_or(false),
             allow_invalid_schema: args.allow_invalid_schema
                 || self.diff.allow_invalid_schema.unwrap_or(false),
+            review_rules,
         })
     }
 
@@ -1062,6 +1071,8 @@ pub struct MergedDiffConfig {
     pub show_stats: bool,
     pub fail_on_warning: bool,
     pub allow_invalid_schema: bool,
+    /// `[review]` rule settings that rank the risk labels of visual diffs.
+    pub review_rules: ReviewRuleSettings,
 }
 
 impl MergedDiffConfig {
@@ -1931,6 +1942,48 @@ mod tests {
             merged.include,
             vec!["invoices".to_string(), "payments".to_string()]
         );
+    }
+
+    #[test]
+    fn test_merge_diff_args_carries_review_rule_settings() {
+        let config: ReluneConfig = toml::from_str(
+            r#"
+            [review]
+            except_rules = ["risk/drop-table"]
+            except_tables = ["audit_*"]
+
+            [review.severity_overrides."risk/add-not-null-on-existing"]
+            severity = "info"
+        "#,
+        )
+        .expect("toml should parse");
+        let args = DiffArgs {
+            before: None,
+            before_sql_text: None,
+            before_schema_json: None,
+            after: None,
+            after_sql_text: None,
+            after_schema_json: None,
+            dialect: None,
+            format: None,
+            out: None,
+            stdout: false,
+            fail_on_warning: false,
+            exit_code: false,
+            allow_invalid_schema: false,
+        };
+
+        let merged = config.merge_diff_args(&args).expect("merge should succeed");
+        let review = merged.review_rules;
+        assert!(review.rules.is_empty());
+        assert_eq!(review.except_rules, ["risk/drop-table"]);
+        assert_eq!(review.except_tables, ["audit_*"]);
+        assert_eq!(review.severity_overrides.len(), 1);
+        assert_eq!(
+            review.severity_overrides[0].rule_id,
+            ReviewRuleId::AddNotNullOnExisting
+        );
+        assert_eq!(review.severity_overrides[0].severity, ReviewSeverity::Info);
     }
 
     fn default_render_args() -> RenderArgs {

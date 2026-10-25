@@ -43,20 +43,27 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
 
     let schema_diff = diff_schemas(&before_schema, &after_schema);
 
-    let applied_rules = resolve_active_rules(&request.rules, &request.except_rules)?;
-    let override_map = build_override_map(&request.severity_overrides)?;
     let (effective, promotion_diagnostic) =
         resolve_effective_dialect(request.dialect, before_dialect, after_dialect);
     if let Some(diagnostic) = promotion_diagnostic {
         diagnostics.push(diagnostic);
     }
-    let mut raw_findings = relune_core::run_rules(
+    let RuleEvaluation {
+        findings,
+        suppressed,
+        applied_rules,
+    } = evaluate_rules(
+        RuleSelection {
+            rules: &request.rules,
+            except_rules: &request.except_rules,
+            except_tables: &request.except_tables,
+            severity_overrides: &request.severity_overrides,
+        },
         &schema_diff,
         &before_schema,
         &after_schema,
-        &applied_rules,
         effective,
-    );
+    )?;
 
     // Surface a single info-level diagnostic when the caller explicitly
     // opted in to a lock-risk rule that the resolved dialect cannot
@@ -67,10 +74,6 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
     {
         diagnostics.push(diagnostic);
     }
-
-    apply_severity_overrides(&mut raw_findings, &override_map);
-
-    let (findings, suppressed) = partition_suppressed(raw_findings, &request.except_tables);
 
     let core_result = CoreReviewResult::from_parts(findings, suppressed, applied_rules);
     let denied = request
@@ -84,6 +87,47 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         requested_dialect: request.dialect,
         effective_dialect: effective.into(),
         inputs,
+    })
+}
+
+/// Rule settings shared by `review` and the risk labels of visual diffs.
+#[derive(Clone, Copy)]
+pub(crate) struct RuleSelection<'a> {
+    pub(crate) rules: &'a [String],
+    pub(crate) except_rules: &'a [String],
+    pub(crate) except_tables: &'a [String],
+    pub(crate) severity_overrides: &'a [ReviewSeverityOverride],
+}
+
+/// Findings of the selected rules, after severity overrides.
+pub(crate) struct RuleEvaluation {
+    /// Findings on tables no `except_tables` pattern matches.
+    pub(crate) findings: Vec<RiskFinding>,
+    /// Findings on tables an `except_tables` pattern suppresses.
+    pub(crate) suppressed: Vec<RiskFinding>,
+    /// Rules that ran.
+    pub(crate) applied_rules: Vec<ReviewRuleId>,
+}
+
+/// Runs the selected rules on a schema diff and applies severity overrides
+/// and table suppression, the same way for `review` and visual diffs.
+pub(crate) fn evaluate_rules(
+    selection: RuleSelection<'_>,
+    schema_diff: &relune_core::SchemaDiff,
+    before: &Schema,
+    after: &Schema,
+    dialect: EffectiveDialect,
+) -> Result<RuleEvaluation, AppError> {
+    let applied_rules = resolve_active_rules(selection.rules, selection.except_rules)?;
+    let override_map = build_override_map(selection.severity_overrides)?;
+    let mut raw_findings =
+        relune_core::run_rules(schema_diff, before, after, &applied_rules, dialect);
+    apply_severity_overrides(&mut raw_findings, &override_map);
+    let (findings, suppressed) = partition_suppressed(raw_findings, selection.except_tables);
+    Ok(RuleEvaluation {
+        findings,
+        suppressed,
+        applied_rules,
     })
 }
 

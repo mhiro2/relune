@@ -15,6 +15,7 @@ use relune_app::{
 };
 
 /// Run the diff command.
+#[allow(clippy::too_many_lines)] // Maps every merged diff setting onto the request in one place.
 pub fn run_diff(
     args: &DiffArgs,
     color: ColorWhen,
@@ -84,6 +85,7 @@ pub fn run_diff(
         focus,
         grouping,
         layout,
+        review: merged.review_rules,
         allow_invalid_schema: merged.allow_invalid_schema,
     };
 

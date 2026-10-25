@@ -6,14 +6,22 @@
 
 use std::path::PathBuf;
 
-use relune_app::{DiffFormat, DiffRequest, InputSource, diff};
-use relune_core::{CardDensity, LayoutSpec};
+use relune_app::{DiffFormat, DiffRequest, InputSource, ReviewRuleSettings, diff};
+use relune_core::{CardDensity, LayoutSpec, ReviewRuleId, ReviewSeverity, ReviewSeverityOverride};
 
 fn render(format: DiffFormat) -> String {
-    render_at(format, None)
+    render_with(format, None, ReviewRuleSettings::default())
 }
 
 fn render_at(format: DiffFormat, density: Option<CardDensity>) -> String {
+    render_with(format, density, ReviewRuleSettings::default())
+}
+
+fn render_with(
+    format: DiffFormat,
+    density: Option<CardDensity>,
+    review: ReviewRuleSettings,
+) -> String {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/diff/change-risk");
     let request = DiffRequest {
         before: InputSource::sql_file(fixture.join("before.sql")),
@@ -23,6 +31,7 @@ fn render_at(format: DiffFormat, density: Option<CardDensity>) -> String {
             density,
             ..LayoutSpec::default()
         },
+        review,
         ..Default::default()
     };
     diff(request)
@@ -97,6 +106,32 @@ fn rows_show_change_kind_and_type_changes() {
         );
         assert!(svg.contains(&change), "missing {before} → {after}");
     }
+}
+
+#[test]
+fn review_settings_shape_the_risk_labels() {
+    let svg = render_with(
+        DiffFormat::Svg,
+        None,
+        ReviewRuleSettings {
+            except_tables: vec!["audit_*".to_string()],
+            severity_overrides: vec![ReviewSeverityOverride {
+                rule_id: ReviewRuleId::DropColumn,
+                severity: ReviewSeverity::Info,
+            }],
+            ..ReviewRuleSettings::default()
+        },
+    );
+
+    // The dropped table is still marked removed, but its finding is suppressed.
+    let audit_log = card_tag(&svg, "audit_log");
+    assert!(audit_log.contains("diff-removed"), "{audit_log}");
+    assert!(!audit_log.contains("risk-"), "{audit_log}");
+    // Dropping legacy_code is downgraded, so customers keeps only the
+    // narrowed note as breaking, and it is the only breaking card left.
+    assert!(card_tag(&svg, "customers").contains("risk-breaking"));
+    assert_eq!(svg.matches(">breaking 1</text>").count(), 1);
+    assert!(!svg.contains(">breaking 2</text>"));
 }
 
 #[test]

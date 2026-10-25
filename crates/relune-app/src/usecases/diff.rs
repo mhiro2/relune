@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use relune_core::diff::{EnumDiff, TableDiff, ViewDiff};
 use relune_core::{
-    ChangeKind, Diagnostic, Enum as SchemaEnum, ReviewRuleId, RiskFinding, Schema, SqlDialect,
-    Table, View, diff_schemas,
+    ChangeKind, Diagnostic, Enum as SchemaEnum, RiskFinding, Schema, SqlDialect, Table, View,
+    diff_schemas,
 };
 use relune_layout::metrics::TYPE_CHANGE_SEPARATOR;
 use relune_layout::{Annotation, ColumnChange, DiagramOverlay, NodeChange};
@@ -16,7 +16,9 @@ use crate::markdown;
 use crate::request::DiffRequest;
 use crate::result::DiffResult;
 use crate::schema_input::{SchemaValidation, align_input_schemas, schema_from_input_checked};
-use crate::usecases::review::resolve_effective_dialect;
+use crate::usecases::review::{
+    RuleEvaluation, RuleSelection, evaluate_rules, resolve_effective_dialect,
+};
 
 /// Execute a diff request.
 #[allow(clippy::needless_pass_by_value)]
@@ -44,21 +46,29 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
     let schema_diff = diff_schemas(&before_schema, &after_schema);
 
     // Step 3: Render visual output if requested, ranking each change's risk
-    // with the review rules for the dialect both inputs resolved to.
+    // with the configured review rules for the dialect both inputs resolved
+    // to, exactly as `review` would.
     let rendered = match request.format {
         DiffFormat::Svg | DiffFormat::Html => {
-            let (dialect, _) = resolve_effective_dialect(
+            let (dialect, mismatch) = resolve_effective_dialect(
                 SqlDialect::Auto,
                 before_context.resolved_dialect,
                 after_context.resolved_dialect,
             );
-            let findings = relune_core::run_rules(
+            diagnostics.extend(mismatch);
+            let settings = &request.review;
+            let RuleEvaluation { findings, .. } = evaluate_rules(
+                RuleSelection {
+                    rules: &settings.rules,
+                    except_rules: &settings.except_rules,
+                    except_tables: &settings.except_tables,
+                    severity_overrides: &settings.severity_overrides,
+                },
                 &schema_diff,
                 &before_schema,
                 &after_schema,
-                ReviewRuleId::all_rules(),
                 dialect,
-            );
+            )?;
             let (content, notice) = render_diff_visual(
                 &before_schema,
                 &after_schema,
@@ -1656,7 +1666,7 @@ mod tests {
             &diff,
             &before_schema,
             &after_schema,
-            ReviewRuleId::all_rules(),
+            relune_core::ReviewRuleId::all_rules(),
             relune_core::EffectiveDialect::Auto,
         );
 
