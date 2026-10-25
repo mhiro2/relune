@@ -11,12 +11,15 @@ use crate::route::AttachmentSide;
 
 /// Base gap between parallel self-loop edges.
 const SELF_LOOP_SLOT_GAP: f32 = 18.0;
-/// Base gap between ports that share the same node side.
-const BASE_SLOT_GAP: f32 = 14.0;
-/// Minimum slot gap used when many edges share a side.
-const MIN_SLOT_GAP: f32 = 10.0;
+/// Base gap between ports that share the same node side. A Crow's Foot
+/// spreads 7px to each side of its line, so neighbours need clear room
+/// between their markers.
+const BASE_SLOT_GAP: f32 = 24.0;
+/// Minimum slot gap used when many edges share a side; markers stay apart
+/// unless the side itself is too short.
+pub(crate) const MIN_SLOT_GAP: f32 = 20.0;
 /// Maximum slot gap.
-const MAX_SLOT_GAP: f32 = 20.0;
+const MAX_SLOT_GAP: f32 = 28.0;
 /// Additional distance treated as a near-neighbor case on the primary flow axis.
 const NEAR_NODE_PADDING: f32 = 24.0;
 /// Distance kept between the outermost port and the corner of its node side.

@@ -39,9 +39,9 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
     "tight_clearance": {
       "count_under_24px": 0,
       "worst_examples": [
-        "sales.order_items[product_id] -> inventory.products[id] (56.2px)",
-        "sales.order_items[order_id] -> sales.orders[id] (88.5px)",
-        "sales.orders[customer_id] -> public.users[id] (139.9px)"
+        "sales.order_items[product_id] -> inventory.products[id] (51.2px)",
+        "sales.order_items[order_id] -> sales.orders[id] (92.8px)",
+        "sales.orders[customer_id] -> public.users[id] (145.0px)"
       ]
     }
   },

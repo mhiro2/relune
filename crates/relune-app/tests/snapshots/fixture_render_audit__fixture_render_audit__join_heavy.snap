@@ -12,11 +12,11 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   },
   "patterns": {
     "long_detours": {
-      "count_over_1_8x": 1,
+      "count_over_1_8x": 0,
       "worst_examples": [
-        "attachments[tenant_id] -> tenants[id] (1.81x)",
-        "task_watchers[user_id] -> users[id] (1.75x)",
-        "tasks[assignee_id] -> users[id] (1.56x)"
+        "task_watchers[user_id] -> users[id] (1.80x)",
+        "attachments[tenant_id] -> tenants[id] (1.79x)",
+        "tasks[assignee_id] -> users[id] (1.57x)"
       ]
     },
     "parallel_groups": {
@@ -43,7 +43,7 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
       ]
     },
     "tight_clearance": {
-      "count_under_24px": 5,
+      "count_under_24px": 4,
       "worst_examples": [
         "role_permissions[permission_id] -> permissions[id] (15.0px)",
         "task_watchers[user_id] -> users[id] (16.1px)",
@@ -53,13 +53,13 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
   },
   "surfaces": {
     "html": {
-      "bytes": 607308,
+      "bytes": 607305,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 201517,
+      "bytes": 201514,
       "edge_groups": 160,
       "node_groups": 23
     }

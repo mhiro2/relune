@@ -14,7 +14,7 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
     "long_detours": {
       "count_over_1_8x": 0,
       "worst_examples": [
-        "order_items[product_id] -> products[id] (1.36x)",
+        "order_items[product_id] -> products[id] (1.37x)",
         "addresses[customer_id] -> customers[id] (1.00x)",
         "order_items[order_id] -> orders[id] (1.00x)"
       ]

@@ -11,7 +11,7 @@ expression: snapshot
         {
           "control_points": [
             [
-              247.79100036621094,
+              252.79100036621094,
               542.0
             ],
             [
@@ -30,15 +30,15 @@ expression: snapshot
           "is_self_loop": false,
           "label": "post_id",
           "label_x": 240.89999389648438,
-          "label_y": 536.5380249023438,
+          "label_y": 538.6209716796875,
           "nullable": false,
           "route_label_position": [
-            244.34500122070313,
+            246.84500122070313,
             542.0
           ],
           "source_side": "north",
           "start": [
-            247.79100036621094,
+            252.79100036621094,
             592.0
           ],
           "style": "Curved",
@@ -52,7 +52,7 @@ expression: snapshot
         {
           "control_points": [
             [
-              233.79100036621094,
+              228.79100036621094,
               560.0
             ],
             [
@@ -64,12 +64,12 @@ expression: snapshot
               222.0
             ],
             [
-              233.84500122070313,
+              228.84500122070313,
               222.0
             ]
           ],
           "end": [
-            233.84500122070313,
+            228.84500122070313,
             190.0
           ],
           "from": "comments",
@@ -79,7 +79,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "user_id",
           "label_x": 35.400001525878906,
-          "label_y": 524.1119995117188,
+          "label_y": 522.4450073242188,
           "nullable": false,
           "route_label_position": [
             35.400001525878906,
@@ -87,7 +87,7 @@ expression: snapshot
           ],
           "source_side": "north",
           "start": [
-            233.79100036621094,
+            228.79100036621094,
             592.0
           ],
           "style": "Curved",
@@ -105,12 +105,12 @@ expression: snapshot
               240.0
             ],
             [
-              247.84500122070313,
+              252.84500122070313,
               240.0
             ]
           ],
           "end": [
-            247.84500122070313,
+            252.84500122070313,
             190.0
           ],
           "from": "posts",
@@ -119,11 +119,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 240.89999389648438,
-          "label_y": 245.43899536132813,
+          "label_x": 271.07598876953125,
+          "label_y": 242.8470001220703,
           "nullable": false,
           "route_label_position": [
-            244.3730010986328,
+            246.8730010986328,
             240.0
           ],
           "source_side": "north",
@@ -187,7 +187,7 @@ expression: snapshot
         {
           "control_points": [
             [
-              247.79100036621094,
+              252.79100036621094,
               542.0
             ],
             [
@@ -206,15 +206,15 @@ expression: snapshot
           "is_self_loop": false,
           "label": "post_id",
           "label_x": 240.89999389648438,
-          "label_y": 536.5380249023438,
+          "label_y": 538.6209716796875,
           "nullable": false,
           "route_label_position": [
-            244.34500122070313,
+            246.84500122070313,
             542.0
           ],
           "source_side": "north",
           "start": [
-            247.79100036621094,
+            252.79100036621094,
             592.0
           ],
           "style": "Orthogonal",
@@ -228,7 +228,7 @@ expression: snapshot
         {
           "control_points": [
             [
-              233.79100036621094,
+              228.79100036621094,
               560.0
             ],
             [
@@ -240,12 +240,12 @@ expression: snapshot
               222.0
             ],
             [
-              233.84500122070313,
+              228.84500122070313,
               222.0
             ]
           ],
           "end": [
-            233.84500122070313,
+            228.84500122070313,
             190.0
           ],
           "from": "comments",
@@ -255,7 +255,7 @@ expression: snapshot
           "is_self_loop": false,
           "label": "user_id",
           "label_x": 35.400001525878906,
-          "label_y": 524.1119995117188,
+          "label_y": 522.4450073242188,
           "nullable": false,
           "route_label_position": [
             35.400001525878906,
@@ -263,7 +263,7 @@ expression: snapshot
           ],
           "source_side": "north",
           "start": [
-            233.79100036621094,
+            228.79100036621094,
             592.0
           ],
           "style": "Orthogonal",
@@ -281,12 +281,12 @@ expression: snapshot
               240.0
             ],
             [
-              247.84500122070313,
+              252.84500122070313,
               240.0
             ]
           ],
           "end": [
-            247.84500122070313,
+            252.84500122070313,
             190.0
           ],
           "from": "posts",
@@ -295,11 +295,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 240.89999389648438,
-          "label_y": 245.43899536132813,
+          "label_x": 271.07598876953125,
+          "label_y": 242.8470001220703,
           "nullable": false,
           "route_label_position": [
-            244.3730010986328,
+            246.8730010986328,
             240.0
           ],
           "source_side": "north",
@@ -372,16 +372,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "post_id",
-          "label_x": 277.4339904785156,
-          "label_y": 547.8590087890625,
+          "label_x": 279.1929931640625,
+          "label_y": 537.7490234375,
           "nullable": false,
           "route_label_position": [
-            240.94500732421875,
+            243.44500732421875,
             542.0
           ],
           "source_side": "north",
           "start": [
-            244.39100646972656,
+            249.39100646972656,
             592.0
           ],
           "style": "Straight",
@@ -395,7 +395,7 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            230.44500732421875,
+            225.44500732421875,
             190.0
           ],
           "from": "comments",
@@ -404,16 +404,16 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 182.39999389648438,
+          "label_x": 177.39999389648438,
           "label_y": 524.9940185546875,
           "nullable": false,
           "route_label_position": [
-            230.41799926757813,
+            225.41799926757813,
             391.0
           ],
           "source_side": "north",
           "start": [
-            230.39100646972656,
+            225.39100646972656,
             592.0
           ],
           "style": "Straight",
@@ -427,7 +427,7 @@ expression: snapshot
         {
           "control_points": [],
           "end": [
-            244.44500732421875,
+            249.44500732421875,
             190.0
           ],
           "from": "posts",
@@ -436,11 +436,11 @@ expression: snapshot
           ],
           "is_self_loop": false,
           "label": "user_id",
-          "label_x": 288.27899169921875,
-          "label_y": 251.65899658203125,
+          "label_x": 290.13800048828125,
+          "label_y": 254.02699279785156,
           "nullable": false,
           "route_label_position": [
-            240.97300720214844,
+            243.47300720214844,
             240.0
           ],
           "source_side": "north",

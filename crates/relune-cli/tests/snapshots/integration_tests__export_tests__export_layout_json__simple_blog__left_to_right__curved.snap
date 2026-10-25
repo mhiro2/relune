@@ -8,7 +8,7 @@ expression: compact_layout_snapshot(&graph)
       "control_points": [
         [
           1180.0,
-          166.74200439453125
+          171.74200439453125
         ],
         [
           1180.0,
@@ -26,16 +26,16 @@ expression: compact_layout_snapshot(&graph)
       "is_self_loop": false,
       "label": "post_id",
       "label_x": 1180.0,
-      "label_y": 135.87100219726563,
+      "label_y": 138.37100219726563,
       "nullable": false,
       "route_label_position": [
         1180.0,
-        135.87100219726563
+        138.37100219726563
       ],
       "source_side": "west",
       "start": [
         1322.0,
-        166.74200439453125
+        171.74200439453125
       ],
       "style": "Curved",
       "target_cardinality": "One",
@@ -49,7 +49,7 @@ expression: compact_layout_snapshot(&graph)
       "control_points": [
         [
           1290.0,
-          152.74200439453125
+          147.74200439453125
         ],
         [
           1290.0,
@@ -61,12 +61,12 @@ expression: compact_layout_snapshot(&graph)
         ],
         [
           419.0,
-          130.87100219726563
+          125.87100219726563
         ]
       ],
       "end": [
         387.0,
-        130.87100219726563
+        125.87100219726563
       ],
       "from": "comments",
       "from_columns": [
@@ -84,7 +84,7 @@ expression: compact_layout_snapshot(&graph)
       "source_side": "west",
       "start": [
         1322.0,
-        152.74200439453125
+        147.74200439453125
       ],
       "style": "Curved",
       "target_cardinality": "One",
@@ -102,12 +102,12 @@ expression: compact_layout_snapshot(&graph)
         ],
         [
           529.0,
-          144.87100219726563
+          149.87100219726563
         ]
       ],
       "end": [
         387.0,
-        144.87100219726563
+        149.87100219726563
       ],
       "from": "posts",
       "from_columns": [
@@ -116,11 +116,11 @@ expression: compact_layout_snapshot(&graph)
       "is_self_loop": false,
       "label": "user_id",
       "label_x": 529.0,
-      "label_y": 135.93600463867188,
+      "label_y": 138.43600463867188,
       "nullable": false,
       "route_label_position": [
         529.0,
-        135.93600463867188
+        138.43600463867188
       ],
       "source_side": "west",
       "start": [

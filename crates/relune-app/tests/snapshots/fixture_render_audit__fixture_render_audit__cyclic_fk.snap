@@ -14,8 +14,8 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
     "long_detours": {
       "count_over_1_8x": 2,
       "worst_examples": [
-        "users[default_team_id] -> teams[id] (1.92x)",
-        "cycle_a[cycle_c_id] -> cycle_c[id] (1.87x)",
+        "users[default_team_id] -> teams[id] (1.88x)",
+        "cycle_a[cycle_c_id] -> cycle_c[id] (1.83x)",
         "cycle_b[cycle_a_id] -> cycle_a[id] (1.00x)"
       ]
     },
