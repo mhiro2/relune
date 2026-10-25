@@ -343,8 +343,12 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       drawerEls.drawer.focus();
     };
 
+    // A fixed table or relationship selection owns the highlight, so hover
+    // previews would only repaint the same classes.
+    const hasSelection = (): boolean => state.selectedNode !== null || state.selectedEdge !== null;
+
     const clearHoverPreview = (): void => {
-      if (state.selectedNode !== null || state.hoveredNode === null) {
+      if (hasSelection() || state.hoveredNode === null) {
         return;
       }
       state.hoveredNode = null;
@@ -357,13 +361,13 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     // rebuilding the object browser.
     nodesById.forEach((node, nodeId) => {
       node.addEventListener('mouseenter', () => {
-        if (state.selectedNode !== null) return;
+        if (hasSelection()) return;
         state.hoveredNode = nodeId;
         renderHighlight();
       });
 
       node.addEventListener('mouseleave', () => {
-        if (state.selectedNode === null && state.hoveredNode === nodeId) {
+        if (!hasSelection() && state.hoveredNode === nodeId) {
           state.hoveredNode = null;
           renderHighlight();
         }

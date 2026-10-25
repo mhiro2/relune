@@ -923,8 +923,9 @@
         navigateToTable(tableId);
         drawerEls.drawer.focus();
       };
+      const hasSelection = () => state.selectedNode !== null || state.selectedEdge !== null;
       const clearHoverPreview = () => {
-        if (state.selectedNode !== null || state.hoveredNode === null) {
+        if (hasSelection() || state.hoveredNode === null) {
           return;
         }
         state.hoveredNode = null;
@@ -932,12 +933,12 @@
       };
       nodesById.forEach((node, nodeId) => {
         node.addEventListener("mouseenter", () => {
-          if (state.selectedNode !== null) return;
+          if (hasSelection()) return;
           state.hoveredNode = nodeId;
           renderHighlight();
         });
         node.addEventListener("mouseleave", () => {
-          if (state.selectedNode === null && state.hoveredNode === nodeId) {
+          if (!hasSelection() && state.hoveredNode === nodeId) {
             state.hoveredNode = null;
             renderHighlight();
           }
