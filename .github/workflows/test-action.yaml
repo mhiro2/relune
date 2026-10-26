@@ -44,21 +44,36 @@ jobs:
             echo "::error::Expected has-changes=false for identical schemas"
             exit 1
           fi
+          if [[ "${{ steps.diff-no-changes.outputs.output-path }}" != "relune-diff.md" ]]; then
+            echo "::error::Expected the markdown default output path relune-diff.md"
+            exit 1
+          fi
+          if ! grep -qx "No schema changes detected." relune-diff.md; then
+            echo "::error::Expected the diff report to state that nothing changed"
+            exit 1
+          fi
       - name: Test action (with changes)
         id: diff-with-changes
         uses: ./action
         with:
           before: fixtures/sql/simple_blog.sql
           after: fixtures/sql/ecommerce.sql
+          output-path: ${{ runner.temp }}/diff-with-changes.md
           binary-path: target/release/relune
       - name: Verify changes detected
+        env:
+          REPORT: ${{ steps.diff-with-changes.outputs.output-path }}
         run: |
           if [[ "${{ steps.diff-with-changes.outputs.has-changes }}" != "true" ]]; then
             echo "::error::Expected has-changes=true for different schemas"
             exit 1
           fi
-          if [[ ! -f "${{ steps.diff-with-changes.outputs.output-path }}" ]]; then
-            echo "::error::Output file not found"
+          if [[ "${REPORT}" != "${RUNNER_TEMP}/diff-with-changes.md" ]]; then
+            echo "::error::Expected output-path to echo the requested path, got '${REPORT}'"
+            exit 1
+          fi
+          if ! grep -q "7 added, 3 removed" "${REPORT}" || ! grep -qw "order_items" "${REPORT}"; then
+            echo "::error::Diff report does not describe the simple_blog -> ecommerce change"
             exit 1
           fi
 
@@ -84,8 +99,12 @@ jobs:
             echo "::error::Expected has-blocking-findings=false for identical schemas"
             exit 1
           fi
-          if [[ ! -s "${{ steps.review-no-findings.outputs.output-path }}" ]]; then
-            echo "::error::Review output file is empty"
+          if [[ "${{ steps.review-no-findings.outputs.output-path }}" != "relune-review.md" ]]; then
+            echo "::error::Expected the markdown default output path relune-review.md"
+            exit 1
+          fi
+          if ! grep -q "0 breaking" relune-review.md; then
+            echo "::error::Expected the review report to show zero findings"
             exit 1
           fi
 
@@ -113,28 +132,43 @@ jobs:
             exit 1
           fi
 
+      # Auto-detection resolves this SQL to PostgreSQL, where dropping a
+      # column does not rebuild the table, so the caution only appears when
+      # the dialect input reaches the CLI.
       - name: Test action (review, lock-risk caution with dialect)
         id: review-lock-risk
         uses: ./action
         with:
           mode: review
-          before: fixtures/review/lock-risk/add-index-on-large-table-postgres/before.sql
-          after: fixtures/review/lock-risk/add-index-on-large-table-postgres/after.sql
-          dialect: postgres
+          before: fixtures/review/lock-risk/rewrite-table-mysql-column-drop/before.sql
+          after: fixtures/review/lock-risk/rewrite-table-mysql-column-drop/after.sql
+          dialect: mysql
+          rules: risk/rewrite-table
           deny: breaking
+          output-path: ${{ runner.temp }}/review-lock-risk.md
           binary-path: target/release/relune
       - name: Verify review (lock-risk caution)
+        env:
+          REPORT: ${{ steps.review-lock-risk.outputs.output-path }}
         run: |
           if [[ "${{ steps.review-lock-risk.outputs.has-findings }}" != "true" ]]; then
-            echo "::error::Expected has-findings=true for lock-risk fixture under dialect: postgres"
+            echo "::error::Expected has-findings=true for lock-risk fixture under dialect: mysql"
             exit 1
           fi
           if [[ "${{ steps.review-lock-risk.outputs.has-blocking-findings }}" != "false" ]]; then
             echo "::error::Expected has-blocking-findings=false (caution is below breaking)"
             exit 1
           fi
-          if [[ "${{ steps.review-lock-risk.outputs.summary-caution }}" -lt 1 ]]; then
-            echo "::error::Expected summary-caution >= 1 when lock-risk rules are active"
+          if [[ "${{ steps.review-lock-risk.outputs.summary-caution }}" != "1" ]]; then
+            echo "::error::Expected exactly one caution from risk/rewrite-table under dialect: mysql"
+            exit 1
+          fi
+          if [[ "${{ steps.review-lock-risk.outputs.summary-breaking }}" != "0" ]]; then
+            echo "::error::Expected the rules filter to drop risk/drop-column"
+            exit 1
+          fi
+          if ! grep -q "risk/rewrite-table" "${REPORT}" || ! grep -q "table rebuild (mysql)" "${REPORT}"; then
+            echo "::error::Review report does not name the MySQL table rebuild"
             exit 1
           fi
 
@@ -147,8 +181,11 @@ jobs:
           after: fixtures/review/drop-column-referenced/after.sql
           deny: breaking
           fail-on-blocking: "false"
+          output-path: ${{ runner.temp }}/review-breaking.md
           binary-path: target/release/relune
       - name: Verify review (breaking, no fail)
+        env:
+          REPORT: ${{ steps.review-breaking.outputs.output-path }}
         run: |
           if [[ "${{ steps.review-breaking.outputs.has-findings }}" != "true" ]]; then
             echo "::error::Expected has-findings=true for breaking fixture"
@@ -162,8 +199,12 @@ jobs:
             echo "::error::Expected summary-breaking >= 1"
             exit 1
           fi
-          if [[ ! -s "${{ steps.review-breaking.outputs.output-path }}" ]]; then
-            echo "::error::Review output file is empty"
+          if [[ "${REPORT}" != "${RUNNER_TEMP}/review-breaking.md" ]]; then
+            echo "::error::Expected output-path to echo the requested path, got '${REPORT}'"
+            exit 1
+          fi
+          if ! grep -q "risk/drop-column-referenced" "${REPORT}"; then
+            echo "::error::Review report does not list risk/drop-column-referenced"
             exit 1
           fi
 
@@ -177,6 +218,7 @@ jobs:
           after: fixtures/review/drop-column-referenced/after.sql
           deny: breaking
           fail-on-blocking: "true"
+          output-path: ${{ runner.temp }}/review-breaking-fail.md
           binary-path: target/release/relune
       - name: Verify review (breaking, fail-on-blocking)
         run: |
@@ -202,5 +244,21 @@ jobs:
         run: |
           if [[ "${{ steps.review-invalid-mode.outcome }}" != "failure" ]]; then
             echo "::error::Expected step outcome=failure for unknown mode"
+            exit 1
+          fi
+      - name: Verify invalid mode diagnostic and exit code
+        env:
+          MODE: bogus
+        run: |
+          set +e
+          out=$(bash action/run.sh 2>&1)
+          rc=$?
+          set -e
+          if [[ ${rc} -ne 2 ]]; then
+            echo "::error::Expected exit code 2 for unknown mode, got ${rc}"
+            exit 1
+          fi
+          if [[ "${out}" != *"Invalid mode 'bogus'"* ]]; then
+            echo "::error::Expected the unknown mode diagnostic, got: ${out}"
             exit 1
           fi
