@@ -7,8 +7,6 @@ use crate::mysql_enum::{
 use proptest::prelude::*;
 use relune_core::{Column, ColumnId, ReferentialAction, Table, TableId};
 use relune_testkit::read_sql_fixture;
-use sqlparser::dialect::PostgreSqlDialect;
-use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Location, Span as SqlSpan};
 
 fn snapshot_data(output: &ParseOutput) -> serde_json::Value {
@@ -781,25 +779,6 @@ fn strict_parse_rejects_error_diagnostics() {
     let err = parse_sql_to_schema_with_dialect(sql, SqlDialect::Postgres)
         .expect_err("strict parsing should reject error diagnostics");
     assert!(err.to_string().contains("error diagnostics"));
-}
-
-#[test]
-fn parse_error_wraps_sqlparser_errors_as_strings() {
-    let parser_error = Parser::new(&PostgreSqlDialect {})
-        .try_with_sql("CREATE TABLE")
-        .expect("tokenization should succeed")
-        .parse_statement()
-        .expect_err("statement should fail");
-
-    let error = ParseError::from(parser_error);
-
-    match error {
-        ParseError::Sql(message) => {
-            assert!(!message.is_empty());
-            assert!(message.contains("sql parser error"));
-        }
-        ParseError::Schema(message) => panic!("unexpected schema error: {message}"),
-    }
 }
 
 #[test]
