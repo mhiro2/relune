@@ -255,16 +255,30 @@ mod shortest_segment_tests {
 
     #[test]
     fn shortest_backbone_segment_length_min_leg() {
+        // Legs of 50, 20, and 40: the shortest one sits in the middle, so
+        // neither the first, the last, nor the longest leg can pass for it.
+        // It runs diagonally (12 by 16), so it measures 20 only as a
+        // Euclidean length.
         let route = EdgeRoute {
             x1: 0.0,
             y1: 0.0,
-            x2: 100.0,
-            y2: 0.0,
-            control_points: vec![(50.0, 40.0)],
+            x2: 102.0,
+            y2: 16.0,
+            control_points: vec![(50.0, 0.0), (62.0, 16.0)],
             style: RouteStyle::Orthogonal,
             label_position: (0.0, 0.0),
         };
-        let leg = 50.0_f32.hypot(40.0);
-        assert!((shortest_backbone_segment_length(&route) - leg).abs() < 0.01);
+        assert!((shortest_backbone_segment_length(&route) - 20.0).abs() < 0.01);
+
+        // The same legs walked backwards give the same minimum.
+        let reversed = EdgeRoute {
+            x1: 102.0,
+            y1: 16.0,
+            x2: 0.0,
+            y2: 0.0,
+            control_points: vec![(62.0, 16.0), (50.0, 0.0)],
+            ..route
+        };
+        assert!((shortest_backbone_segment_length(&reversed) - 20.0).abs() < 0.01);
     }
 }

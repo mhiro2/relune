@@ -500,6 +500,28 @@ impl AttachmentSide {
 mod tests {
     use super::*;
 
+    #[allow(clippy::float_cmp)]
+    fn assert_same_route(actual: &EdgeRoute, expected: &EdgeRoute) {
+        assert_eq!(
+            (actual.x1, actual.y1, actual.x2, actual.y2),
+            (expected.x1, expected.y1, expected.x2, expected.y2)
+        );
+        assert_eq!(actual.control_points, expected.control_points);
+        assert_eq!(actual.style, expected.style);
+        assert_eq!(actual.label_position, expected.label_position);
+    }
+
+    /// Samples the segment and reports whether any point lies strictly inside
+    /// the rectangle, independently of the router's own intersection test.
+    fn segment_enters_rect(start: (f32, f32), end: (f32, f32), rect: &Rect) -> bool {
+        (0..=200u8).any(|step| {
+            let along = f32::from(step) / 200.0;
+            let x = (end.0 - start.0).mul_add(along, start.0);
+            let y = (end.1 - start.1).mul_add(along, start.1);
+            x > rect.x && x < rect.x + rect.w && y > rect.y && y < rect.y + rect.h
+        })
+    }
+
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_route_straight() {
@@ -795,7 +817,20 @@ mod tests {
         );
         assert!(west.label_position.0 < x);
         let center_x = x + w / 2.0;
-        assert!((east.label_position.0 - center_x) - (center_x - west.label_position.0) < 1e-3);
+        let mirrored = |east_point: (f32, f32), west_point: (f32, f32)| {
+            ((east_point.0 - center_x) + (west_point.0 - center_x)).abs() < 1e-3
+                && (east_point.1 - west_point.1).abs() < 1e-3
+        };
+        assert!(mirrored(east.label_position, west.label_position));
+        assert!(mirrored((east.x1, east.y1), (west.x1, west.y1)));
+        assert!(mirrored((east.x2, east.y2), (west.x2, west.y2)));
+        assert_eq!(east.control_points.len(), west.control_points.len());
+        for (east_point, west_point) in east.control_points.iter().zip(&west.control_points) {
+            assert!(
+                mirrored(*east_point, *west_point),
+                "{east_point:?} and {west_point:?} are not mirrored about x = {center_x}"
+            );
+        }
 
         // BottomToTop reflects vertically: the bulge stays east but the endpoints
         // swap top/bottom.
@@ -827,7 +862,7 @@ mod tests {
             RouteStyle::Straight,
         );
         let result = detour_around_obstacles(&route, &[]);
-        assert_eq!(result.control_points.len(), route.control_points.len());
+        assert_same_route(&result, &route);
     }
 
     #[test]
@@ -854,6 +889,15 @@ mod tests {
             "should add detour waypoints"
         );
         assert_eq!(result.style, RouteStyle::Straight);
+        assert_eq!((result.x1, result.y1), (route.x1, route.y1));
+        assert_eq!((result.x2, result.y2), (route.x2, route.y2));
+        let points = route_points(&result);
+        for segment in points.windows(2) {
+            assert!(
+                !segment_enters_rect(segment[0], segment[1], &obstacles[0]),
+                "detour segment {segment:?} still crosses the obstacle"
+            );
+        }
     }
 
     #[test]
@@ -1006,8 +1050,7 @@ mod tests {
             h: 50.0,
         }];
         let result = detour_around_obstacles(&route, &obstacles);
-        assert_eq!(result.style, RouteStyle::Curved);
-        assert_eq!(result.control_points.len(), route.control_points.len());
+        assert_same_route(&result, &route);
     }
 
     #[test]
@@ -1127,8 +1170,16 @@ mod tests {
             LABEL_HALF_W,
             96.0,
         );
-        // Should have moved away from the obstacle
-        assert!((result.0 - label.0).abs() > 0.001 || (result.1 - label.1).abs() > 0.001);
+        // The label box, margin included, no longer overlaps the obstacle.
+        let obstacle = &obstacles[0];
+        let overlaps = result.0 + LABEL_HALF_W + 4.0 > obstacle.x
+            && result.0 - LABEL_HALF_W - 4.0 < obstacle.x + obstacle.w
+            && result.1 + LABEL_HALF_H + 4.0 > obstacle.y
+            && result.1 - LABEL_HALF_H - 4.0 < obstacle.y + obstacle.h;
+        assert!(
+            !overlaps,
+            "nudged label {result:?} still overlaps the obstacle"
+        );
     }
 
     #[test]
