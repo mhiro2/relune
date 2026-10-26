@@ -40,15 +40,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn escapes_every_markup_character() {
-        assert_eq!(
-            escape_xml_text(r#"a & b < c > d "e" 'f'"#),
-            "a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#39;"
-        );
-        assert_eq!(escape_xml_text("&amp;"), "&amp;amp;");
-    }
-
-    #[test]
     fn escapes_text_content() {
         let input = "<script>alert('xss')</script>";
         assert_eq!(
@@ -79,5 +70,21 @@ mod tests {
             escape_xml_attribute(input),
             "&quot; onload=&quot;alert(&#39;xss&#39;)"
         );
+    }
+
+    #[test]
+    fn escapes_each_markup_character() {
+        for (input, expected) in [
+            ("a & b", "a &amp; b"),
+            ("a < b", "a &lt; b"),
+            ("a > b", "a &gt; b"),
+            (r#"a "b""#, "a &quot;b&quot;"),
+            ("a 'b'", "a &#39;b&#39;"),
+            // An existing entity is escaped again rather than passed through.
+            ("&lt;", "&amp;lt;"),
+        ] {
+            assert_eq!(escape_xml_text(input), expected, "{input}");
+            assert_eq!(escape_xml_attribute(input), expected, "{input}");
+        }
     }
 }

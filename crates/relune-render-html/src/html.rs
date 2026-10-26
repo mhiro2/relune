@@ -296,14 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_xml_text_for_html() {
-        assert_eq!(escape_xml_text("<script>"), "&lt;script&gt;");
-        assert_eq!(escape_xml_text("a & b"), "a &amp; b");
-        assert_eq!(escape_xml_text(r#""quoted""#), "&quot;quoted&quot;");
-        assert_eq!(escape_xml_text("'quoted'"), "&#39;quoted&#39;");
-    }
-
-    #[test]
     fn test_build_html_document_structure() {
         let svg = "<svg></svg>";
         let metadata = "{}";
