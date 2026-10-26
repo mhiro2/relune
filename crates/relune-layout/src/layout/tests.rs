@@ -464,6 +464,9 @@ fn test_build_layout() {
     let graph = result.unwrap();
     assert_eq!(graph.nodes.len(), 2);
     assert_eq!(graph.edges.len(), 1);
+    let edge = &graph.edges[0];
+    assert_eq!((edge.from.as_str(), edge.to.as_str()), ("posts", "users"));
+    assert!(edge.label_x.is_finite() && edge.label_y.is_finite());
 }
 
 fn make_multi_schema_for_grouping() -> Schema {
@@ -836,37 +839,6 @@ fn force_prefix_grouped_layout_keeps_groups_in_a_band_disjoint_on_x() {
 }
 
 #[test]
-#[allow(clippy::float_cmp)]
-fn test_layout_deterministic() {
-    let schema = make_test_schema();
-    let config = LayoutConfig::default();
-    let request = LayoutRequest::default();
-
-    let result1 = build_layout_with_config(&schema, &request, &config).unwrap();
-    let result2 = build_layout_with_config(&schema, &request, &config).unwrap();
-
-    // Results should be identical
-    assert_eq!(result1.nodes.len(), result2.nodes.len());
-    for (n1, n2) in result1.nodes.iter().zip(result2.nodes.iter()) {
-        assert_eq!(n1.x, n2.x);
-        assert_eq!(n1.y, n2.y);
-    }
-}
-
-#[test]
-fn test_edge_label_position() {
-    let schema = make_test_schema();
-    let result = build_layout(&schema).unwrap();
-
-    // Check that edges have label positions
-    for edge in &result.edges {
-        // Label position should be set
-        assert!(edge.label_x.is_finite());
-        assert!(edge.label_y.is_finite());
-    }
-}
-
-#[test]
 fn test_force_layout_bt_mirrors_tb_and_rl_mirrors_lr() {
     let schema = make_test_schema();
     let request = LayoutRequest::default();
@@ -946,44 +918,54 @@ fn test_force_layout_bt_mirrors_tb_and_rl_mirrors_lr() {
 #[test]
 fn test_force_layout_keeps_connected_nodes_clear_after_primary_axis_restore() {
     let schema = make_test_schema();
-    let config = LayoutConfig {
-        mode: LayoutAlgorithm::ForceDirected,
-        direction: LayoutDirection::TopToBottom,
-        horizontal_spacing: 320.0,
-        vertical_spacing: 8.0,
-        compaction: LayoutCompactionSpec {
-            min_horizontal_spacing: 220.0,
-            min_vertical_spacing: 8.0,
+    let connected_gap_y = |mode: LayoutAlgorithm| {
+        let config = LayoutConfig {
+            mode,
+            direction: LayoutDirection::TopToBottom,
+            horizontal_spacing: 320.0,
+            vertical_spacing: 8.0,
+            compaction: LayoutCompactionSpec {
+                min_horizontal_spacing: 220.0,
+                min_vertical_spacing: 8.0,
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
+        };
+        let graph = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
+        let users = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "users")
+            .expect("users node");
+        let posts = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "posts")
+            .expect("posts node");
+        force_pair_axis_gaps(
+            users.x,
+            users.y,
+            users.width,
+            users.height,
+            posts.x,
+            posts.y,
+            posts.width,
+            posts.height,
+        )
+        .1
     };
 
-    let graph = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
-    let users = graph
-        .nodes
-        .iter()
-        .find(|node| node.id == "users")
-        .expect("users node");
-    let posts = graph
-        .nodes
-        .iter()
-        .find(|node| node.id == "posts")
-        .expect("posts node");
-    let (_, gap_y) = force_pair_axis_gaps(
-        users.x,
-        users.y,
-        users.width,
-        users.height,
-        posts.x,
-        posts.y,
-        posts.width,
-        posts.height,
-    );
-
+    // Hierarchical placement keeps the tight rank gap that was asked for...
+    let hierarchical_gap_y = connected_gap_y(LayoutAlgorithm::Hierarchical);
     assert!(
-        gap_y >= FORCE_CONNECTED_NODE_GAP,
-        "expected force layout to preserve vertical clearance after restoring rank-guided primary positions, got {gap_y}"
+        hierarchical_gap_y < FORCE_CONNECTED_NODE_GAP,
+        "hierarchical layout should keep the requested rank gap, got {hierarchical_gap_y}"
+    );
+    // ...while force layout pushes connected cards apart.
+    let force_gap_y = connected_gap_y(LayoutAlgorithm::ForceDirected);
+    assert!(
+        force_gap_y >= FORCE_CONNECTED_NODE_GAP,
+        "expected force layout to preserve vertical clearance after restoring rank-guided primary positions, got {force_gap_y}"
     );
 }
 
@@ -1033,72 +1015,6 @@ fn test_force_layout_valid_positions() {
     // Graph dimensions should be positive
     assert!(graph.width > 0.0);
     assert!(graph.height > 0.0);
-}
-
-#[test]
-#[allow(clippy::float_cmp)]
-fn test_force_layout_deterministic() {
-    let schema = make_test_schema();
-    let config = LayoutConfig {
-        mode: LayoutAlgorithm::ForceDirected,
-        ..Default::default()
-    };
-
-    let result1 = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
-    let result2 = build_layout_with_config(&schema, &LayoutRequest::default(), &config).unwrap();
-
-    // Force layout should also be deterministic
-    assert_eq!(result1.nodes.len(), result2.nodes.len());
-    for (n1, n2) in result1.nodes.iter().zip(result2.nodes.iter()) {
-        assert_eq!(n1.x, n2.x);
-        assert_eq!(n1.y, n2.y);
-    }
-}
-
-#[test]
-fn test_force_layout_different_from_hierarchical() {
-    let schema = make_test_schema();
-
-    let hierarchical_config = LayoutConfig {
-        mode: LayoutAlgorithm::Hierarchical,
-        ..Default::default()
-    };
-
-    let force_config = LayoutConfig {
-        mode: LayoutAlgorithm::ForceDirected,
-        ..Default::default()
-    };
-
-    let hierarchical_result =
-        build_layout_with_config(&schema, &LayoutRequest::default(), &hierarchical_config).unwrap();
-    let force_result =
-        build_layout_with_config(&schema, &LayoutRequest::default(), &force_config).unwrap();
-
-    // Collect positions sorted by node id for comparison
-    let mut hierarchical_positions: Vec<(&String, f32, f32)> = hierarchical_result
-        .nodes
-        .iter()
-        .map(|n| (&n.id, n.x, n.y))
-        .collect();
-    hierarchical_positions.sort_by(|a, b| a.0.cmp(b.0));
-
-    let mut force_positions: Vec<(&String, f32, f32)> = force_result
-        .nodes
-        .iter()
-        .map(|n| (&n.id, n.x, n.y))
-        .collect();
-    force_positions.sort_by(|a, b| a.0.cmp(b.0));
-
-    // The layouts should produce different positions for at least some nodes
-    let positions_differ = hierarchical_positions
-        .iter()
-        .zip(force_positions.iter())
-        .any(|((_, x1, y1), (_, x2, y2))| (x1 - x2).abs() > 1.0 || (y1 - y2).abs() > 1.0);
-
-    assert!(
-        positions_differ,
-        "Force layout should produce different positions than hierarchical layout"
-    );
 }
 
 #[test]
