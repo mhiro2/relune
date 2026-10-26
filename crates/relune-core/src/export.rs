@@ -626,48 +626,120 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_export_roundtrip() {
-        let export = SchemaExport::new(vec![TableExport {
-            id: "users".to_string(),
-            schema: Some("public".to_string()),
-            name: "users".to_string(),
-            columns: vec![
-                ColumnExport {
-                    name: "id".to_string(),
-                    data_type: "bigint".to_string(),
-                    nullable: false,
-                    primary_key: true,
-                    comment: None,
-                    enum_values: None,
-                    semantics: crate::model::ColumnSemantics::default(),
-                },
-                ColumnExport {
-                    name: "email".to_string(),
-                    data_type: "varchar(255)".to_string(),
-                    nullable: false,
-                    primary_key: false,
-                    comment: None,
-                    enum_values: None,
-                    semantics: crate::model::ColumnSemantics::default(),
-                },
+    #[allow(clippy::too_many_lines)] // The literal JSON spells out the full wire format.
+    fn test_schema_export_json_wire_format() {
+        let mut users = make_table(
+            2,
+            "public.users",
+            Some("public"),
+            "users",
+            vec![
+                make_column(1, "id", "bigint", true),
+                make_column(2, "org_id", "bigint", false),
+                make_column(3, "email", "varchar(255)", false),
             ],
-            foreign_keys: vec![],
-            primary_key_name: None,
-            comment: None,
-            check_constraints: Vec::new(),
-            indexes: vec![IndexExport {
-                name: Some("idx_email".to_string()),
-                key_parts: vec![IndexKey::column("email".to_string())],
-                unique: true,
-                predicate: None,
-                included_columns: Vec::new(),
-                method: None,
+            vec![make_fk(
+                "users_org_fkey",
+                &["org_id"],
+                Some("public"),
+                "orgs",
+                &["id"],
+                ReferentialAction::Cascade,
+                ReferentialAction::NoAction,
+            )],
+        );
+        users.indexes = vec![crate::model::Index::from_columns(
+            Some("idx_email".to_string()),
+            vec!["email".to_string()],
+            true,
+        )];
+        let schema = Schema {
+            tables: vec![
+                make_table(
+                    1,
+                    "public.orgs",
+                    Some("public"),
+                    "orgs",
+                    vec![make_column(1, "id", "bigint", true)],
+                    vec![],
+                ),
+                users,
+            ],
+            views: vec![View {
+                id: "public.user_emails".to_string(),
+                schema_name: Some("public".to_string()),
+                name: "user_emails".to_string(),
+                columns: vec![make_column(1, "email", "varchar(255)", false)],
+                definition: Some("SELECT email FROM users".to_string()),
             }],
-        }]);
+            enums: vec![Enum {
+                id: "public.status".to_string(),
+                schema_name: Some("public".to_string()),
+                name: "status".to_string(),
+                values: vec!["active".to_string(), "inactive".to_string()],
+            }],
+        };
 
-        let json = serde_json::to_string(&export).unwrap();
-        let parsed: SchemaExport = serde_json::from_str(&json).unwrap();
-        assert_eq!(export, parsed);
+        let export = export_schema(&schema);
+        let column = |name: &str, data_type: &str, primary_key: bool| {
+            serde_json::json!({
+                "name": name,
+                "data_type": data_type,
+                "nullable": false,
+                "primary_key": primary_key
+            })
+        };
+        let expected = serde_json::json!({
+            "version": "2.0.0",
+            "tables": [
+                {
+                    "id": "public.orgs",
+                    "schema": "public",
+                    "name": "orgs",
+                    "columns": [column("id", "bigint", true)],
+                    "foreign_keys": []
+                },
+                {
+                    "id": "public.users",
+                    "schema": "public",
+                    "name": "users",
+                    "columns": [
+                        column("id", "bigint", true),
+                        column("org_id", "bigint", false),
+                        column("email", "varchar(255)", false)
+                    ],
+                    "foreign_keys": [{
+                        "name": "users_org_fkey",
+                        "from_columns": ["org_id"],
+                        "to_schema": "public",
+                        "to_table": "orgs",
+                        "to_columns": ["id"],
+                        "on_delete": "CASCADE"
+                    }],
+                    "indexes": [{
+                        "name": "idx_email",
+                        "key_parts": [{"column": {"name": "email"}}],
+                        "unique": true
+                    }]
+                }
+            ],
+            "views": [{
+                "id": "public.user_emails",
+                "schema": "public",
+                "name": "user_emails",
+                "columns": [column("email", "varchar(255)", false)],
+                "definition": "SELECT email FROM users"
+            }],
+            "enums": [{
+                "id": "public.status",
+                "schema": "public",
+                "name": "status",
+                "values": ["active", "inactive"]
+            }]
+        });
+        assert_eq!(serde_json::to_value(&export).unwrap(), expected);
+        let parsed: SchemaExport = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, export);
     }
 
     #[test]
