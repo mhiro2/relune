@@ -110,13 +110,32 @@ mod tests {
         );
     }
 
-    #[test]
-    fn handles_svg_with_text() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50">
-            <text x="10" y="30" font-size="20">Hello</text>
-        </svg>"#;
+    /// Counts pixels that are not fully transparent in a PNG.
+    fn painted_pixels(png_data: &[u8]) -> usize {
+        let pixmap = resvg::tiny_skia::Pixmap::decode_png(png_data).expect("decode PNG");
+        pixmap
+            .pixels()
+            .iter()
+            .filter(|pixel| pixel.alpha() > 0)
+            .count()
+    }
 
-        let png_data = svg_to_png(svg).expect("should handle SVG with text elements");
-        assert_eq!(&png_data[..8], b"\x89PNG\r\n\x1a\n");
+    #[test]
+    fn draws_svg_text_with_system_fonts() {
+        // Same font stack as the SVG renderer, so a missing font fallback or
+        // skipped text pass shows up as an empty image.
+        let text_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50">
+            <text x="10" y="30" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="20" fill="black">Hello</text>
+        </svg>"#;
+        let blank_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50"></svg>"#;
+
+        let with_text = svg_to_png(text_svg).expect("should handle SVG with text elements");
+        let blank = svg_to_png(blank_svg).expect("should handle an empty SVG");
+
+        assert_eq!(painted_pixels(&blank), 0);
+        assert!(
+            painted_pixels(&with_text) > 50,
+            "text should paint glyph pixels"
+        );
     }
 }

@@ -186,10 +186,15 @@ mod tests {
 
     #[test]
     fn rejects_png_stdout_even_with_explicit_stdout_flag() {
-        // PNG cannot use --stdout because it conflicts with --out in clap,
-        // but if somehow both are false, it should still reject on terminal.
-        let result = validate_stdout_usage(RenderFormat::Png, false, false, true);
-        assert!(result.is_err());
+        // --stdout opts markup formats into terminal output, but binary PNG
+        // data must stay off a terminal regardless.
+        let result = validate_stdout_usage(RenderFormat::Png, false, true, true);
+
+        let error = result.expect_err("explicit stdout must not allow PNG on a terminal");
+        assert!(
+            error.to_string().contains("binary PNG data"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

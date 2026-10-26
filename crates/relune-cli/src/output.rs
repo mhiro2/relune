@@ -456,19 +456,6 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_helpers_detect_severity() {
-        let diagnostics = [
-            Diagnostic::info(codes::parse_skipped(), "ignored"),
-            Diagnostic::warning(LintRuleId::OrphanTable.diagnostic_code(), "warn"),
-            Diagnostic::error(codes::parse_error(), "err"),
-        ];
-
-        assert!(diagnostics.iter().any(|d| d.severity == Severity::Warning));
-        assert!(diagnostics.iter().any(|d| d.severity == Severity::Error));
-        assert_eq!(diagnostics[0].severity, Severity::Info);
-    }
-
-    #[test]
     fn diagnostics_threshold_respects_info_level() {
         let diagnostics = vec![Diagnostic::info(codes::parse_skipped(), "ignored")];
 

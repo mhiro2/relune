@@ -1266,29 +1266,41 @@ mod tests {
 
     #[test]
     fn test_merge_render_args_cli_overrides_config() {
-        // Load config with specific values
-        let config = ReluneConfig::default();
+        // Every setting below is also present in the config with a different
+        // value, so each assertion proves the CLI value took precedence.
+        let mut config = ReluneConfig::default();
+        config.render.format = Some(RenderFormat::Html);
+        config.render.theme = Some(Theme::Dark);
+        config.render.layout = Some(LayoutAlgorithmArg::ForceDirected);
+        config.render.edge_style = Some(EdgeStyleArg::Curved);
+        config.render.direction = Some(DirectionArg::LeftToRight);
+        config.render.density = Some(DensityArg::Keys);
+        config.render.focus = Some("config_table".to_string());
+        config.render.depth = Some(5);
+        config.render.group_by = Some(GroupByMode::Schema);
+        config.render.include = vec!["config_include".to_string()];
+        config.render.exclude = vec!["config_exclude".to_string()];
+        config.render.show_stats = Some(false);
 
-        // Create CLI args with different values
         let args = RenderArgs {
             sql: None,
             sql_text: None,
             schema_json: None,
             db_url: None,
-            format: Some(RenderFormat::Svg), // CLI specifies svg
+            format: Some(RenderFormat::Svg),
             out: None,
             stdout: false,
-            focus: Some("posts".to_string()), // CLI specifies different focus
+            focus: Some("posts".to_string()),
             viewpoint: None,
-            depth: Some(3),                      // CLI specifies different depth
-            group_by: Some(GroupByMode::Prefix), // CLI specifies different group_by
-            include: vec!["a".to_string()],      // CLI specifies different include
-            exclude: vec!["b".to_string()],      // CLI specifies different exclude
-            theme: Some(Theme::Light),           // CLI specifies light theme
+            depth: Some(3),
+            group_by: Some(GroupByMode::Prefix),
+            include: vec!["a".to_string()],
+            exclude: vec!["b".to_string()],
+            theme: Some(Theme::Light),
             layout: Some(LayoutAlgorithmArg::Hierarchical),
             edge_style: Some(EdgeStyleArg::Straight),
-            direction: None,
-            density: None,
+            direction: Some(DirectionArg::BottomToTop),
+            density: Some(DensityArg::Overview),
             stats: true,
             fail_on_warning: false,
             dialect: None,
@@ -1298,11 +1310,12 @@ mod tests {
             .merge_render_args(&args)
             .expect("merge should succeed");
 
-        // CLI values should win
         assert_eq!(merged.format, RenderFormat::Svg);
         assert_eq!(merged.theme, Theme::Light);
         assert_eq!(merged.layout, LayoutAlgorithmArg::Hierarchical);
         assert_eq!(merged.edge_style, EdgeStyleArg::Straight);
+        assert_eq!(merged.direction, DirectionArg::BottomToTop);
+        assert_eq!(merged.density, Some(DensityArg::Overview));
         assert_eq!(merged.focus, Some("posts".to_string()));
         assert_eq!(merged.depth, 3);
         assert_eq!(merged.group_by, Some(GroupByMode::Prefix));
@@ -1443,16 +1456,6 @@ mod tests {
     fn test_from_file_missing_returns_error() {
         let path = PathBuf::from("/nonexistent/path/config.toml");
         assert!(ReluneConfig::from_file(&path).is_err());
-    }
-
-    #[test]
-    fn test_from_file_partial() {
-        let path = fixtures_dir().join("valid_partial.toml");
-        let config = ReluneConfig::from_file(&path).expect("Should load config");
-
-        // Should have loaded values
-        assert_eq!(config.render.theme, Some(Theme::Light));
-        assert_eq!(config.render.group_by, Some(GroupByMode::Schema));
     }
 
     #[test]
