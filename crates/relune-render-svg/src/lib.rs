@@ -1056,22 +1056,40 @@ mod tests {
     }
 
     #[test]
-    fn test_render_svg_contains_valid_svg_structure() {
+    fn test_render_svg_is_well_formed_xml() {
         let graph = single_node_graph();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        // Check for valid SVG root element with xmlns
-        assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
-        // Check for viewBox attribute
-        assert!(svg.contains("viewBox="));
-        // Check for width and height
-        assert!(svg.contains("width=\""));
-        assert!(svg.contains("height=\""));
-        // Check for defs with arrow marker
-        assert!(svg.contains("<defs>"));
-        assert!(svg.contains("</defs>"));
-        // Check for background rect
-        assert!(svg.contains("<rect width=\"100%\" height=\"100%\""));
+        let document = roxmltree::Document::parse(&svg).expect("SVG should be well-formed XML");
+        let root = document.root_element();
+        assert_eq!(root.tag_name().name(), "svg");
+        assert_eq!(
+            root.tag_name().namespace(),
+            Some("http://www.w3.org/2000/svg")
+        );
+        assert_eq!(root.attribute("width"), Some("432"));
+        assert_eq!(root.attribute("height"), Some("206"));
+        assert_eq!(root.attribute("viewBox"), Some("0 0 432 206"));
+
+        let children: Vec<_> = root
+            .children()
+            .filter(roxmltree::Node::is_element)
+            .collect();
+        assert_eq!(children[0].tag_name().name(), "defs");
+        assert_eq!(children[1].tag_name().name(), "rect");
+        assert_eq!(children[1].attribute("width"), Some("100%"));
+
+        let nodes: Vec<_> = root
+            .descendants()
+            .filter(|node| node.attribute("data-table-id").is_some())
+            .collect();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].attribute("data-table-id"), Some("users"));
+        assert!(
+            nodes[0]
+                .descendants()
+                .any(|node| node.text() == Some("users"))
+        );
     }
 
     #[test]
@@ -1259,9 +1277,9 @@ mod tests {
         svg.split(&format!(r#"class="{class}""#))
             .skip(1)
             .map(|rest| {
-                let start =
-                    rest.find(&format!(r#" {attr}=""#)).expect("attribute") + attr.len() + 3;
-                &rest[start..start + rest[start..].find('"').expect("closing quote")]
+                let tag = &rest[..rest.find('>').expect("end of tag")];
+                let start = tag.find(&format!(r#" {attr}=""#)).expect("attribute") + attr.len() + 3;
+                &tag[start..start + tag[start..].find('"').expect("closing quote")]
             })
             .collect()
     }
@@ -1693,50 +1711,6 @@ mod tests {
         }
     }
 
-    /// Helper function to create a test layout `PositionedGraph` without groups
-    fn layout_graph_without_groups() -> relune_layout::PositionedGraph {
-        relune_layout::PositionedGraph {
-            nodes: vec![PositionedNode {
-                omitted: None,
-                id: "users".to_string(),
-                label: "users".to_string(),
-                kind: NodeKind::Table,
-                columns: vec![column(
-                    "id",
-                    "uuid",
-                    false,
-                    relation_flags(true, false, false),
-                )],
-                x: 56.0,
-                y: 56.0,
-                width: 260.0,
-                height: 76.0,
-                is_join_table_candidate: false,
-                has_self_loop: false,
-                group_index: None,
-            }],
-            edges: vec![],
-            groups: vec![],
-            width: 432.0,
-            height: 188.0,
-            routing_debug: None,
-        }
-    }
-
-    #[test]
-    fn test_render_svg_basic() {
-        let graph = layout_graph_without_groups();
-        let svg = render_svg(&graph, SvgRenderOptions::default());
-
-        // Should contain valid SVG structure
-        assert!(svg.starts_with("<svg"));
-        assert!(svg.ends_with("</svg>"));
-        assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
-        // Should contain the node
-        assert!(svg.contains(">users<"));
-        assert!(svg.contains("data-table-id=\"users\""));
-    }
-
     #[test]
     fn test_render_svg_with_groups() {
         let graph = layout_graph_with_groups();
@@ -1816,34 +1790,29 @@ mod tests {
     }
 
     #[test]
-    fn test_render_svg_with_dark_theme_groups() {
+    fn test_render_svg_paints_group_surfaces_with_theme_colors() {
         let graph = layout_graph_with_groups();
-        let options = SvgRenderOptions {
-            theme: Theme::Dark,
-            ..Default::default()
-        };
-        let svg = render_svg(&graph, options);
+        for theme in [Theme::Dark, Theme::Light] {
+            let colors = get_colors(theme);
+            let svg = render_svg(
+                &graph,
+                SvgRenderOptions {
+                    theme,
+                    ..Default::default()
+                },
+            );
 
-        // Dark theme background
-        assert!(svg.contains("#0c0f1a"));
-        // Dark theme node fill
-        assert!(svg.contains(r##"fill="#161b26""##));
-    }
-
-    #[test]
-    fn test_render_svg_with_light_theme_groups() {
-        let graph = layout_graph_with_groups();
-        let options = SvgRenderOptions {
-            theme: Theme::Light,
-            ..Default::default()
-        };
-        let svg = render_svg(&graph, options);
-
-        // Light theme background
-        assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill and table kind mark
-        assert!(svg.contains(r##"fill="#ffffff""##));
-        assert!(svg.contains(r##"fill="#ea580c""##));
+            assert_eq!(
+                attribute_values(&svg, "group-box", "fill"),
+                [colors.group_fill],
+                "{theme:?}"
+            );
+            assert_eq!(
+                attribute_values(&svg, "group-label", "fill"),
+                [colors.text_secondary],
+                "{theme:?}"
+            );
+        }
     }
 
     #[test]
@@ -1851,11 +1820,11 @@ mod tests {
         let graph = layout_graph_with_groups();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        // Group surfaces and node cards both use small radii.
-        assert!(svg.contains(r#"class="group-box" x="#));
-        assert!(svg.contains("rx=\"10\""));
-        assert!(svg.contains(r#"class="table-body""#));
-        assert!(svg.contains("rx=\"6\" ry=\"6\""));
+        // Group surfaces and node cards each use their own small radius.
+        assert_eq!(attribute_values(&svg, "group-box", "rx"), ["10"]);
+        assert_eq!(attribute_values(&svg, "group-box", "ry"), ["10"]);
+        assert_eq!(attribute_values(&svg, "table-body", "rx"), ["6", "6"]);
+        assert_eq!(attribute_values(&svg, "table-body", "ry"), ["6", "6"]);
     }
 
     #[test]
@@ -2014,6 +1983,30 @@ mod tests {
         assert!(svg.contains("\u{2212}</text>"));
         assert!(svg.contains("edge-kind-foreign-key diff-removed"));
         assert!(svg.contains("removed relationship"));
+        // The removed line takes the change color, a heavier stroke, and a
+        // dash in place of the plain FK stroke.
+        let colors = get_colors(Theme::Dark);
+        let plain = render_svg(&graph, options);
+        assert_eq!(
+            attribute_values(&plain, "edge-path", "stroke"),
+            [colors.edge_stroke]
+        );
+        assert_eq!(
+            attribute_values(&svg, "edge-path", "stroke"),
+            [diff::change_color(
+                relune_core::ChangeKind::Removed,
+                &colors
+            )]
+        );
+        assert_ne!(
+            diff::change_color(relune_core::ChangeKind::Removed, &colors),
+            colors.edge_stroke
+        );
+        assert_eq!(attribute_values(&svg, "edge-path", "stroke-width"), ["2.0"]);
+        assert_eq!(
+            attribute_values(&svg, "edge-path", "stroke-dasharray"),
+            [diff::REMOVED_DASHARRAY]
+        );
         // Nothing risky was reported, so no risk label is drawn.
         assert!(!svg.contains("risk-label"));
     }
