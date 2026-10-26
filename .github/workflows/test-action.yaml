@@ -3,10 +3,15 @@ name: Test Action
 on:
   pull_request:
     paths:
+      - ".github/workflows/test-action.yaml"
       - "action/**"
       - "crates/relune-cli/**"
       - "crates/relune-app/**"
       - "crates/relune-core/**"
+      - "crates/relune-parser-sql/**"
+      - "fixtures/sql/**"
+      - "fixtures/review/**"
+      - "Cargo.lock"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
