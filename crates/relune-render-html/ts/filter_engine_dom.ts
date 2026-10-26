@@ -54,7 +54,7 @@ export function syncModeSwitcher(container: HTMLElement, activeMode: FilterMode)
 
 export function buildFacetSection(
   facet: FacetDefinition,
-  onChange: (value: string, checked: boolean) => void,
+  onBulkChange: (values: string[], checked: boolean) => void,
   onSearchInput?: (query: string) => void,
 ): HTMLDetailsElement {
   const details = document.createElement('details');
@@ -80,14 +80,7 @@ export function buildFacetSection(
   allBtn.className = 'filter-facet-action';
   allBtn.textContent = 'Select All';
   allBtn.addEventListener('click', () => {
-    const listEl = details.querySelector('.filter-facet-list');
-    if (!listEl) return;
-    for (const cb of listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
-      if (!cb.checked) {
-        cb.checked = true;
-        onChange(cb.value, true);
-      }
-    }
+    setAllCheckboxes(details, true, onBulkChange);
   });
 
   const noneBtn = document.createElement('button');
@@ -95,14 +88,7 @@ export function buildFacetSection(
   noneBtn.className = 'filter-facet-action';
   noneBtn.textContent = 'Clear';
   noneBtn.addEventListener('click', () => {
-    const listEl = details.querySelector('.filter-facet-list');
-    if (!listEl) return;
-    for (const cb of listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
-      if (cb.checked) {
-        cb.checked = false;
-        onChange(cb.value, false);
-      }
-    }
+    setAllCheckboxes(details, false, onBulkChange);
   });
 
   actions.append(allBtn, noneBtn);
@@ -129,6 +115,26 @@ export function buildFacetSection(
   details.appendChild(list);
 
   return details;
+}
+
+/** Toggles every listed checkbox, then reports all changed values in one call. */
+function setAllCheckboxes(
+  details: HTMLDetailsElement,
+  checked: boolean,
+  onBulkChange: (values: string[], checked: boolean) => void,
+): void {
+  const listEl = details.querySelector('.filter-facet-list');
+  if (!listEl) return;
+  const changed: string[] = [];
+  for (const cb of listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+    if (cb.checked !== checked) {
+      cb.checked = checked;
+      changed.push(cb.value);
+    }
+  }
+  if (changed.length > 0) {
+    onBulkChange(changed, checked);
+  }
 }
 
 export function rebuildFacetCheckboxes(
