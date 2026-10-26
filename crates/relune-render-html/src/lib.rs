@@ -257,18 +257,6 @@ mod tests {
     }
 
     #[test]
-    fn test_render_html_contains_pan_zoom_script() {
-        let graph = create_test_graph();
-        let svg = create_test_svg();
-        let options = HtmlRenderOptions::default();
-
-        let result = render_html(&graph, &svg, &options).unwrap();
-
-        assert!(result.contains("updateTransform"));
-        assert!(result.contains("addEventListener"));
-    }
-
-    #[test]
     fn test_render_html_self_contained() {
         let graph = create_test_graph();
         let svg = create_test_svg();

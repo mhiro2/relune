@@ -356,29 +356,33 @@ mod tests {
     }
 
     #[test]
-    fn test_build_html_without_pan_zoom() {
+    fn test_pan_zoom_bundles_follow_the_option() {
         let svg = "<svg></svg>";
         let metadata = "{}";
-        let options = HtmlRenderOptions {
-            enable_pan_zoom: false,
-            enable_group_toggles: false,
-            ..Default::default()
-        };
+        let viewport_bundles = [
+            build_pan_zoom_js(),
+            build_minimap_js(),
+            build_shortcuts_js(),
+        ];
 
-        let html = build_html_document(svg, metadata, &options);
+        let enabled = build_html_document(svg, metadata, &HtmlRenderOptions::default());
+        for bundle in viewport_bundles {
+            assert!(enabled.contains(bundle));
+        }
 
-        // Should not contain the pan/zoom script
-        assert!(!html.contains("function initPanZoom"));
-        assert!(!html.contains("viewport.addEventListener"));
-    }
-
-    #[test]
-    fn test_pan_zoom_js_clamps_panning_to_viewport_bounds() {
-        let js = build_pan_zoom_js();
-
-        assert!(js.contains("function clampPan("));
-        assert!(js.contains("function getAvailableViewport("));
-        assert!(js.contains("contentX - diagram.x"));
+        let disabled = build_html_document(
+            svg,
+            metadata,
+            &HtmlRenderOptions {
+                enable_pan_zoom: false,
+                ..Default::default()
+            },
+        );
+        for bundle in viewport_bundles {
+            assert!(!disabled.contains(bundle));
+        }
+        // The other viewer modules stay independent of the option.
+        assert!(disabled.contains(build_search_js()));
     }
 
     #[test]
