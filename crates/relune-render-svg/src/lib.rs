@@ -11,7 +11,6 @@ mod diff;
 pub mod edge;
 mod error;
 pub mod escape;
-pub mod geometry;
 pub mod group;
 pub mod legend;
 mod markers;
@@ -21,7 +20,6 @@ mod theme;
 
 pub use edge::{EdgeRenderOptions, render_edge};
 pub use error::SvgRenderError;
-pub use geometry::{Point, Rect, clamp, compute_column_y, lerp};
 pub use group::{ambiguous_groups, render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
 pub use options::SvgRenderOptions;
