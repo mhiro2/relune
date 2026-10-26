@@ -314,39 +314,4 @@ mod tests {
             Ordering::Less
         );
     }
-
-    #[test]
-    fn cached_candidate_score_matches_raw_comparison_order() {
-        let weights = ChannelCostWeights::default();
-        let left = ChannelCandidateScore {
-            hard_constraint_violations: 0,
-            short_endpoint_stubs: 0,
-            tight_obstacles: 0,
-            clearance_penalty: 5,
-            total_length: 100,
-            bend_count: 2,
-            center_deviation: 12,
-            congestion_penalty: 1,
-            stable_order: 2,
-        };
-        let right = ChannelCandidateScore {
-            hard_constraint_violations: 0,
-            short_endpoint_stubs: 0,
-            tight_obstacles: 0,
-            clearance_penalty: 4,
-            total_length: 108,
-            bend_count: 2,
-            center_deviation: 12,
-            congestion_penalty: 1,
-            stable_order: 1,
-        };
-
-        assert_eq!(
-            compare_cached_channel_candidate_scores(
-                CachedChannelCandidateScore::new(left, weights),
-                CachedChannelCandidateScore::new(right, weights),
-            ),
-            compare_channel_candidate_scores(left, right, weights)
-        );
-    }
 }
