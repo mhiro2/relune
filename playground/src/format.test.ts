@@ -80,8 +80,13 @@ describe('totalDiffChanges', () => {
       'enums_modified',
       'enum_values_changed',
     ];
-    const summary = Object.fromEntries(keys.map((key) => [key, 1])) as DiffSummary;
-    expect(totalDiffChanges(summary)).toBe(keys.length);
+    const zero = Object.fromEntries(keys.map((key) => [key, 0])) as DiffSummary;
+    expect(totalDiffChanges(zero)).toBe(0);
+    // One counter at a time, so a dropped counter cannot be masked by
+    // another one counted twice.
+    for (const key of keys) {
+      expect(totalDiffChanges({ ...zero, [key]: 3 }), key).toBe(3);
+    }
   });
 });
 
@@ -165,23 +170,20 @@ describe('inputCoverageNote', () => {
 });
 
 describe('export format helpers', () => {
-  const formats: ExportFormat[] = [
-    'schema-json',
-    'graph-json',
-    'layout-json',
-    'mermaid',
-    'd2',
-    'dot',
+  const json = 'application/json;charset=utf-8';
+  const text = 'text/plain;charset=utf-8';
+  const expected: [ExportFormat, string, string, string][] = [
+    ['schema-json', 'Schema JSON', 'relune-schema.json', json],
+    ['graph-json', 'Graph JSON', 'relune-graph.json', json],
+    ['layout-json', 'Layout JSON', 'relune-layout.json', json],
+    ['mermaid', 'Mermaid', 'relune-diagram.mmd', text],
+    ['d2', 'D2', 'relune-diagram.d2', text],
+    ['dot', 'DOT', 'relune-diagram.dot', text],
   ];
 
-  it('gives every format a label and a distinct filename', () => {
-    expect(formats.every((format) => exportFormatLabel(format) !== '')).toBe(true);
-    expect(new Set(formats.map(exportFilename)).size).toBe(formats.length);
-  });
-
-  it('serves JSON formats as JSON and the rest as plain text', () => {
-    expect(exportMimeType('graph-json')).toBe('application/json;charset=utf-8');
-    expect(exportMimeType('mermaid')).toBe('text/plain;charset=utf-8');
-    expect(exportFilename('mermaid')).toBe('relune-diagram.mmd');
+  it.each(expected)('labels and downloads %s', (format, label, filename, mime) => {
+    expect(exportFormatLabel(format)).toBe(label);
+    expect(exportFilename(format)).toBe(filename);
+    expect(exportMimeType(format)).toBe(mime);
   });
 });
