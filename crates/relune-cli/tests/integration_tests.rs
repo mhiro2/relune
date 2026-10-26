@@ -3,6 +3,7 @@
 //! These tests exercise the CLI through actual subprocess invocations,
 //! testing render, inspect, and export commands with real fixtures.
 
+use std::collections::BTreeSet;
 use std::fs;
 #[cfg(unix)]
 use std::io::Read;
@@ -58,6 +59,81 @@ fn write_comment_only_sql(temp: &tempfile::TempDir) -> PathBuf {
     let path = temp.path().join("comments_only.sql");
     fs::write(&path, comment_only_sql()).expect("write comment-only SQL fixture");
     path
+}
+
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// Schema whose `posts` table has a two-hop neighbour (`reactions`) and an
+/// unconnected table (`settings`), so a depth-1 focus on `posts` must drop
+/// both.
+const FOCUS_SQL: &str = "
+    CREATE TABLE users (id INT PRIMARY KEY);
+    CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id));
+    CREATE TABLE comments (id INT PRIMARY KEY, post_id INT REFERENCES posts(id));
+    CREATE TABLE reactions (id INT PRIMARY KEY, comment_id INT REFERENCES comments(id));
+    CREATE TABLE settings (id INT PRIMARY KEY);
+";
+
+fn names(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|name| (*name).to_string()).collect()
+}
+
+fn edge_pairs(pairs: &[(&str, &str)]) -> BTreeSet<(String, String)> {
+    pairs
+        .iter()
+        .map(|(from, to)| ((*from).to_string(), (*to).to_string()))
+        .collect()
+}
+
+fn simple_blog_tables() -> BTreeSet<String> {
+    names(&["comments", "posts", "users"])
+}
+
+fn simple_blog_edges() -> BTreeSet<(String, String)> {
+    edge_pairs(&[
+        ("comments", "posts"),
+        ("comments", "users"),
+        ("posts", "users"),
+    ])
+}
+
+fn parse_json(bytes: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(bytes).expect("Output should be valid JSON")
+}
+
+/// Node IDs of a graph-json document.
+fn graph_tables(graph: &serde_json::Value) -> BTreeSet<String> {
+    graph["nodes"]
+        .as_array()
+        .expect("graph JSON should have a nodes array")
+        .iter()
+        .map(|node| node["id"].as_str().expect("node id").to_string())
+        .collect()
+}
+
+/// `(from, to)` pairs of a graph-json document.
+fn graph_edges(graph: &serde_json::Value) -> BTreeSet<(String, String)> {
+    graph["edges"]
+        .as_array()
+        .expect("graph JSON should have an edges array")
+        .iter()
+        .map(|edge| {
+            (
+                edge["from"].as_str().expect("edge from").to_string(),
+                edge["to"].as_str().expect("edge to").to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Fill color of the SVG canvas background pattern.
+fn canvas_fill(svg: &str) -> &str {
+    let pattern = svg
+        .find(r#"<pattern id="canvas-grid""#)
+        .expect("SVG should define the canvas pattern");
+    let fill = pattern + svg[pattern..].find(r#"fill=""#).expect("canvas fill") + 6;
+    let len = svg[fill..].find('"').expect("closing quote");
+    &svg[fill..fill + len]
 }
 
 fn failure_snapshot(name: &str, output: &Output) {
@@ -201,11 +277,9 @@ mod render_tests {
         // Verify output file was created
         assert!(output_path.exists(), "Output JSON file should be created");
 
-        // Verify it contains valid JSON
-        let content = fs::read_to_string(&output_path).expect("Failed to read output file");
-        let parsed: serde_json::Value =
-            serde_json::from_str(&content).expect("Output should be valid JSON");
-        assert!(parsed.is_object(), "Graph JSON should be a JSON object");
+        let graph = parse_json(&fs::read(&output_path).expect("Failed to read output file"));
+        assert_eq!(graph_tables(&graph), simple_blog_tables());
+        assert_eq!(graph_edges(&graph), simple_blog_edges());
     }
 
     #[test]
@@ -281,27 +355,22 @@ mod render_tests {
     }
 
     #[test]
-    fn render_with_theme_dark() {
-        let temp = tempfile::tempdir().expect("Failed to create temp dir");
-        let output_path = temp.path().join("output.svg");
+    fn render_with_theme_selects_canvas_colors() {
+        let render = |theme: &str| {
+            let output = relune()
+                .arg("render")
+                .arg("--sql")
+                .arg(simple_blog_fixture())
+                .arg("--theme")
+                .arg(theme)
+                .arg("--stdout")
+                .assert()
+                .success();
+            String::from_utf8_lossy(&output.get_output().stdout).into_owned()
+        };
 
-        let mut cmd = relune();
-        cmd.arg("render")
-            .arg("--sql")
-            .arg(simple_blog_fixture())
-            .arg("--theme")
-            .arg("dark")
-            .arg("--out")
-            .arg(&output_path)
-            .assert()
-            .success();
-
-        let content = fs::read_to_string(&output_path).expect("Failed to read output file");
-        // Dark theme should have dark background colors
-        assert!(
-            content.contains("<svg"),
-            "Output should contain SVG element"
-        );
+        assert_eq!(canvas_fill(&render("dark")), "#0c0f1a");
+        assert_eq!(canvas_fill(&render("light")), "#f7f8fc");
     }
 
     #[test]
@@ -311,18 +380,22 @@ mod render_tests {
 
         let mut cmd = relune();
         cmd.arg("render")
-            .arg("--sql")
-            .arg(simple_blog_fixture())
+            .arg("--sql-text")
+            .arg(FOCUS_SQL)
             .arg("--focus")
-            .arg("users")
+            .arg("posts")
             .arg("--depth")
-            .arg("2")
+            .arg("1")
             .arg("--out")
             .arg(&output_path)
             .assert()
             .success();
 
-        assert!(output_path.exists(), "Output file should be created");
+        let svg = fs::read_to_string(&output_path).expect("Failed to read output file");
+        assert_eq!(
+            relune_testkit::svg::table_ids(&svg),
+            names(&["comments", "posts", "users"])
+        );
     }
 
     #[test]
@@ -364,26 +437,31 @@ exclude = ["comments"]
 
     #[test]
     fn render_with_force_directed_layout() {
-        let temp = tempfile::tempdir().expect("Failed to create temp dir");
-        let output_path = temp.path().join("force.svg");
+        let render = |layout: &str| {
+            let output = relune()
+                .arg("render")
+                .arg("--sql")
+                .arg(simple_blog_fixture())
+                .arg("--layout")
+                .arg(layout)
+                .arg("--edge-style")
+                .arg("orthogonal")
+                .arg("--stdout")
+                .assert()
+                .success();
+            String::from_utf8_lossy(&output.get_output().stdout).into_owned()
+        };
 
-        let mut cmd = relune();
-        cmd.arg("render")
-            .arg("--sql")
-            .arg(simple_blog_fixture())
-            .arg("--layout")
-            .arg("force-directed")
-            .arg("--edge-style")
-            .arg("orthogonal")
-            .arg("--out")
-            .arg(&output_path)
-            .assert()
-            .success();
+        let force = relune_testkit::svg::table_bodies(&render("force-directed"));
+        let hierarchical = relune_testkit::svg::table_bodies(&render("hierarchical"));
 
-        let content = fs::read_to_string(&output_path).expect("Failed to read output file");
-        assert!(
-            content.contains("<svg"),
-            "Output should contain SVG element"
+        assert_eq!(
+            force.keys().cloned().collect::<BTreeSet<_>>(),
+            simple_blog_tables()
+        );
+        assert_ne!(
+            force, hierarchical,
+            "force-directed layout should place cards differently from the default"
         );
     }
 
@@ -529,23 +607,45 @@ exclude = ["comments"]
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn render_png_rejects_terminal_stdout() {
-        // When format is png and no --out is specified, the CLI should refuse
-        // to write binary data to an interactive terminal.
-        // Note: in test context stdout is not a terminal, so we verify via
-        // the error message by checking the help text mentions --out.
-        let mut cmd = relune();
-        cmd.arg("render")
+        let (exit_code, output) = relune_in_terminal(&[
+            "render".to_string(),
+            "--sql".to_string(),
+            simple_blog_fixture().display().to_string(),
+            "--format".to_string(),
+            "png".to_string(),
+        ]);
+
+        assert_eq!(exit_code, 2, "PNG on a terminal should be a usage error");
+        assert!(
+            output.contains("binary PNG data"),
+            "terminal output should explain the refusal; got: {output}"
+        );
+        // Every PNG starts with an IHDR chunk; the terminal may rewrite line
+        // endings in the signature, but not this chunk name.
+        assert!(
+            !output.contains("IHDR"),
+            "no PNG bytes should reach the terminal"
+        );
+    }
+
+    #[test]
+    fn render_png_to_piped_stdout() {
+        let output = relune()
+            .arg("render")
             .arg("--sql")
             .arg(simple_blog_fixture())
             .arg("--format")
-            .arg("png");
+            .arg("png")
+            .assert()
+            .success();
 
-        // In CI/test context stdout is piped (not a terminal), so this
-        // actually succeeds by writing binary to stdout. We just verify
-        // the command doesn't crash.
-        cmd.assert().success();
+        assert!(
+            output.get_output().stdout.starts_with(PNG_SIGNATURE),
+            "piped stdout should receive the PNG"
+        );
     }
 
     #[test]
@@ -567,10 +667,13 @@ exclude = ["comments"]
             .success();
 
         let content = fs::read(&output_path).expect("Failed to read output file");
+        let pixmap = resvg::tiny_skia::Pixmap::decode_png(&content).expect("decode PNG");
+        // The top-left pixel is plain canvas, painted with the dark theme base
+        // color #0c0f1a.
+        let corner = pixmap.pixel(0, 0).expect("corner pixel");
         assert_eq!(
-            &content[..8],
-            b"\x89PNG\r\n\x1a\n",
-            "Dark theme PNG should still be valid"
+            (corner.red(), corner.green(), corner.blue(), corner.alpha()),
+            (0x0c, 0x0f, 0x1a, 0xff)
         );
     }
 }
@@ -616,11 +719,9 @@ mod export_tests {
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-
-        assert!(parsed.is_object(), "Graph JSON should be a JSON object");
+        let graph = parse_json(&output.get_output().stdout);
+        assert_eq!(graph_tables(&graph), simple_blog_tables());
+        assert_eq!(graph_edges(&graph), simple_blog_edges());
     }
 
     #[test]
@@ -635,11 +736,29 @@ mod export_tests {
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-
-        assert!(parsed.is_object(), "Layout JSON should be a JSON object");
+        let graph = parse_layout_json(&String::from_utf8_lossy(&output.get_output().stdout));
+        assert_eq!(
+            graph
+                .nodes
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<BTreeSet<_>>(),
+            simple_blog_tables()
+        );
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.width > 0.0 && node.height > 0.0)
+        );
+        assert_eq!(
+            graph
+                .edges
+                .iter()
+                .map(|edge| (edge.from.clone(), edge.to.clone()))
+                .collect::<BTreeSet<_>>(),
+            simple_blog_edges()
+        );
     }
 
     #[test]
@@ -746,29 +865,55 @@ mod export_tests {
     }
 
     #[test]
-    fn export_with_focus() {
-        let mut cmd = relune();
-        let output = cmd
+    fn export_graph_json_with_focus() {
+        let output = relune()
             .arg("export")
-            .arg("--sql")
-            .arg(simple_blog_fixture())
+            .arg("--sql-text")
+            .arg(FOCUS_SQL)
             .arg("--format")
-            .arg("schema-json")
+            .arg("graph-json")
             .arg("--focus")
-            .arg("users")
+            .arg("posts")
             .arg("--depth")
             .arg("1")
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
+        let graph = parse_json(&output.get_output().stdout);
+        assert_eq!(graph_tables(&graph), names(&["comments", "posts", "users"]));
+        assert_eq!(
+            graph_edges(&graph),
+            edge_pairs(&[("comments", "posts"), ("posts", "users")])
+        );
+    }
 
-        // With focus on users, the schema should contain limited tables
-        assert!(
-            parsed.get("tables").is_some(),
-            "Schema JSON should have tables field"
+    #[test]
+    fn export_schema_json_keeps_every_table_under_focus() {
+        // Schema JSON is the full normalized schema; focus only narrows the
+        // graph-based formats.
+        let output = relune()
+            .arg("export")
+            .arg("--sql-text")
+            .arg(FOCUS_SQL)
+            .arg("--format")
+            .arg("schema-json")
+            .arg("--focus")
+            .arg("posts")
+            .arg("--depth")
+            .arg("1")
+            .assert()
+            .success();
+
+        let schema = parse_json(&output.get_output().stdout);
+        let tables = schema["tables"]
+            .as_array()
+            .expect("schema JSON should have a tables array")
+            .iter()
+            .map(|table| table["name"].as_str().expect("table name").to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            tables,
+            names(&["comments", "posts", "reactions", "settings", "users"])
         );
     }
 
@@ -842,10 +987,12 @@ exclude = ["comments"]
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-        assert!(parsed.is_object(), "Graph JSON should be a JSON object");
+        // [export] picks graph-json, and the billing viewpoint (users at
+        // depth 1, comments excluded) narrows the graph.
+        let graph = parse_json(&output.get_output().stdout);
+        assert!(graph.get("tables").is_none(), "should not be schema JSON");
+        assert_eq!(graph_tables(&graph), names(&["posts", "users"]));
+        assert_eq!(graph_edges(&graph), edge_pairs(&[("posts", "users")]));
     }
 
     #[test]
@@ -921,11 +1068,22 @@ mod inspect_tests {
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-
-        assert!(parsed.is_object(), "Inspect JSON should be an object");
+        let parsed = parse_json(&output.get_output().stdout);
+        let summary = &parsed["summary"];
+        assert_eq!(summary["table_count"], 3);
+        assert_eq!(summary["column_count"], 16);
+        assert_eq!(summary["foreign_key_count"], 3);
+        let users = summary["tables"]
+            .as_array()
+            .expect("summary tables")
+            .iter()
+            .find(|table| table["name"] == "users")
+            .expect("users summary");
+        assert_eq!(users["incoming_fk_count"], 2);
+        assert!(
+            parsed["table"].is_null(),
+            "summary mode has no table detail"
+        );
     }
 
     #[test]
@@ -957,17 +1115,42 @@ mod inspect_tests {
             .arg("--sql")
             .arg(simple_blog_fixture())
             .arg("--table")
-            .arg("users")
+            .arg("posts")
             .arg("--format")
             .arg("json")
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-
-        assert!(parsed.is_object(), "Inspect JSON should be an object");
+        let parsed = parse_json(&output.get_output().stdout);
+        let table = &parsed["table"];
+        assert_eq!(table["name"], "posts");
+        let columns = table["columns"]
+            .as_array()
+            .expect("table columns")
+            .iter()
+            .map(|column| column["name"].as_str().expect("column name"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            columns,
+            [
+                "id",
+                "user_id",
+                "title",
+                "content",
+                "published_at",
+                "created_at",
+                "updated_at"
+            ]
+        );
+        assert_eq!(
+            table["foreign_keys"],
+            serde_json::json!([{
+                "name": null,
+                "from_columns": ["user_id"],
+                "to_table": "users",
+                "to_columns": ["id"],
+            }])
+        );
     }
 
     #[test]
@@ -1560,14 +1743,34 @@ mod global_flag_tests {
 
     #[test]
     fn quiet_flag_suppresses_output() {
-        let mut cmd = relune();
-        cmd.arg("--quiet")
-            .arg("render")
-            .arg("--sql")
-            .arg(simple_blog_fixture())
-            .assert()
-            .success();
-        // With quiet flag, stderr should be minimal (only errors)
+        // Comment-only SQL always emits a PARSE004 warning, so the default run
+        // has diagnostics for --quiet to hide.
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let render = |quiet: bool| {
+            let mut cmd = relune();
+            if quiet {
+                cmd.arg("--quiet");
+            }
+            cmd.arg("render")
+                .arg("--sql-text")
+                .arg(comment_only_sql())
+                .arg("--out")
+                .arg(temp.path().join("output.svg"))
+                .output()
+                .expect("command should run")
+        };
+
+        let normal = render(false);
+        assert!(normal.status.success());
+        assert!(String::from_utf8_lossy(&normal.stderr).contains("PARSE004"));
+
+        let quiet = render(true);
+        assert!(quiet.status.success());
+        assert!(
+            quiet.stderr.is_empty(),
+            "--quiet should hide warnings and progress; got: {}",
+            String::from_utf8_lossy(&quiet.stderr)
+        );
     }
 
     #[test]
@@ -1613,16 +1816,34 @@ mod global_flag_tests {
     }
 
     #[test]
-    fn color_never_flag() {
-        let mut cmd = relune();
-        cmd.arg("--color")
-            .arg("never")
-            .arg("render")
-            .arg("--sql")
-            .arg(simple_blog_fixture())
-            .assert()
-            .success();
-        // Color never should not produce ANSI codes
+    fn color_flag_controls_ansi_diagnostics() {
+        // Comment-only SQL always emits a PARSE004 warning to colorize.
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let stderr = |color: &str| {
+            let output = relune()
+                .arg("--color")
+                .arg(color)
+                .arg("render")
+                .arg("--sql-text")
+                .arg(comment_only_sql())
+                .arg("--out")
+                .arg(temp.path().join("output.svg"))
+                .output()
+                .expect("command should run");
+            assert!(output.status.success());
+            String::from_utf8_lossy(&output.stderr).into_owned()
+        };
+
+        let always = stderr("always");
+        assert!(always.contains("PARSE004"));
+        assert!(always.contains("\x1b["), "--color always should emit ANSI");
+
+        let never = stderr("never");
+        assert!(never.contains("PARSE004"));
+        assert!(
+            !never.contains('\x1b'),
+            "--color never should not emit ANSI"
+        );
     }
 }
 
@@ -1702,10 +1923,31 @@ mod multi_format_tests {
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-        assert!(parsed.is_object(), "Graph JSON should be a JSON object");
+        let graph = parse_json(&output.get_output().stdout);
+        assert_eq!(
+            graph_tables(&graph),
+            names(&[
+                "addresses",
+                "categories",
+                "customers",
+                "order_items",
+                "orders",
+                "product_categories",
+                "products",
+            ])
+        );
+        assert_eq!(
+            graph_edges(&graph),
+            edge_pairs(&[
+                ("addresses", "customers"),
+                ("categories", "categories"),
+                ("order_items", "orders"),
+                ("order_items", "products"),
+                ("orders", "customers"),
+                ("product_categories", "categories"),
+                ("product_categories", "products"),
+            ])
+        );
     }
 }
 
@@ -2048,10 +2290,30 @@ mod diff_tests {
             .assert()
             .success();
 
-        let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&stdout).expect("Output should be valid JSON");
-        assert!(parsed.is_object(), "Diff JSON should be an object");
+        let parsed = parse_json(&output.get_output().stdout);
+        assert_eq!(parsed["summary"]["tables_modified"], 1);
+        assert_eq!(parsed["summary"]["columns_changed"], 1);
+        assert_eq!(parsed["added_tables"], serde_json::json!([]));
+        assert_eq!(parsed["removed_tables"], serde_json::json!([]));
+        let modified = parsed["modified_tables"]
+            .as_array()
+            .expect("modified_tables array");
+        assert_eq!(modified.len(), 1);
+        assert_eq!(modified[0]["table_name"], "users");
+        assert_eq!(
+            modified[0]["column_diffs"],
+            serde_json::json!([{
+                "column_name": "name",
+                "change_kind": "added",
+                "old_value": null,
+                "new_value": {
+                    "name": "name",
+                    "data_type": "VARCHAR(255)",
+                    "nullable": true,
+                    "primary_key": false,
+                },
+            }])
+        );
     }
 
     #[test]
@@ -2668,32 +2930,41 @@ mod review_tests {
             "review --list-rules should succeed without before/after"
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for rule in [
-            "risk/drop-column",
-            "risk/drop-table",
-            "risk/drop-enum-value",
-            "risk/drop-column-referenced",
-            "risk/drop-table-referenced",
-            "risk/add-not-null-on-existing",
-            "risk/type-narrow",
-            "risk/drop-pk-or-unique",
-            "risk/add-unique-on-existing",
-            "risk/add-cascade-delete",
-            "risk/fk-without-index",
-            "risk/add-index-on-large-table",
-            "risk/add-fk-on-existing",
-            "risk/alter-column-type",
-            "risk/rewrite-table",
-        ] {
-            assert!(
-                stdout.contains(rule),
-                "text listing should mention {rule}; got: {stdout}"
-            );
-        }
-        assert!(stdout.contains("breaking"));
-        assert!(stdout.contains("warning"));
-        assert!(stdout.contains("caution"));
-        assert!(stdout.contains("info"));
+        // Each line is `<rule id> <default severity> <description>`; keep the
+        // listing order-independent but exact, so a missing, extra, or
+        // duplicated rule fails.
+        let mut listed = stdout
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut columns = line.split_whitespace();
+                (
+                    columns.next().expect("rule id column"),
+                    columns.next().expect("severity column"),
+                )
+            })
+            .collect::<Vec<_>>();
+        listed.sort_unstable();
+        let mut expected = vec![
+            ("risk/drop-column", "breaking"),
+            ("risk/drop-table", "breaking"),
+            ("risk/drop-enum-value", "breaking"),
+            ("risk/drop-column-referenced", "breaking"),
+            ("risk/drop-table-referenced", "breaking"),
+            ("risk/add-not-null-on-existing", "warning"),
+            ("risk/type-narrow", "breaking"),
+            ("risk/drop-pk-or-unique", "warning"),
+            ("risk/add-unique-on-existing", "warning"),
+            ("risk/add-check-on-existing", "warning"),
+            ("risk/add-cascade-delete", "warning"),
+            ("risk/fk-without-index", "info"),
+            ("risk/add-index-on-large-table", "caution"),
+            ("risk/add-fk-on-existing", "caution"),
+            ("risk/alter-column-type", "caution"),
+            ("risk/rewrite-table", "caution"),
+        ];
+        expected.sort_unstable();
+        assert_eq!(listed, expected, "unexpected rule listing:\n{stdout}");
     }
 
     #[test]
@@ -3283,6 +3554,10 @@ mod review_tests {
         );
         let parsed: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("review JSON should parse");
+        // This SQL also auto-promotes to postgres, so the requested dialect is
+        // what shows the config value was applied rather than auto-detection.
+        assert_eq!(parsed["requested_dialect"], "postgres");
+        assert_eq!(parsed["effective_dialect"], "postgres");
         assert_eq!(parsed["summary"]["caution"], 1);
         let findings = parsed["findings"].as_array().expect("findings array");
         assert!(
