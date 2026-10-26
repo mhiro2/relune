@@ -38,6 +38,7 @@ wasm-bindgen.workspace = true
 console_error_panic_hook = { workspace = true, optional = true }
 
 [dev-dependencies]
+js-sys = "0.3"
 wasm-bindgen-test = "0.3"
 
 [lints]

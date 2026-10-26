@@ -2312,6 +2312,7 @@ name = "relune-wasm"
 version = "0.12.0"
 dependencies = [
  "console_error_panic_hook",
+ "js-sys",
  "relune-app",
  "relune-core",
  "serde",
