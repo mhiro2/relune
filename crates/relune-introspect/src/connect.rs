@@ -108,15 +108,19 @@ where
     }
 }
 
+/// Reads the raw `RELUNE_DB_POOL_MAX_CONNECTIONS` override, if set.
+#[must_use]
+pub(crate) fn pool_max_connections_env() -> Option<String> {
+    std::env::var(POOL_MAX_CONNECTIONS_ENV).ok()
+}
+
 /// Resolves the effective pool max connection count for a dialect.
 ///
-/// Reads `RELUNE_DB_POOL_MAX_CONNECTIONS`; if set to a positive integer the
-/// override wins, otherwise falls back to `default_max`. Invalid values
-/// (zero, negative, non-numeric, empty) are ignored.
+/// A positive integer override wins, otherwise falls back to `default_max`.
+/// Invalid values (zero, negative, non-numeric, empty) are ignored.
 #[must_use]
-pub(crate) fn pool_max_connections_with_default(default_max: u32) -> u32 {
-    pool_max_override_from(std::env::var(POOL_MAX_CONNECTIONS_ENV).ok().as_deref())
-        .unwrap_or(default_max)
+pub(crate) fn resolve_pool_max_connections(default_max: u32, override_value: Option<&str>) -> u32 {
+    pool_max_override_from(override_value).unwrap_or(default_max)
 }
 
 fn pool_max_override_from(value: Option<&str>) -> Option<u32> {
