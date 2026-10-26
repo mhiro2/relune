@@ -176,13 +176,8 @@ fn lint_issues(url: &str) -> BTreeSet<(String, String)> {
         .collect()
 }
 
-/// Renders `url` with `extra` arguments and returns the table IDs and
-/// `(from, to)` foreign key edges drawn in the output.
-fn rendered_tables_and_edges(
-    url: &str,
-    file_name: &str,
-    extra: &[&str],
-) -> (BTreeSet<String>, BTreeSet<(String, String)>) {
+/// Renders `url` with `extra` arguments and returns the written file.
+fn render_output(url: &str, file_name: &str, extra: &[&str]) -> String {
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join(file_name);
     relune()
@@ -192,13 +187,27 @@ fn rendered_tables_and_edges(
         .arg(&out)
         .assert()
         .success();
-    let content = fs::read_to_string(&out).unwrap();
-    let edges = relune_testkit::svg::edges(&content)
+    fs::read_to_string(&out).unwrap()
+}
+
+/// Table IDs and `(from, to)` foreign key edges drawn in rendered markup.
+fn drawn_tables_and_edges(markup: &str) -> (BTreeSet<String>, BTreeSet<(String, String)>) {
+    let edges = relune_testkit::svg::edges(markup)
         .into_iter()
         .filter(|edge| edge.classes.contains("edge-kind-foreign-key"))
         .map(|edge| (edge.from, edge.to))
         .collect();
-    (relune_testkit::svg::table_ids(&content), edges)
+    (relune_testkit::svg::table_ids(markup), edges)
+}
+
+/// Renders `url` with `extra` arguments and returns the drawn tables and
+/// foreign key edges.
+fn rendered_tables_and_edges(
+    url: &str,
+    file_name: &str,
+    extra: &[&str],
+) -> (BTreeSet<String>, BTreeSet<(String, String)>) {
+    drawn_tables_and_edges(&render_output(url, file_name, extra))
 }
 
 // ===========================================================================
@@ -249,10 +258,26 @@ mod postgres {
         let sql = fs::read_to_string(fixtures_dir().join("simple_blog.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        assert_eq!(
-            rendered_tables_and_edges(&url, "out.html", &["--format", "html"]),
-            (blog_tables(), blog_edges())
-        );
+        let html = render_output(&url, "out.html", &["--format", "html"]);
+        assert!(html.starts_with("<!DOCTYPE html>"), "expected an HTML page");
+        assert_eq!(drawn_tables_and_edges(&html), (blog_tables(), blog_edges()));
+
+        // The viewer metadata drives search and filtering, so it must list
+        // the same introspected tables as the diagram.
+        let tag = html
+            .find(r#"id="relune-metadata""#)
+            .expect("HTML should embed viewer metadata");
+        let body = tag + html[tag..].find('>').expect("metadata tag end") + 1;
+        let len = html[body..].find("</script>").expect("metadata end");
+        let metadata: serde_json::Value =
+            serde_json::from_str(&html[body..body + len]).expect("metadata JSON");
+        let metadata_tables = metadata["tables"]
+            .as_array()
+            .expect("metadata tables")
+            .iter()
+            .map(|table| table["id"].as_str().expect("table id").to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(metadata_tables, blog_tables());
     }
 
     #[tokio::test]

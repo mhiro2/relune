@@ -61,16 +61,19 @@ pub fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     Some(&tag[start..start + len])
 }
 
+/// Undoes the renderer's XML escaping.
+fn unescape(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
 /// Returns attribute `name` with the renderer's XML escaping undone.
 fn text_attr(tag: &str, name: &str) -> Option<String> {
-    attr(tag, name).map(|value| {
-        value
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&amp;", "&")
-    })
+    attr(tag, name).map(unescape)
 }
 
 fn classes(tag: &str) -> BTreeSet<String> {
@@ -95,26 +98,37 @@ fn rect(tag: &str) -> SvgRect {
     }
 }
 
-/// Returns the first `<rect class="{class}"` tag after `offset`.
-fn rect_after(svg: &str, offset: usize, class: &str) -> SvgRect {
+/// Returns the first `<rect class="{class}"` inside `markup`.
+fn rect_in(markup: &str, class: &str) -> SvgRect {
     let prefix = format!("<rect class=\"{class}\"");
-    let (_, tag) = start_tags(&svg[offset..], &prefix)
+    let (_, tag) = start_tags(markup, &prefix)
         .next()
-        .unwrap_or_else(|| panic!("missing {class} rect after offset {offset}"));
+        .unwrap_or_else(|| panic!("missing {class} rect in {markup}"));
     rect(tag)
 }
 
-/// Returns the markup of one table node, from its start tag up to the next
-/// table node (or the end of the document).
+/// Yields `(start tag, markup)` for every node, where the markup runs from
+/// the start tag up to the next node (or the end of the document), so a
+/// query never reads into a neighbouring card.
+fn table_nodes(svg: &str) -> impl Iterator<Item = (&str, &str)> {
+    let starts = start_tags(svg, "<g class=\"table-node").collect::<Vec<_>>();
+    let ends = starts
+        .iter()
+        .skip(1)
+        .map(|(start, _)| *start)
+        .chain(std::iter::once(svg.len()))
+        .collect::<Vec<_>>();
+    starts
+        .into_iter()
+        .zip(ends)
+        .map(move |((start, tag), end)| (tag, &svg[start..end]))
+}
+
+/// Returns the markup of the node with `table_id`.
 fn table_node_markup<'a>(svg: &'a str, table_id: &str) -> Option<&'a str> {
-    let mut nodes = start_tags(svg, "<g class=\"table-node").peekable();
-    while let Some((start, tag)) = nodes.next() {
-        if text_attr(tag, "data-table-id").as_deref() == Some(table_id) {
-            let end = nodes.peek().map_or(svg.len(), |(next, _)| *next);
-            return Some(&svg[start..end]);
-        }
-    }
-    None
+    table_nodes(svg)
+        .find(|(tag, _)| text_attr(tag, "data-table-id").as_deref() == Some(table_id))
+        .map(|(_, markup)| markup)
 }
 
 /// Returns the IDs of all rendered nodes: tables, views, and enums.
@@ -145,17 +159,17 @@ pub fn table_classes(svg: &str, table_id: &str) -> Option<BTreeSet<String>> {
 pub fn column_classes(svg: &str, table_id: &str, column: &str) -> Option<BTreeSet<String>> {
     let node = table_node_markup(svg, table_id)?;
     start_tags(node, "<g class=\"column-row")
-        .find(|(_, tag)| attr(tag, "data-column-name") == Some(column))
+        .find(|(_, tag)| text_attr(tag, "data-column-name").as_deref() == Some(column))
         .map(|(_, tag)| classes(tag))
 }
 
 /// Returns the card rectangle of every table node, keyed by table ID.
 #[must_use]
 pub fn table_bodies(svg: &str) -> BTreeMap<String, SvgRect> {
-    start_tags(svg, "<g class=\"table-node")
-        .filter_map(|(start, tag)| {
+    table_nodes(svg)
+        .filter_map(|(tag, markup)| {
             let id = text_attr(tag, "data-table-id")?;
-            Some((id, rect_after(svg, start, "table-body")))
+            Some((id, rect_in(markup, "table-body")))
         })
         .collect()
 }
@@ -163,12 +177,12 @@ pub fn table_bodies(svg: &str) -> BTreeMap<String, SvgRect> {
 /// Returns the tables enclosed by each group box, keyed by the group label.
 #[must_use]
 pub fn group_members(svg: &str) -> BTreeMap<String, BTreeSet<String>> {
-    let labels: BTreeMap<&str, &str> = start_tags(svg, "<text class=\"group-label\"")
+    let labels: BTreeMap<&str, String> = start_tags(svg, "<text class=\"group-label\"")
         .filter_map(|(start, tag)| {
             let id = attr(tag, "data-group-id")?;
             let text_start = start + tag.len();
             let text_len = svg[text_start..].find("</text>")?;
-            Some((id, &svg[text_start..text_start + text_len]))
+            Some((id, unescape(&svg[text_start..text_start + text_len])))
         })
         .collect();
     let bodies = table_bodies(svg);
@@ -179,13 +193,16 @@ pub fn group_members(svg: &str) -> BTreeMap<String, BTreeSet<String>> {
             let label = labels
                 .get(id)
                 .unwrap_or_else(|| panic!("group {id} without label"));
-            let area = rect_after(svg, start, "group-box");
+            let end = svg[start..]
+                .find("</g>")
+                .map_or(svg.len(), |end| start + end);
+            let area = rect_in(&svg[start..end], "group-box");
             let members = bodies
                 .iter()
                 .filter(|(_, body)| area.contains(body))
                 .map(|(table, _)| table.clone())
                 .collect();
-            ((*label).to_string(), members)
+            (label.clone(), members)
         })
         .collect()
 }
@@ -212,7 +229,8 @@ mod tests {
         r#"<g class="group" data-group-id="prefix_0"><rect class="group-box" x="0.0" y="0.0" width="100.0" height="100.0"/></g>"#,
         r#"<g class="table-node node diff-modified" data-table-id="app_users" data-id="app_users" data-node-kind="table">"#,
         r#"<rect class="table-body" x="10.0" y="10.0" width="50.0" height="50.0"/>"#,
-        r#"<g class="column-row diff-removed" data-column-name="legacy" data-nullable="true"></g></g>"#,
+        r#"<g class="column-row diff-removed" data-column-name="legacy" data-nullable="true"></g>"#,
+        r#"<g class="column-row diff-added" data-column-name="a&amp;b" data-nullable="true"></g></g>"#,
         r#"<g class="table-node node" data-table-id="cats" data-id="cats" data-node-kind="table">"#,
         r#"<rect class="table-body" x="200.0" y="10.0" width="50.0" height="50.0"/></g>"#,
         r#"<text class="group-label" data-group-id="prefix_0" x="1" y="1">app</text>"#,
@@ -248,6 +266,11 @@ mod tests {
                 .unwrap()
                 .contains("diff-removed")
         );
+        assert!(
+            column_classes(SVG, "app_users", "a&b")
+                .unwrap()
+                .contains("diff-added")
+        );
         assert_eq!(column_classes(SVG, "cats", "legacy"), None);
         assert_eq!(
             group_members(SVG),
@@ -261,5 +284,16 @@ mod tests {
                 classes: ["edge", "diff-removed"].map(str::to_string).into(),
             }]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "missing table-body rect")]
+    fn a_node_without_a_card_does_not_borrow_the_next_one() {
+        let svg = concat!(
+            r#"<g class="table-node node" data-table-id="ghost" data-node-kind="table"></g>"#,
+            r#"<g class="table-node node" data-table-id="cats" data-node-kind="table">"#,
+            r#"<rect class="table-body" x="0.0" y="0.0" width="50.0" height="50.0"/></g>"#,
+        );
+        let _ = table_bodies(svg);
     }
 }
