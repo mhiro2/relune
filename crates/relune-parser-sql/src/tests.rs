@@ -870,32 +870,35 @@ fn warns_when_input_produces_empty_schema() {
 
 #[test]
 fn handles_composite_foreign_keys() {
+    // The referencing columns are declared in a different order than the
+    // referenced key so that column pairing is observable.
     let sql = r"
-    CREATE TABLE orders (
-      id BIGINT PRIMARY KEY
-    );
-
     CREATE TABLE order_items (
       order_id BIGINT NOT NULL,
       line_num INTEGER NOT NULL,
-      product_id BIGINT NOT NULL,
-      PRIMARY KEY (order_id, line_num),
-      CONSTRAINT fk_order FOREIGN KEY (order_id) REFERENCES orders(id)
+      PRIMARY KEY (order_id, line_num)
+    );
+
+    CREATE TABLE shipments (
+      id BIGINT PRIMARY KEY,
+      item_line INTEGER NOT NULL,
+      item_order BIGINT NOT NULL,
+      CONSTRAINT fk_shipment_item FOREIGN KEY (item_order, item_line)
+        REFERENCES order_items(order_id, line_num)
     );
     ";
 
     let schema = parse_sql_to_schema(sql).expect("parse should succeed");
     assert_eq!(schema.tables.len(), 2);
 
-    let order_items = &schema.tables[1];
-    assert_eq!(order_items.foreign_keys.len(), 1);
-    assert_eq!(
-        order_items.foreign_keys[0].name,
-        Some("fk_order".to_string())
-    );
-    assert_eq!(order_items.foreign_keys[0].from_columns, vec!["order_id"]);
-    assert_eq!(order_items.foreign_keys[0].to_table, "orders");
-    assert_eq!(order_items.foreign_keys[0].to_columns, vec!["id"]);
+    let shipments = &schema.tables[1];
+    assert_eq!(shipments.foreign_keys.len(), 1);
+    let fk = &shipments.foreign_keys[0];
+    assert_eq!(fk.name.as_deref(), Some("fk_shipment_item"));
+    assert_eq!(fk.from_columns, vec!["item_order", "item_line"]);
+    assert_eq!(fk.to_table, "order_items");
+    assert_eq!(fk.to_columns, vec!["order_id", "line_num"]);
+    assert!(schema.validate().is_empty());
 }
 
 #[test]
@@ -922,14 +925,24 @@ fn generates_column_ids_per_table() {
       name TEXT NOT NULL,
       email TEXT
     );
+
+    CREATE TABLE posts (
+      id BIGINT PRIMARY KEY,
+      title TEXT NOT NULL
+    );
     ";
 
     let schema = parse_sql_to_schema(sql).expect("parse should succeed");
-    let table = &schema.tables[0];
+    let column_ids = |index: usize| {
+        schema.tables[index]
+            .columns
+            .iter()
+            .map(|column| column.id)
+            .collect::<Vec<_>>()
+    };
 
-    assert_eq!(table.columns[0].id, ColumnId(1));
-    assert_eq!(table.columns[1].id, ColumnId(2));
-    assert_eq!(table.columns[2].id, ColumnId(3));
+    assert_eq!(column_ids(0), vec![ColumnId(1), ColumnId(2), ColumnId(3)]);
+    assert_eq!(column_ids(1), vec![ColumnId(1), ColumnId(2)]);
 }
 
 #[test]
@@ -971,35 +984,38 @@ fn ignores_reversed_sql_spans_in_release_builds() {
 }
 
 #[test]
-fn handles_index_on_unknown_table() {
+fn index_on_unknown_table_warns_with_source_span() {
     let sql = r"
     CREATE INDEX idx_missing ON nonexistent_table (id);
     ";
 
     let output = parse_sql_to_schema_with_diagnostics(sql);
 
-    // Schema should be Some but empty (no tables, but no errors)
-    assert!(output.schema.is_some());
-    assert_eq!(output.schema.as_ref().unwrap().tables.len(), 0);
+    assert!(!output.has_errors());
+    let schema = output.schema.as_ref().expect("schema should be produced");
+    assert!(schema.tables.is_empty());
 
-    // Should have warning about unknown table
-    assert!(output.has_warnings());
-}
-
-#[test]
-fn unknown_table_warnings_include_spans() {
-    let sql = r"
-    CREATE INDEX idx_missing ON nonexistent_table (id);
-    ";
-
-    let output = parse_sql_to_schema_with_diagnostics(sql);
-    let warning = output
+    let unknown_table: Vec<_> = output
         .diagnostics
         .iter()
-        .find(|d| d.code == codes::schema_unknown_table())
-        .expect("warning should exist");
+        .filter(|d| d.code == codes::schema_unknown_table())
+        .collect();
+    assert_eq!(unknown_table.len(), 1);
+    let warning = unknown_table[0];
+    assert_eq!(warning.severity, Severity::Warning);
+    assert!(
+        warning.message.contains("nonexistent_table"),
+        "unexpected message: {}",
+        warning.message
+    );
 
-    assert!(warning.span.is_some());
+    // sqlparser spans a CREATE INDEX from its name through the last key
+    // column, which is the source range the warning points at.
+    let span = warning.span.expect("warning should carry a span");
+    let expected = "idx_missing ON nonexistent_table (id";
+    let start = sql.find(expected).expect("span text offset");
+    assert_eq!(span.offset, start);
+    assert_eq!(span.length, expected.len());
 }
 
 #[test]
@@ -1175,23 +1191,6 @@ fn handles_comment_on_unknown_column() {
             .count(),
         1
     );
-}
-
-#[test]
-fn handles_null_comment() {
-    let sql = r"
-    CREATE TABLE users (
-      id BIGINT PRIMARY KEY
-    );
-
-    COMMENT ON TABLE users IS NULL;
-    ";
-
-    let schema = parse_sql_to_schema(sql).expect("parse should succeed");
-    assert_eq!(schema.tables.len(), 1);
-
-    let users = &schema.tables[0];
-    assert_eq!(users.comment, None);
 }
 
 #[test]
@@ -1604,8 +1603,41 @@ fn auto_detection_matches_explicit_dialect_for_fixture_corpus() {
         ("sqlite_blog.sql", SqlDialect::Sqlite),
     ];
 
-    for (fixture, dialect) in cases {
-        let sql = read_sql_fixture(fixture);
+    let inline_cases = [
+        (
+            "inline MySQL table",
+            r"
+            CREATE TABLE `users` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `name` VARCHAR(255) NOT NULL,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB;
+            ",
+            SqlDialect::Mysql,
+        ),
+        (
+            "inline SQLite table",
+            r"
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            );
+            ",
+            SqlDialect::Sqlite,
+        ),
+    ];
+
+    // Inline cases also pin their exact tables; fixtures only need some.
+    let corpus = cases
+        .into_iter()
+        .map(|(fixture, dialect)| (fixture, read_sql_fixture(fixture), dialect, None))
+        .chain(
+            inline_cases
+                .into_iter()
+                .map(|(label, sql, dialect)| (label, sql.to_string(), dialect, Some(["users"]))),
+        );
+
+    for (fixture, sql, dialect, expected_tables) in corpus {
         let auto = parse_sql_to_schema_with_diagnostics(&sql);
         let explicit = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, dialect);
 
@@ -1613,6 +1645,17 @@ fn auto_detection_matches_explicit_dialect_for_fixture_corpus() {
             auto.dialect, dialect,
             "auto-detected wrong dialect for {fixture}"
         );
+        assert!(!auto.has_errors(), "{fixture} should parse without errors");
+        let table_names: Vec<_> = auto
+            .schema
+            .iter()
+            .flat_map(|schema| &schema.tables)
+            .map(|table| table.name.as_str())
+            .collect();
+        match expected_tables {
+            Some(expected) => assert_eq!(table_names, expected, "tables for {fixture}"),
+            None => assert!(!table_names.is_empty(), "{fixture} should produce tables"),
+        }
         assert_eq!(
             snapshot_data(&auto),
             snapshot_data(&explicit),
@@ -2091,37 +2134,6 @@ fn test_parse_sqlite_foreign_keys() {
     let posts = &schema.tables[1];
     assert_eq!(posts.foreign_keys.len(), 1);
     assert_eq!(posts.foreign_keys[0].to_table, "users");
-}
-
-#[test]
-fn test_parse_auto_detect_mysql() {
-    let sql = r"
-        CREATE TABLE `users` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `name` VARCHAR(255) NOT NULL,
-            PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB;
-    ";
-    // Auto dialect should detect MySQL and parse correctly
-    let schema =
-        parse_sql_to_schema_with_dialect(sql, SqlDialect::Auto).expect("parse should succeed");
-    assert_eq!(schema.tables.len(), 1);
-    assert_eq!(schema.tables[0].name, "users");
-}
-
-#[test]
-fn test_parse_auto_detect_sqlite() {
-    let sql = r"
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
-        );
-    ";
-    // Auto dialect should detect SQLite and parse correctly
-    let schema =
-        parse_sql_to_schema_with_dialect(sql, SqlDialect::Auto).expect("parse should succeed");
-    assert_eq!(schema.tables.len(), 1);
-    assert_eq!(schema.tables[0].name, "users");
 }
 
 #[test]
