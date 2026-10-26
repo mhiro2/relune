@@ -4924,7 +4924,7 @@ mod tests {
     }
 
     #[test]
-    fn drop_column_referenced_silenced_when_all_same_shape_fks_dropped() {
+    fn drop_table_referenced_silenced_when_all_same_shape_fks_dropped() {
         // before: public.orders has TWO FKs with identical shape
         //         (user_id -> public.users.id), differing only by name.
         // after:  both FKs are dropped, and public.users itself is dropped.
@@ -4989,6 +4989,89 @@ mod tests {
                 .iter()
                 .all(|f| f.rule_id != ReviewRuleId::DropTableReferenced),
             "All same-shape FKs were dropped; drop-table-referenced should not fire, got: {findings:?}"
+        );
+    }
+
+    /// Builds a migration that drops `public.users.email` while
+    /// `public.orders` goes from two same-shape FKs on that column
+    /// (differing only by name) to the first `kept_fks` of them.
+    fn drop_email_with_same_shape_fks(kept_fks: usize) -> (Schema, Schema) {
+        let users = |columns| table_in("public", "users", columns, vec![], vec![]);
+        let fks: Vec<_> = ["orders_email_a_fkey", "orders_email_b_fkey"]
+            .into_iter()
+            .map(|name| {
+                let mut fk = fk(
+                    name,
+                    &["user_email"],
+                    "users",
+                    &["email"],
+                    ReferentialAction::NoAction,
+                );
+                fk.to_schema = Some("public".into());
+                fk
+            })
+            .collect();
+        let orders = |fks| {
+            table_in(
+                "public",
+                "orders",
+                vec![
+                    col("id", "BIGINT", false, true),
+                    col("user_email", "TEXT", true, false),
+                ],
+                fks,
+                vec![],
+            )
+        };
+        let before = Schema {
+            tables: vec![
+                users(vec![
+                    col("id", "BIGINT", false, true),
+                    col("email", "TEXT", true, false),
+                ]),
+                orders(fks.clone()),
+            ],
+            ..Default::default()
+        };
+        let after = Schema {
+            tables: vec![
+                users(vec![col("id", "BIGINT", false, true)]),
+                orders(fks[..kept_fks].to_vec()),
+            ],
+            ..Default::default()
+        };
+        (before, after)
+    }
+
+    #[test]
+    fn drop_column_referenced_silenced_when_all_same_shape_fks_dropped() {
+        let (before, after) = drop_email_with_same_shape_fks(0);
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumn),
+            "the column drop itself must still be reported, got: {findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.rule_id != ReviewRuleId::DropColumnReferenced),
+            "All same-shape FKs were dropped; drop-column-referenced should not fire, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn drop_column_referenced_breaking_when_only_one_of_same_shape_fks_dropped() {
+        let (before, after) = drop_email_with_same_shape_fks(1);
+
+        let findings = run_with_dialect(&before, &after, EffectiveDialect::Postgres);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == ReviewRuleId::DropColumnReferenced),
+            "One same-shape FK still references users.email; drop-column-referenced must fire, got: {findings:?}"
         );
     }
 
