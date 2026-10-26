@@ -8,9 +8,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{Level, debug, info, span};
 
+use relune_core::config::MARKER_SAFE_RANK_GAP;
+use relune_core::diagnostic::codes;
 use relune_core::layout::{EdgeRoute, RouteStyle};
 use relune_core::{
-    EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection, LayoutSpec, NodeKind, Schema,
+    CardDensity, Diagnostic, EdgeKind, LayoutAlgorithm, LayoutCompactionSpec, LayoutDirection,
+    LayoutSpec, NodeKind, Schema,
 };
 
 use crate::focus::FocusExtractor;
@@ -18,6 +21,7 @@ use crate::graph::{CollapsedJoinTable, LayoutGraph, LayoutGraphBuilder, LayoutRe
 use crate::order::order_nodes_within_layers;
 use crate::rank::assign_ranks;
 
+mod density;
 mod edge_routing;
 mod force;
 mod groups;
@@ -26,9 +30,10 @@ mod routing_debug;
 mod spacing;
 mod spatial;
 
-use edge_routing::route_edges_with_diagnostics;
+use density::{DensityView, apply_density};
+use edge_routing::route_edges_around;
 use force::apply_force_layout;
-use groups::position_groups;
+use groups::{group_heading_rect, position_groups};
 use hierarchical::{HierarchicalPlacement, RowAlignment, assign_coordinates};
 use spacing::{fit_canvas_to_content, measure_node_sizes};
 
@@ -37,15 +42,14 @@ const fn default_force_iterations() -> usize {
     150
 }
 
-/// Horizontal padding around grouped nodes.
-pub(super) const GROUP_PADDING: f32 = 20.0;
-/// Extra top inset reserved for the rendered group label band.
-pub(super) const GROUP_TOP_PADDING: f32 = 44.0;
+use crate::metrics::{GROUP_PADDING, GROUP_TOP_PADDING};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct NodeSize {
     pub(super) width: f32,
     pub(super) height: f32,
+    /// Columns the card leaves out at the chosen density.
+    pub(super) omitted: Option<OmittedColumns>,
 }
 
 /// Configuration for layout.
@@ -61,15 +65,17 @@ pub struct LayoutConfig {
     pub vertical_spacing: f32,
     /// Node width.
     pub node_width: f32,
-    /// Padding inside nodes.
+    /// Clearance kept around each node when force-directed layout pushes
+    /// overlapping nodes apart. Card size comes from the shared row metrics.
     pub node_padding: f32,
     /// Layout direction.
     pub direction: LayoutDirection,
     /// Edge rendering style.
     pub edge_style: RouteStyle,
-    /// Whether to show column details in nodes.
-    /// When false, only table names are displayed.
-    pub show_columns: bool,
+    /// Columns each card lists. `None` lists every column unless the schema
+    /// is past the compaction limit, where cards fall back to the overview.
+    #[serde(default)]
+    pub density: Option<CardDensity>,
     /// Layout mode (hierarchical or force-directed).
     #[serde(default)]
     pub mode: LayoutAlgorithm,
@@ -95,7 +101,7 @@ impl Default for LayoutConfig {
             node_padding: 8.0,
             direction: LayoutDirection::TopToBottom,
             edge_style: RouteStyle::Orthogonal,
-            show_columns: true,
+            density: None,
             mode: LayoutAlgorithm::default(),
             force_iterations: default_force_iterations(),
             compaction: LayoutCompactionSpec::default(),
@@ -188,6 +194,7 @@ impl From<&LayoutSpec> for LayoutConfig {
             force_iterations: spec.force_iterations,
             compaction: spec.compaction.clone(),
             auto_tune_spacing: spec.auto_tune_spacing,
+            density: spec.density,
             ..Default::default()
         }
     }
@@ -236,10 +243,8 @@ pub struct CompactedConfig {
     pub vertical_spacing: f32,
     /// Compacted node width.
     pub node_width: f32,
-    /// Compacted padding inside nodes.
+    /// Compacted clearance kept around each node in force-directed layout.
     pub node_padding: f32,
-    /// Whether columns should be hidden.
-    pub hide_columns: bool,
 }
 
 impl LayoutConfig {
@@ -267,13 +272,6 @@ impl LayoutConfig {
                     .max(self.compaction.min_node_width),
                 node_padding: (self.node_padding * compaction_factor)
                     .max(self.compaction.min_node_padding),
-                hide_columns: !self.show_columns
-                    || (self.compaction.hide_columns_threshold_multiplier > 0
-                        && node_count
-                            > self
-                                .compaction
-                                .threshold
-                                .saturating_mul(self.compaction.hide_columns_threshold_multiplier)),
             }
         } else {
             CompactedConfig {
@@ -281,9 +279,53 @@ impl LayoutConfig {
                 vertical_spacing: self.vertical_spacing,
                 node_width: self.node_width,
                 node_padding: self.node_padding,
-                hide_columns: !self.show_columns,
             }
         }
+    }
+
+    /// Card density for a graph of `node_count` nodes.
+    ///
+    /// An explicit density always wins. Otherwise cards list every column,
+    /// falling back to the overview once the node count passes
+    /// `compaction.threshold * compaction.hide_columns_threshold_multiplier`.
+    #[must_use]
+    pub fn effective_density(&self, node_count: usize) -> CardDensity {
+        self.density.unwrap_or_else(|| {
+            if self.density_falls_back(node_count) {
+                CardDensity::Overview
+            } else {
+                CardDensity::Full
+            }
+        })
+    }
+
+    /// Info diagnostic explaining that cards fell back to the overview
+    /// because the schema is large and no density was chosen, so the switch
+    /// is never silent. `None` when the chosen or default density applies.
+    #[must_use]
+    pub fn density_fallback_notice(&self, node_count: usize) -> Option<Diagnostic> {
+        (self.density.is_none() && self.density_falls_back(node_count)).then(|| {
+            Diagnostic::info(
+                codes::layout_density_fallback(),
+                format!(
+                    "{node_count} objects exceed the overview limit of {}, so cards show headers only; \
+                     set the density to keys or full (--density or the `density` config key) \
+                     to list columns",
+                    self.density_fallback_limit()
+                ),
+            )
+        })
+    }
+
+    const fn density_fallback_limit(&self) -> usize {
+        self.compaction
+            .threshold
+            .saturating_mul(self.compaction.hide_columns_threshold_multiplier)
+    }
+
+    const fn density_falls_back(&self, node_count: usize) -> bool {
+        let limit = self.density_fallback_limit();
+        limit > 0 && node_count > limit
     }
 
     /// Check if compact mode should be enabled based on node count.
@@ -330,8 +372,13 @@ impl LayoutConfig {
 
         self.horizontal_spacing =
             (self.horizontal_spacing * combined).max(self.compaction.min_horizontal_spacing);
-        self.vertical_spacing =
-            (self.vertical_spacing * combined).max(self.compaction.min_vertical_spacing);
+        // Auto-tuning never squeezes ranks below the gap that fits a marker
+        // at each end of a line and its label, unless the spacing asked for
+        // is already tighter; compaction handles large schemas separately.
+        let marker_floor = self.vertical_spacing.min(MARKER_SAFE_RANK_GAP);
+        self.vertical_spacing = (self.vertical_spacing * combined)
+            .max(self.compaction.min_vertical_spacing)
+            .max(marker_floor);
 
         self
     }
@@ -391,8 +438,12 @@ pub struct PositionedNode {
     pub label: String,
     /// Node kind.
     pub kind: NodeKind,
-    /// Column information.
+    /// Columns the card lists, in table order.
     pub columns: Vec<PositionedColumn>,
+    /// Columns the card leaves out at the chosen density; `None` when it
+    /// lists every column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<OmittedColumns>,
     /// X coordinate (top-left corner).
     pub x: f32,
     /// Y coordinate (top-left corner).
@@ -407,6 +458,46 @@ pub struct PositionedNode {
     pub has_self_loop: bool,
     /// Group index (if grouped).
     pub group_index: Option<usize>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if requires &T
+impl PositionedNode {
+    /// Columns counted by the card's closing `+N columns` row, if it has one.
+    #[must_use]
+    pub fn counted_omitted_columns(&self) -> Option<usize> {
+        self.omitted.and_then(OmittedColumns::row_count)
+    }
+
+    /// Whether the card draws any rows below its header.
+    #[must_use]
+    pub fn has_rows(&self) -> bool {
+        !self.columns.is_empty() || self.counted_omitted_columns().is_some()
+    }
+}
+
+/// Columns a card leaves out at its density.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OmittedColumns {
+    /// Number of columns left out.
+    pub count: usize,
+    /// Primary key columns among them, so tooltips can still count keys.
+    pub primary_keys: usize,
+    /// Whether the card ends with a `+N columns` row. Overview cards are a
+    /// header alone; any other card that leaves columns out counts them.
+    pub counted_row: bool,
+}
+
+impl OmittedColumns {
+    /// Columns the closing `+N columns` row counts, or `None` when the card
+    /// has no such row.
+    #[must_use]
+    pub const fn row_count(self) -> Option<usize> {
+        if self.counted_row {
+            Some(self.count)
+        } else {
+            None
+        }
+    }
 }
 
 /// Shared flag set for rendered columns.
@@ -439,6 +530,9 @@ pub struct PositionedColumn {
     pub name: String,
     /// Column data type.
     pub data_type: String,
+    /// Type the column had before a diff changed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_data_type: Option<String>,
     /// Boolean render flags flattened for stable serialized output.
     #[serde(flatten)]
     pub flags: ColumnFlags,
@@ -634,15 +728,19 @@ pub fn build_layout_from_graph_with_config(
             vertical_spacing: compacted.vertical_spacing,
             node_width: compacted.node_width,
             node_padding: compacted.node_padding,
-            show_columns: !compacted.hide_columns,
             ..tuned_config
         }
     } else {
         tuned_config
     };
 
+    let density = effective_config.effective_density(graph.nodes.len());
+    debug!("Laying out cards at {density:?} density");
+    let DensityView { graph, omitted } = apply_density(graph, density);
+    let graph = graph.as_ref();
+
     // Step 3: Assign coordinates based on layout mode
-    let node_sizes = measure_node_sizes(graph, &effective_config);
+    let node_sizes = measure_node_sizes(graph, &omitted, &effective_config);
     let ranks = assign_ranks(graph);
     debug!("Assigned {} ranks", ranks.num_ranks);
     let ordered_nodes = order_nodes_within_layers(graph, &ranks);
@@ -672,16 +770,21 @@ pub fn build_layout_from_graph_with_config(
         node_rows,
     } = placement;
 
-    // Step 4: Route edges
-    let (positioned_edges, routing_diagnostics) = route_edges_with_diagnostics(
+    // Step 4: Position groups, whose headings lines and labels must avoid
+    let mut positioned_groups = position_groups(&graph.groups, &positioned_nodes);
+    let headings: Vec<_> = positioned_groups
+        .iter()
+        .filter_map(group_heading_rect)
+        .collect();
+
+    // Step 5: Route edges
+    let (positioned_edges, routing_diagnostics) = route_edges_around(
         graph,
         &positioned_nodes,
         &effective_config,
         Some(&node_rows),
+        &headings,
     )?;
-
-    // Step 5: Position groups
-    let mut positioned_groups = position_groups(&graph.groups, &positioned_nodes);
 
     // Fit the canvas to routes and labels so nothing is clipped.
     let mut positioned_nodes = positioned_nodes;

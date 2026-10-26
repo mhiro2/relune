@@ -12,12 +12,14 @@ use crate::channel::{
     compare_cached_channel_candidate_scores,
 };
 use crate::graph::LayoutGraph;
-use crate::port::{EdgePortAssignment, RegularPortAssignment, assign_edge_ports};
+use crate::port::{
+    EdgePortAssignment, MIN_SLOT_GAP, PORT_CORNER_INSET, RegularPortAssignment, assign_edge_ports,
+};
 use crate::route::{
-    AttachmentSide, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
+    AttachmentSide, BORDER_OUTSET, ChannelAxis, LABEL_HALF_H, Rect, approximate_route_length,
     detour_around_obstacles_with_endpoint_sizes, estimate_label_half_width, nudge_label,
     point_along_route, rebuild_route_from_points, route_edge_with_assigned_ports, route_points,
-    route_self_loop_with_offset, sample_route_obstacles, step_from_attachment,
+    route_self_loop_at_rows, sample_route_obstacles, step_from_attachment,
 };
 
 use super::routing_debug::{build_regular_edge_debug, channel_axis_name};
@@ -28,10 +30,15 @@ use super::{
 
 /// Clearance target used while scoring obstacle-aware channel candidates.
 const ROUTE_CLEARANCE_TARGET: f32 = 14.0;
+/// Obstacle inflation for the hard intersection check. The segment test
+/// ignores a rectangle's outer 2px; this cancels most of that so a channel
+/// running just inside a node's edge still counts as crossing it.
+pub(super) const HARD_OBSTACLE_PADDING: f32 = 1.5;
 /// Maximum gap between nearby channel candidates that may share one visual bundle.
 const BUNDLE_CHANNEL_TOLERANCE: f32 = 36.0;
-/// Distance used to preserve endpoint approach direction while entering a bypass channel.
-const ROUTE_STUB_DISTANCE: f32 = 28.0;
+/// Distance used to preserve endpoint approach direction while entering a
+/// bypass channel; past the endpoint marker, plus the port's own offset.
+const ROUTE_STUB_DISTANCE: f32 = MIN_ENDPOINT_STUB + 4.0;
 /// Margin added when probing side corridors outside the endpoint nodes.
 const BYPASS_CHANNEL_MARGIN: f32 = 24.0;
 /// Distance between adjacent outer bypass lanes.
@@ -56,7 +63,7 @@ const EDGE_LABEL_COLLISION_MARGIN: f32 = 4.0;
 /// Labels should stay away from edge endpoints and markers.
 pub(super) const MIN_LABEL_ROUTE_T: f32 = 0.16;
 /// Candidate stride when sliding labels along their own route.
-const LABEL_ROUTE_T_STEP: f32 = 0.08;
+const LABEL_ROUTE_T_STEP: f32 = 0.03;
 /// Maximum perpendicular fallback when a label cannot fit anywhere on its own route.
 const LABEL_ROUTE_FALLBACK_MAX_OFFSET: f32 = 96.0;
 /// Extra clearance reserved from a FK endpoint for Crow's Foot markers.
@@ -65,6 +72,9 @@ const FK_MARKER_CLEARANCE: f32 = 30.0;
 const ARROW_MARKER_CLEARANCE: f32 = 14.0;
 /// Half-thickness of the axis-aligned obstacle reserved for endpoint markers.
 const ENDPOINT_MARKER_HALF_THICKNESS: f32 = 14.0;
+/// Shortest straight run a route keeps at each card before its first bend,
+/// so a Crow's Foot marker never folds over the elbow.
+const MIN_ENDPOINT_STUB: f32 = FK_MARKER_CLEARANCE;
 
 /// Route all edges in the graph.
 #[cfg_attr(not(test), allow(dead_code))] // Test helpers exercise the wrapper directly.
@@ -167,7 +177,7 @@ fn route_single_edge(
                 detail: "source node position missing for self-loop",
             });
         };
-        route_self_loop_with_offset(
+        route_self_loop_at_rows(
             x,
             y,
             w,
@@ -175,6 +185,8 @@ fn route_single_edge(
             ctx.config.edge_style,
             ctx.config.direction,
             assignment.radius_offset,
+            assignment.rows,
+            Some(assignment.side),
         )
     } else if let (
         EdgePortAssignment::Regular(assignment),
@@ -311,13 +323,17 @@ fn route_single_edge(
                 (Some(&(_, _, w, h)), _) | (_, Some(&(_, _, w, h))) => Some((w, h)),
                 _ => None,
             };
+            let loop_side = match port_assignment {
+                EdgePortAssignment::SelfLoop(assignment) => assignment.side,
+                EdgePortAssignment::Regular(_) => AttachmentSide::East,
+            };
             // Detours may wander arbitrarily far from the loop, so self-loops
             // (rare in practice) check against every node.
             detour_around_obstacles_with_endpoint_sizes(
                 &route,
                 &ctx.obstacles.all(),
-                Some(AttachmentSide::East),
-                Some(AttachmentSide::East),
+                Some(loop_side),
+                Some(loop_side),
                 self_size,
                 self_size,
             )
@@ -436,7 +452,8 @@ pub(super) struct NodeObstacleIndex<'a> {
 }
 
 impl<'a> NodeObstacleIndex<'a> {
-    pub(super) fn from_nodes(nodes: &'a [PositionedNode]) -> Self {
+    /// Indexes every node plus anonymous `rects` that no edge may cross.
+    pub(super) fn from_nodes_and_rects(nodes: &'a [PositionedNode], rects: &[Rect]) -> Self {
         Self::build(
             nodes
                 .iter()
@@ -451,6 +468,7 @@ impl<'a> NodeObstacleIndex<'a> {
                         },
                     )
                 })
+                .chain(rects.iter().map(|rect| ("", *rect)))
                 .collect(),
         )
     }
@@ -568,6 +586,18 @@ pub(super) fn route_edges_with_diagnostics(
     config: &LayoutConfig,
     node_ranks: Option<&[usize]>,
 ) -> Result<(Vec<PositionedEdge>, RoutingDiagnostics), LayoutError> {
+    route_edges_around(graph, positioned_nodes, config, node_ranks, &[])
+}
+
+/// Routes all edges, keeping lines and labels off `fixed_obstacles` (such as
+/// group headings) as well as off every card.
+pub(super) fn route_edges_around(
+    graph: &LayoutGraph,
+    positioned_nodes: &[PositionedNode],
+    config: &LayoutConfig,
+    node_ranks: Option<&[usize]>,
+    fixed_obstacles: &[Rect],
+) -> Result<(Vec<PositionedEdge>, RoutingDiagnostics), LayoutError> {
     let node_positions: BTreeMap<&str, (f32, f32, f32, f32)> = positioned_nodes
         .iter()
         .map(|node| (node.id.as_str(), (node.x, node.y, node.width, node.height)))
@@ -582,7 +612,7 @@ pub(super) fn route_edges_with_diagnostics(
 
     let mut routed_edges = vec![None; graph.edges.len()];
 
-    let node_obstacles = NodeObstacleIndex::from_nodes(positioned_nodes);
+    let node_obstacles = NodeObstacleIndex::from_nodes_and_rects(positioned_nodes, fixed_obstacles);
 
     for &edge_index in &routing_order {
         let edge = &graph.edges[edge_index];
@@ -639,7 +669,8 @@ pub(super) fn route_edges_with_diagnostics(
         });
     }
 
-    apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph);
+    apply_parallel_edge_bundling(&mut routed_edges, positioned_nodes, graph, fixed_obstacles);
+    straighten_small_jogs(&mut routed_edges, graph, positioned_nodes, &node_obstacles);
 
     let mut edges = vec![None; graph.edges.len()];
     let mut placed_labels = PlacedLabels::new();
@@ -665,7 +696,7 @@ pub(super) fn route_edges_with_diagnostics(
     }
 
     let mut edges: Vec<_> = edges.into_iter().flatten().collect();
-    resolve_edge_label_collisions(&mut edges, positioned_nodes);
+    resolve_edge_label_collisions(&mut edges, positioned_nodes, fixed_obstacles);
     Ok((edges, diagnostics))
 }
 
@@ -673,6 +704,7 @@ fn apply_parallel_edge_bundling(
     routed_edges: &mut [Option<RoutedEdgeDraft>],
     positioned_nodes: &[PositionedNode],
     graph: &LayoutGraph,
+    fixed_obstacles: &[Rect],
 ) {
     let mut groups: BTreeMap<BundleGroupKey, Vec<usize>> = BTreeMap::new();
 
@@ -743,6 +775,7 @@ fn apply_parallel_edge_bundling(
                         edge,
                         bundle_metadata,
                         positioned_nodes,
+                        fixed_obstacles,
                     ) {
                         edge.route = candidate;
                     }
@@ -750,6 +783,102 @@ fn apply_parallel_edge_bundling(
             }
 
             cluster_start = cluster_end;
+        }
+    }
+}
+
+/// Sideways step below which a vertical route reads as one line drawn
+/// slightly off, rather than as a deliberate bend; it covers the half slot
+/// gap that two centered port groups leave between nearly aligned ports.
+const SMALL_JOG: f32 = 16.0;
+
+/// Straightens vertical routes whose ends are only a few pixels apart.
+///
+/// Port slots are spread per card side, so two nearly aligned ports can
+/// leave a route with a tiny sideways step between its channel bends. When
+/// one endpoint can slide along its top or bottom side to line up with the
+/// other, without crowding another port or crossing a card, the route
+/// becomes a single straight line. Side ports stay put: their height names
+/// a column row.
+fn straighten_small_jogs(
+    routed_edges: &mut [Option<RoutedEdgeDraft>],
+    graph: &LayoutGraph,
+    positioned_nodes: &[PositionedNode],
+    obstacles: &NodeObstacleIndex<'_>,
+) {
+    let node_by_id: BTreeMap<&str, &PositionedNode> = positioned_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let mut ports: Vec<(usize, &str, (f32, f32))> = Vec::new();
+    for (index, draft) in routed_edges.iter().enumerate() {
+        let Some(draft) = draft else { continue };
+        let edge = &graph.edges[draft.edge_index];
+        ports.push((index, edge.from.as_str(), (draft.route.x1, draft.route.y1)));
+        ports.push((index, edge.to.as_str(), (draft.route.x2, draft.route.y2)));
+    }
+
+    for (index, slot) in routed_edges.iter_mut().enumerate() {
+        let Some(draft) = slot.as_mut() else {
+            continue;
+        };
+        let edge = &graph.edges[draft.edge_index];
+        if edge.is_self_loop || draft.route.style == RouteStyle::Straight {
+            continue;
+        }
+        let points = route_points(&draft.route);
+        let [source, bend_a, bend_b, target] = points[..] else {
+            continue;
+        };
+        let vertical_z = (source.0 - bend_a.0).abs() < 0.01
+            && (bend_b.0 - target.0).abs() < 0.01
+            && (bend_a.1 - bend_b.1).abs() < 0.01;
+        let jog = (source.0 - target.0).abs();
+        if !vertical_z || !(0.01..SMALL_JOG).contains(&jog) {
+            continue;
+        }
+
+        // Prefer moving the target end, which carries the lighter marker.
+        let moves = [
+            (edge.to.as_str(), target, source.0),
+            (edge.from.as_str(), source, target.0),
+        ];
+        let straightened = moves.into_iter().find_map(|(node_id, port, new_x)| {
+            let node = node_by_id.get(node_id)?;
+            let within_side = new_x >= node.x + PORT_CORNER_INSET
+                && new_x <= node.x + node.width - PORT_CORNER_INSET;
+            let crowds_neighbour = ports.iter().any(|&(other, other_node, other_port)| {
+                other != index
+                    && other_node == node_id
+                    && (other_port.1 - port.1).abs() < 0.5
+                    && (other_port.0 - new_x).abs() < MIN_SLOT_GAP
+            });
+            if !within_side || crowds_neighbour {
+                return None;
+            }
+            let points = if port == target {
+                [source, (new_x, target.1)]
+            } else {
+                [(new_x, source.1), target]
+            };
+            let route = rebuild_route_from_points(&points, draft.route.style);
+            let edge_obstacles = EdgeObstacles::new(obstacles, &edge.from, &edge.to);
+            let nearby = edge_obstacles.near_route(&route, ROUTE_CLEARANCE_TARGET);
+            (route_obstacle_hit_count(&route, &nearby, HARD_OBSTACLE_PADDING) == 0).then_some((
+                route,
+                port == target,
+                new_x,
+            ))
+        });
+
+        if let Some((route, moved_target, new_x)) = straightened {
+            for port in &mut ports {
+                if port.0 == index && (port.2 == if moved_target { target } else { source }) {
+                    port.2.0 = new_x;
+                }
+            }
+            draft.route = route;
+            draft.bundle_metadata = None;
         }
     }
 }
@@ -773,7 +902,8 @@ fn bundle_anchor_distance(density: f32, cluster_size: usize) -> f32 {
     #[allow(clippy::cast_precision_loss)]
     let extra = cluster_size.saturating_sub(2) as f32;
     let base = if density >= 1.5 { 14.0 } else { 18.0 };
-    base + (extra * 4.0).min(12.0)
+    // Bundled lines still need room for their endpoint markers.
+    (base + (extra * 4.0).min(12.0)).max(MIN_ENDPOINT_STUB)
 }
 
 fn bundle_cluster_stats(
@@ -865,6 +995,7 @@ fn bundled_route_is_valid(
     edge: &RoutedEdgeDraft,
     metadata: BundleRouteMetadata,
     positioned_nodes: &[PositionedNode],
+    fixed_obstacles: &[Rect],
 ) -> bool {
     let source_edge = &graph.edges[edge.edge_index];
     if endpoint_side_violations(route, metadata.source_side, metadata.target_side) > 0 {
@@ -880,9 +1011,10 @@ fn bundled_route_is_valid(
             w: node.width,
             h: node.height,
         })
+        .chain(fixed_obstacles.iter().copied())
         .collect::<Vec<_>>();
 
-    route_obstacle_hit_count(route, &obstacles, 0.0) == 0
+    route_obstacle_hit_count(route, &obstacles, HARD_OBSTACLE_PADDING) == 0
 }
 
 #[allow(clippy::cast_precision_loss)] // Bundle clusters stay tiny and only affect visual interpolation.
@@ -1165,6 +1297,9 @@ pub(super) fn channel_candidates(
     rank_bounds: &[RankAxisBounds],
 ) -> Vec<ObstacleAwareChannelCandidate> {
     let mut candidates = Vec::with_capacity(plan.class.search_offsets().len());
+    let stub_range = (plan.class == ChannelCandidateClass::InterRank)
+        .then(|| inter_rank_stub_range(source_rank, target_rank, rank_bounds))
+        .flatten();
 
     for (stable_order, offset) in plan.class.search_offsets().iter().copied().enumerate() {
         let coordinate = plan.baseline + offset;
@@ -1183,6 +1318,37 @@ pub(super) fn channel_candidates(
         });
     }
 
+    // Lanes inside the part of the gap that keeps endpoint markers clear of
+    // the elbow, so edges sharing a gap can each keep their markers whole
+    // without stacking on one channel.
+    if let Some((lower, upper)) = stub_range {
+        let center = f32::midpoint(lower, upper);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let steps = (((center - lower) / STUB_RANGE_LANE_STEP).floor() as usize)
+            .min(STUB_RANGE_LANES_PER_SIDE);
+        let mut lanes = Vec::with_capacity(steps * 2 + 4);
+        #[allow(clippy::cast_precision_loss)]
+        for step in (0..=steps).map(|index| index as f32 * STUB_RANGE_LANE_STEP) {
+            lanes.extend([center - step, center + step]);
+        }
+        // The range edges keep the most room from cards in the middle.
+        lanes.extend([lower, upper]);
+        for coordinate in lanes {
+            let duplicate = candidates
+                .iter()
+                .any(|candidate| (candidate.coordinate - coordinate).abs() < 1.0);
+            if coordinate <= upper && !duplicate {
+                #[allow(clippy::cast_possible_truncation)]
+                candidates.push(ObstacleAwareChannelCandidate {
+                    axis: plan.axis,
+                    coordinate,
+                    baseline: plan.baseline,
+                    stable_order: candidates.len() as u32,
+                });
+            }
+        }
+    }
+
     if candidates.is_empty() {
         candidates.push(ObstacleAwareChannelCandidate {
             axis: plan.axis,
@@ -1193,6 +1359,46 @@ pub(super) fn channel_candidates(
     }
 
     candidates
+}
+
+/// Spacing of the extra channel lanes tried inside a gap's marker-safe range.
+const STUB_RANGE_LANE_STEP: f32 = 10.0;
+/// Extra lanes tried on each side of the range's center; long edges across
+/// many ranks would otherwise add a lane for every 10px of their gap.
+const STUB_RANGE_LANES_PER_SIDE: usize = 6;
+
+/// Endpoints whose straight run before the first bend is too short for the
+/// endpoint marker; zero for a route without bends.
+fn short_endpoint_stubs(route: &EdgeRoute) -> u16 {
+    let points = route_points(route);
+    if points.len() < 3 {
+        return 0;
+    }
+    let length = |a: (f32, f32), b: (f32, f32)| (b.0 - a.0).hypot(b.1 - a.1);
+    let first = length(points[0], points[1]);
+    let last = length(points[points.len() - 2], points[points.len() - 1]);
+    u16::from(first + 0.5 < MIN_ENDPOINT_STUB) + u16::from(last + 0.5 < MIN_ENDPOINT_STUB)
+}
+
+/// Range of the gap between two ranks whose channels leave every card in
+/// either rank at least [`MIN_ENDPOINT_STUB`] of straight line, or `None`
+/// when the gap is too narrow to keep it on both sides.
+fn inter_rank_stub_range(
+    source_rank: usize,
+    target_rank: usize,
+    rank_bounds: &[RankAxisBounds],
+) -> Option<(f32, f32)> {
+    let source = rank_bounds.get(source_rank).copied()?;
+    let target = rank_bounds.get(target_rank).copied()?;
+    let (lower, upper) = if source.min <= target.min {
+        (source.max, target.min)
+    } else {
+        (target.max, source.min)
+    };
+    // Ports sit just outside the card border, so the stub starts there.
+    let reach = MIN_ENDPOINT_STUB + BORDER_OUTSET;
+    let range = (lower + reach, upper - reach);
+    (range.0 <= range.1).then_some(range)
 }
 
 /// Candidates in the outer corridors on both sides of an edge.
@@ -1364,7 +1570,9 @@ fn candidate_channel_anchors(
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            if context.source_rank < context.target_rank {
+            // Step out of each rank on the side facing the other one; rank
+            // order says nothing about which side that is in bottom-to-top.
+            if source_bounds.min <= target_bounds.min {
                 (
                     (source.0, source_bounds.max + ROUTE_STUB_DISTANCE),
                     (target.0, target_bounds.min - ROUTE_STUB_DISTANCE),
@@ -1393,7 +1601,7 @@ fn candidate_channel_anchors(
                     step_from_attachment(target, target_side, ROUTE_STUB_DISTANCE),
                 );
             };
-            if context.source_rank < context.target_rank {
+            if source_bounds.min <= target_bounds.min {
                 (
                     (source_bounds.max + ROUTE_STUB_DISTANCE, source.1),
                     (target_bounds.min - ROUTE_STUB_DISTANCE, target.1),
@@ -1465,12 +1673,22 @@ fn score_channel_candidate(
     // Obstacles farther than the clearance target neither intersect the route
     // nor add a clearance penalty, so only nearby nodes are scored.
     let obstacles = obstacles.near_route(route, ROUTE_CLEARANCE_TARGET);
-    let hard_constraint_violations = clipped_u16(route_obstacle_hit_count(route, &obstacles, 0.0))
-        + route_primary_direction_violations(route, direction, source_rank, target_rank)
-        + endpoint_side_violations(route, source_side, target_side);
+    let hard_constraint_violations =
+        clipped_u16(route_obstacle_hit_count(
+            route,
+            &obstacles,
+            HARD_OBSTACLE_PADDING,
+        )) + route_primary_direction_violations(route, direction, source_rank, target_rank)
+            + endpoint_side_violations(route, source_side, target_side);
 
     ChannelCandidateScore {
         hard_constraint_violations,
+        tight_obstacles: clipped_u16(route_obstacle_hit_count(
+            route,
+            &obstacles,
+            ROUTE_CLEARANCE_TARGET,
+        )),
+        short_endpoint_stubs: short_endpoint_stubs(route),
         clearance_penalty: route_clearance_penalty(route, &obstacles, ROUTE_CLEARANCE_TARGET),
         total_length: rounded_metric(approximate_route_length(route)),
         bend_count: clipped_u16(route.control_points.len()),
@@ -1597,16 +1815,22 @@ fn segment_matches_side(start: (f32, f32), next: (f32, f32), side: AttachmentSid
     }
 }
 
+/// Distance within which two parallel channels read as one doubled line.
+const NEAR_CHANNEL_DISTANCE: f32 = 9.0;
+
+/// Penalty for a channel on top of, or within [`NEAR_CHANNEL_DISTANCE`] of,
+/// channels other edges already use.
 fn channel_congestion_penalty(
     channel_usage: &BTreeMap<(ChannelAxis, i32), u32>,
     axis: ChannelAxis,
     coordinate: f32,
 ) -> u32 {
-    let quantized = quantize_channel_coordinate(coordinate);
+    let low = quantize_channel_coordinate(coordinate - NEAR_CHANNEL_DISTANCE);
+    let high = quantize_channel_coordinate(coordinate + NEAR_CHANNEL_DISTANCE);
     channel_usage
-        .get(&(axis, quantized))
-        .copied()
-        .unwrap_or(0)
+        .range((axis, low)..=(axis, high))
+        .map(|(_, &count)| count)
+        .sum::<u32>()
         .saturating_mul(2)
 }
 
@@ -1906,6 +2130,7 @@ fn endpoint_marker_obstacle(endpoint: (f32, f32), toward: (f32, f32), clearance:
     }
 }
 
+#[cfg(test)]
 pub(super) fn rect_overlaps_any(label: Rect, obstacles: &[Rect], margin: f32) -> bool {
     obstacles.iter().any(|obstacle| {
         label.x + label.w + margin > obstacle.x
@@ -1938,42 +2163,145 @@ pub(super) fn place_label_on_route(
     margin: f32,
     label_half_w: f32,
 ) -> (f32, f32) {
-    let candidates = label_candidate_parameters(preferred_t);
-    let mut best = point_along_route(route, candidates[0]);
-    let mut best_overlap_area = f32::MAX;
+    place_label_avoiding(route, preferred_t, obstacles, &[], margin, label_half_w)
+}
 
-    for t in candidates {
-        let candidate = point_along_route(route, t);
-        let label = label_rect(candidate.0, candidate.1, label_half_w);
-        if !rect_overlaps_any(label, obstacles, margin) {
-            return candidate;
+/// Gap a nudged label may leave between its pill and its own line.
+const LABEL_NEAR_GAP: f32 = 4.0;
+/// Step of the sideways search near the line.
+const LABEL_NEAR_STEP: f32 = 4.0;
+/// Half size of the box kept clear around each bend of a label's own route,
+/// so a pill never hides the corner it sits on.
+const LABEL_BEND_HALF_SIZE: f32 = 4.0;
+
+/// Places a label on its route, off every `hard` obstacle (cards, headings,
+/// markers, other labels) and, when it can, off every `soft` one (other
+/// lines) and off its own bends.
+///
+/// A label first slides along its route. If no spot is fully clear, it
+/// steps sideways only as far as still keeps the pill on its line; a label
+/// that merely crosses another line stays on its own line rather than
+/// floating away. Only when every spot on the route would cover something
+/// hard does it move farther out.
+fn place_label_avoiding(
+    route: &EdgeRoute,
+    preferred_t: f32,
+    hard: &[Rect],
+    soft: &[Rect],
+    margin: f32,
+    label_half_w: f32,
+) -> (f32, f32) {
+    let points = route_points(route);
+    let bends: Vec<Rect> = points
+        .iter()
+        .skip(1)
+        .take(points.len().saturating_sub(2))
+        .map(|&(x, y)| Rect {
+            x: x - LABEL_BEND_HALF_SIZE,
+            y: y - LABEL_BEND_HALF_SIZE,
+            w: LABEL_BEND_HALF_SIZE * 2.0,
+            h: LABEL_BEND_HALF_SIZE * 2.0,
+        })
+        .collect();
+    let cost = |center: (f32, f32)| {
+        let label = label_rect(center.0, center.1, label_half_w);
+        (
+            overlap_area(label, hard, margin),
+            overlap_area(label, soft, 0.0) + overlap_area(label, &bends, 0.0),
+        )
+    };
+
+    let mut ranked: Vec<LabelSpot> = Vec::new();
+    for t in label_candidate_parameters(preferred_t) {
+        let center = point_along_route(route, t);
+        let candidate_cost = cost(center);
+        if candidate_cost == (0.0, 0.0) {
+            return center;
         }
+        ranked.push((candidate_cost, center, t));
+    }
+    // Stable sort keeps the preferred parameter first among equal costs.
+    ranked.sort_by(|left, right| {
+        left.0
+            .0
+            .total_cmp(&right.0.0)
+            .then_with(|| left.0.1.total_cmp(&right.0.1))
+    });
 
-        let overlap_area: f32 = obstacles
-            .iter()
-            .map(|obstacle| {
-                let overlap_w =
-                    (label.x + label.w).min(obstacle.x + obstacle.w) - label.x.max(obstacle.x);
-                let overlap_h =
-                    (label.y + label.h).min(obstacle.y + obstacle.h) - label.y.max(obstacle.y);
-                overlap_w.max(0.0) * overlap_h.max(0.0)
-            })
-            .sum();
-        if overlap_area < best_overlap_area {
-            best_overlap_area = overlap_area;
-            best = candidate;
+    for &(_, center, t) in &ranked {
+        let normal = route_normal_at(route, t);
+        // Half the pill's extent across the line: its width beside a
+        // vertical run, its height beside a horizontal one.
+        let extent = normal
+            .0
+            .abs()
+            .mul_add(label_half_w, normal.1.abs() * LABEL_HALF_H);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let steps = ((extent + LABEL_NEAR_GAP) / LABEL_NEAR_STEP).floor() as usize;
+        #[allow(clippy::cast_precision_loss)]
+        for offset in (1..=steps).map(|index| index as f32 * LABEL_NEAR_STEP) {
+            for sign in [1.0, -1.0] {
+                let shifted = (
+                    (normal.0 * sign).mul_add(offset, center.0),
+                    (normal.1 * sign).mul_add(offset, center.1),
+                );
+                if cost(shifted) == (0.0, 0.0) {
+                    return shifted;
+                }
+            }
         }
     }
 
+    let &((best_hard, _), best, best_t) = ranked
+        .first()
+        .expect("a route always yields at least one label candidate");
+    if best_hard == 0.0 {
+        return best;
+    }
+
+    let normal = route_normal_at(route, best_t);
+    let mut all = hard.to_vec();
+    all.extend_from_slice(soft);
     nudge_label(
         best,
-        (route.x1, route.y1),
-        (route.x2, route.y2),
-        obstacles,
+        (best.0 - normal.1, best.1 + normal.0),
+        (best.0 + normal.1, best.1 - normal.0),
+        &all,
         margin,
         label_half_w,
         LABEL_ROUTE_FALLBACK_MAX_OFFSET.max(label_half_w),
     )
+}
+
+/// A candidate label spot: its hard and soft overlap, its center, and its
+/// parameter along the route.
+type LabelSpot = ((f32, f32), (f32, f32), f32);
+
+/// Unit normal of the route around parameter `t`.
+fn route_normal_at(route: &EdgeRoute, t: f32) -> (f32, f32) {
+    let before = point_along_route(route, (t - 0.01).max(0.0));
+    let after = point_along_route(route, (t + 0.01).min(1.0));
+    let (dx, dy) = (after.0 - before.0, after.1 - before.1);
+    let length = dx.hypot(dy);
+    if length < f32::EPSILON {
+        (0.0, -1.0)
+    } else {
+        (-dy / length, dx / length)
+    }
+}
+
+/// Total area by which `label`, grown by `margin`, overlaps `obstacles`.
+fn overlap_area(label: Rect, obstacles: &[Rect], margin: f32) -> f32 {
+    obstacles
+        .iter()
+        .map(|obstacle| {
+            let overlap_w = (label.x + label.w + margin).min(obstacle.x + obstacle.w)
+                - (label.x - margin).max(obstacle.x);
+            let overlap_h = (label.y + label.h + margin).min(obstacle.y + obstacle.h)
+                - (label.y - margin).max(obstacle.y);
+            overlap_w.max(0.0) * overlap_h.max(0.0)
+        })
+        .sum()
 }
 
 fn estimate_route_parameter(route: &EdgeRoute, point: (f32, f32)) -> f32 {
@@ -1997,6 +2325,7 @@ fn estimate_route_parameter(route: &EdgeRoute, point: (f32, f32)) -> f32 {
 fn resolve_edge_label_collisions(
     edges: &mut [PositionedEdge],
     positioned_nodes: &[PositionedNode],
+    fixed_obstacles: &[Rect],
 ) {
     if edges.is_empty() {
         return;
@@ -2010,6 +2339,7 @@ fn resolve_edge_label_collisions(
             w: node.width,
             h: node.height,
         })
+        .chain(fixed_obstacles.iter().copied())
         .collect();
     let route_obstacles: Vec<Vec<Rect>> = edges
         .iter()
@@ -2081,41 +2411,43 @@ fn resolve_edge_label_collisions(
             let nearby_nodes = node_grid.query_sorted(&query);
             let nearby_edges = edge_grid.query_sorted(&query);
 
-            // Preserve the original obstacle order (nodes, this edge's endpoint
-            // markers, then other edges in ascending index order) so the
-            // floating-point overlap-area accumulation is byte-for-byte
-            // identical to the exhaustive sweep.
-            let mut obstacles =
-                Vec::with_capacity(nearby_nodes.len() + nearby_edges.len().saturating_mul(4));
+            // Cards, headings, markers, and other labels are hard; other
+            // lines are soft, so a label may cross one rather than drift off
+            // its own line.
+            let mut hard =
+                Vec::with_capacity(nearby_nodes.len() + nearby_edges.len().saturating_mul(3));
+            let mut soft = Vec::new();
             for &node_index in &nearby_nodes {
-                obstacles.push(node_obstacles[node_index]);
+                hard.push(node_obstacles[node_index]);
             }
-            obstacles.extend_from_slice(&endpoint_marker_obstacles[index]);
+            hard.extend_from_slice(&endpoint_marker_obstacles[index]);
 
             for &other_index in &nearby_edges {
                 if other_index == index {
                     continue;
                 }
-                obstacles.push(label_rect(
+                hard.push(label_rect(
                     edges[other_index].label_x,
                     edges[other_index].label_y,
                     label_half_widths[other_index],
                 ));
-                obstacles.extend_from_slice(&route_obstacles[other_index]);
-                obstacles.extend_from_slice(&endpoint_marker_obstacles[other_index]);
+                hard.extend_from_slice(&endpoint_marker_obstacles[other_index]);
+                soft.extend_from_slice(&route_obstacles[other_index]);
             }
             // Nearby edges contribute every sample along their whole route;
             // samples outside the reachable region can never overlap a label.
-            obstacles.retain(|obstacle| query.intersects_rect(obstacle));
+            hard.retain(|obstacle| query.intersects_rect(obstacle));
+            soft.retain(|obstacle| query.intersects_rect(obstacle));
 
             let current_t = estimate_route_parameter(
                 &edges[index].route,
                 (edges[index].label_x, edges[index].label_y),
             );
-            let updated = place_label_on_route(
+            let updated = place_label_avoiding(
                 &edges[index].route,
                 current_t,
-                &obstacles,
+                &hard,
+                &soft,
                 EDGE_LABEL_COLLISION_MARGIN,
                 label_half_w,
             );

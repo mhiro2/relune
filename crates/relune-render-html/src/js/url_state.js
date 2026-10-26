@@ -102,6 +102,10 @@
       if (selected !== null) {
         params.set(PARAM_TABLE, selected);
       }
+      const relation = runtime.selection?.getSelectedRelation() ?? null;
+      if (relation !== null) {
+        params.set(PARAM_RELATION, relation);
+      }
       const viewport = runtime.viewport?.getState();
       if (viewport !== null && viewport !== void 0) {
         params.set(PARAM_SCALE, viewport.scale.toFixed(4));
@@ -116,7 +120,6 @@
         params.set(PARAM_FILTER_MODE, filterMode);
       }
       appendList2(params, PARAM_HIDDEN_GROUPS, runtime.groups?.getHiddenGroups() ?? []);
-      appendList2(params, PARAM_COLLAPSED, runtime.collapse?.getCollapsed() ?? []);
       if (runtime.minimap?.isHidden() === false) {
         params.set(PARAM_MINIMAP_VISIBLE, "1");
       }
@@ -140,6 +143,7 @@
       const params = readHash2();
       runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== "1", { silent: true });
       if (params.toString() === "") {
+        runtime.selection?.clear();
         return;
       }
       const s = params.get(PARAM_SCALE);
@@ -170,13 +174,15 @@
       for (const groupId of readList2(params, PARAM_HIDDEN_GROUPS)) {
         runtime.groups?.setVisibility(groupId, false);
       }
-      const collapsed = readList2(params, PARAM_COLLAPSED).filter((id) => tableIds.has(id));
-      if (collapsed.length > 0) {
-        runtime.collapse?.setCollapsed(collapsed);
+      const relation = params.get(PARAM_RELATION);
+      if (relation !== null && relation !== "" && runtime.selection?.selectRelation(relation)) {
+        return;
       }
       const table = params.get(PARAM_TABLE);
       if (table !== null && table !== "" && tableIds.has(table)) {
         runtime.selection?.select(table);
+      } else {
+        runtime.selection?.clear();
       }
     }, expectedViewerModules2 = function() {
       const modules = [];
@@ -195,9 +201,6 @@
       if ((metadata?.groups?.length ?? 0) > 0) {
         modules.push("groups");
       }
-      if (document.getElementById("canvas")?.querySelector("svg") != null) {
-        modules.push("collapse");
-      }
       if (document.getElementById("minimap-shell") !== null) {
         modules.push("minimap");
       }
@@ -210,6 +213,7 @@
     const tableIds = new Set(tables.map((table) => table.id));
     const PARAM_SEARCH = "q";
     const PARAM_TABLE = "t";
+    const PARAM_RELATION = "r";
     const PARAM_SCALE = "s";
     const PARAM_PAN_X = "x";
     const PARAM_PAN_Y = "y";
@@ -220,7 +224,6 @@
     const PARAM_FILTER_DIFF = "fd";
     const PARAM_FILTER_MODE = "fm";
     const PARAM_HIDDEN_GROUPS = "hg";
-    const PARAM_COLLAPSED = "c";
     const PARAM_MINIMAP_VISIBLE = "mv";
     const FACET_PARAMS = [
       { param: PARAM_FILTER_SCHEMA, facetId: "schema" },
@@ -238,10 +241,11 @@
     document.addEventListener("relune:search-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:node-selected", scheduleDiscreteWrite2);
     document.addEventListener("relune:node-cleared", scheduleDiscreteWrite2);
+    document.addEventListener("relune:relation-selected", scheduleDiscreteWrite2);
+    document.addEventListener("relune:relation-cleared", scheduleDiscreteWrite2);
     document.addEventListener("relune:viewport-changed", scheduleWrite2);
     document.addEventListener("relune:filters-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:groups-changed", scheduleDiscreteWrite2);
-    document.addEventListener("relune:collapse-changed", scheduleDiscreteWrite2);
     document.addEventListener("relune:minimap-toggled", scheduleDiscreteWrite2);
     window.addEventListener("popstate", () => {
       restoringFromPopstate = true;

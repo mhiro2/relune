@@ -4,21 +4,32 @@ use std::fmt::{self, Write};
 
 use relune_core::model::SchemaStats;
 
+use relune_layout::metrics::{COLUMN_BADGE_HEIGHT, COLUMN_NULLABLE_MARKER};
+
+use relune_core::{ChangeKind, ReviewSeverity};
+
+use crate::diff::{render_change_marker, render_risk_pill};
+use crate::node::{ColumnBadge, render_column_badge};
 use crate::theme::ThemeColors;
 
-// Legend indicator colors (matching node cards)
-const PK_STROKE: &str = "#fbbf24";
-const FK_COLOR: &str = "#3b82f6";
-const IDX_COLOR: &str = "#f59e0b";
-const NULLABLE_TEXT: &str = "#64748b";
+/// Width taken by the title, badges, and nullable marker, including padding.
+const LEGEND_ITEMS_WIDTH: f32 = 488.0;
+/// Width added for the diff change kinds, the risk label, and their divider.
+const LEGEND_DIFF_WIDTH: f32 = 392.0;
+/// Width added for the statistics block and its divider.
+const LEGEND_STATS_WIDTH: f32 = 160.0;
 
-/// Renders a legend block showing PK, FK, IDX indicators and nullable style.
-/// Optionally includes statistics if provided.
+/// Renders a legend block explaining the marks node cards draw.
+///
+/// The PK, FK, and IX badges and the nullable marker are drawn exactly as on
+/// the cards. Diff diagrams add the change kind markers and the risk label;
+/// statistics are included if provided.
 ///
 /// # Arguments
 /// * `out` - The output string buffer
 /// * `theme` - The theme colors to use
 /// * `stats` - Optional schema statistics to display
+/// * `diff` - Whether to explain the diff change kinds and risk label
 /// * `svg_width` - Width of the SVG canvas (for positioning)
 /// * `svg_height` - Height of the SVG canvas (for positioning)
 #[allow(clippy::too_many_lines)]
@@ -26,18 +37,39 @@ pub fn render_legend(
     out: &mut String,
     theme: &ThemeColors,
     stats: Option<&SchemaStats>,
+    diff: bool,
     svg_width: f32,
     svg_height: f32,
 ) -> fmt::Result {
     let bar_height = 42.0;
     let side_padding = 18.0;
-    let legend_width = (svg_width - side_padding * 2.0).clamp(320.0, 640.0);
+    let available_width = svg_width - side_padding * 2.0;
+    // The legend never shrinks below its items; on narrower canvases the
+    // whole bar is scaled down instead of letting items run off the edge.
+    let content_width = LEGEND_ITEMS_WIDTH
+        + if diff { LEGEND_DIFF_WIDTH } else { 0.0 }
+        + if stats.is_some() {
+            LEGEND_STATS_WIDTH
+        } else {
+            0.0
+        };
+    let legend_width = available_width.clamp(content_width, content_width.max(640.0));
     let legend_x = (svg_width - legend_width) * 0.5;
     let legend_y = svg_height - bar_height - 18.0;
     let mut cursor_x = legend_x + 16.0;
     let baseline_y = legend_y + 25.0;
 
-    out.push_str(r#"<g class="legend">"#);
+    if legend_width > available_width && available_width > 0.0 {
+        let scale = available_width / legend_width;
+        let (cx, cy) = (svg_width * 0.5, legend_y + bar_height);
+        write!(
+            out,
+            r#"<g class="legend" transform="translate({cx:.1} {cy:.1}) scale({scale:.3}) translate({:.1} {:.1})">"#,
+            -cx, -cy
+        )?;
+    } else {
+        out.push_str(r#"<g class="legend">"#);
+    }
 
     write!(
         out,
@@ -50,33 +82,60 @@ pub fn render_legend(
         cursor_x, baseline_y, theme.text_primary
     )?;
     cursor_x += 84.0;
-    render_legend_pk_indicator(out, cursor_x, baseline_y - 8.0)?;
-    cursor_x += 16.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Primary key", theme)?;
-    cursor_x += 82.0;
-    render_legend_fk_indicator(out, cursor_x, baseline_y - 7.0)?;
-    cursor_x += 22.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Foreign key", theme)?;
-    cursor_x += 84.0;
-    render_legend_idx_indicator(out, cursor_x, baseline_y - 8.0)?;
-    cursor_x += 16.0;
-    render_legend_item_label(out, cursor_x, baseline_y, "Indexed", theme)?;
-    cursor_x += 62.0;
+    let badge_y = baseline_y - COLUMN_BADGE_HEIGHT + 3.5;
+    for (badge, label, advance) in [
+        (ColumnBadge::PrimaryKey, "Primary key", 104.0),
+        (ColumnBadge::ForeignKey, "Foreign key", 104.0),
+        (ColumnBadge::Index, "Indexed", 84.0),
+    ] {
+        render_column_badge(out, cursor_x, badge_y, badge, theme)?;
+        render_legend_item_label(out, cursor_x + 24.0, baseline_y, label, theme)?;
+        cursor_x += advance;
+    }
     write!(
         out,
-        r#"<text class="legend-nullable" x="{cursor_x:.1}" y="{baseline_y:.1}" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="11" font-style="italic" fill="{NULLABLE_TEXT}">nullable</text>"#
+        r#"<text class="legend-nullable" x="{:.1}" y="{baseline_y:.1}" text-anchor="middle" font-family="'JetBrains Mono', 'Fira Code', ui-monospace, monospace" font-size="12" font-weight="700" fill="{}">{COLUMN_NULLABLE_MARKER}</text>"#,
+        cursor_x + 9.0,
+        theme.text_muted
     )?;
+    render_legend_item_label(out, cursor_x + 24.0, baseline_y, "Nullable", theme)?;
+
+    if diff {
+        cursor_x += 88.0;
+        render_legend_divider(out, cursor_x, legend_y, bar_height, theme)?;
+        cursor_x += 16.0;
+        for (kind, label, advance) in [
+            (ChangeKind::Added, "Added", 70.0),
+            (ChangeKind::Removed, "Removed", 84.0),
+            (ChangeKind::Modified, "Modified", 88.0),
+        ] {
+            render_change_marker(out, cursor_x + 5.0, baseline_y, 12.0, kind, theme)?;
+            render_legend_item_label(out, cursor_x + 16.0, baseline_y, label, theme)?;
+            cursor_x += advance;
+        }
+        let pill_width = render_risk_pill(
+            out,
+            cursor_x,
+            baseline_y - 4.0,
+            "breaking",
+            ReviewSeverity::Breaking,
+            theme,
+        )?;
+        render_legend_item_label(
+            out,
+            cursor_x + pill_width + 8.0,
+            baseline_y,
+            "Review risk",
+            theme,
+        )?;
+    }
 
     if let Some(stats) = stats {
-        let stats_x = legend_x + legend_width - 144.0;
+        let stats_x = legend_x + legend_width - LEGEND_STATS_WIDTH + 16.0;
+        render_legend_divider(out, stats_x - 16.0, legend_y, bar_height, theme)?;
         write!(
             out,
-            r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/><text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
-            stats_x - 16.0,
-            legend_y + 10.0,
-            stats_x - 16.0,
-            legend_y + bar_height - 10.0,
-            theme.group_stroke,
+            r#"<text class="legend-stats" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" fill="{}">{} tables · {} columns · {} FKs</text>"#,
             stats_x,
             baseline_y,
             theme.text_secondary,
@@ -90,33 +149,19 @@ pub fn render_legend(
     Ok(())
 }
 
-/// Renders a small key icon for the legend.
-fn render_legend_pk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
+fn render_legend_divider(
+    out: &mut String,
+    x: f32,
+    legend_y: f32,
+    bar_height: f32,
+    theme: &ThemeColors,
+) -> fmt::Result {
     write!(
         out,
-        r#"<path class="legend-pk-indicator" d="M{:.1} {:.1}a3.2 3.2 0 1 0 0.01 0M{:.1} {:.1}h7m-2.4 0v2.1m-2.2 -2.1v3.4" fill="none" stroke="{PK_STROKE}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"#,
-        x,
-        y + 3.2,
-        x + 3.2,
-        y + 3.2
-    )
-}
-
-/// Renders a small link indicator for the legend.
-fn render_legend_fk_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    write!(
-        out,
-        r#"<path class="legend-fk-indicator" d="M{:.1} {:.1}c0 -1.9 1.5 -3.4 3.4 -3.4h2.5c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4 -3.4 3.4h-2.5c-1.9 0 -3.4 1.5 -3.4 3.4s1.5 3.4 3.4 3.4h2.5c1.9 0 3.4 -1.5 3.4 -3.4" stroke="{FK_COLOR}" stroke-width="1.5" fill="none" stroke-linecap="round"/>"#,
-        x,
-        y + 3.4
-    )
-}
-
-/// Renders a small bolt indicator for the legend.
-fn render_legend_idx_indicator(out: &mut String, x: f32, y: f32) -> fmt::Result {
-    write!(
-        out,
-        r#"<path class="legend-idx-indicator" d="M{x:.1} {y:.1}h4.2l-2.2 4.4h3.8l-6.4 7.2 2.1-5h-3.5z" fill="{IDX_COLOR}"/>"#
+        r#"<line x1="{x:.1}" y1="{:.1}" x2="{x:.1}" y2="{:.1}" stroke="{}" stroke-opacity="0.72"/>"#,
+        legend_y + 10.0,
+        legend_y + bar_height - 10.0,
+        theme.group_stroke,
     )
 }
 
@@ -145,32 +190,12 @@ mod tests {
         width: f32,
         height: f32,
     ) {
-        render_legend(out, colors, stats, width, height)
+        render_legend(out, colors, stats, false, width, height)
             .expect("legend rendering should succeed in tests");
     }
 
     fn test_theme_colors() -> ThemeColors {
-        ThemeColors {
-            background: "#0c0f1a",
-            canvas_base: "#0c0f1a",
-            canvas_dot: "#151928",
-            foreground: "#e2e8f0",
-            node_fill: "#111827",
-            node_stroke: "#334155",
-            header_fill: "#1e293b",
-            text_primary: "#e2e8f0",
-            text_secondary: "#cbd5e1",
-            text_muted: "#94a3b8",
-            edge_stroke: "#64748b",
-            arrow_fill: "#64748b",
-            node_shadow: "rgba(0, 0, 0, 0.5)",
-            group_fill: "#0f172acc",
-            group_band_fill: "#172036",
-            group_stroke: "#334155",
-            glow_color: "#f59e0b",
-            glow_particle: "#fbbf24",
-            is_light: false,
-        }
+        crate::theme::get_colors(crate::theme::Theme::Dark)
     }
 
     #[test]
@@ -186,7 +211,8 @@ mod tests {
         assert!(out.contains("Primary key"));
         assert!(out.contains("Foreign key"));
         assert!(out.contains("Indexed"));
-        assert!(out.contains("nullable"));
+        assert!(out.contains("Nullable"));
+        assert_eq!(out.matches(r#"class="col-badge""#).count(), 3);
         assert!(!out.contains("tables ·"));
     }
 
@@ -205,6 +231,40 @@ mod tests {
 
         assert!(out.contains("class=\"legend\""));
         assert!(out.contains("5 tables · 42 columns · 8 FKs"));
+    }
+
+    #[test]
+    fn test_render_legend_explains_diff_marks() {
+        let colors = test_theme_colors();
+        let mut plain = String::new();
+        let mut diff = String::new();
+
+        render_legend_ok(&mut plain, &colors, None, 1200.0, 600.0);
+        render_legend(&mut diff, &colors, None, true, 1200.0, 600.0).unwrap();
+
+        assert!(!plain.contains("diff-marker"));
+        assert!(!plain.contains("Review risk"));
+        assert_eq!(diff.matches(r#"class="diff-marker""#).count(), 3);
+        for label in ["Added", "Removed", "Modified", "Review risk"] {
+            assert!(diff.contains(&format!(">{label}<")), "missing {label}");
+        }
+        assert!(diff.contains(r#"<g class="risk-label risk-breaking">"#));
+        // The diff items widen the bar instead of overflowing it.
+        assert!(diff.contains(r#"width="880.0""#));
+    }
+
+    #[test]
+    fn test_legend_scales_down_on_narrow_canvas() {
+        let colors = test_theme_colors();
+        let mut wide = String::new();
+        let mut narrow = String::new();
+
+        render_legend_ok(&mut wide, &colors, None, 800.0, 600.0);
+        render_legend_ok(&mut narrow, &colors, None, 400.0, 600.0);
+
+        assert!(wide.starts_with(r#"<g class="legend">"#));
+        assert!(narrow.starts_with(r#"<g class="legend" transform="#));
+        assert!(narrow.contains("scale(0.746)"));
     }
 
     #[test]

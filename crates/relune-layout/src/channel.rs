@@ -64,6 +64,14 @@ impl Default for ChannelCostWeights {
 pub struct ChannelCandidateScore {
     /// Number of hard-constraint violations.
     pub hard_constraint_violations: u16,
+    /// Obstacles the route passes closer than the clearance target, which
+    /// would send it to the detour fallback; ranked right after hard
+    /// constraints.
+    pub tight_obstacles: u16,
+    /// Endpoints whose straight run is too short for their marker, ranked
+    /// right after hard constraints so markers never fold over an elbow
+    /// when any candidate avoids it.
+    pub short_endpoint_stubs: u16,
     /// Penalty accumulated from missing obstacle clearance.
     pub clearance_penalty: u32,
     /// Total routed path length in pixels.
@@ -115,6 +123,12 @@ pub(crate) fn compare_cached_channel_candidate_scores(
     left.score
         .hard_constraint_violations
         .cmp(&right.score.hard_constraint_violations)
+        .then_with(|| left.score.tight_obstacles.cmp(&right.score.tight_obstacles))
+        .then_with(|| {
+            left.score
+                .short_endpoint_stubs
+                .cmp(&right.score.short_endpoint_stubs)
+        })
         .then_with(|| left.weighted_soft_cost.cmp(&right.weighted_soft_cost))
         .then_with(|| {
             left.score
@@ -174,6 +188,8 @@ mod tests {
         let weights = ChannelCostWeights::default();
         let feasible = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 500,
             total_length: 500,
             bend_count: 6,
@@ -183,6 +199,8 @@ mod tests {
         };
         let infeasible = ChannelCandidateScore {
             hard_constraint_violations: 1,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             ..feasible
         };
 
@@ -197,6 +215,8 @@ mod tests {
         let weights = ChannelCostWeights::default();
         let shorter = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 5,
             total_length: 120,
             bend_count: 2,
@@ -206,6 +226,8 @@ mod tests {
         };
         let safer = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 2,
             total_length: 150,
             bend_count: 2,
@@ -231,6 +253,8 @@ mod tests {
         };
         let first = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 4,
             total_length: 100,
             bend_count: 2,
@@ -240,6 +264,8 @@ mod tests {
         };
         let second = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 5,
             total_length: 99,
             bend_count: 2,
@@ -269,6 +295,8 @@ mod tests {
         };
         let earlier = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 4,
             total_length: 100,
             bend_count: 2,
@@ -292,6 +320,8 @@ mod tests {
         let weights = ChannelCostWeights::default();
         let left = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 5,
             total_length: 100,
             bend_count: 2,
@@ -301,6 +331,8 @@ mod tests {
         };
         let right = ChannelCandidateScore {
             hard_constraint_violations: 0,
+            short_endpoint_stubs: 0,
+            tight_obstacles: 0,
             clearance_penalty: 4,
             total_length: 108,
             bend_count: 2,

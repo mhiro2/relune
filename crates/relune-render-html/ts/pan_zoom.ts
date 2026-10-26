@@ -138,6 +138,20 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         viewportEl.style.cursor = 'grab';
       });
 
+      // Focusing an element outside the visible area (Tab onto a far line or
+      // card) makes the browser scroll the clipped viewport to reveal it. Turn
+      // that scroll into a pan, so the element stays in view and the transform
+      // remains the only source of the view position.
+      viewportEl.addEventListener('scroll', () => {
+        const { scrollLeft, scrollTop } = viewportEl;
+        if (scrollLeft === 0 && scrollTop === 0) return;
+        viewportEl.scrollLeft = 0;
+        viewportEl.scrollTop = 0;
+        panX -= scrollLeft;
+        panY -= scrollTop;
+        updateTransform();
+      });
+
       viewportEl.addEventListener(
         'wheel',
         (event: WheelEvent) => {

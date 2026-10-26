@@ -5,24 +5,36 @@ pub(crate) const fn build_pan_zoom_js() -> &'static str {
     include_str!("js/pan_zoom.js")
 }
 
-/// Build the group panel HTML structure.
+/// Build the group panel: a collapsed section listing groups with
+/// visibility toggles. It sits in the explorer sidebar, or floats on its own
+/// when search is disabled.
 #[allow(clippy::needless_raw_string_hashes)]
 pub(crate) fn build_group_panel_html() -> String {
-    r#"  <section class="group-panel" id="group-panel">
-    <div class="group-panel-header">
-      <button type="button" id="group-panel-collapse" class="group-panel-collapse-btn" aria-expanded="true" title="Collapse or expand panel">&#9662;</button>
-      <span class="group-panel-title">Groups</span>
-      <div class="group-panel-actions">
-        <button type="button" id="show-all-groups">Show All</button>
-        <button type="button" id="hide-all-groups">Hide All</button>
+    r#"    <details class="sidebar-section group-panel" id="group-panel">
+      <summary class="sidebar-section-summary" aria-keyshortcuts="G"><span class="sidebar-section-title">Groups</span><span class="sidebar-section-meta" id="group-panel-meta"></span></summary>
+      <div class="sidebar-section-body">
+        <div class="group-panel-actions">
+          <button type="button" id="show-all-groups">Show all</button>
+          <button type="button" id="hide-all-groups">Hide all</button>
+        </div>
+        <div class="group-list" id="group-list"></div>
       </div>
-    </div>
-    <div class="group-panel-body" id="group-panel-body">
-      <div class="group-list" id="group-list"></div>
-    </div>
-  </section>
+    </details>
 "#
     .to_string()
+}
+
+/// Build the button that brings back a hidden explorer sidebar.
+#[allow(clippy::needless_raw_string_hashes)]
+pub(crate) fn build_sidebar_open_html() -> String {
+    r#"  <button type="button" class="sidebar-open" id="sidebar-open" aria-controls="search-panel" aria-expanded="false" aria-keyshortcuts="S" title="Show sidebar (S)" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Explore</span></button>
+"#
+    .to_string()
+}
+
+/// Build the sidebar toggle JavaScript.
+pub(crate) const fn build_sidebar_js() -> &'static str {
+    include_str!("js/sidebar.js")
 }
 
 /// Build the group toggle JavaScript.
@@ -38,11 +50,6 @@ pub(crate) const fn build_search_js() -> &'static str {
 /// Build the filter engine JavaScript.
 pub(crate) const fn build_filter_engine_js() -> &'static str {
     include_str!("js/filter_engine.js")
-}
-
-/// Build the collapse JavaScript.
-pub(crate) const fn build_collapse_js() -> &'static str {
-    include_str!("js/collapse.js")
 }
 
 /// Build the highlight neighbors JavaScript.
@@ -90,10 +97,6 @@ pub(crate) fn build_viewer_controls_html() -> String {
     <button type="button" class="viewer-control-button viewer-control-minimap" id="minimap-toggle" aria-pressed="false" aria-label="Minimap" aria-controls="minimap-shell" aria-keyshortcuts="M" title="Show minimap (M)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v16M15 6v16"/></svg></button>
   </div>
   <div class="minimap-shell" id="minimap-shell" aria-label="Diagram minimap" hidden>
-    <div class="minimap-header">
-      <span>Minimap</span>
-      <span class="minimap-hint">Viewport</span>
-    </div>
     <svg class="minimap" id="minimap" viewBox="0 0 100 100" aria-hidden="true"></svg>
   </div>
 "#
@@ -102,7 +105,7 @@ pub(crate) fn build_viewer_controls_html() -> String {
 
 #[allow(clippy::needless_raw_string_hashes)]
 pub(crate) fn build_detail_drawer_html() -> String {
-    r#"  <aside class="detail-drawer" id="detail-drawer" hidden>
+    r#"  <aside class="detail-drawer" id="detail-drawer" tabindex="-1" aria-labelledby="detail-title" hidden>
     <div class="detail-drawer-header">
       <div>
         <p class="detail-kicker" id="detail-kind">Inspector</p>
@@ -122,6 +125,10 @@ pub(crate) fn build_detail_drawer_html() -> String {
         <button type="button" class="detail-traversal-btn" data-depth="2">2-hop</button>
       </div>
     </div>
+    <section class="detail-section" id="detail-changes-section" hidden>
+      <h3>Changes</h3>
+      <ul class="detail-changes" id="detail-changes"></ul>
+    </section>
     <section class="detail-section">
       <h3>Columns</h3>
       <div class="detail-empty" id="detail-columns-empty">No column details available.</div>
@@ -133,8 +140,8 @@ pub(crate) fn build_detail_drawer_html() -> String {
       <div class="detail-relations" id="detail-relations"></div>
     </section>
     <section class="detail-section">
-      <h3>Health</h3>
-      <div class="detail-empty" id="detail-issues-empty">No issues detected.</div>
+      <h3>Risks</h3>
+      <div class="detail-empty" id="detail-issues-empty">No risks found.</div>
       <div class="detail-issues" id="detail-issues"></div>
     </section>
   </aside>
@@ -155,51 +162,54 @@ pub(crate) fn build_hover_popover_html() -> String {
     .to_string()
 }
 
-/// Build the search panel HTML structure.
+/// Build the relation card that shows the selected relationship's column
+/// mapping. It is a live region, so the mapping is announced when a
+/// relationship is chosen from the keyboard.
+#[allow(clippy::needless_raw_string_hashes)]
+pub(crate) fn build_relation_card_html() -> String {
+    r#"  <aside class="relation-card" id="relation-card" tabindex="-1" role="region" aria-labelledby="relation-card-title" aria-live="polite" hidden>
+    <div class="relation-card-header">
+      <div>
+        <p class="relation-card-kicker" id="relation-card-kind">Relationship</p>
+        <h2 class="relation-card-title" id="relation-card-title">Relationship</h2>
+      </div>
+      <button type="button" class="relation-card-close" id="relation-card-close" aria-label="Clear relationship">&times;</button>
+    </div>
+    <p class="relation-card-name" id="relation-card-name" hidden></p>
+    <ul class="relation-card-pairs" id="relation-card-pairs"></ul>
+    <div class="relation-card-actions">
+      <button type="button" class="relation-card-open" id="relation-card-open-from">Open source</button>
+      <button type="button" class="relation-card-open" id="relation-card-open-to">Open target</button>
+    </div>
+  </aside>
+"#
+    .to_string()
+}
+
+/// Build the explorer sidebar. Search and the object list come first;
+/// filters and groups stay collapsed until a reader opens them.
 #[allow(clippy::needless_raw_string_hashes)]
 pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
-    let filter_block = r#"    <section class="filter-section" id="filter-section" aria-label="Filters">
-      <div class="filter-section-header" id="filter-section-header"></div>
-      <div class="filter-active-summary" id="filter-active-summary"></div>
-      <div class="filter-facets" id="filter-facets"></div>
-    </section>
-"#;
-
     let group_block = if enable_group_toggles {
-        r#"    <section class="group-panel" id="group-panel">
-      <div class="group-panel-header">
-        <button type="button" id="group-panel-collapse" class="group-panel-collapse-btn" aria-expanded="true" title="Collapse or expand groups">&#9662;</button>
-        <span class="group-panel-title">Groups</span>
-        <div class="group-panel-actions">
-          <button type="button" id="show-all-groups">Show All</button>
-          <button type="button" id="hide-all-groups">Hide All</button>
-        </div>
-      </div>
-      <div class="group-panel-body" id="group-panel-body">
-        <div class="group-list" id="group-list"></div>
-      </div>
-    </section>
-"#
+        build_group_panel_html()
     } else {
-        ""
+        String::new()
     };
 
     format!(
-        r#"  <aside class="search-panel" id="search-panel">
-    <div class="search-panel-header">
-      <span class="search-panel-title">Explore</span>
-      <span class="search-panel-meta">Press / to focus</span>
-    </div>
+        r#"  <aside class="search-panel" id="search-panel" aria-label="Explorer">
     <div class="search-container">
-      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <circle cx="11" cy="11" r="8"></circle>
         <path d="m21 21l-4.35-4.35"></path>
       </svg>
-      <input type="text" class="search-input" id="table-search" placeholder="Search tables, views, or columns" autocomplete="off">
-      <button type="button" class="search-clear" id="search-clear" title="Clear search">&times;</button>
+      <input type="text" class="search-input" id="table-search" placeholder="Search tables or columns" aria-label="Search tables, views, or columns" aria-keyshortcuts="/" autocomplete="off">
+      <button type="button" class="search-clear" id="search-clear" title="Clear search" aria-label="Clear search">&times;</button>
+      <kbd class="search-shortcut" aria-hidden="true">/</kbd>
+      <button type="button" class="sidebar-collapse" id="sidebar-collapse" aria-controls="search-panel" aria-expanded="true" aria-keyshortcuts="S" title="Hide sidebar (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
     </div>
     <div class="search-results" id="search-results"></div>
-{filter_block}    <section class="object-browser-section" aria-label="Schema objects">
+    <section class="object-browser-section" aria-label="Schema objects">
       <div class="object-browser-header">
         <span>Objects</span>
         <span class="object-browser-count" id="object-browser-count"></span>
@@ -207,6 +217,14 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
       <div class="object-browser-list" id="object-browser-list"></div>
       <p class="object-browser-empty" id="object-browser-empty" hidden>No matching objects.</p>
     </section>
+    <details class="sidebar-section filter-section" id="filter-section">
+      <summary class="sidebar-section-summary"><span class="sidebar-section-title">Filters</span><span class="sidebar-section-badge" id="filter-active-count" hidden></span></summary>
+      <div class="sidebar-section-body">
+        <div class="filter-section-header" id="filter-section-header"></div>
+        <div class="filter-active-summary" id="filter-active-summary"></div>
+        <div class="filter-facets" id="filter-facets"></div>
+      </div>
+    </details>
 {group_block}  </aside>
 "#,
     )
@@ -214,24 +232,21 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use relune_layout::metrics::{
-        NODE_FIRST_COLUMN_BASELINE, NODE_KIND_LABEL_RESERVE, NODE_TEXT_INSET,
-    };
+    use relune_layout::metrics::{NODE_COLUMN_HEIGHT, NODE_ROW_BASELINE};
 
-    /// The collapse controller positions its overlays with copies of the node
+    /// The highlight painter draws column bands from copies of the row
     /// metrics; this keeps those copies in step with the Rust definitions.
     #[test]
-    fn collapse_dom_mirrors_node_metrics() {
-        let source = include_str!("../ts/collapse_dom.ts");
+    fn highlight_dom_mirrors_row_metrics() {
+        let source = include_str!("../ts/highlight_dom.ts");
         for (name, value) in [
-            ("KIND_LABEL_RESERVE", NODE_KIND_LABEL_RESERVE),
-            ("FIRST_ROW_BASELINE", NODE_FIRST_COLUMN_BASELINE),
-            ("TEXT_INSET", NODE_TEXT_INSET),
+            ("ROW_HEIGHT", NODE_COLUMN_HEIGHT),
+            ("ROW_BASELINE", NODE_ROW_BASELINE),
         ] {
             let declaration = format!("const {name} = {value};");
             assert!(
                 source.contains(&declaration),
-                "ts/collapse_dom.ts must declare `{declaration}`"
+                "ts/highlight_dom.ts must declare `{declaration}`"
             );
         }
     }

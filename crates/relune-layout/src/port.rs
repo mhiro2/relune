@@ -2,25 +2,28 @@
 
 use std::collections::BTreeMap;
 
-use relune_core::LayoutDirection;
+use relune_core::{LayoutDirection, normalize_identifier};
 
 use crate::graph::LayoutGraph;
 use crate::layout::{LayoutConfig, PositionedNode};
-use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT};
-use crate::route::AttachmentSide;
+use crate::metrics::column_row_center;
+use crate::route::{AttachmentSide, self_loop_middle_rows};
 
 /// Base gap between parallel self-loop edges.
 const SELF_LOOP_SLOT_GAP: f32 = 18.0;
-/// Base gap between ports that share the same node side.
-const BASE_SLOT_GAP: f32 = 14.0;
-/// Minimum slot gap used when many edges share a side.
-const MIN_SLOT_GAP: f32 = 10.0;
+/// Base gap between ports that share the same node side. A Crow's Foot
+/// spreads 7px to each side of its line, so neighbours need clear room
+/// between their markers.
+const BASE_SLOT_GAP: f32 = 24.0;
+/// Minimum slot gap used when many edges share a side; markers stay apart
+/// unless the side itself is too short.
+pub(crate) const MIN_SLOT_GAP: f32 = 20.0;
 /// Maximum slot gap.
-const MAX_SLOT_GAP: f32 = 20.0;
+const MAX_SLOT_GAP: f32 = 28.0;
 /// Additional distance treated as a near-neighbor case on the primary flow axis.
 const NEAR_NODE_PADDING: f32 = 24.0;
 /// Distance kept between the outermost port and the corner of its node side.
-const PORT_CORNER_INSET: f32 = 4.0;
+pub(crate) const PORT_CORNER_INSET: f32 = 4.0;
 
 #[derive(Debug, Clone)]
 pub(crate) enum EdgePortAssignment {
@@ -45,6 +48,11 @@ pub(crate) struct RegularPortAssignment {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SelfLoopPortAssignment {
     pub radius_offset: f32,
+    /// Heights where the loop leaves and re-enters its card, measured from
+    /// the card top.
+    pub rows: Option<(f32, f32)>,
+    /// Card side the loop bulges out of: east or west.
+    pub side: AttachmentSide,
 }
 
 #[derive(Debug, Clone)]
@@ -74,16 +82,11 @@ pub(crate) fn assign_edge_ports(
     let mut endpoint_groups: BTreeMap<(String, AttachmentSide), Vec<EndpointCandidate>> =
         BTreeMap::new();
     let mut self_loop_counts = BTreeMap::new();
+    let mut self_loops = Vec::new();
 
     for (edge_index, edge) in graph.edges.iter().enumerate() {
         if edge.is_self_loop {
-            let slot_index = self_loop_counts
-                .entry(edge.from.clone())
-                .and_modify(|count| *count += 1usize)
-                .or_insert(0usize);
-            assignments[edge_index] = Some(EdgePortAssignment::SelfLoop(SelfLoopPortAssignment {
-                radius_offset: self_loop_radius_offset(*slot_index),
-            }));
+            self_loops.push(edge_index);
             continue;
         }
 
@@ -112,9 +115,8 @@ pub(crate) fn assign_edge_ports(
             .copied();
         let (source_side, target_side) =
             choose_regular_sides(source_node, target_node, source_rank, target_rank, config);
-        let source_row_offset =
-            column_y_offset_from_center(source_node, &edge.from_columns, config);
-        let target_row_offset = column_y_offset_from_center(target_node, &edge.to_columns, config);
+        let source_row_offset = column_y_offset_from_center(source_node, &edge.from_columns);
+        let target_row_offset = column_y_offset_from_center(target_node, &edge.to_columns);
 
         assignments[edge_index] = Some(EdgePortAssignment::Regular(RegularPortAssignment {
             source_side,
@@ -159,11 +161,80 @@ pub(crate) fn assign_edge_ports(
             });
     }
 
+    // Self-loops go after every other edge, so each can take the left or
+    // right side with fewer ports and pack its ends among them.
+    for edge_index in self_loops {
+        let edge = &graph.edges[edge_index];
+        let slot_index = self_loop_counts
+            .entry(edge.from.clone())
+            .and_modify(|count| *count += 1usize)
+            .or_insert(0usize);
+        let Some(node) = node_by_id.get(edge.from.as_str()) else {
+            continue;
+        };
+        let rows = self_loop_rows(node, &edge.from_columns, &edge.to_columns);
+        let (preferred, other) = if config.direction == LayoutDirection::RightToLeft {
+            (AttachmentSide::West, AttachmentSide::East)
+        } else {
+            (AttachmentSide::East, AttachmentSide::West)
+        };
+        let ports_on = |side| {
+            endpoint_groups
+                .get(&(edge.from.clone(), side))
+                .map_or(0, Vec::len)
+        };
+        let side = if ports_on(preferred) > ports_on(other) {
+            other
+        } else {
+            preferred
+        };
+        assignments[edge_index] = Some(EdgePortAssignment::SelfLoop(SelfLoopPortAssignment {
+            radius_offset: self_loop_radius_offset(*slot_index),
+            rows: Some(rows),
+            side,
+        }));
+        let center = node_center(node);
+        let stable_key = stable_edge_key(edge.from.as_str(), edge.to.as_str(), edge_index);
+        let left_to_right = matches!(
+            config.direction,
+            LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
+        );
+        for (is_source, row) in [(true, rows.0), (false, rows.1)] {
+            endpoint_groups
+                .entry((edge.from.clone(), side))
+                .or_default()
+                .push(EndpointCandidate {
+                    edge_index,
+                    is_source,
+                    // Side ports are ordered by where their lines head; a
+                    // loop end heads to its own row.
+                    remote_order: if left_to_right {
+                        node.y + row
+                    } else {
+                        secondary_flow_coordinate(center, config.direction)
+                    },
+                    row_order: row - node.height / 2.0,
+                    remote_primary: primary_flow_coordinate(center, config.direction),
+                    stable_key: stable_key.clone(),
+                });
+        }
+    }
+
     for ((node_id, side), candidates) in &mut endpoint_groups {
+        // Column rows only place ports on left and right sides. On top and
+        // bottom sides they would order two cards' shared edges differently
+        // at each end, so lines between the same pair of cards would cross.
+        let orders_by_row = side.is_horizontal();
         candidates.sort_by(|left, right| {
             left.remote_order
                 .total_cmp(&right.remote_order)
-                .then_with(|| left.row_order.total_cmp(&right.row_order))
+                .then_with(|| {
+                    if orders_by_row {
+                        left.row_order.total_cmp(&right.row_order)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
                 .then_with(|| left.remote_primary.total_cmp(&right.remote_primary))
                 .then_with(|| left.stable_key.cmp(&right.stable_key))
         });
@@ -201,11 +272,25 @@ pub(crate) fn assign_edge_ports(
                 .collect()
         };
 
+        let half_height = node_by_id
+            .get(node_id.as_str())
+            .map_or(0.0, |node| node.height / 2.0);
         for (slot_index, (candidate, slot_offset)) in candidates.iter().zip(assigned).enumerate() {
-            let Some(Some(EdgePortAssignment::Regular(assignment))) =
-                assignments.get_mut(candidate.edge_index)
-            else {
-                continue;
+            let assignment = match assignments.get_mut(candidate.edge_index) {
+                Some(Some(EdgePortAssignment::Regular(assignment))) => assignment,
+                Some(Some(EdgePortAssignment::SelfLoop(assignment))) => {
+                    // Loop ends sit at their packed height on the side.
+                    if let Some(rows) = assignment.rows.as_mut() {
+                        let row = half_height + slot_offset + candidate.row_order;
+                        if candidate.is_source {
+                            rows.0 = row;
+                        } else {
+                            rows.1 = row;
+                        }
+                    }
+                    continue;
+                }
+                _ => continue,
             };
             if candidate.is_source {
                 assignment.source_slot_offset = slot_offset;
@@ -222,28 +307,57 @@ pub(crate) fn assign_edge_ports(
     assignments
 }
 
-#[must_use]
-pub(crate) fn column_y_offset_from_center(
+/// Center height of the first listed row among `edge_columns`, from the
+/// card top, or `None` when the card lists none of them.
+fn column_row_y(node: &PositionedNode, edge_columns: &[String]) -> Option<f32> {
+    let edge_columns: Vec<String> = edge_columns
+        .iter()
+        .map(|name| normalize_identifier(name))
+        .collect();
+    node.columns
+        .iter()
+        .position(|column| edge_columns.contains(&normalize_identifier(&column.name)))
+        .map(column_row_center)
+}
+
+/// Heights, from the card top, where a self-loop leaves and re-enters its
+/// card: the referencing and referenced column rows when the card lists
+/// both on different rows, otherwise the middle of the card.
+fn self_loop_rows(
     node: &PositionedNode,
-    edge_columns: &[String],
-    config: &LayoutConfig,
-) -> f32 {
+    from_columns: &[String],
+    to_columns: &[String],
+) -> (f32, f32) {
+    if let (Some(from_row), Some(to_row)) = (
+        column_row_y(node, from_columns),
+        column_row_y(node, to_columns),
+    ) && (from_row - to_row).abs() >= 1.0
+    {
+        return (from_row, to_row);
+    }
+    self_loop_middle_rows(node.height)
+}
+
+#[must_use]
+pub(crate) fn column_y_offset_from_center(node: &PositionedNode, edge_columns: &[String]) -> f32 {
     if edge_columns.is_empty() || node.columns.is_empty() {
         return 0.0;
     }
+    // Relationships may name columns in a different case than the table
+    // declares them.
+    let edge_columns: Vec<String> = edge_columns
+        .iter()
+        .map(|name| normalize_identifier(name))
+        .collect();
     let Some(col_index) = node
         .columns
         .iter()
-        .position(|column| edge_columns.contains(&column.name))
+        .position(|column| edge_columns.contains(&normalize_identifier(&column.name)))
     else {
         return 0.0;
     };
     let center_y = node.height / 2.0;
-    #[allow(clippy::cast_precision_loss)]
-    let column_y = (col_index as f32)
-        .mul_add(NODE_COLUMN_HEIGHT, config.node_padding + NODE_HEADER_HEIGHT)
-        + NODE_COLUMN_HEIGHT / 2.0;
-    let offset = column_y - center_y;
+    let offset = column_row_center(col_index) - center_y;
     let max_offset = (center_y - 4.0).max(0.0);
     offset.clamp(-max_offset, max_offset)
 }
@@ -511,12 +625,13 @@ mod tests {
     use crate::layout::{
         ColumnFlags, ColumnRelationFlags, LayoutConfig, PositionedColumn, PositionedNode,
     };
-    use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT};
+    use crate::metrics::{NODE_COLUMN_HEIGHT, NODE_FIRST_ROW_TOP, NODE_ROWS_BOTTOM_PADDING};
     use crate::route::AttachmentSide;
     use relune_core::{EdgeKind, LayoutDirection, layout::Cardinality};
 
     fn node(id: &str, x: f32, y: f32) -> PositionedNode {
         PositionedNode {
+            omitted: None,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,
@@ -682,8 +797,8 @@ mod tests {
 
     #[test]
     fn test_column_y_offset_from_center_uses_matching_column_row() {
-        let config = LayoutConfig::default();
         let node = PositionedNode {
+            omitted: None,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
@@ -699,6 +814,7 @@ mod tests {
                             is_indexed: false,
                         },
                     },
+                    previous_data_type: None,
                 },
                 PositionedColumn {
                     name: "author_id".to_string(),
@@ -711,6 +827,7 @@ mod tests {
                             is_indexed: true,
                         },
                     },
+                    previous_data_type: None,
                 },
             ],
             x: 0.0,
@@ -722,7 +839,7 @@ mod tests {
             group_index: None,
         };
 
-        let offset = column_y_offset_from_center(&node, &["author_id".to_string()], &config);
+        let offset = column_y_offset_from_center(&node, &["author_id".to_string()]);
 
         assert!(offset > 0.0);
     }
@@ -790,6 +907,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn column_row_offset_matches_names_regardless_of_case() {
+        let node = node_with_fk_columns("t", 0.0, 0.0, 240.0, &["id", "Parent_Code", "name"]);
+        let exact = column_y_offset_from_center(&node, &["Parent_Code".to_string()]);
+        let folded = column_y_offset_from_center(&node, &["parent_code".to_string()]);
+
+        assert!(exact.abs() > f32::EPSILON);
+        assert!((exact - folded).abs() < f32::EPSILON);
+    }
+
     fn node_with_fk_columns(
         id: &str,
         x: f32,
@@ -797,10 +924,14 @@ mod tests {
         width: f32,
         columns: &[&str],
     ) -> PositionedNode {
-        // Match the default node_padding (8) and the shared header/column metrics.
+        // Match the card height layout derives from the shared row metrics.
         #[allow(clippy::cast_precision_loss)]
-        let height = (columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, 16.0 + NODE_HEADER_HEIGHT);
+        let height = (columns.len() as f32).mul_add(
+            NODE_COLUMN_HEIGHT,
+            NODE_FIRST_ROW_TOP + NODE_ROWS_BOTTOM_PADDING,
+        );
         PositionedNode {
+            omitted: None,
             id: id.to_string(),
             label: id.to_string(),
             kind: NodeKind::Table,
@@ -817,6 +948,7 @@ mod tests {
                             is_indexed: false,
                         },
                     },
+                    previous_data_type: None,
                 })
                 .collect(),
             x,

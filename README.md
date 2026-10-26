@@ -73,7 +73,7 @@ structure easier to understand, communicate, and change safely.
 Generate schema diagrams as:
 
 - SVG for static documentation, design notes, and README assets
-- HTML for interactive exploration with pan, zoom, search, and filters
+- HTML for interactive exploration with pan, zoom, search, filters, and shareable links to a selected table or relationship
 
 Relune can render:
 
@@ -133,7 +133,7 @@ Compare schema revisions and integrate with tooling:
 - text and Markdown diff output
 - JSON output for CI and automation
 - `layout-json` with routing debug metadata for edge-side, slot, and channel inspection
-- SVG or HTML visual diff with color-coded overlays
+- SVG or HTML visual diff that shows each change's kind (`+` / `−` / `~` with a faint tint) apart from its review risk (`breaking 1`-style labels)
 - [GitHub Actions integration](docs/github-actions.md) for automated schema review on pull requests
 
 ### Flexible input sources
@@ -181,6 +181,9 @@ relune render --config relune.toml --sql schema.sql --viewpoint billing -o billi
 
 # Use a force-directed layout with orthogonal edges
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o erd-force.svg
+
+# List only key and relationship columns on each table card
+relune render --sql schema.sql --density keys -o erd-keys.svg
 
 # Generate Markdown docs to a file
 relune doc --sql schema.sql -o schema.md

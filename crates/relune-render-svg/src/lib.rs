@@ -5,8 +5,9 @@
 
 use std::fmt::{self, Write};
 
-use relune_core::{EdgeKind, NodeKind, layout::RouteStyle};
+use relune_core::{ChangeKind, EdgeKind, NodeKind, layout::RouteStyle};
 
+mod diff;
 pub mod edge;
 mod error;
 pub mod escape;
@@ -21,7 +22,7 @@ mod theme;
 pub use edge::{EdgeRenderOptions, render_edge};
 pub use error::SvgRenderError;
 pub use geometry::{Point, Rect, clamp, compute_column_y, lerp};
-pub use group::{render_group, render_group_background, render_group_label};
+pub use group::{ambiguous_groups, render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
@@ -71,6 +72,10 @@ impl AsRef<str> for SvgArtifact {
     }
 }
 
+/// Distance from a label pill's center down to its text baseline, which
+/// centers 11px text in the pill that layout centers on `label_y`.
+const EDGE_LABEL_BASELINE_DROP: f32 = 4.0;
+
 /// When any backbone segment is shorter than this, Crow's Foot `<marker>` geometry
 /// (refX up to ~26px) intrudes past orthogonal elbows; draw inline symbols instead.
 const MIN_SVG_MARKER_BACKBONE_SEGMENT: f32 = 32.0;
@@ -112,20 +117,26 @@ pub fn render_svg_with_overlay(
     )?;
     out.push_str(r#"<rect width="100%" height="100%" fill="url(#canvas-grid)" opacity="0.92"/>"#);
 
-    // Render group shells behind nodes and edges.
-    for group in &graph.groups {
-        render_group_background(&mut out, group, &colors)?;
+    // Render group surfaces behind nodes and edges.
+    for (group, outlined) in graph.groups.iter().zip(ambiguous_groups(graph)) {
+        render_group_background(&mut out, group, outlined, &colors)?;
     }
 
     // Render edges with enhanced options
     let edge_options = EdgeRenderOptions {
-        stroke_width: 2.0,
+        stroke_width: 1.4,
         show_tooltips: options.show_tooltips,
         ..EdgeRenderOptions::default()
     };
+    let label_layer = edge_options.show_labels && options.labels_on_top;
+    let group_options = EdgeRenderOptions {
+        show_labels: edge_options.show_labels && !label_layer,
+        ..edge_options
+    };
     for (index, edge) in graph.edges.iter().enumerate() {
-        let edge_overlay = overlay.and_then(|o| o.edge(&edge.from, &edge.to));
-        render_edge_internal(&mut out, edge, &colors, &edge_options, index, edge_overlay)?;
+        let edge_overlay = overlay
+            .and_then(|o| o.edge(&edge.from, &edge.to, &edge.from_columns, &edge.to_columns));
+        render_edge_internal(&mut out, edge, &colors, &group_options, index, edge_overlay)?;
     }
 
     // Render nodes
@@ -141,6 +152,15 @@ pub fn render_svg_with_overlay(
         )?;
     }
 
+    // Edge labels go above every line and card, so none is cut through.
+    if label_layer {
+        out.push_str(r#"<g class="edge-labels">"#);
+        for edge in &graph.edges {
+            render_edge_label(&mut out, edge, &colors)?;
+        }
+        out.push_str("</g>");
+    }
+
     // Render group labels after nodes so schema titles remain readable even
     // when force-directed groups pack tightly.
     for group in &graph.groups {
@@ -149,7 +169,8 @@ pub fn render_svg_with_overlay(
 
     // Render legend if requested
     if options.show_legend {
-        render_legend(&mut out, &colors, None, graph.width, graph.height)?;
+        let diff = overlay.is_some_and(|overlay| !overlay.is_empty());
+        render_legend(&mut out, &colors, None, diff, graph.width, graph.height)?;
     }
 
     out.push_str("</svg>");
@@ -182,8 +203,10 @@ fn estimate_svg_capacity(
                 .sum::<usize>();
             let tooltip_bytes = if options.show_tooltips { 256 } else { 0 };
             let overlay_bytes = overlay
-                .and_then(|item| item.edge(&edge.from, &edge.to))
-                .map_or(0, estimate_edge_overlay_bytes);
+                .and_then(|item| {
+                    item.edge(&edge.from, &edge.to, &edge.from_columns, &edge.to_columns)
+                })
+                .map_or(0, |_| 96);
             768 + route_bytes
                 + label_bytes
                 + endpoint_bytes
@@ -213,17 +236,35 @@ fn estimate_svg_capacity(
             1_024 + label_bytes + column_bytes + tooltip_bytes + overlay_bytes
         })
         .sum();
-    let legend_bytes = if options.show_legend { 1_024 } else { 0 };
+    let legend_bytes = match (options.show_legend, overlay.is_some()) {
+        (false, _) => 0,
+        (true, false) => 3_072,
+        (true, true) => 6_144,
+    };
 
     base + group_bytes + edge_bytes + node_bytes + legend_bytes
 }
 
 fn estimate_node_overlay_bytes(overlay: &relune_layout::NodeOverlay) -> usize {
-    estimate_annotations_bytes(&overlay.annotations)
-}
-
-fn estimate_edge_overlay_bytes(overlay: &relune_layout::EdgeOverlay) -> usize {
-    estimate_annotations_bytes(&overlay.annotations)
+    let change_bytes = overlay.change.as_ref().map_or(0, |change| {
+        256 + change.summary.len() * 12
+            + change
+                .details
+                .iter()
+                .map(|detail| detail.len() * 12)
+                .sum::<usize>()
+    });
+    let column_bytes = overlay
+        .column_changes
+        .values()
+        .map(|change| {
+            384 + change
+                .previous_type
+                .as_ref()
+                .map_or(0, |previous| 64 + previous.len() * 12)
+        })
+        .sum::<usize>();
+    change_bytes + column_bytes + estimate_annotations_bytes(&overlay.annotations)
 }
 
 fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usize {
@@ -241,30 +282,23 @@ fn estimate_annotations_bytes(annotations: &[relune_layout::Annotation]) -> usiz
 }
 
 fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
-    let (shadow_dy, shadow_blur, hatch_color) = if is_light_theme(colors) {
-        ("2", "5", "#cbd5e1")
+    let hatch_color = if is_light_theme(colors) {
+        "#cbd5e1"
     } else {
-        ("4", "8", "#334155")
+        "#334155"
     };
 
     write!(
         out,
         r"<defs>
 <style>
-.edge-particles {{ opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }}
-.edge-particle {{ fill: {glow_particle}; }}
-.edge:hover .edge-particles {{ opacity: 0.92; }}
-.edge:hover .edge-path {{ filter: drop-shadow(0 0 4px {glow_color}); }}
 .edge:hover .edge-path,
-.edge:hover .crow-inline {{ stroke: {glow_color}; }}
-.node:hover .table-body {{ stroke-width: 2.1px; }}
+.edge:hover .crow-inline {{ stroke: {hover_color}; }}
+.node:hover .table-body {{ stroke-width: 1.6px; }}
 .group-box,
-.group-band,
-.group-divider,
 .group-label {{ pointer-events: none; }}
 </style>",
-        glow_color = colors.glow_color,
-        glow_particle = colors.glow_particle,
+        hover_color = colors.selection_color,
     )?;
     write!(
         out,
@@ -278,12 +312,6 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <rect width="8" height="8" fill="transparent"/>
 <rect width="3" height="8" fill="{hatch_color}" fill-opacity="0.42"/>
 </pattern>
-<filter id="node-shadow" x="-20%" y="-20%" width="140%" height="150%">
-<feDropShadow dx="0" dy="{shadow_dy}" stdDeviation="{shadow_blur}" flood-color="{}"/>
-</filter>
-<filter id="group-shadow" x="-20%" y="-20%" width="140%" height="160%">
-<feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="{}" flood-opacity="0.16"/>
-</filter>
 <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
 <path d="M1,1 L9,5 L1,9" fill="none" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>
@@ -305,21 +333,8 @@ fn out_push_defs(out: &mut String, colors: &ThemeColors) -> fmt::Result {
 <path d="M2 2 L2 16" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" shape-rendering="geometricPrecision"/>
 <path d="M10 2 L23 9 M10 9 L23 9 M10 16 L23 9" stroke="context-stroke" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"/>
 </marker>"#,
-        colors.canvas_base,
-        colors.canvas_dot,
-        colors.canvas_dot,
-        colors.node_shadow,
-        colors.node_shadow,
+        colors.canvas_base, colors.canvas_dot, colors.canvas_dot,
     )?;
-    for kind in [NodeKind::Table, NodeKind::View, NodeKind::Enum] {
-        let header_fill = node::node_style(kind, colors).header_fill;
-        write!(
-            out,
-            r#"
-<linearGradient id="header-fade-{}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{header_fill}" stop-opacity="0.38"/><stop offset="100%" stop-color="{header_fill}" stop-opacity="0"/></linearGradient>"#,
-            node::node_kind_name(kind)
-        )?;
-    }
     out.push_str("\n</defs>");
     Ok(())
 }
@@ -352,56 +367,46 @@ fn render_edge_internal(
                 edge.route.style,
                 RouteStyle::Orthogonal | RouteStyle::Straight
             ) && shortest_seg < MIN_SVG_MARKER_BACKBONE_SEGMENT));
-    let max_severity = overlay.and_then(relune_layout::EdgeOverlay::max_severity);
+    let change = overlay.and_then(|edge_overlay| edge_overlay.change);
 
-    let stroke_dasharray = if options.dashed {
-        Some("5,3")
+    let stroke_dasharray = if options.dashed || change == Some(ChangeKind::Removed) {
+        Some(diff::REMOVED_DASHARRAY)
     } else {
         edge_style.dasharray
     };
 
-    // Add overlay severity CSS class if present
-    let severity_class = match max_severity {
-        Some(relune_layout::OverlaySeverity::Error) => " overlay-error",
-        Some(relune_layout::OverlaySeverity::Warning) => " overlay-warning",
-        Some(relune_layout::OverlaySeverity::Info) => " overlay-info",
-        Some(relune_layout::OverlaySeverity::Hint) => " overlay-hint",
-        None => "",
-    };
-
     write!(
         out,
-        r#"<g id="edge-{index}" class="edge edge-kind-{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
+        r#"<g id="edge-{index}" class="edge edge-kind-{}{}{}" data-from="{}" data-to="{}" data-edge-kind="{}" style="--enter-delay:{:.3}s">"#,
         kind,
-        severity_class,
+        if change.is_some() { " " } else { "" },
+        change.map_or("", diff::change_class),
         escape_attribute(&edge.from),
         escape_attribute(&edge.to),
         kind,
         index as f32 * 0.016 + 0.04
     )?;
 
-    // Add tooltip if enabled (with overlay annotations appended)
+    // Add tooltip if enabled (with the diff change appended)
     if options.show_tooltips {
         let mut tooltip_text = generate_edge_tooltip(edge);
-        if let Some(edge_overlay) = overlay
-            && !edge_overlay.annotations.is_empty()
-        {
-            tooltip_text.push('\n');
-            for annotation in &edge_overlay.annotations {
-                let severity_label = overlay_severity_label(annotation.severity);
-                write!(tooltip_text, "\n[{severity_label}] {}", annotation.message)?;
-                if let Some(ref hint) = annotation.hint {
-                    write!(tooltip_text, "\n  → {hint}")?;
-                }
-            }
+        if let Some(change) = change {
+            write!(
+                tooltip_text,
+                "\n\n{} {change} relationship",
+                diff::change_marker(change)
+            )?;
         }
         write!(out, r"<title>{}</title>", escape_text(&tooltip_text))?;
     }
 
-    // Override stroke color when overlay severity is present
-    let effective_stroke = match max_severity {
-        Some(severity) => overlay_severity_color(severity, colors),
-        None => edge_style.stroke,
+    // A changed relationship takes its change kind's color and a heavier line.
+    let (effective_stroke, stroke_width) = match change {
+        Some(change) => (
+            diff::change_color(change, colors),
+            options.stroke_width.max(2.0),
+        ),
+        None => (edge_style.stroke, options.stroke_width),
     };
 
     // Render the path with CSS class and data attributes
@@ -418,7 +423,7 @@ fn render_edge_internal(
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
-                options.stroke_width,
+                stroke_width,
                 marker_attrs,
                 stroke_dasharray
             )?;
@@ -430,19 +435,10 @@ fn render_edge_internal(
                 index,
                 escape_attribute(&path_d),
                 effective_stroke,
-                options.stroke_width,
+                stroke_width,
                 marker_attrs,
             )?;
         }
-    }
-
-    // The particle only runs while the edge is hovered, so idle diagrams keep
-    // no animation timers alive.
-    if edge.kind == EdgeKind::ForeignKey {
-        write!(
-            out,
-            r##"<g class="edge-particles" opacity="0"><circle class="edge-particle" r="2.4"><animateMotion dur="2.6s" begin="edge-{index}.mouseenter" end="edge-{index}.mouseleave" repeatCount="indefinite" fill="freeze" rotate="auto"><mpath href="#edge-path-{index}"/></animateMotion></circle></g>"##
-        )?;
     }
 
     // For curved FK edges, draw Crow's Foot symbols as inline SVG
@@ -457,33 +453,44 @@ fn render_edge_internal(
         )?;
     }
 
-    // Render the label if enabled
-    if options.show_labels && !edge.label.is_empty() {
-        let label_x = edge.label_x;
-        let label_y = edge.label_y;
-        let label_width = estimate_edge_label_width(&edge.label);
-        write!(
-            out,
-            r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="{EDGE_LABEL_HEIGHT}" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
-            label_width.mul_add(-0.5, label_x),
-            label_y - 12.0,
-            label_width,
-            node_label_background(colors),
-            edge_style.stroke
-        )?;
-
-        write!(
-            out,
-            r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="{}">{}</text>"#,
-            label_x,
-            label_y,
-            edge_style.label_fill.unwrap_or(colors.text_muted),
-            escape_text(&edge.label)
-        )?;
+    if options.show_labels {
+        render_edge_label(out, edge, colors)?;
     }
 
     out.push_str("</g>");
     Ok(())
+}
+
+/// Draws an edge's label pill and text, if it has a label.
+fn render_edge_label(
+    out: &mut String,
+    edge: &relune_layout::PositionedEdge,
+    colors: &ThemeColors,
+) -> fmt::Result {
+    if edge.label.is_empty() {
+        return Ok(());
+    }
+    let edge_style = edge_style(edge.kind, colors);
+    let label_x = edge.label_x;
+    let label_y = edge.label_y;
+    let label_width = estimate_edge_label_width(&edge.label);
+    write!(
+        out,
+        r#"<rect class="edge-label-pill" x="{:.1}" y="{:.1}" width="{:.1}" height="{EDGE_LABEL_HEIGHT}" rx="9" ry="9" fill="{}" fill-opacity="0.92" stroke="{}" stroke-opacity="0.65"/>"#,
+        label_width.mul_add(-0.5, label_x),
+        EDGE_LABEL_HEIGHT.mul_add(-0.5, label_y),
+        label_width,
+        node_label_background(colors),
+        edge_style.stroke
+    )?;
+    write!(
+        out,
+        r#"<text class="edge-label" x="{:.1}" y="{:.1}" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle" fill="{}">{}</text>"#,
+        label_x,
+        label_y + EDGE_LABEL_BASELINE_DROP,
+        edge_style.label_fill.unwrap_or(colors.text_muted),
+        escape_text(&edge.label)
+    )
 }
 
 /// Generates tooltip text for a relune-layout `PositionedEdge`.
@@ -534,36 +541,6 @@ pub(crate) const fn is_light_theme(colors: &ThemeColors) -> bool {
     colors.is_light
 }
 
-/// Returns a display-friendly label for an overlay severity level.
-pub(crate) const fn overlay_severity_label(
-    severity: relune_layout::OverlaySeverity,
-) -> &'static str {
-    match severity {
-        relune_layout::OverlaySeverity::Error => "error",
-        relune_layout::OverlaySeverity::Warning => "warning",
-        relune_layout::OverlaySeverity::Info => "info",
-        relune_layout::OverlaySeverity::Hint => "hint",
-    }
-}
-
-/// Returns the stroke/fill color for an overlay severity, themed for light/dark.
-pub(crate) const fn overlay_severity_color(
-    severity: relune_layout::OverlaySeverity,
-    colors: &ThemeColors,
-) -> &'static str {
-    let light = is_light_theme(colors);
-    match (severity, light) {
-        (relune_layout::OverlaySeverity::Error, false) => "#f87171",
-        (relune_layout::OverlaySeverity::Error, true) => "#dc2626",
-        (relune_layout::OverlaySeverity::Warning, false) => "#fbbf24",
-        (relune_layout::OverlaySeverity::Warning, true) => "#d97706",
-        (relune_layout::OverlaySeverity::Info, false) => "#38bdf8",
-        (relune_layout::OverlaySeverity::Info, true) => "#0284c7",
-        (relune_layout::OverlaySeverity::Hint, false) => "#94a3b8",
-        (relune_layout::OverlaySeverity::Hint, true) => "#64748b",
-    }
-}
-
 const fn edge_kind_name(kind: EdgeKind) -> &'static str {
     match kind {
         EdgeKind::ForeignKey => "foreign-key",
@@ -572,36 +549,26 @@ const fn edge_kind_name(kind: EdgeKind) -> &'static str {
     }
 }
 
+/// FK lines use the theme's quiet edge colour; enum and view lines take the
+/// hue of the kind mark on the card they point to, dashed so they never read
+/// as foreign keys.
 const fn edge_style(kind: EdgeKind, colors: &ThemeColors) -> EdgeStyle {
-    match (kind, is_light_theme(colors)) {
-        (EdgeKind::ForeignKey, _) => EdgeStyle {
-            stroke: if is_light_theme(colors) {
-                "#64748b"
-            } else {
-                "#475569"
-            },
+    let light = is_light_theme(colors);
+    match kind {
+        EdgeKind::ForeignKey => EdgeStyle {
+            stroke: colors.edge_stroke,
             dasharray: None,
             label_fill: None,
         },
-        (EdgeKind::EnumReference, false) => EdgeStyle {
-            stroke: "#f59e0b",
+        EdgeKind::EnumReference => EdgeStyle {
+            stroke: node::node_kind_accent(NodeKind::Enum, colors),
             dasharray: Some("6,4"),
-            label_fill: Some("#fbbf24"),
+            label_fill: Some(if light { "#7e22ce" } else { "#d8b4fe" }),
         },
-        (EdgeKind::EnumReference, true) => EdgeStyle {
-            stroke: "#d97706",
-            dasharray: Some("6,4"),
-            label_fill: Some("#b45309"),
-        },
-        (EdgeKind::ViewDependency, false) => EdgeStyle {
-            stroke: "#2dd4bf",
+        EdgeKind::ViewDependency => EdgeStyle {
+            stroke: node::node_kind_accent(NodeKind::View, colors),
             dasharray: Some("4,4"),
-            label_fill: Some("#5eead4"),
-        },
-        (EdgeKind::ViewDependency, true) => EdgeStyle {
-            stroke: "#0f766e",
-            dasharray: Some("4,4"),
-            label_fill: Some("#115e59"),
+            label_fill: Some(if light { "#115e59" } else { "#5eead4" }),
         },
     }
 }
@@ -616,9 +583,10 @@ mod tests {
     use super::*;
     use relune_core::layout::Cardinality;
     use relune_core::{EdgeKind, NodeKind};
+    use relune_layout::metrics::COLUMN_NULLABLE_MARKER;
     use relune_layout::{
-        ColumnFlags, ColumnRelationFlags, EdgeRoute, PositionedColumn, PositionedEdge,
-        PositionedGroup, PositionedNode, RouteStyle,
+        ColumnFlags, ColumnRelationFlags, EdgeRoute, OmittedColumns, PositionedColumn,
+        PositionedEdge, PositionedGroup, PositionedNode, RouteStyle,
     };
 
     fn render_svg(graph: &relune_layout::PositionedGraph, options: SvgRenderOptions) -> String {
@@ -658,6 +626,7 @@ mod tests {
         PositionedColumn {
             name: name.to_string(),
             data_type: data_type.to_string(),
+            previous_data_type: None,
             flags: ColumnFlags { nullable, relation },
         }
     }
@@ -678,6 +647,7 @@ mod tests {
     fn single_node_graph() -> relune_layout::PositionedGraph {
         relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted: None,
                 id: "users".to_string(),
                 label: "users".to_string(),
                 kind: NodeKind::Table,
@@ -707,6 +677,7 @@ mod tests {
         relune_layout::PositionedGraph {
             nodes: vec![
                 PositionedNode {
+                    omitted: None,
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
@@ -723,6 +694,7 @@ mod tests {
                     group_index: None,
                 },
                 PositionedNode {
+                    omitted: None,
                     id: "posts".to_string(),
                     label: "posts".to_string(),
                     kind: NodeKind::Table,
@@ -791,18 +763,119 @@ mod tests {
 
         // Should contain the node label
         assert!(svg.contains(">users<"));
-        // Should contain the columns (now in "name: type" format from PositionedColumn)
-        assert!(svg.contains("id: uuid PK"));
-        assert!(svg.contains("name: text"));
+        // Names and types are separate text elements.
+        assert!(svg.contains(r#"class="column-name""#));
+        assert!(svg.contains(">uuid PK</text>"));
+        assert!(svg.contains(">text</text>"));
+        assert!(!svg.contains("id: uuid"));
         // Should contain valid SVG structure
         assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(svg.contains("<rect"));
         assert!(svg.contains("<text"));
         assert!(svg.contains("node-0-header-clip"));
-        // One clip per badge count: `id` carries the PK badge, `name` none.
-        assert_eq!(svg.matches("<clipPath id=\"node-0-columns-").count(), 2);
-        assert_eq!(svg.matches("url(#node-0-columns-1-clip)").count(), 1);
-        assert_eq!(svg.matches("url(#node-0-columns-0-clip)").count(), 1);
+        // One clip per node, shared by every name and type.
+        assert_eq!(
+            svg.matches("<clipPath id=\"node-0-columns-clip\"").count(),
+            1
+        );
+        assert_eq!(svg.matches("url(#node-0-columns-clip)").count(), 4);
+    }
+
+    #[test]
+    fn test_render_svg_draws_edge_labels_above_cards_when_asked() {
+        let graph = multi_node_graph();
+        let labelled = graph
+            .edges
+            .iter()
+            .filter(|edge| !edge.label.is_empty())
+            .count();
+        assert!(labelled > 0);
+
+        let on_top = render_svg(
+            &graph,
+            SvgRenderOptions {
+                labels_on_top: true,
+                ..SvgRenderOptions::default()
+            },
+        );
+        let layer = on_top
+            .find(r#"<g class="edge-labels">"#)
+            .expect("label layer");
+        let last_node = on_top.rfind(r#"class="table-node"#).expect("node");
+        assert!(layer > last_node, "labels come after every card");
+        assert_eq!(on_top[layer..].matches("edge-label-pill").count(), labelled);
+
+        let grouped = render_svg(&graph, SvgRenderOptions::default());
+        assert!(!grouped.contains(r#"<g class="edge-labels">"#));
+        assert_eq!(grouped.matches("edge-label-pill").count(), labelled);
+    }
+
+    #[test]
+    fn test_render_svg_counts_omitted_columns_below_listed_rows() {
+        let mut graph = single_node_graph();
+        graph.nodes[0].omitted = Some(OmittedColumns {
+            count: 3,
+            primary_keys: 0,
+            counted_row: true,
+        });
+        let svg = render_svg(
+            &graph,
+            SvgRenderOptions {
+                show_tooltips: true,
+                ..SvgRenderOptions::default()
+            },
+        );
+
+        assert!(svg.contains(r#"class="omitted-columns""#));
+        assert!(svg.contains(">+3 columns</text>"));
+        // The tooltip counts every column, listed or not.
+        assert!(svg.contains("5 columns"));
+    }
+
+    #[test]
+    fn test_render_svg_header_only_card_has_no_omitted_row() {
+        let mut graph = single_node_graph();
+        let pk_columns = graph.nodes[0]
+            .columns
+            .iter()
+            .filter(|column| column.flags.relation.is_primary_key)
+            .count();
+        graph.nodes[0].columns.clear();
+        graph.nodes[0].omitted = Some(OmittedColumns {
+            count: 2,
+            primary_keys: pk_columns,
+            counted_row: false,
+        });
+        let svg = render_svg(
+            &graph,
+            SvgRenderOptions {
+                show_tooltips: true,
+                ..SvgRenderOptions::default()
+            },
+        );
+
+        assert!(!svg.contains("omitted-columns"));
+        assert!(!svg.contains("column-row"));
+        assert!(!svg.contains("table-header-divider"));
+        // The tooltip still counts the primary keys the card leaves out.
+        assert!(svg.contains("2 columns"));
+        assert!(svg.contains(&format!("{pk_columns} primary key")));
+    }
+
+    #[test]
+    fn test_render_svg_counts_columns_of_a_card_that_lists_none() {
+        let mut graph = single_node_graph();
+        graph.nodes[0].columns.clear();
+        graph.nodes[0].omitted = Some(OmittedColumns {
+            count: 4,
+            primary_keys: 0,
+            counted_row: true,
+        });
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+
+        assert!(svg.contains(">+4 columns</text>"));
+        assert!(svg.contains("table-header-divider"));
+        assert!(!svg.contains("column-row"));
     }
 
     #[test]
@@ -810,9 +883,10 @@ mod tests {
         let graph = multi_node_graph();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        assert_eq!(svg.matches("<linearGradient id=\"header-fade-").count(), 3);
+        assert!(!svg.contains("header-fade"));
+        assert!(!svg.contains("node-shadow"));
         assert_eq!(
-            svg.matches(r#"fill="url(#header-fade-table)""#).count(),
+            svg.matches(r#"class="table-kind-mark""#).count(),
             graph.nodes.len()
         );
         assert_eq!(
@@ -823,13 +897,15 @@ mod tests {
     }
 
     #[test]
-    fn test_render_svg_runs_fk_particles_only_while_hovered() {
+    fn test_render_svg_edges_have_no_glow_or_particles() {
         let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
 
         assert!(svg.contains(r#"<g id="edge-0" class="edge edge-kind-foreign-key""#));
-        assert_eq!(svg.matches("<animateMotion").count(), 1);
-        assert!(svg.contains(r#"begin="edge-0.mouseenter" end="edge-0.mouseleave""#));
-        assert!(!svg.contains("begin=\"-"));
+        assert!(!svg.contains("<animateMotion"));
+        assert!(!svg.contains("edge-particle"));
+        assert!(!svg.contains("drop-shadow"));
+        // Hover recolours the line in the selection colour instead.
+        assert!(svg.contains(".edge:hover .crow-inline { stroke: #93a8c9; }"));
     }
 
     #[test]
@@ -855,6 +931,7 @@ mod tests {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![
                 PositionedNode {
+                    omitted: None,
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
@@ -873,6 +950,7 @@ mod tests {
                     group_index: None,
                 },
                 PositionedNode {
+                    omitted: None,
                     id: "active_users".to_string(),
                     label: "active_users".to_string(),
                     kind: NodeKind::View,
@@ -891,6 +969,7 @@ mod tests {
                     group_index: None,
                 },
                 PositionedNode {
+                    omitted: None,
                     id: "status".to_string(),
                     label: "status".to_string(),
                     kind: NodeKind::Enum,
@@ -973,7 +1052,7 @@ mod tests {
         assert!(svg.contains("edge-kind-enum-reference"));
         assert!(svg.contains("stroke-dasharray=\"4,4\""));
         assert!(svg.contains("stroke-dasharray=\"6,4\""));
-        assert!(svg.contains("• active"));
+        assert!(svg.contains(">active</text>"));
         assert!(svg.contains("data-node-kind=\"view\""));
         assert!(svg.contains("data-node-kind=\"enum\""));
     }
@@ -1020,6 +1099,7 @@ mod tests {
     fn test_render_svg_escapes_special_characters_in_labels() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted: None,
                 id: "test".to_string(),
                 label: "Test & <Label>".to_string(),
                 kind: NodeKind::Table,
@@ -1088,6 +1168,7 @@ mod tests {
         let escaped = "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;";
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted: None,
                 id: payload.to_string(),
                 label: payload.to_string(),
                 kind: NodeKind::Table,
@@ -1161,8 +1242,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
-        assert!(svg.contains("#151926"));
-        assert!(svg.contains("edge-particles"));
+        assert!(svg.contains(r##"fill="#161b26""##));
     }
 
     #[test]
@@ -1176,8 +1256,9 @@ mod tests {
 
         // Light theme background
         assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill
-        assert!(svg.contains("#fffaf0"));
+        // Light theme node fill and table kind mark
+        assert!(svg.contains(r##"fill="#ffffff""##));
+        assert!(svg.contains(r##"fill="#ea580c""##));
     }
 
     #[test]
@@ -1194,28 +1275,46 @@ mod tests {
         assert_eq!(svg2, svg3);
     }
 
-    #[test]
-    fn test_column_separators_sit_between_rows_of_each_node() {
-        // The first node previously got no separators and every later node got
-        // one above its first column.
-        let svg = render_svg(&multi_node_graph(), SvgRenderOptions::default());
-        let per_node: Vec<usize> = svg
-            .split("<g class=\"table-node")
+    /// Returns the value of `attr` on every element whose class is `class`.
+    fn attribute_values<'a>(svg: &'a str, class: &str, attr: &str) -> Vec<&'a str> {
+        svg.split(&format!(r#"class="{class}""#))
             .skip(1)
-            .map(|node| node.matches("class=\"column-separator\"").count())
-            .collect();
-        let expected: Vec<usize> = multi_node_graph()
-            .nodes
-            .iter()
-            .map(|node| node.columns.len().saturating_sub(1))
-            .collect();
-        assert_eq!(per_node, expected);
+            .map(|rest| {
+                let start =
+                    rest.find(&format!(r#" {attr}=""#)).expect("attribute") + attr.len() + 3;
+                &rest[start..start + rest[start..].find('"').expect("closing quote")]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_column_rows_align_marks_without_separators() {
+        let mut graph = multi_node_graph();
+        graph.nodes[1].columns[2].flags.nullable = true;
+        let svg = render_svg(&graph, SvgRenderOptions::default());
+        let posts = svg
+            .split("<g class=\"table-node")
+            .nth(2)
+            .expect("posts node");
+
+        assert!(!svg.contains("column-separator"));
+        assert!(!svg.contains(r#"font-style="italic""#));
+        // PK and FK badges sit in their own slots, so every name starts at
+        // the same x, after both slots.
+        let names = attribute_values(posts, "column-name", "x");
+        assert_eq!(names.len(), 3);
+        assert!(names.iter().all(|x| *x == names[0]));
+        let types = attribute_values(posts, "column-type", "x");
+        assert!(types.iter().all(|x| *x == types[0]));
+        assert_eq!(posts.matches(r#"class="column-nullable""#).count(), 1);
+        assert!(posts.contains(&format!(">{COLUMN_NULLABLE_MARKER}</text>")));
     }
 
     #[test]
     fn test_render_svg_with_empty_columns() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted: None,
                 id: "empty".to_string(),
                 label: "EmptyTable".to_string(),
                 kind: NodeKind::Table,
@@ -1475,7 +1574,7 @@ mod tests {
         );
         assert!(!svg.contains("marker-start=\"url(#cardinality-one-many)\""));
         assert!(svg.contains(
-            r##"stroke="#475569" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
+            r##"stroke="#56627a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
         ));
         assert!(!svg.contains(
             r##"stroke="#cbd5e1" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" shape-rendering="geometricPrecision""##,
@@ -1535,6 +1634,7 @@ mod tests {
         relune_layout::PositionedGraph {
             nodes: vec![
                 PositionedNode {
+                    omitted: None,
                     id: "users".to_string(),
                     label: "users".to_string(),
                     kind: NodeKind::Table,
@@ -1551,6 +1651,7 @@ mod tests {
                     group_index: Some(0),
                 },
                 PositionedNode {
+                    omitted: None,
                     id: "posts".to_string(),
                     label: "posts".to_string(),
                     kind: NodeKind::Table,
@@ -1610,6 +1711,7 @@ mod tests {
     fn layout_graph_without_groups() -> relune_layout::PositionedGraph {
         relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted: None,
                 id: "users".to_string(),
                 label: "users".to_string(),
                 kind: NodeKind::Table,
@@ -1659,10 +1761,10 @@ mod tests {
         assert!(svg.contains("data-group-id=\"user_domain\""));
         assert!(svg.contains("class=\"group-label\""));
         assert!(svg.contains(">User Domain<"));
-        // Should contain dashed stroke for group
-        assert!(svg.contains("stroke-dasharray=\"10,5\""));
-        // Should contain the refreshed group accent band
-        assert!(svg.contains("class=\"group-band\""));
+        // Groups are plain surfaces without a dashed frame, band, or shadow.
+        assert!(!svg.contains("stroke-dasharray=\"10,5\""));
+        assert!(!svg.contains("group-band"));
+        assert!(!svg.contains("group-shadow"));
     }
 
     #[test]
@@ -1739,7 +1841,7 @@ mod tests {
         // Dark theme background
         assert!(svg.contains("#0c0f1a"));
         // Dark theme node fill
-        assert!(svg.contains("#151926"));
+        assert!(svg.contains(r##"fill="#161b26""##));
     }
 
     #[test]
@@ -1753,8 +1855,9 @@ mod tests {
 
         // Light theme background
         assert!(svg.contains("#f7f8fc"));
-        // Light theme node fill
-        assert!(svg.contains("#fffaf0"));
+        // Light theme node fill and table kind mark
+        assert!(svg.contains(r##"fill="#ffffff""##));
+        assert!(svg.contains(r##"fill="#ea580c""##));
     }
 
     #[test]
@@ -1762,15 +1865,18 @@ mod tests {
         let graph = layout_graph_with_groups();
         let svg = render_svg(&graph, SvgRenderOptions::default());
 
-        // Group box should have rounded corners
-        assert!(svg.contains("rx=\"16\""));
-        assert!(svg.contains("ry=\"16\""));
+        // Group surfaces and node cards both use small radii.
+        assert!(svg.contains(r#"class="group-box" x="#));
+        assert!(svg.contains("rx=\"10\""));
+        assert!(svg.contains(r#"class="table-body""#));
+        assert!(svg.contains("rx=\"6\" ry=\"6\""));
     }
 
     #[test]
     fn test_render_svg_escapes_special_characters_in_groups() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {
+                omitted: None,
                 id: "test & table".to_string(),
                 label: "Test & <Table>".to_string(),
                 kind: NodeKind::Table,
@@ -1814,45 +1920,42 @@ mod tests {
         assert!(!svg.contains("Group & <Test>"));
     }
 
-    #[test]
-    fn test_render_svg_with_node_overlay_adds_severity_class() {
-        let graph = single_node_graph();
-        let mut overlay = relune_layout::DiagramOverlay::new();
-        overlay.add_node_annotation(
-            "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "No primary key".to_string(),
-                hint: Some("Add a PK column".to_string()),
-                rule_id: Some("no-primary-key".to_string()),
-            },
-        );
-
-        let options = SvgRenderOptions {
-            show_tooltips: true,
-            ..Default::default()
-        };
-        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
-
-        assert!(svg.contains("overlay-warning"));
-        assert!(svg.contains("overlay-badge"));
-        assert!(svg.contains("[warning] No primary key"));
-        assert!(svg.contains("Add a PK column"));
+    fn risk(severity: relune_core::ReviewSeverity, message: &str) -> relune_layout::Annotation {
+        relune_layout::Annotation {
+            severity,
+            message: message.to_string(),
+            hint: Some("Backfill before tightening".to_string()),
+            rule_id: Some("risk/add-not-null-on-existing".to_string()),
+        }
     }
 
     #[test]
-    fn test_render_svg_with_edge_overlay_changes_stroke() {
-        let graph = multi_node_graph();
+    fn test_render_svg_shows_risk_apart_from_change_kind() {
+        let graph = single_node_graph();
         let mut overlay = relune_layout::DiagramOverlay::new();
-        overlay.add_edge_annotation(
-            "posts",
+        overlay.set_node_change(
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "Missing index on FK".to_string(),
-                hint: None,
-                rule_id: Some("missing-foreign-key-index".to_string()),
+            relune_layout::NodeChange {
+                kind: relune_core::ChangeKind::Modified,
+                summary: "Modified (1 changes)".to_string(),
+                details: vec!["+ name".to_string()],
             },
+        );
+        overlay.set_column_change(
+            "users",
+            "name",
+            relune_layout::ColumnChange::new(relune_core::ChangeKind::Added),
+        );
+        overlay.add_node_annotation(
+            "users",
+            risk(
+                relune_core::ReviewSeverity::Warning,
+                "NOT NULL column added",
+            ),
+        );
+        overlay.add_node_annotation(
+            "users",
+            risk(relune_core::ReviewSeverity::Breaking, "Column dropped"),
         );
 
         let options = SvgRenderOptions {
@@ -1861,34 +1964,107 @@ mod tests {
         };
         let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
 
-        // Edge should have overlay-warning class
-        assert!(svg.contains("edge-kind-foreign-key overlay-warning"));
-        // Tooltip should include annotation
-        assert!(svg.contains("[warning] Missing index on FK"));
+        assert!(svg.contains("node-kind-table diff-modified risk-breaking"));
+        assert!(svg.contains(r#"class="column-row diff-added" data-column-name="name""#));
+        assert!(svg.contains(">breaking 1</text>"));
+        assert!(svg.contains("~ Modified (1 changes)"));
+        assert!(svg.contains("[warning] NOT NULL column added"));
+        assert!(svg.contains("Backfill before tightening"));
+    }
+
+    #[test]
+    fn test_render_svg_draws_type_change_inline() {
+        let mut graph = single_node_graph();
+        graph.nodes[0].columns[1].previous_data_type = Some("varchar(500)".to_string());
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.set_column_change(
+            "users",
+            "name",
+            relune_layout::ColumnChange {
+                kind: relune_core::ChangeKind::Modified,
+                previous_type: Some("varchar(500)".to_string()),
+            },
+        );
+
+        let svg = render_svg_with_overlay(&graph, SvgRenderOptions::default(), Some(&overlay));
+
+        assert!(svg.contains(
+            r#"<tspan class="column-type-previous">varchar(500)</tspan> → <tspan class="column-type-current""#
+        ));
+        assert!(svg.contains(">text</tspan></text>"));
+        // A row-level change leaves the card itself unmarked.
+        assert!(!svg.contains("risk-label"));
+        assert!(svg.contains(r#"class="column-row diff-modified""#));
+    }
+
+    #[test]
+    fn test_render_svg_marks_removed_card_and_relationship() {
+        let graph = multi_node_graph();
+        let mut overlay = relune_layout::DiagramOverlay::new();
+        overlay.set_node_change(
+            "posts",
+            relune_layout::NodeChange {
+                kind: relune_core::ChangeKind::Removed,
+                summary: "Removed table (3 columns)".to_string(),
+                details: Vec::new(),
+            },
+        );
+        overlay.set_edge_change(
+            "posts",
+            "users",
+            &["user_id"],
+            &["id"],
+            relune_core::ChangeKind::Removed,
+        );
+
+        let options = SvgRenderOptions {
+            show_tooltips: true,
+            ..Default::default()
+        };
+        let svg = render_svg_with_overlay(&graph, options, Some(&overlay));
+
+        assert!(svg.contains("node-kind-table diff-removed"));
+        assert!(svg.contains(r#"class="diff-tint""#));
+        assert!(svg.contains("\u{2212}</text>"));
+        assert!(svg.contains("edge-kind-foreign-key diff-removed"));
+        assert!(svg.contains("removed relationship"));
+        // Nothing risky was reported, so no risk label is drawn.
+        assert!(!svg.contains("risk-label"));
     }
 
     #[test]
     fn test_svg_capacity_estimate_covers_overlay_render() {
         let graph = multi_node_graph();
         let mut overlay = relune_layout::DiagramOverlay::new();
-        overlay.add_node_annotation(
+        overlay.set_node_change(
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Warning,
-                message: "Very long warning message for capacity estimation".to_string(),
-                hint: Some("Helpful remediation guidance for the warning".to_string()),
-                rule_id: Some("warn-capacity".to_string()),
+            relune_layout::NodeChange {
+                kind: relune_core::ChangeKind::Modified,
+                summary: "Modified (2 changes)".to_string(),
+                details: vec!["+ name".to_string(), "~ id: int → uuid PK".to_string()],
             },
         );
-        overlay.add_edge_annotation(
+        overlay.set_column_change(
+            "users",
+            "id",
+            relune_layout::ColumnChange {
+                kind: relune_core::ChangeKind::Modified,
+                previous_type: Some("int".to_string()),
+            },
+        );
+        overlay.add_node_annotation(
+            "users",
+            risk(
+                relune_core::ReviewSeverity::Breaking,
+                "Very long warning message for capacity estimation",
+            ),
+        );
+        overlay.set_edge_change(
             "posts",
             "users",
-            relune_layout::Annotation {
-                severity: relune_layout::OverlaySeverity::Error,
-                message: "Another long edge warning for tooltip expansion".to_string(),
-                hint: Some("Add the missing index".to_string()),
-                rule_id: Some("edge-capacity".to_string()),
-            },
+            &["user_id"],
+            &["id"],
+            relune_core::ChangeKind::Added,
         );
 
         let options = SvgRenderOptions {
@@ -1911,9 +2087,10 @@ mod tests {
         let svg_empty_overlay =
             render_svg_with_overlay(&graph, options, Some(&relune_layout::DiagramOverlay::new()));
 
-        // Both should produce identical output (no overlay classes/badges)
-        assert!(!svg_no_overlay.contains("overlay-"));
-        assert!(!svg_empty_overlay.contains("overlay-"));
+        // Both should produce identical output (no diff or risk marks)
+        assert_eq!(svg_no_overlay, svg_empty_overlay);
+        assert!(!svg_no_overlay.contains("diff-"));
+        assert!(!svg_no_overlay.contains("risk-"));
     }
 }
 
@@ -1935,6 +2112,7 @@ mod snapshot_tests {
             "broken_input.sql" => include_str!("../../../fixtures/sql/broken_input.sql"),
             "cyclic_fk.sql" => include_str!("../../../fixtures/sql/cyclic_fk.sql"),
             "join_heavy.sql" => include_str!("../../../fixtures/sql/join_heavy.sql"),
+            "card_stress.sql" => include_str!("../../../fixtures/sql/card_stress.sql"),
             _ => panic!("Unknown fixture: {name}"),
         }
     }
@@ -2042,6 +2220,19 @@ mod snapshot_tests {
             prepend_module_to_snapshot => false,
         }, {
             insta::assert_snapshot!("join_heavy", svg);
+        });
+    }
+
+    #[test]
+    fn test_snapshot_card_stress() {
+        let sql = read_fixture("card_stress.sql");
+        let svg = process_fixture_to_svg(sql).expect("Failed to process card_stress.sql");
+
+        insta::with_settings!({
+            snapshot_path => "snapshots",
+            prepend_module_to_snapshot => false,
+        }, {
+            insta::assert_snapshot!("card_stress", svg);
         });
     }
 }

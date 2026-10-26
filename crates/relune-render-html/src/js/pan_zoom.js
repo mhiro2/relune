@@ -290,6 +290,15 @@
           isDragging = false;
           viewportEl.style.cursor = "grab";
         });
+        viewportEl.addEventListener("scroll", () => {
+          const { scrollLeft, scrollTop } = viewportEl;
+          if (scrollLeft === 0 && scrollTop === 0) return;
+          viewportEl.scrollLeft = 0;
+          viewportEl.scrollTop = 0;
+          panX -= scrollLeft;
+          panY -= scrollTop;
+          updateTransform();
+        });
         viewportEl.addEventListener(
           "wheel",
           (event) => {

@@ -10,11 +10,12 @@ use crate::config::ReluneConfig;
 use crate::error::{CliError, CliResult, schema_comparison_error};
 use crate::output::{check_diagnostics, print_success, validate_markup_stdout_usage, write_output};
 use relune_app::{
-    DiffRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, LayoutSpec, RenderOptions,
-    RenderTheme, diff, format_diff_markdown, format_diff_text,
+    DiffRequest, FilterSpec, FocusSpec, GroupingSpec, GroupingStrategy, RenderOptions, RenderTheme,
+    diff, format_diff_markdown, format_diff_text,
 };
 
 /// Run the diff command.
+#[allow(clippy::too_many_lines)] // Maps every merged diff setting onto the request in one place.
 pub fn run_diff(
     args: &DiffArgs,
     color: ColorWhen,
@@ -52,12 +53,12 @@ pub fn run_diff(
             GroupByMode::Prefix => GroupingStrategy::ByPrefix,
         },
     };
-    let layout = LayoutSpec {
-        algorithm: merged.layout.into(),
-        edge_style: merged.edge_style.into(),
-        direction: merged.direction.into(),
-        ..Default::default()
-    };
+    let layout = super::layout_spec(
+        merged.layout,
+        merged.edge_style,
+        merged.direction,
+        merged.density,
+    );
     let options = RenderOptions {
         theme: match merged.theme {
             crate::cli::Theme::Light => RenderTheme::Light,
@@ -84,6 +85,7 @@ pub fn run_diff(
         focus,
         grouping,
         layout,
+        review: merged.review_rules,
         allow_invalid_schema: merged.allow_invalid_schema,
     };
 

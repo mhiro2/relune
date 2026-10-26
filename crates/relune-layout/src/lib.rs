@@ -28,14 +28,16 @@ pub use graph::{
 };
 pub use layout::{
     ColumnFlags, ColumnRelationFlags, LayoutConfig, LayoutConfigValidationError, LayoutError,
-    PositionedColumn, PositionedEdge, PositionedEdgeRoutingDebug, PositionedGraph,
+    OmittedColumns, PositionedColumn, PositionedEdge, PositionedEdgeRoutingDebug, PositionedGraph,
     PositionedGraphRoutingDebug, PositionedGroup, PositionedNode, build_layout,
     build_layout_from_graph_with_config, build_layout_with_config,
 };
 pub use order::{
     CrossingReductionStrategy, order_nodes_within_layers, order_nodes_within_layers_with_strategy,
 };
-pub use overlay::{Annotation, DiagramOverlay, EdgeKey, EdgeOverlay, NodeOverlay, OverlaySeverity};
+pub use overlay::{
+    Annotation, ColumnChange, DiagramOverlay, EdgeKey, EdgeOverlay, NodeChange, NodeOverlay,
+};
 pub use rank::{RankAssignment, assign_ranks};
 pub use relune_core::layout::{EdgeRoute, RouteStyle};
 pub use route::{

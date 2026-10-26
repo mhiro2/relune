@@ -6,17 +6,17 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
   "fixture": "multi_schema.sql",
   "layout": {
     "edge_count": 6,
-    "height": 866.0,
+    "height": 1002.0,
     "node_count": 7,
-    "width": 1578.4000244140625
+    "width": 1727.4000244140625
   },
   "patterns": {
     "long_detours": {
       "count_over_1_8x": 0,
       "worst_examples": [
-        "sales.order_items[product_id] -> inventory.products[id] (1.78x)",
         "inventory.stock[product_id] -> inventory.products[id] (1.00x)",
-        "public.posts[author_id] -> public.users[id] (1.00x)"
+        "public.posts[author_id] -> public.users[id] (1.00x)",
+        "sales.order_items[order_id] -> sales.orders[id] (1.00x)"
       ]
     },
     "parallel_groups": {
@@ -37,24 +37,24 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
       "examples": []
     },
     "tight_clearance": {
-      "count_under_24px": 1,
+      "count_under_24px": 0,
       "worst_examples": [
-        "sales.order_items[product_id] -> inventory.products[id] (9.3px)",
-        "sales.order_items[order_id] -> sales.orders[id] (83.7px)",
-        "sales.orders[customer_id] -> public.users[id] (141.4px)"
+        "sales.order_items[product_id] -> inventory.products[id] (51.2px)",
+        "sales.order_items[order_id] -> sales.orders[id] (92.8px)",
+        "sales.orders[customer_id] -> public.users[id] (145.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 417576,
+      "bytes": 441609,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 52532,
-      "edge_groups": 36,
+      "bytes": 55384,
+      "edge_groups": 25,
       "node_groups": 7
     }
   }

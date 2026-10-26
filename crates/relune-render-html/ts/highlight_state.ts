@@ -3,6 +3,8 @@ import type { EdgeMetadata, TableMetadata } from './metadata';
 export interface HighlightState {
   hoveredNode: string | null;
   selectedNode: string | null;
+  /** Index into `edges` of the selected relationship, if any. */
+  selectedEdge: number | null;
   traversalDepth: number;
   tableById: Map<string, TableMetadata>;
   inboundMap: Record<string, { node: string; edge: EdgeMetadata }[]>;
@@ -27,6 +29,7 @@ export function createHighlightState(
   return {
     hoveredNode: null,
     selectedNode: null,
+    selectedEdge: null,
     traversalDepth: 1,
     tableById,
     inboundMap,

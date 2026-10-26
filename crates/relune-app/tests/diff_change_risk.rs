@@ -1,0 +1,160 @@
+//! A diff diagram shows what changed apart from how risky it is.
+//!
+//! `fixtures/diff/change-risk` mixes added, removed, and modified tables and
+//! columns, some risky and some safe. Each card and row must expose its
+//! change kind and its review risk as independent signals.
+
+use std::path::PathBuf;
+
+use relune_app::{DiffFormat, DiffRequest, InputSource, ReviewRuleSettings, diff};
+use relune_core::{CardDensity, LayoutSpec, ReviewRuleId, ReviewSeverity, ReviewSeverityOverride};
+
+fn render(format: DiffFormat) -> String {
+    render_with(format, None, ReviewRuleSettings::default())
+}
+
+fn render_at(format: DiffFormat, density: Option<CardDensity>) -> String {
+    render_with(format, density, ReviewRuleSettings::default())
+}
+
+fn render_with(
+    format: DiffFormat,
+    density: Option<CardDensity>,
+    review: ReviewRuleSettings,
+) -> String {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/diff/change-risk");
+    let request = DiffRequest {
+        before: InputSource::sql_file(fixture.join("before.sql")),
+        after: InputSource::sql_file(fixture.join("after.sql")),
+        format,
+        layout: LayoutSpec {
+            density,
+            ..LayoutSpec::default()
+        },
+        review,
+        ..Default::default()
+    };
+    diff(request)
+        .expect("diff should succeed")
+        .rendered
+        .expect("visual output expected")
+}
+
+/// Opening `<g>` tag of the card with `id`.
+fn card_tag<'a>(svg: &'a str, id: &str) -> &'a str {
+    let anchor = svg
+        .find(&format!(r#"data-table-id="{id}""#))
+        .unwrap_or_else(|| panic!("card {id} missing"));
+    let start = svg[..anchor].rfind("<g ").expect("card tag start");
+    let end = anchor + svg[anchor..].find('>').expect("card tag end");
+    &svg[start..end]
+}
+
+fn row_class<'a>(svg: &'a str, column: &str) -> &'a str {
+    let anchor = svg
+        .find(&format!(r#"data-column-name="{column}""#))
+        .unwrap_or_else(|| panic!("row {column} missing"));
+    let start = svg[..anchor].rfind("class=\"").expect("row class") + 7;
+    &svg[start..anchor - 2]
+}
+
+#[test]
+fn cards_show_change_kind_and_risk_independently() {
+    let svg = render(DiffFormat::Svg);
+
+    // Modified with breaking changes inside.
+    let customers = card_tag(&svg, "customers");
+    assert!(customers.contains("diff-modified"), "{customers}");
+    assert!(customers.contains("risk-breaking"), "{customers}");
+    assert!(svg.contains(">breaking 2</text>"));
+
+    // Modified, but nothing risky.
+    let orders = card_tag(&svg, "orders");
+    assert!(orders.contains("diff-modified"), "{orders}");
+    assert!(!orders.contains("risk-"), "{orders}");
+
+    // Added and safe; removed and breaking.
+    let coupons = card_tag(&svg, "coupons");
+    assert!(
+        coupons.contains("diff-added") && !coupons.contains("risk-"),
+        "{coupons}"
+    );
+    let audit_log = card_tag(&svg, "audit_log");
+    assert!(audit_log.contains("diff-removed"), "{audit_log}");
+    assert!(audit_log.contains("risk-breaking"), "{audit_log}");
+    assert!(svg.contains(">breaking 1</text>"));
+}
+
+#[test]
+fn rows_show_change_kind_and_type_changes() {
+    let svg = render(DiffFormat::Svg);
+
+    assert_eq!(row_class(&svg, "status"), "column-row diff-added");
+    assert_eq!(row_class(&svg, "legacy_code"), "column-row diff-removed");
+    assert_eq!(row_class(&svg, "total"), "column-row diff-modified");
+    assert_eq!(row_class(&svg, "shipped_at"), "column-row diff-added");
+    // Unchanged rows stay plain so the card still reads as context.
+    assert_eq!(row_class(&svg, "code"), "column-row");
+
+    // Widened (safe) and narrowed (breaking) types both read `before → after`.
+    for (before, after) in [
+        ("VARCHAR(120)", "VARCHAR(500)"),
+        ("VARCHAR(500)", "VARCHAR(120)"),
+    ] {
+        let change = format!(
+            r#"<tspan class="column-type-previous">{before}</tspan> → <tspan class="column-type-current""#
+        );
+        assert!(svg.contains(&change), "missing {before} → {after}");
+    }
+}
+
+#[test]
+fn review_settings_shape_the_risk_labels() {
+    let svg = render_with(
+        DiffFormat::Svg,
+        None,
+        ReviewRuleSettings {
+            except_tables: vec!["audit_*".to_string()],
+            severity_overrides: vec![ReviewSeverityOverride {
+                rule_id: ReviewRuleId::DropColumn,
+                severity: ReviewSeverity::Info,
+            }],
+            ..ReviewRuleSettings::default()
+        },
+    );
+
+    // The dropped table is still marked removed, but its finding is suppressed.
+    let audit_log = card_tag(&svg, "audit_log");
+    assert!(audit_log.contains("diff-removed"), "{audit_log}");
+    assert!(!audit_log.contains("risk-"), "{audit_log}");
+    // Dropping legacy_code is downgraded, so customers keeps only the
+    // narrowed note as breaking, and it is the only breaking card left.
+    assert!(card_tag(&svg, "customers").contains("risk-breaking"));
+    assert_eq!(svg.matches(">breaking 1</text>").count(), 1);
+    assert!(!svg.contains(">breaking 2</text>"));
+}
+
+#[test]
+fn keys_density_keeps_changed_columns_listed() {
+    let svg = render_at(DiffFormat::Svg, Some(CardDensity::Keys));
+
+    // None of these are keys, yet each changed, so its row and marker stay.
+    assert_eq!(row_class(&svg, "status"), "column-row diff-added");
+    assert_eq!(row_class(&svg, "legacy_code"), "column-row diff-removed");
+    assert_eq!(row_class(&svg, "note"), "column-row diff-modified");
+    assert_eq!(row_class(&svg, "shipped_at"), "column-row diff-added");
+    assert!(svg.contains(r#"<tspan class="column-type-previous">VARCHAR(500)</tspan>"#));
+    // Unchanged non-key columns are still counted instead of listed.
+    assert!(!svg.contains(r#"data-column-name="code""#));
+    assert!(svg.contains(">+1 column</text>"));
+}
+
+#[test]
+fn html_metadata_keeps_risk_apart_from_change_kind() {
+    let html = render(DiffFormat::Html);
+
+    assert!(html.contains(r#""diff_kind":"modified""#));
+    assert!(html.contains(r#""previous_data_type":"VARCHAR(500)""#));
+    assert!(html.contains(r#""severity":"breaking""#));
+    assert!(html.contains(r#""rule_id":"risk/add-not-null-on-existing""#));
+}

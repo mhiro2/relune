@@ -109,6 +109,7 @@ relune render --sql schema.sql --format html -o erd.html
 relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 relune render --sql schema.sql --layout force-directed --edge-style curved --theme dark -o erd.svg
 relune render --sql schema.sql --group-by schema -o grouped.svg
+relune render --sql schema.sql --density keys -o keys.svg
 relune render --sql schema.sql --include users --include orders -o subset.svg
 relune render --config relune.toml --sql schema.sql --viewpoint billing -o billing.svg
 relune render --db-url 'postgres://user:pass@localhost:5432/mydb' -o erd.svg
@@ -121,6 +122,7 @@ relune render --db-url 'postgres://user:pass@localhost:5432/mydb' -o erd.svg
 | `--layout` | `hierarchical`, `force-directed` | `hierarchical` |
 | `--edge-style` | `straight`, `orthogonal`, `curved` | `orthogonal` |
 | `--direction` | `top-to-bottom`, `left-to-right`, `right-to-left`, `bottom-to-top` | `top-to-bottom` |
+| `--density` | `overview` (names only), `keys` (key and relationship columns), `full` (every column) | `full`; `overview` past 100 objects |
 | `--theme` | `light`, `dark` | `light` |
 | `--viewpoint` | Named preset from `[viewpoints.<name>]` in config | -- |
 | `--focus` | Table name to center on | -- |
@@ -197,7 +199,7 @@ relune export --config relune.toml --sql schema.sql --format graph-json --viewpo
 | `d2` | D2 diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--layout`, `--edge-style`, `--direction`, `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, and `--exclude` for graph-backed exports. `layout-json` includes graph-level detour counts plus per-edge side, slot, and channel metadata, which makes route diffs easier to audit alongside SVG/HTML output.
+Supports `--layout`, `--edge-style`, `--direction`, `--density`, `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, and `--exclude` for graph-backed exports. `layout-json` includes graph-level detour counts plus per-edge side, slot, and channel metadata, which makes route diffs easier to audit alongside SVG/HTML output.
 `--fail-on-warning` is also available when export diagnostics should fail automation.
 
 ### Named viewpoints in config
@@ -276,6 +278,8 @@ relune diff --before-schema-json old.json --after-schema-json new.json
 | `--exit-code` | Exit with code 10 if schema changes are detected (like `git diff --exit-code`) | off |
 | `--fail-on-warning` | Non-zero exit on warnings | -- |
 | `--allow-invalid-schema` | Compare inputs with empty or duplicate table/column/view/enum names instead of failing (errors become `SCHEMA004` warnings) | off |
+
+Visual diffs (`svg` / `html`) mark each change's kind with `+` / `−` / `~` and a faint tint, write type changes as `before → after`, and label risky cards with the highest review severity and its count (`breaking 1`), using the same `[review]` rules, suppressed tables, and severity overrides as `relune review`. Change kind and risk are independent: read the marker for *what* changed and the label for *how risky* it is. With `density = "keys"` in `[diff]`, changed columns stay listed next to the key columns. With `show_legend = true` under `[diff]`, the legend explains both.
 
 File inputs are auto-detected by content (schema JSON works even without `.json` extension).
 
@@ -455,6 +459,7 @@ theme = "light"
 layout = "hierarchical"
 edge_style = "curved"
 direction = "top-to-bottom"
+density = "full"
 group_by = "none"
 include = ["users", "orders"]
 exclude = ["schema_migrations"]

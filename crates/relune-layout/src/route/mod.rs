@@ -322,16 +322,47 @@ pub(crate) fn route_self_loop_with_offset(
     direction: LayoutDirection,
     radius_offset: f32,
 ) -> EdgeRoute {
+    route_self_loop_at_rows(x, y, w, h, style, direction, radius_offset, None, None)
+}
+
+/// Shortest vertical run of a self-loop, so the markers at its two ends,
+/// each about 14px across, never touch.
+const SELF_LOOP_MIN_SPAN: f32 = 22.0;
+
+/// Heights, from the top of a card `height` tall, where a self-loop that
+/// names no listed rows leaves and re-enters: around the middle of the card.
+pub(crate) fn self_loop_middle_rows(height: f32) -> (f32, f32) {
+    let half_span = (height * 0.25).max(SELF_LOOP_MIN_SPAN / 2.0);
+    (height / 2.0 - half_span, height / 2.0 + half_span)
+}
+
+/// Routes a self-loop out of the referencing column row and back into the
+/// referenced one, given as `rows` (heights from the card top), bulging out
+/// of `side`. Without rows and side it spans the middle of the card on the
+/// side the layout direction puts it.
+#[must_use]
+#[allow(clippy::too_many_arguments)] // Card geometry plus loop options.
+pub(crate) fn route_self_loop_at_rows(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    style: RouteStyle,
+    direction: LayoutDirection,
+    radius_offset: f32,
+    rows: Option<(f32, f32)>,
+    side: Option<AttachmentSide>,
+) -> EdgeRoute {
     // Self-loops go around the node.
     // Use a generous base radius so that Crow's Foot SVG markers (up to 20 px
     // wide) stay visually attached to the curved path instead of diverging
     // along the tangent.
     let loop_radius = 36.0 + radius_offset.max(0.0);
 
+    let (from_row, to_row) = rows.unwrap_or_else(|| self_loop_middle_rows(h));
+    let (sy, ty) = (y + from_row, y + to_row);
     let sx = x + w;
-    let sy = h.mul_add(0.25, y);
     let tx = x + w;
-    let ty = h.mul_add(0.75, y);
     let mut points = [
         (sx, sy),
         (sx + loop_radius, sy),
@@ -343,7 +374,15 @@ pub(crate) fn route_self_loop_with_offset(
     // are routed (see `mirror_positioned_nodes_for_direction`). The loop above
     // is built in the canonical east-bulging orientation, so reflect it across
     // the node's own center to follow the mirror instead of always bulging east.
-    mirror_self_loop_points(&mut points, x, y, w, h, direction);
+    // Rows name fixed places on the card, which is drawn unmirrored, so a
+    // loop between rows only flips to the side it was given.
+    match side {
+        Some(AttachmentSide::West) => {
+            mirror_self_loop_points(&mut points, x, y, w, h, LayoutDirection::RightToLeft);
+        }
+        Some(_) => {}
+        None => mirror_self_loop_points(&mut points, x, y, w, h, direction),
+    }
 
     EdgeRoute {
         x1: points[0].0,
@@ -750,6 +789,33 @@ mod tests {
         let ty = 50.0 * 0.75; // y + h * 0.75
         assert!(route.label_position.1 > sy);
         assert!(route.label_position.1 < ty);
+    }
+
+    #[test]
+    fn test_self_loop_leaves_and_reenters_at_the_given_rows() {
+        let route = route_self_loop_at_rows(
+            10.0,
+            20.0,
+            200.0,
+            180.0,
+            RouteStyle::Orthogonal,
+            LayoutDirection::BottomToTop,
+            0.0,
+            Some((137.0, 49.0)),
+            Some(AttachmentSide::West),
+        );
+
+        // Rows stay put under a vertical mirror; the side flips the bulge.
+        assert_eq!((route.x1, route.y1), (10.0, 157.0));
+        assert_eq!((route.x2, route.y2), (10.0, 69.0));
+        assert!(route.control_points.iter().all(|point| point.0 < 10.0));
+    }
+
+    #[test]
+    fn test_self_loop_on_a_header_only_card_keeps_its_markers_apart() {
+        let route = route_self_loop(0.0, 0.0, 200.0, 34.0, RouteStyle::Orthogonal);
+
+        assert!((route.y2 - route.y1).abs() >= SELF_LOOP_MIN_SPAN);
     }
 
     #[test]

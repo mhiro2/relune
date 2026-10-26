@@ -43,6 +43,7 @@ import {
 import type {
   ButtonAction,
   CompareView,
+  Density,
   EdgeStyle,
   ExampleDefinition,
   ExampleId,
@@ -220,6 +221,7 @@ const themeSelect = getElement<HTMLSelectElement>('theme-select');
 const layoutSelect = getElement<HTMLSelectElement>('layout-select');
 const directionSelect = getElement<HTMLSelectElement>('direction-select');
 const edgeStyleSelect = getElement<HTMLSelectElement>('edge-style-select');
+const densitySelect = getElement<HTMLSelectElement>('density-select');
 const groupBySelect = getElement<HTMLSelectElement>('group-by-select');
 const viewpointSelect = getElement<HTMLSelectElement>('viewpoint-select');
 const viewpointHint = getElement<HTMLElement>('viewpoint-hint');
@@ -536,6 +538,7 @@ function attachEventListeners(): void {
     layoutSelect,
     directionSelect,
     edgeStyleSelect,
+    densitySelect,
     groupBySelect,
     focusTableInput,
     depthInput,
@@ -793,6 +796,7 @@ function applyState(state: PersistedState): void {
   layoutSelect.value = state.layout;
   directionSelect.value = state.direction;
   edgeStyleSelect.value = state.edgeStyle;
+  densitySelect.value = state.density;
   exportFormatSelect.value = state.exportFormat;
   inspectTableSelect.value = state.inspectTable;
   lintRulesInput.value = state.lintRules;
@@ -1328,6 +1332,11 @@ function buildFindingCard(finding: ReviewFinding): string {
   `;
 }
 
+/** The density to request; `auto` is left to the engine's default. */
+function selectedDensity(): string | undefined {
+  return densitySelect.value === 'auto' ? undefined : densitySelect.value;
+}
+
 function buildRenderRequest(format: 'html' | 'svg'): Record<string, unknown> {
   const focusTable = focusTableInput.value.trim();
   const depth = parsePositiveInteger(depthInput.value);
@@ -1339,6 +1348,7 @@ function buildRenderRequest(format: 'html' | 'svg'): Record<string, unknown> {
     layoutAlgorithm: layoutSelect.value,
     layoutDirection: directionSelect.value,
     edgeStyle: edgeStyleSelect.value,
+    density: selectedDensity(),
     groupBy: groupBySelect.value,
     focusTable: focusTable || undefined,
     depth: focusTable ? depth : undefined,
@@ -1364,6 +1374,7 @@ function buildExportRequest(): Record<string, unknown> {
     layoutAlgorithm: layoutSelect.value,
     layoutDirection: directionSelect.value,
     edgeStyle: edgeStyleSelect.value,
+    density: selectedDensity(),
   };
 }
 
@@ -1385,6 +1396,7 @@ function buildDiffRequest(compareView: CompareView): Record<string, unknown> {
     layoutAlgorithm: layoutSelect.value,
     layoutDirection: directionSelect.value,
     edgeStyle: edgeStyleSelect.value,
+    density: selectedDensity(),
     groupBy: groupBySelect.value,
     includeTables: splitPatterns(includeTablesInput.value),
     excludeTables: splitPatterns(excludeTablesInput.value),
@@ -1862,6 +1874,7 @@ function collectState(): PersistedState {
     layout: layoutSelect.value as LayoutAlgorithm,
     direction: directionSelect.value as LayoutDirection,
     edgeStyle: edgeStyleSelect.value as EdgeStyle,
+    density: densitySelect.value as Density,
     viewpoint: viewpointSelect.value,
     groupBy: groupBySelect.value as GroupBy,
     focusTable: focusTableInput.value.trim(),

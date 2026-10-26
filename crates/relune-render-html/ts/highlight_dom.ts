@@ -1,7 +1,17 @@
-import type { HoverPreview, NeighborHighlight } from './highlight_actions';
+import {
+  relationColumnPairs,
+  type HoverPreview,
+  type NeighborHighlight,
+  type RelationHighlight,
+} from './highlight_actions';
 import type { HighlightState } from './highlight_state';
 import {
+  diffMarker,
+  riskLabel,
   tableDisplayName,
+  topRisk,
+  type ColumnMetadata,
+  type DiffKind,
   type EdgeMetadata,
   type IssueMetadata,
   type TableMetadata,
@@ -10,7 +20,7 @@ import {
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 const ALLOWED_DIFF_KINDS = new Set(['added', 'removed', 'modified']);
-const ALLOWED_SEVERITIES = new Set(['error', 'warning', 'info', 'hint']);
+const ALLOWED_SEVERITIES = new Set(['breaking', 'caution', 'warning', 'info']);
 /** Sanitize a value for use in CSS class names. Returns empty string for unknown values. */
 function safeCssToken(value: string, allowlist: ReadonlySet<string>): string {
   return allowlist.has(value) ? value : '';
@@ -27,12 +37,28 @@ function joinTableBadge(): HTMLDivElement {
   return badge;
 }
 
-function diffBadge(kind: string): HTMLDivElement {
+function diffBadge(kind: DiffKind): HTMLDivElement {
   const badge = document.createElement('div');
   const safe = safeCssToken(kind, ALLOWED_DIFF_KINDS);
   badge.className =
     safe !== '' ? `detail-diff-badge detail-diff-badge-${safe}` : 'detail-diff-badge';
-  badge.textContent = kind;
+  badge.textContent = `${diffMarker(kind)} ${kind}`;
+  return badge;
+}
+
+/** Badge naming the highest risk and its count, e.g. `breaking 1`. */
+function riskBadge(
+  issues: readonly IssueMetadata[],
+  baseClass: string,
+): HTMLSpanElement | undefined {
+  const top = topRisk(issues);
+  const label = riskLabel(issues);
+  if (top === undefined || label === undefined) return undefined;
+  const badge = document.createElement('span');
+  const safe = safeCssToken(top.severity, ALLOWED_SEVERITIES);
+  badge.className = safe !== '' ? `${baseClass} ${baseClass}-${safe}` : baseClass;
+  badge.textContent = label;
+  badge.title = `${issues.length} risk${issues.length === 1 ? '' : 's'}`;
   return badge;
 }
 
@@ -54,6 +80,15 @@ function metricCard(label: string, value: string): HTMLDivElement {
 
 // ── SVG highlight classes ───────────────────────────────────────────────────
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+// Node geometry mirrored from `relune_layout::metrics`; a Rust test in
+// relune-render-html keeps these values in sync.
+// Height of one column row.
+const ROW_HEIGHT = 22;
+// Baseline of column text, measured from the top of its row.
+const ROW_BASELINE = 15;
+const PORT_RADIUS = 3.5;
+
 /** Diagram elements indexed once, so highlighting never re-queries the SVG. */
 export interface HighlightTargets {
   nodesById: ReadonlyMap<string, Element>;
@@ -65,6 +100,8 @@ export interface HighlightPainter {
   clear(): void;
   applySelected(highlight: NeighborHighlight): void;
   applyHoverPreview(preview: HoverPreview): void;
+  /** Emphasizes one relationship: its path, ports, endpoint tables, and columns. */
+  applyRelation(relation: RelationHighlight): void;
 }
 
 const HIGHLIGHT_CLASSES = [
@@ -78,7 +115,48 @@ const HIGHLIGHT_CLASSES = [
   'hover-inbound',
   'hover-outbound',
   'hover-preview-edge',
+  'selected-edge',
+  'relation-endpoint',
+  'relation-column',
 ];
+
+function svgElement(name: string, className: string, attributes: Record<string, number>): Element {
+  const element = document.createElementNS(SVG_NS, name);
+  element.setAttribute('class', className);
+  for (const [key, value] of Object.entries(attributes)) {
+    element.setAttribute(key, String(value));
+  }
+  return element;
+}
+
+function numericAttribute(element: Element | null | undefined, name: string): number {
+  return Number.parseFloat(element?.getAttribute(name) ?? '') || 0;
+}
+
+/**
+ * Puts a wide, invisible copy of a line's path under it, so the thin drawn
+ * stroke is still easy to click. Static SVG output stays free of it.
+ */
+export function addEdgeHitArea(edge: Element): void {
+  const path = edge.querySelector('.edge-path');
+  const d = path?.getAttribute('d');
+  if (path == null || d == null || edge.querySelector('.edge-hit') !== null) return;
+  const hit = document.createElementNS(SVG_NS, 'path');
+  hit.setAttribute('class', 'edge-hit');
+  hit.setAttribute('d', d);
+  hit.setAttribute('aria-hidden', 'true');
+  path.before(hit);
+}
+
+/** First and last points of an SVG path's `d` attribute. */
+export function pathEndpoints(d: string): [[number, number], [number, number]] | null {
+  const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+  if (numbers.length < 4) return null;
+  return [
+    [numbers[0] ?? 0, numbers[1] ?? 0],
+    [numbers[numbers.length - 2] ?? 0, numbers[numbers.length - 1] ?? 0],
+  ];
+}
 
 /**
  * Applies highlight classes and remembers which elements it touched, so
@@ -87,9 +165,37 @@ const HIGHLIGHT_CLASSES = [
  */
 export function createHighlightPainter(targets: HighlightTargets): HighlightPainter {
   const touched = new Set<Element>();
+  // Bands and ports drawn for a selected relationship, removed on clear.
+  const decorations: Element[] = [];
   const mark = (element: Element, ...classes: string[]): void => {
     element.classList.add(...classes);
     touched.add(element);
+  };
+  const markColumns = (nodeId: string, columns: readonly string[]): void => {
+    const node = targets.nodesById.get(nodeId);
+    if (node === undefined || columns.length === 0) return;
+    const body = node.querySelector('.table-body');
+    node.querySelectorAll('.column-row').forEach((row) => {
+      if (!columns.includes(row.getAttribute('data-column-name') ?? '')) return;
+      mark(row, 'relation-column');
+      const band = svgElement('rect', 'relation-column-band', {
+        x: numericAttribute(body, 'x') + 1,
+        y: numericAttribute(row.querySelector('.column-name'), 'y') - ROW_BASELINE,
+        width: Math.max(numericAttribute(body, 'width') - 2, 0),
+        height: ROW_HEIGHT,
+      });
+      row.prepend(band);
+      decorations.push(band);
+    });
+  };
+  const markPorts = (edge: Element): void => {
+    const endpoints = pathEndpoints(edge.querySelector('.edge-path')?.getAttribute('d') ?? '');
+    if (endpoints === null) return;
+    for (const [cx, cy] of endpoints) {
+      const port = svgElement('circle', 'relation-port', { cx, cy, r: PORT_RADIUS });
+      edge.append(port);
+      decorations.push(port);
+    }
   };
   const directionClasses = (
     id: string,
@@ -110,6 +216,24 @@ export function createHighlightPainter(targets: HighlightTargets): HighlightPain
         element.classList.remove(...HIGHLIGHT_CLASSES);
       }
       touched.clear();
+      for (const decoration of decorations) {
+        decoration.remove();
+      }
+      decorations.length = 0;
+    },
+
+    applyRelation(relation: RelationHighlight): void {
+      targets.nodesById.forEach((node, id) => {
+        const isEndpoint = id === relation.fromId || id === relation.toId;
+        mark(node, isEndpoint ? 'relation-endpoint' : 'dimmed-by-highlight');
+      });
+      targets.edges.forEach((edge, index) => {
+        mark(edge, index === relation.edgeIndex ? 'selected-edge' : 'dimmed-by-highlight');
+      });
+      markColumns(relation.fromId, relation.fromColumns);
+      markColumns(relation.toId, relation.toColumns);
+      const selected = targets.edges[relation.edgeIndex];
+      if (selected !== undefined) markPorts(selected);
     },
 
     applySelected(highlight: NeighborHighlight): void {
@@ -162,6 +286,54 @@ export function createHighlightPainter(targets: HighlightTargets): HighlightPain
   };
 }
 
+// ── Relation card ───────────────────────────────────────────────────────────
+
+export interface RelationCardElements {
+  card: HTMLElement;
+  kind: HTMLElement;
+  title: HTMLElement;
+  name: HTMLElement;
+  pairs: HTMLElement;
+  openFrom: HTMLButtonElement;
+  openTo: HTMLButtonElement;
+}
+
+const RELATION_KIND_LABELS: Record<EdgeMetadata['kind'], string> = {
+  foreign_key: 'Foreign key',
+  enum_reference: 'Enum reference',
+  view_dependency: 'View dependency',
+};
+
+/** Shows the selected relationship's column mapping, or hides the card. */
+export function renderRelationCard(
+  edge: EdgeMetadata | undefined,
+  tableById: Map<string, TableMetadata>,
+  elements: RelationCardElements,
+): void {
+  if (edge === undefined) {
+    elements.card.setAttribute('hidden', '');
+    clearChildren(elements.pairs);
+    return;
+  }
+  const label = (id: string): string => {
+    const table = tableById.get(id);
+    return table === undefined ? id : tableDisplayName(table);
+  };
+  elements.card.removeAttribute('hidden');
+  elements.kind.textContent = RELATION_KIND_LABELS[edge.kind] ?? edge.kind;
+  elements.title.textContent = `${label(edge.from)} → ${label(edge.to)}`;
+  elements.name.textContent = edge.name ?? '';
+  elements.name.toggleAttribute('hidden', edge.name == null || edge.name === '');
+  clearChildren(elements.pairs);
+  for (const pair of relationColumnPairs(edge)) {
+    const item = document.createElement('li');
+    item.textContent = pair;
+    elements.pairs.appendChild(item);
+  }
+  elements.openFrom.textContent = `Open ${label(edge.from)}`;
+  elements.openTo.textContent = `Open ${label(edge.to)}`;
+}
+
 // ── Detail drawer ───────────────────────────────────────────────────────────
 
 export interface DrawerElements {
@@ -175,6 +347,8 @@ export interface DrawerElements {
   columnsEmpty: HTMLElement;
   relations: HTMLElement;
   relationsEmpty: HTMLElement;
+  changesSection: HTMLElement | null;
+  changes: HTMLElement | null;
   issues: HTMLElement | null;
   issuesEmpty: HTMLElement | null;
 }
@@ -197,7 +371,7 @@ export function renderDrawer(
   table: TableMetadata | undefined,
   state: HighlightState,
   elements: DrawerElements,
-  onNavigate?: (tableId: string) => void,
+  onSelectRelation?: (edge: EdgeMetadata) => void,
 ): void {
   if (table === undefined) {
     elements.drawer.setAttribute('hidden', '');
@@ -205,6 +379,8 @@ export function renderDrawer(
     clearChildren(elements.metrics);
     clearChildren(elements.columns);
     clearChildren(elements.relations);
+    if (elements.changes) clearChildren(elements.changes);
+    if (elements.changesSection) elements.changesSection.setAttribute('hidden', '');
     if (elements.issues) clearChildren(elements.issues);
     elements.columnsEmpty.removeAttribute('hidden');
     elements.relationsEmpty.removeAttribute('hidden');
@@ -239,6 +415,23 @@ export function renderDrawer(
     metricCard('Out \u2192', String(table.outbound_count)),
   );
 
+  // Diff changes (FK, index and check changes are listed only here)
+  if (elements.changes instanceof HTMLElement && elements.changesSection instanceof HTMLElement) {
+    clearChildren(elements.changes);
+    const details = table.diff_details ?? [];
+    if (details.length === 0) {
+      elements.changesSection.setAttribute('hidden', '');
+    } else {
+      elements.changesSection.removeAttribute('hidden');
+      for (const detail of details) {
+        const item = document.createElement('li');
+        item.className = 'detail-change';
+        item.textContent = detail;
+        elements.changes.appendChild(item);
+      }
+    }
+  }
+
   // Columns
   clearChildren(elements.columns);
   if (table.columns.length === 0) {
@@ -259,12 +452,12 @@ export function renderDrawer(
     elements.relationsEmpty.setAttribute('hidden', '');
     for (const relation of relations) {
       elements.relations.appendChild(
-        buildRelationElement(relation.edge, relation.node, state.tableById, onNavigate),
+        buildRelationElement(relation.edge, relation.node, state.tableById, onSelectRelation),
       );
     }
   }
 
-  // Issues
+  // Risks
   if (elements.issues instanceof HTMLElement && elements.issuesEmpty instanceof HTMLElement) {
     clearChildren(elements.issues);
     const issues: IssueMetadata[] = table.issues ?? [];
@@ -316,23 +509,15 @@ export function renderHoverPopover(
     elements.badges.appendChild(diffBadge(table.diff_kind));
   }
 
-  const issues = table.issues ?? [];
-  if (issues.length > 0) {
-    elements.badges.appendChild(issueCountBadge(issues));
+  const badge = riskBadge(table.issues ?? [], 'hover-popover-badge');
+  if (badge !== undefined) {
+    elements.badges.appendChild(badge);
   }
 
   placePopover(elements.popover, position);
 }
 
-function buildColumnElement(column: {
-  name: string;
-  data_type: string;
-  nullable: boolean;
-  is_primary_key: boolean;
-  is_foreign_key: boolean;
-  is_indexed: boolean;
-  diff_kind?: string | null;
-}): HTMLDivElement {
+function buildColumnElement(column: ColumnMetadata): HTMLDivElement {
   const columnEl = document.createElement('div');
   columnEl.className = 'detail-column';
 
@@ -366,7 +551,9 @@ function buildColumnElement(column: {
 
   const typePill = document.createElement('span');
   typePill.className = 'detail-column-pill';
-  typePill.textContent = column.data_type || 'unknown';
+  const dataType = column.data_type || 'unknown';
+  typePill.textContent =
+    column.previous_data_type != null ? `${column.previous_data_type} → ${dataType}` : dataType;
   pills.appendChild(typePill);
 
   const nullPill = document.createElement('span');
@@ -381,7 +568,7 @@ function buildColumnElement(column: {
       safeDiff !== ''
         ? `detail-column-pill detail-column-pill-diff detail-column-pill-diff-${safeDiff}`
         : 'detail-column-pill detail-column-pill-diff';
-    diffPill.textContent = column.diff_kind;
+    diffPill.textContent = `${diffMarker(column.diff_kind)} ${column.diff_kind}`;
     pills.appendChild(diffPill);
   }
 
@@ -393,7 +580,7 @@ function buildRelationElement(
   edge: EdgeMetadata,
   targetNodeId: string,
   tableById: Map<string, TableMetadata>,
-  onNavigate?: (tableId: string) => void,
+  onSelectRelation?: (edge: EdgeMetadata) => void,
 ): HTMLElement {
   const targetTable = tableById.get(targetNodeId);
   const targetName = targetTable?.label ?? targetNodeId;
@@ -410,12 +597,13 @@ function buildRelationElement(
       : '';
   meta.textContent = `${edge.kind} · ${targetName}${columnMap}`;
 
-  if (onNavigate) {
+  if (onSelectRelation) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'detail-relation detail-relation-navigable';
+    btn.setAttribute('aria-label', `Show relationship ${relationColumnPairs(edge).join(', ')}`);
     btn.addEventListener('click', () => {
-      onNavigate(targetNodeId);
+      onSelectRelation(edge);
     });
     btn.append(label, meta);
     return btn;
@@ -471,24 +659,6 @@ function summaryMetric(label: string, value: string): HTMLSpanElement {
 
   metric.append(labelEl, valueEl);
   return metric;
-}
-
-function issueCountBadge(issues: IssueMetadata[]): HTMLSpanElement {
-  const badge = document.createElement('span');
-  const safeSeverity = safeCssToken(highestIssueSeverity(issues), ALLOWED_SEVERITIES);
-  badge.className =
-    safeSeverity !== ''
-      ? `hover-popover-badge hover-popover-badge-${safeSeverity}`
-      : 'hover-popover-badge';
-  badge.textContent = `${issues.length} issue${issues.length === 1 ? '' : 's'}`;
-  return badge;
-}
-
-function highestIssueSeverity(issues: IssueMetadata[]): string {
-  const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
-  return issues.reduce((max, issue) => {
-    return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
-  }, 'hint');
 }
 
 function placePopover(popover: HTMLElement, position: PopoverPosition): void {
@@ -569,20 +739,8 @@ function buildObjectBrowserButton(
   kind.className = 'object-browser-kind';
   kind.textContent = table.kind;
 
-  const tableIssues = table.issues ?? [];
-  if (tableIssues.length > 0) {
-    const severityRank: Record<string, number> = { error: 3, warning: 2, info: 1, hint: 0 };
-    const maxSeverity = tableIssues.reduce((max, issue) => {
-      return (severityRank[issue.severity] ?? 0) > (severityRank[max] ?? 0) ? issue.severity : max;
-    }, 'hint' as string);
-    const issueBadge = document.createElement('span');
-    const safeSev = safeCssToken(maxSeverity, ALLOWED_SEVERITIES);
-    issueBadge.className =
-      safeSev !== ''
-        ? `object-browser-issue-badge object-browser-issue-badge-${safeSev}`
-        : 'object-browser-issue-badge';
-    issueBadge.textContent = String(tableIssues.length);
-    issueBadge.title = `${tableIssues.length} issue${tableIssues.length === 1 ? '' : 's'}`;
+  const issueBadge = riskBadge(table.issues ?? [], 'object-browser-issue-badge');
+  if (issueBadge !== undefined) {
     header.append(name, issueBadge, kind);
   } else {
     header.append(name, kind);

@@ -4,13 +4,13 @@ use relune_core::LayoutDirection;
 
 use super::spatial::BBox;
 use super::{
-    ColumnFlags, ColumnRelationFlags, LayoutConfig, NodeSize, PositionedColumn, PositionedEdge,
-    PositionedGroup, PositionedNode,
+    ColumnFlags, ColumnRelationFlags, LayoutConfig, NodeSize, OmittedColumns, PositionedColumn,
+    PositionedEdge, PositionedGroup, PositionedNode,
 };
 use crate::metrics::{
-    GROUP_LABEL_FONT_SIZE, GROUP_LABEL_INSET, GROUP_LABEL_LETTER_SPACING, NODE_COLUMN_FONT_SIZE,
-    NODE_COLUMN_HEIGHT, NODE_HEADER_FONT_SIZE, NODE_HEADER_HEIGHT, NODE_KIND_LABEL_RESERVE,
-    NODE_TEXT_INSET, column_badge_reserve, column_display_text, estimate_text_width,
+    ColumnSlots, GROUP_LABEL_INSET, NODE_DETAIL_FONT_SIZE, NODE_HEADER_FONT_SIZE,
+    NODE_HEADER_NAME_OFFSET, NODE_KIND_LABEL_RESERVE, NODE_TEXT_INSET, column_row_width,
+    estimate_mono_text_width, group_label_width, node_height, omitted_columns_label,
 };
 use crate::route::{LABEL_HALF_H, Rect, estimate_label_half_width, route_points};
 
@@ -26,31 +26,26 @@ pub(super) fn build_positioned_node(
     y: f32,
     width: f32,
     height: f32,
-    show_columns: bool,
+    omitted: Option<OmittedColumns>,
 ) -> PositionedNode {
     PositionedNode {
         id: node.id.clone(),
         label: node.label.clone(),
         kind: node.kind,
-        columns: if show_columns {
-            node.columns
-                .iter()
-                .map(|c| PositionedColumn {
-                    name: c.name.clone(),
-                    data_type: c.data_type.clone(),
-                    flags: ColumnFlags {
-                        nullable: c.nullable,
-                        relation: ColumnRelationFlags {
-                            is_primary_key: c.is_primary_key,
-                            is_foreign_key: c.is_foreign_key,
-                            is_indexed: c.is_indexed,
-                        },
-                    },
-                })
-                .collect()
-        } else {
-            Vec::new()
-        },
+        columns: node
+            .columns
+            .iter()
+            .map(|c| PositionedColumn {
+                name: c.name.clone(),
+                data_type: c.data_type.clone(),
+                previous_data_type: c
+                    .change
+                    .as_ref()
+                    .and_then(|change| change.previous_type.clone()),
+                flags: column_flags(c),
+            })
+            .collect(),
+        omitted,
         x,
         y,
         width,
@@ -61,62 +56,80 @@ pub(super) fn build_positioned_node(
     }
 }
 
+/// Sizes every card for the columns it lists and the ones it leaves out
+/// (`omitted`, by node index).
 pub(super) fn measure_node_sizes(
     graph: &crate::graph::LayoutGraph,
+    omitted: &[Option<OmittedColumns>],
     config: &LayoutConfig,
 ) -> Vec<NodeSize> {
     graph
         .nodes
         .iter()
-        .map(|node| NodeSize {
-            width: estimate_node_width(node, config),
-            height: estimate_node_height(node, config),
+        .zip(omitted)
+        .map(|(node, &omitted)| {
+            let counted = omitted.and_then(OmittedColumns::row_count);
+            NodeSize {
+                width: estimate_node_width(node, counted, config),
+                height: node_height(node.columns.len(), counted.is_some()),
+                omitted,
+            }
         })
         .collect()
 }
 
-fn estimate_node_width(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
+const fn column_flags(column: &crate::graph::LayoutColumn) -> ColumnFlags {
+    ColumnFlags {
+        nullable: column.nullable,
+        relation: ColumnRelationFlags {
+            is_primary_key: column.is_primary_key,
+            is_foreign_key: column.is_foreign_key,
+            is_indexed: column.is_indexed,
+        },
+    }
+}
+
+fn estimate_node_width(
+    node: &crate::graph::LayoutNode,
+    counted_columns: Option<usize>,
+    config: &LayoutConfig,
+) -> f32 {
     let minimum_width = (config.node_width * MIN_NODE_WIDTH_FACTOR).max(160.0);
-    let header_width = config
-        .node_padding
-        .mul_add(2.0, estimate_text_width(&node.label, NODE_HEADER_FONT_SIZE))
+    let header_width = NODE_TEXT_INSET.mul_add(
+        2.0,
+        estimate_mono_text_width(&node.label, NODE_HEADER_FONT_SIZE),
+    ) + NODE_HEADER_NAME_OFFSET
         + HEADER_KIND_LABEL_RESERVE;
-    if !config.show_columns {
+    if node.columns.is_empty() && counted_columns.is_none() {
         return header_width.max(minimum_width).ceil();
     }
 
+    let flags: Vec<ColumnFlags> = node.columns.iter().map(column_flags).collect();
+    let slots = ColumnSlots::of(&flags);
     let column_width = node
         .columns
         .iter()
         .map(|column| {
-            let text = column_display_text(node.kind, &column.name, &column.data_type);
-            let text_px = estimate_text_width(&text, NODE_COLUMN_FONT_SIZE);
-            let badge_count = usize::from(column.is_indexed)
-                + usize::from(column.is_foreign_key)
-                + usize::from(column.is_primary_key);
-            text_px + column_badge_reserve(badge_count)
+            column_row_width(
+                slots,
+                &column.name,
+                column
+                    .change
+                    .as_ref()
+                    .and_then(|change| change.previous_type.as_deref()),
+                &column.data_type,
+            )
         })
         .fold(0.0, f32::max);
+    let omitted_row_width = counted_columns.map_or(0.0, |count| {
+        slots.key_gutter()
+            + estimate_mono_text_width(&omitted_columns_label(count), NODE_DETAIL_FONT_SIZE)
+    });
+    let column_width = column_width.max(omitted_row_width);
 
     header_width
-        .max(config.node_padding.mul_add(2.0, column_width) + NODE_TEXT_INSET)
+        .max(NODE_TEXT_INSET.mul_add(2.0, column_width))
         .max(minimum_width)
-        .ceil()
-}
-
-#[allow(clippy::cast_precision_loss)] // Layout sizing is approximate and bounded for diagram rendering.
-#[allow(clippy::suboptimal_flops)]
-#[allow(clippy::missing_const_for_fn)] // This helper stays non-const to avoid over-constraining floating-point layout code.
-pub(super) fn estimate_node_height(node: &crate::graph::LayoutNode, config: &LayoutConfig) -> f32 {
-    if !config.show_columns {
-        return config.node_padding.mul_add(2.0, NODE_HEADER_HEIGHT).ceil();
-    }
-    config
-        .node_padding
-        .mul_add(
-            2.0,
-            (node.columns.len() as f32).mul_add(NODE_COLUMN_HEIGHT, NODE_HEADER_HEIGHT),
-        )
         .ceil()
 }
 
@@ -160,8 +173,9 @@ pub(super) fn mirror_positioned_nodes_for_direction(
 
 /// Room kept around route points for Crow's Foot markers.
 const CANVAS_MARKER_PAD: f32 = 24.0;
-/// Room kept around edge labels.
-const CANVAS_LABEL_PAD: f32 = 4.0;
+/// Room kept between edge or group labels and the canvas edge, so a pill
+/// never sits flush against it.
+const CANVAS_LABEL_PAD: f32 = 16.0;
 
 /// Fits the canvas to everything that is drawn: nodes, groups, edge routes
 /// (bypass lanes, self-loops and markers) and edge labels.
@@ -194,11 +208,7 @@ pub(super) fn fit_canvas_to_content(
             h: group.height,
         });
         // Group labels are not clipped to their container.
-        #[allow(clippy::cast_precision_loss)] // Label lengths are small.
-        let label_width = (group.label.chars().count() as f32).mul_add(
-            GROUP_LABEL_LETTER_SPACING,
-            estimate_text_width(&group.label, GROUP_LABEL_FONT_SIZE),
-        );
+        let label_width = group_label_width(&group.label);
         bounds.include_rect(&Rect {
             x: group.x,
             y: group.y,

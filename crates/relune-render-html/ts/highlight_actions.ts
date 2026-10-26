@@ -1,4 +1,5 @@
 import type { HighlightState } from './highlight_state';
+import type { EdgeMetadata } from './metadata';
 
 interface HighlightNeighborhood {
   neighborIds: Set<string>;
@@ -86,4 +87,116 @@ export function computeNeighborHighlights(
 
 export function computeHoverPreview(nodeId: string, state: HighlightState): HoverPreview {
   return { hoveredId: nodeId, ...collectNeighborhood(nodeId, state) };
+}
+
+/** One selected relationship: its edge and the columns on each end. */
+export interface RelationHighlight {
+  edgeIndex: number;
+  fromId: string;
+  toId: string;
+  fromColumns: readonly string[];
+  toColumns: readonly string[];
+}
+
+export function computeRelationHighlight(
+  edgeIndex: number,
+  state: HighlightState,
+): RelationHighlight | null {
+  const edge = state.edges[edgeIndex];
+  if (edge === undefined) return null;
+  return {
+    edgeIndex,
+    fromId: edge.from,
+    toId: edge.to,
+    fromColumns: edge.from_columns,
+    toColumns: edge.to_columns,
+  };
+}
+
+/** Percent-escapes the characters a relationship key uses as delimiters. */
+function escapeKeyPart(part: string): string {
+  return part.replaceAll(
+    /[%(),>~]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
+ * Readable key naming one relationship in a shared link, e.g.
+ * `posts(user_id)>users(id)`. It names both ends and their columns, so it
+ * stays valid while unrelated relationships come and go; delimiters inside
+ * quoted identifiers are escaped so no two relationships share a key.
+ */
+export function relationKey(edge: EdgeMetadata): string {
+  const end = (table: string, columns: readonly string[]): string =>
+    `${escapeKeyPart(table)}(${columns.map(escapeKeyPart).join(',')})`;
+  return `${end(edge.from, edge.from_columns)}>${end(edge.to, edge.to_columns)}`;
+}
+
+/**
+ * Keys for every relationship, by edge index. Relationships that join the
+ * same columns (duplicate foreign keys) share a `relationKey`, so the second
+ * and later ones get a `~2`, `~3`, ... suffix in metadata order and a shared
+ * link still names exactly one line.
+ */
+export function relationKeys(edges: readonly EdgeMetadata[]): string[] {
+  const seen = new Map<string, number>();
+  return edges.map((edge) => {
+    const key = relationKey(edge);
+    const count = (seen.get(key) ?? 0) + 1;
+    seen.set(key, count);
+    return count === 1 ? key : `${key}~${count}`;
+  });
+}
+
+/**
+ * Column correspondences of a relationship, one `from.col → to.col` line per
+ * column pair, so a composite key reads as its full set of pairs.
+ */
+export function relationColumnPairs(edge: EdgeMetadata): string[] {
+  const pairCount = Math.min(edge.from_columns.length, edge.to_columns.length);
+  if (pairCount === 0) {
+    // Enum references know only the source column; keep it so two columns
+    // using the same enum stay distinguishable.
+    if (edge.from_columns.length > 0) {
+      return edge.from_columns.map((column) => `${edge.from}.${column} → ${edge.to}`);
+    }
+    return [`${edge.from} → ${edge.to}`];
+  }
+  return edge.from_columns
+    .slice(0, pairCount)
+    .map((column, index) => `${edge.from}.${column} → ${edge.to}.${edge.to_columns[index]}`);
+}
+
+/**
+ * Index the arrow, Home, or End `key` moves to among `count` relationship
+ * lines, skipping lines `isFocusable` rejects. Returns `null` for other keys
+ * or when there is nowhere to go.
+ */
+export function nextLineIndex(
+  count: number,
+  current: number,
+  key: string,
+  isFocusable: (index: number) => boolean,
+): number | null {
+  const scan = (start: number, step: number): number | null => {
+    for (let index = start; index >= 0 && index < count; index += step) {
+      if (isFocusable(index)) return index;
+    }
+    return null;
+  };
+  switch (key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      return scan(current + 1, 1);
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      return scan(current - 1, -1);
+    case 'Home':
+      return scan(0, 1);
+    case 'End':
+      return scan(count - 1, -1);
+    default:
+      return null;
+  }
 }

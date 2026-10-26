@@ -100,6 +100,7 @@ When rendering `svg` or `html` without `-o`, interactive terminals require `--st
 | `--layout hierarchical\|force-directed` | Layout algorithm |
 | `--direction top-to-bottom\|left-to-right\|right-to-left\|bottom-to-top` | Primary flow direction |
 | `--edge-style straight\|orthogonal\|curved` | Edge rendering style |
+| `--density overview\|keys\|full` | Columns each table card lists (see [Card density](#card-density)) |
 
 **Other:** `--stats` (stderr statistics), `--fail-on-warning` (non-zero on warnings).
 
@@ -118,9 +119,42 @@ relune render --sql schema.sql --focus orders --depth 2 -o orders.svg
 relune render --config relune.toml --sql schema.sql --viewpoint billing -o billing.svg
 relune render --sql schema.sql --group-by schema -o grouped.svg
 relune render --sql schema.sql --layout force-directed --edge-style orthogonal -o force.svg
+relune render --sql schema.sql --density keys -o keys.svg
 relune render --sql schema.sql --include users --include orders -o subset.svg
 relune render --schema-json schema.json -o from-json.svg
 ```
+
+### Card density
+
+`--density` picks how much of each table a card lists. Layout sizes every card for the rows it shows, so relationship lines always meet a listed row or the edge of the card.
+
+| Density | Card lists | Use it to |
+|---------|------------|-----------|
+| `overview` | Table name and kind only | See the overall structure |
+| `keys` | Primary key and foreign key columns, plus every column a relationship names; a `+N columns` row counts the rest, even on a view that lists none | Read how tables connect |
+| `full` | Every column with its type and constraints | Check definitions |
+
+Without `--density` (or a `density` config key), cards list every column, except that diagrams with more than 100 objects (tables, views, and enums) fall back to `overview`, and an info diagnostic (`LAYOUT001`) says so. An explicit density always wins. Zooming the HTML viewer never changes the density or the layout.
+
+### Groups
+
+`--group-by schema` or `--group-by prefix` draws each group as a faint surface behind its tables with a small heading. A thin boundary appears only where membership would otherwise be unclear, when another group or a table outside the group overlaps the surface.
+
+### HTML viewer
+
+The sidebar leads with search and the object list; **Filters** and **Groups** are collapsed sections that show how many filter values are active or how many groups are hidden. Selecting a table opens a detail drawer only as tall as its content, and selecting a relationship shows its column mapping in a small card. The minimap sits in the bottom-right corner and steps aside for an open drawer.
+
+| Key | Action |
+|-----|--------|
+| `/` | Focus search (bringing back a hidden sidebar) |
+| `S` | Hide or show the sidebar |
+| `G` | Open or close the Groups section |
+| `M` | Show or hide the minimap |
+| `F` | Fit the diagram to the window |
+| `+` / `-` | Zoom in / out |
+| `Esc` | Clear search, filters, and selection |
+
+Relationship lines share one Tab stop: Tab onto a line, move between lines with the arrow keys, Home, or End, and press Enter or Space to select one. The URL hash records the search, filters, hidden groups, viewport, minimap, and the selected table or relationship (`r=orders(customer_id)>customers(id)`, with `~2` added for a second foreign key on the same columns), so a copied link reopens the same view.
 
 ---
 
@@ -177,7 +211,7 @@ Emit normalized JSON or diagram text. **`--format` is required.**
 | `d2` | [D2](https://d2lang.com/) diagram source |
 | `dot` | Graphviz DOT source |
 
-Supports `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, `--exclude`, `--layout`, `--direction`, and `--edge-style` like `render` for graph-backed exports. `export` applies the same focus/filter validation rules as `render`, so `--depth` requires `--focus`, the same table cannot appear in both `--include` and `--exclude`, and the focused table must stay inside the effective include set.
+Supports `--viewpoint`, `--focus`, `--depth`, `--group-by`, `--include`, `--exclude`, `--layout`, `--direction`, `--edge-style`, and `--density` like `render` for graph-backed exports; `--density` only affects `layout-json`. `export` applies the same focus/filter validation rules as `render`, so `--depth` requires `--focus`, the same table cannot appear in both `--include` and `--exclude`, and the focused table must stay inside the effective include set.
 `--fail-on-warning` is also available for CI flows that treat parser diagnostics as failures.
 
 `layout-json` includes graph-level `routing_debug.non_self_loop_detour_activations` and per-edge `routing_debug` fields for source/target side policy, slot indices, slot counts, row offsets, and selected channel coordinates.
@@ -258,6 +292,8 @@ When rendering the diff as `svg` or `html` without `-o`, interactive terminals r
 `diff` and `review` match objects between the two schemas by name, so they refuse an input with empty or duplicate table, column, view, or enum names (or empty / duplicate table `stable_id`s) and exit `1` before comparing anything. `--allow-invalid-schema` downgrades those errors to `SCHEMA004` warnings; duplicate objects may then be merged in the output. Two cases are handled earlier and are not affected by the flag: the SQL parser keeps the first of several `CREATE TABLE`, `CREATE VIEW`, or `CREATE TYPE ... AS ENUM` statements for the same object (a later `CREATE OR REPLACE VIEW` replaces the view instead), skips statements that declare an empty object name, and reports both as parse warnings; and schema JSON import always rejects empty or duplicate `id`s. Other validation problems, such as foreign keys or indexes that reference missing tables or columns, are always reported as `SCHEMA004` warnings, because review rules such as `risk/drop-table-referenced` analyze exactly those states. `render`, `inspect`, `export`, `doc`, and `lint` always report validation errors as warnings.
 
 Before comparing, `diff` and `review` treat objects in the default schema as unqualified when either input contains unqualified objects, so hand-written DDL (`CREATE TABLE users`) matches a schema exported from the database (`public.users`) instead of reporting every table as removed and re-added. The default schema is `public` for PostgreSQL, `main` for SQLite, and the connected database for MySQL (the schema shared by every object). Tables in other schemas, such as `auth.users`, stay qualified. When both inputs are fully qualified, names are reported as they are.
+
+The `svg` and `html` diagrams keep what changed apart from how risky it is. Added, removed, and modified tables, columns, and relationships are marked with `+` / `−` / `~` and a faint green / red / amber tint (a removed card or line is also dashed), and a column whose type changed reads `before → after` in its type slot, such as `varchar(500) → varchar(120)`. The risk comes from the `review` rules for the dialect both inputs resolve to, with the `[review]` config's `rules`, `except_rules`, `except_tables`, and `severity_overrides` applied, so the labels match what `relune review` reports with the same config: a card with findings carries a label naming the highest severity and how many findings have it (`breaking 1`, `caution 2`, ...), and its tooltip or the HTML viewer's Risks section lists every finding. An added column can therefore sit on a `breaking` card, and a modified one can carry no label at all. Unchanged tables keep their normal colors so they still read as context. With `show_legend = true` under `[diff]`, the legend also explains the change markers and the risk label. When the two inputs resolve to different dialects, a `REVIEW002` warning explains why lock-risk labels are missing. With `density = "keys"` in `[diff]`, every changed column stays listed next to the key columns, so its marker and `before → after` type remain visible; `overview` cards show only the card-level marker.
 
 Within a table, an unnamed foreign key, index, or `CHECK` written in DDL matches the same constraint under the name the database generated for it (such as `orders_user_id_fkey` or `users_email_key`), so it is not reported as dropped and re-added; two differently named constraints stay a rename. Index predicates, expression keys, and `CHECK` expressions are compared with keyword case ignored, while text inside quoted literals and identifiers must match (`'Active'` → `'active'` is a change). Tables are paired by their `stable_id` (the `id` in schema JSON), so renaming a table there while keeping its `id` is reported as a modification of the same table.
 

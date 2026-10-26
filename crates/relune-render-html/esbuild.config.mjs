@@ -8,10 +8,10 @@ const outDir = join(__dirname, 'src', 'js');
 
 const entries = [
   'pan_zoom',
+  'sidebar',
   'search',
   'filter_engine',
   'group_toggle',
-  'collapse',
   'highlight',
   'minimap',
   'shortcuts',

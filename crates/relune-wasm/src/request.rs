@@ -7,9 +7,12 @@ use relune_app::{
     DiffFormat, DiffRequest, ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec,
     LayoutDirection, LayoutSpec, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewSeverityOverride, RouteStyle,
+    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewRuleSettings,
+    ReviewSeverityOverride, RouteStyle,
 };
-use relune_core::{LintProfile, LintRuleCategory, ReviewSeverity, Severity, SqlDialect};
+use relune_core::{
+    CardDensity, LintProfile, LintRuleCategory, ReviewSeverity, Severity, SqlDialect,
+};
 use serde::{Deserialize, Serialize};
 
 /// Grouping strategy as exposed to the WASM/JS API.
@@ -94,6 +97,10 @@ pub struct WasmRenderRequest {
     /// Edge rendering style.
     #[serde(default)]
     pub edge_style: Option<RouteStyle>,
+    /// Columns each table card lists (`"overview"`, `"keys"`, `"full"`).
+    /// Omitted lists every column, falling back to the overview for large schemas.
+    #[serde(default)]
+    pub density: Option<CardDensity>,
     /// Horizontal spacing hint.
     #[serde(default)]
     pub horizontal_spacing: Option<f32>,
@@ -138,15 +145,24 @@ impl WasmRenderRequest {
             strategy: self.group_by.unwrap_or_default().into(),
         };
 
-        let horizontal_spacing =
-            validated_spacing(self.horizontal_spacing, 320.0, "horizontalSpacing")?;
-        let vertical_spacing = validated_spacing(self.vertical_spacing, 80.0, "verticalSpacing")?;
+        let defaults = LayoutSpec::default();
+        let horizontal_spacing = validated_spacing(
+            self.horizontal_spacing,
+            defaults.horizontal_spacing,
+            "horizontalSpacing",
+        )?;
+        let vertical_spacing = validated_spacing(
+            self.vertical_spacing,
+            defaults.vertical_spacing,
+            "verticalSpacing",
+        )?;
         let force_iterations = validated_force_iterations(self.force_iterations)?;
 
         let layout = LayoutSpec {
             algorithm: self.layout_algorithm.unwrap_or_default(),
             direction: self.layout_direction.unwrap_or_default().into(),
             edge_style: self.edge_style.unwrap_or_default(),
+            density: self.density,
             horizontal_spacing,
             vertical_spacing,
             force_iterations,
@@ -264,6 +280,10 @@ pub struct WasmExportRequest {
     /// Edge rendering style.
     #[serde(default)]
     pub edge_style: Option<RouteStyle>,
+    /// Columns each table card lists (`"overview"`, `"keys"`, `"full"`).
+    /// Omitted lists every column, falling back to the overview for large schemas.
+    #[serde(default)]
+    pub density: Option<CardDensity>,
 }
 
 impl WasmExportRequest {
@@ -297,6 +317,7 @@ impl WasmExportRequest {
                 direction: self.layout_direction.unwrap_or_default().into(),
                 algorithm: self.layout_algorithm.unwrap_or_default(),
                 edge_style: self.edge_style.unwrap_or_default(),
+                density: self.density,
                 ..Default::default()
             },
             output_path: None, // Not applicable in WASM
@@ -384,6 +405,10 @@ pub struct WasmDiffRequest {
     /// Edge rendering style.
     #[serde(default)]
     pub edge_style: Option<RouteStyle>,
+    /// Columns each table card lists (`"overview"`, `"keys"`, `"full"`).
+    /// Omitted lists every column, falling back to the overview for large schemas.
+    #[serde(default)]
+    pub density: Option<CardDensity>,
     /// Iteration count for the force-directed layout (defaults to the
     /// canonical 150 if omitted).
     #[serde(default)]
@@ -437,10 +462,13 @@ impl WasmDiffRequest {
                 algorithm: self.layout_algorithm.unwrap_or_default(),
                 direction: self.layout_direction.unwrap_or_default().into(),
                 edge_style: self.edge_style.unwrap_or_default(),
+                density: self.density,
                 force_iterations,
                 compaction: LayoutCompactionSpec::default(),
                 ..Default::default()
             },
+            // The playground has no review config, so every rule ranks risk.
+            review: ReviewRuleSettings::default(),
             allow_invalid_schema: self.allow_invalid_schema,
         })
     }
@@ -580,6 +608,7 @@ mod tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            density: None,
             horizontal_spacing: None,
             vertical_spacing: None,
             force_iterations: None,
@@ -606,6 +635,7 @@ mod tests {
             layout_direction: None,
             layout_algorithm: Some(LayoutAlgorithm::ForceDirected),
             edge_style: Some(RouteStyle::Orthogonal),
+            density: None,
             horizontal_spacing: None,
             vertical_spacing: None,
             force_iterations: Some(75),
@@ -641,6 +671,7 @@ mod tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            density: None,
             horizontal_spacing: None,
             vertical_spacing: None,
             force_iterations: None,
@@ -686,6 +717,7 @@ mod tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            density: None,
             horizontal_spacing: None,
             vertical_spacing: None,
             force_iterations: None,
@@ -711,6 +743,7 @@ mod tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            density: None,
             horizontal_spacing: None,
             vertical_spacing: None,
             force_iterations: None,
@@ -750,6 +783,7 @@ mod tests {
             layout_direction: Some(WasmLayoutDirection::LeftToRight),
             layout_algorithm: Some(LayoutAlgorithm::ForceDirected),
             edge_style: Some(RouteStyle::Curved),
+            density: Some(CardDensity::Overview),
         };
 
         let export_req = req.to_export_request().unwrap();
@@ -757,6 +791,21 @@ mod tests {
         assert_eq!(export_req.layout.direction, LayoutDirection::LeftToRight);
         assert_eq!(export_req.layout.algorithm, LayoutAlgorithm::ForceDirected);
         assert_eq!(export_req.layout.edge_style, RouteStyle::Curved);
+        assert_eq!(export_req.layout.density, Some(CardDensity::Overview));
+    }
+
+    #[test]
+    fn test_wasm_render_request_reads_density() {
+        let req: WasmRenderRequest =
+            serde_json::from_str(r#"{"sql":"CREATE TABLE t (id INT);","density":"keys"}"#).unwrap();
+        assert_eq!(
+            req.to_render_request().unwrap().layout.density,
+            Some(CardDensity::Keys)
+        );
+
+        let unset: WasmRenderRequest =
+            serde_json::from_str(r#"{"sql":"CREATE TABLE t (id INT);"}"#).unwrap();
+        assert_eq!(unset.to_render_request().unwrap().layout.density, None);
     }
 
     #[test]
@@ -795,6 +844,7 @@ mod tests {
             layout_direction: Some(WasmLayoutDirection::RightToLeft),
             layout_algorithm: Some(LayoutAlgorithm::ForceDirected),
             edge_style: Some(RouteStyle::Straight),
+            density: None,
             force_iterations: Some(50),
             theme: Some(RenderTheme::Light),
             show_legend: Some(false),
@@ -969,6 +1019,7 @@ mod tests {
             layout_direction: None,
             layout_algorithm: None,
             edge_style: None,
+            density: None,
             horizontal_spacing: Some(0.0),
             vertical_spacing: Some(80.0),
             force_iterations: None,

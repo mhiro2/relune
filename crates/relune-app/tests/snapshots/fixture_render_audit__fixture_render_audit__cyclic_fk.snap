@@ -6,16 +6,16 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
   "fixture": "cyclic_fk.sql",
   "layout": {
     "edge_count": 12,
-    "height": 1230.0,
+    "height": 1430.0,
     "node_count": 12,
-    "width": 1503.4000244140625
+    "width": 1697.0
   },
   "patterns": {
     "long_detours": {
       "count_over_1_8x": 2,
       "worst_examples": [
-        "users[default_team_id] -> teams[id] (1.94x)",
-        "cycle_a[cycle_c_id] -> cycle_c[id] (1.90x)",
+        "users[default_team_id] -> teams[id] (1.88x)",
+        "cycle_a[cycle_c_id] -> cycle_c[id] (1.83x)",
         "cycle_b[cycle_a_id] -> cycle_a[id] (1.00x)"
       ]
     },
@@ -29,9 +29,9 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
     "reverse_edges": {
       "count": 5,
       "examples": [
-        "cycle_b[cycle_a_id] -> cycle_a[id] (rank 1 -> 0, bends 2)",
-        "cycle_c[cycle_b_id] -> cycle_b[id] (rank 2 -> 1, bends 2)",
-        "organizations_ref[owner_user_id] -> users[id] (rank 1 -> 0, bends 2)"
+        "cycle_b[cycle_a_id] -> cycle_a[id] (rank 1 -> 0, bends 0)",
+        "cycle_c[cycle_b_id] -> cycle_b[id] (rank 2 -> 1, bends 0)",
+        "organizations_ref[owner_user_id] -> users[id] (rank 1 -> 0, bends 0)"
       ]
     },
     "same_rank_edges": {
@@ -46,21 +46,21 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
       "count_under_24px": 0,
       "worst_examples": [
         "cycle_a[cycle_c_id] -> cycle_c[id] (24.0px)",
-        "users[default_team_id] -> teams[id] (24.0px)",
-        "cycle_c[cycle_b_id] -> cycle_b[id] (202.0px)"
+        "users[default_team_id] -> teams[id] (36.0px)",
+        "cycle_c[cycle_b_id] -> cycle_b[id] (238.0px)"
       ]
     }
   },
   "surfaces": {
     "html": {
-      "bytes": 448976,
+      "bytes": 471232,
       "contains_embedded_svg": true,
       "contains_metadata": true,
       "contains_viewport": true
     },
     "svg": {
-      "bytes": 80540,
-      "edge_groups": 72,
+      "bytes": 81615,
+      "edge_groups": 49,
       "node_groups": 12
     }
   }

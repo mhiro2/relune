@@ -455,10 +455,32 @@ pub struct DiffRequest {
     /// Layout specification (used when format is Svg or Html).
     #[serde(default)]
     pub layout: LayoutSpec,
+    /// Review rules that rank the risk labels of Svg and Html diagrams, so
+    /// they match what `review` reports with the same settings.
+    #[serde(default)]
+    pub review: ReviewRuleSettings,
     /// Continue when an input fails `Schema::validate`, reporting the errors
     /// as warnings instead of failing with `AppError::InvalidSchema`.
     #[serde(default)]
     pub allow_invalid_schema: bool,
+}
+
+/// Which review rules run, how severe their findings are, and which tables
+/// they skip, for the risk labels of a visual diff.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReviewRuleSettings {
+    /// Specific rules to run. Empty means "all rules".
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Rules to exclude after the active set is resolved.
+    #[serde(default)]
+    pub except_rules: Vec<String>,
+    /// Table glob patterns to suppress findings for.
+    #[serde(default)]
+    pub except_tables: Vec<String>,
+    /// Per-rule severity overrides applied after rule evaluation.
+    #[serde(default)]
+    pub severity_overrides: Vec<ReviewSeverityOverride>,
 }
 
 impl DiffRequest {
