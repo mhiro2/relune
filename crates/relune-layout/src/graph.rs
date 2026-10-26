@@ -1616,29 +1616,6 @@ mod tests {
     }
 
     #[test]
-    fn test_collapse_join_tables_option() {
-        // Test that collapse_join_tables defaults to false
-        let request = LayoutRequest::default();
-        assert!(!request.collapse_join_tables);
-
-        // Test that it can be set to true
-        let request = LayoutRequest {
-            collapse_join_tables: true,
-            ..Default::default()
-        };
-        assert!(request.collapse_join_tables);
-    }
-
-    #[test]
-    fn test_builder_collapse_join_tables() {
-        let builder = LayoutGraphBuilder::new().collapse_join_tables(true);
-        assert!(builder.request.collapse_join_tables);
-
-        let builder = LayoutGraphBuilder::new().collapse_join_tables(false);
-        assert!(!builder.request.collapse_join_tables);
-    }
-
-    #[test]
     fn test_build_marks_foreign_key_and_index_columns() {
         let schema = Schema {
             tables: vec![Table {
@@ -2508,6 +2485,11 @@ mod collapse_tests {
     #[test]
     fn test_collapse_join_tables_removes_node() {
         let schema = make_many_to_many_schema();
+
+        // Collapsing is off by default.
+        let graph_default = LayoutGraphBuilder::new().build(&schema);
+        assert_eq!(graph_default.nodes.len(), 3);
+        assert!(graph_default.nodes.iter().any(|n| n.id == "user_roles"));
 
         // Without collapsing
         let graph_no_collapse = LayoutGraphBuilder::new()

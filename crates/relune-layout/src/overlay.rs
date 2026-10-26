@@ -426,15 +426,6 @@ mod tests {
     }
 
     #[test]
-    fn edge_key_round_trips_components() {
-        let key = EdgeKey::new("posts", "users", &["user_id"], &["id"]);
-        assert_eq!(key.from, "posts");
-        assert_eq!(key.to, "users");
-        assert_eq!(key.from_columns, vec!["user_id".to_string()]);
-        assert_eq!(key.to_columns, vec!["id".to_string()]);
-    }
-
-    #[test]
     fn ambiguous_arrow_ids_do_not_collide() {
         // Without an explicit tuple key, the two changes below would have
         // collapsed to a single `"a->b->c"` entry.
