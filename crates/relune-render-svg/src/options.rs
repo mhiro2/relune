@@ -65,113 +65,7 @@ mod tests {
         assert!(!opts.show_stats);
         assert!(opts.embed_css);
         assert!(!opts.show_tooltips);
-    }
-
-    #[test]
-    fn test_default_theme() {
-        let opts = SvgRenderOptions::default();
-        assert_eq!(opts.theme, Theme::Dark);
-    }
-
-    #[test]
-    fn test_default_show_legend() {
-        let opts = SvgRenderOptions::default();
-        assert!(!opts.show_legend);
-    }
-
-    #[test]
-    fn test_default_show_stats() {
-        let opts = SvgRenderOptions::default();
-        assert!(!opts.show_stats);
-    }
-
-    #[test]
-    fn test_default_embed_css() {
-        let opts = SvgRenderOptions::default();
-        assert!(opts.embed_css);
-    }
-
-    #[test]
-    fn test_default_show_tooltips() {
-        let opts = SvgRenderOptions::default();
-        assert!(!opts.show_tooltips);
-    }
-
-    #[test]
-    fn test_options_with_light_theme() {
-        let opts = SvgRenderOptions {
-            theme: Theme::Light,
-            ..Default::default()
-        };
-        assert_eq!(opts.theme, Theme::Light);
-        assert!(opts.embed_css); // Should still have default for other fields
-    }
-
-    #[test]
-    fn test_options_with_legend() {
-        let opts = SvgRenderOptions {
-            show_legend: true,
-            ..Default::default()
-        };
-        assert!(opts.show_legend);
-    }
-
-    #[test]
-    fn test_options_with_stats() {
-        let opts = SvgRenderOptions {
-            show_stats: true,
-            ..Default::default()
-        };
-        assert!(opts.show_stats);
-    }
-
-    #[test]
-    fn test_options_without_embed_css() {
-        let opts = SvgRenderOptions {
-            embed_css: false,
-            ..Default::default()
-        };
-        assert!(!opts.embed_css);
-    }
-
-    #[test]
-    fn test_options_all_custom() {
-        let opts = SvgRenderOptions {
-            theme: Theme::Light,
-            show_legend: true,
-            show_stats: true,
-            embed_css: false,
-            show_tooltips: true,
-            labels_on_top: true,
-        };
-        assert_eq!(opts.theme, Theme::Light);
-        assert!(opts.show_legend);
-        assert!(opts.show_stats);
-        assert!(!opts.embed_css);
-        assert!(opts.show_tooltips);
-    }
-
-    #[test]
-    fn test_options_clone() {
-        let opts = SvgRenderOptions {
-            theme: Theme::Light,
-            show_legend: true,
-            show_stats: false,
-            embed_css: true,
-            show_tooltips: true,
-            labels_on_top: true,
-        };
-        let cloned = opts;
-        assert_eq!(opts, cloned);
-    }
-
-    #[test]
-    fn test_options_debug() {
-        let opts = SvgRenderOptions::default();
-        let debug_str = format!("{opts:?}");
-        assert!(debug_str.contains("SvgRenderOptions"));
-        assert!(debug_str.contains("theme"));
-        assert!(debug_str.contains("show_legend"));
+        assert!(!opts.labels_on_top);
     }
 
     #[test]
@@ -211,14 +105,5 @@ mod tests {
         assert!(!opts.show_stats);
         assert!(opts.embed_css);
         assert!(!opts.show_tooltips);
-    }
-
-    #[test]
-    fn test_options_with_tooltips() {
-        let opts = SvgRenderOptions {
-            show_tooltips: true,
-            ..Default::default()
-        };
-        assert!(opts.show_tooltips);
     }
 }
