@@ -534,12 +534,28 @@ mod tests {
         let result = RenderResult {
             content: "<svg></svg>".to_string(),
             diagnostics: vec![],
-            stats: RenderStats::default(),
+            stats: RenderStats {
+                table_count: 3,
+                column_count: 7,
+                edge_count: 2,
+                view_count: 1,
+                total_time: Duration::from_millis(5),
+                ..Default::default()
+            },
         };
-        let json = serde_json::to_string(&result).unwrap();
-        assert!(json.contains("\"content\""));
-        assert!(json.contains("\"diagnostics\""));
-        assert!(json.contains("\"stats\""));
+        let json = serde_json::to_value(&result).unwrap();
+
+        assert_eq!(json["content"], "<svg></svg>");
+        assert_eq!(json["diagnostics"], serde_json::json!([]));
+        let stats = &json["stats"];
+        assert_eq!(stats["table_count"], 3);
+        assert_eq!(stats["column_count"], 7);
+        assert_eq!(stats["edge_count"], 2);
+        assert_eq!(stats["view_count"], 1);
+        assert_eq!(
+            stats["total_time"],
+            serde_json::json!({ "secs": 0, "nanos": 5_000_000 })
+        );
     }
 
     #[test]

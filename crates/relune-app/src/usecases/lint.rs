@@ -367,16 +367,21 @@ mod tests {
             );
         ";
 
+        // Without a rule filter the table trips both orphan-table and
+        // no-primary-key, so the filter has something to drop.
+        let unfiltered = lint(LintRequest::from_sql(sql)).unwrap();
+        assert!(
+            unfiltered
+                .issues
+                .iter()
+                .any(|i| i.rule_id == LintRuleId::NoPrimaryKey)
+        );
+
         let request = LintRequest::from_sql(sql).with_rules(vec!["orphan-table".to_string()]);
         let result = lint(request).unwrap();
 
-        // Should only have orphan-table issues, not no-primary-key
-        assert!(
-            result
-                .issues
-                .iter()
-                .all(|i| i.rule_id == LintRuleId::OrphanTable)
-        );
+        let rule_ids = result.issues.iter().map(|i| i.rule_id).collect::<Vec<_>>();
+        assert_eq!(rule_ids, [LintRuleId::OrphanTable]);
     }
 
     #[test]
