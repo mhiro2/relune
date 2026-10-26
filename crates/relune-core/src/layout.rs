@@ -13,18 +13,6 @@ pub enum Cardinality {
     Many,
 }
 
-impl Cardinality {
-    /// Returns the symbol representation for display.
-    #[must_use]
-    pub const fn symbol(&self) -> &'static str {
-        match self {
-            Self::One => "1",
-            Self::ZeroOrOne => "0..1",
-            Self::Many => "N",
-        }
-    }
-}
-
 /// Visual edge rendering style for a positioned graph.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

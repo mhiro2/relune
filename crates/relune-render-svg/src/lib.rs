@@ -18,7 +18,7 @@ mod node;
 mod options;
 mod theme;
 
-pub use edge::{EdgeRenderOptions, render_edge};
+pub use edge::EdgeRenderOptions;
 pub use error::SvgRenderError;
 pub use group::{ambiguous_groups, render_group, render_group_background, render_group_label};
 pub use legend::render_legend;
@@ -367,7 +367,7 @@ fn render_edge_internal(
             ) && shortest_seg < MIN_SVG_MARKER_BACKBONE_SEGMENT));
     let change = overlay.and_then(|edge_overlay| edge_overlay.change);
 
-    let stroke_dasharray = if options.dashed || change == Some(ChangeKind::Removed) {
+    let stroke_dasharray = if change == Some(ChangeKind::Removed) {
         Some(diff::REMOVED_DASHARRAY)
     } else {
         edge_style.dasharray
@@ -1603,12 +1603,19 @@ mod tests {
         };
         let svg = render_svg(&graph, options);
 
-        // Should contain title elements for edge tooltips
-        assert!(svg.contains("<title>"));
-        // Edge tooltip should show FK relationship
-        assert!(svg.contains("Foreign Key: user_id"));
-        // Edge tooltip should show column mapping (note: > is escaped as &gt; in XML/SVG)
-        assert!(svg.contains("posts.user_id -&gt; users.id"));
+        // The edge tooltip names the FK, maps its columns (with `>` escaped),
+        // and states whether the FK is nullable.
+        assert!(
+            svg.contains(
+                "<title>Foreign Key: user_id\nposts.user_id -&gt; users.id\nNullable: No</title>"
+            ),
+            "edge tooltip missing from {svg}"
+        );
+
+        let mut nullable_graph = multi_node_graph();
+        nullable_graph.edges[0].nullable = true;
+        let svg = render_svg(&nullable_graph, options);
+        assert!(svg.contains("users.id\nNullable: Yes</title>"));
     }
 
     #[test]
