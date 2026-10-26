@@ -1075,25 +1075,6 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_text_special_characters() {
-        // Test ampersand
-        assert_eq!(escape_text("a & b"), "a &amp; b");
-        // Test less than
-        assert_eq!(escape_text("a < b"), "a &lt; b");
-        // Test greater than
-        assert_eq!(escape_text("a > b"), "a &gt; b");
-        // Test double quote
-        assert_eq!(escape_text("a \"b\" c"), "a &quot;b&quot; c");
-        // Test single quote
-        assert_eq!(escape_text("a 'b' c"), "a &#39;b&#39; c");
-        // Test combined
-        assert_eq!(
-            escape_text("<script>alert('xss')</script>"),
-            "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
-        );
-    }
-
-    #[test]
     fn test_render_svg_escapes_special_characters_in_labels() {
         let graph = relune_layout::PositionedGraph {
             nodes: vec![PositionedNode {

@@ -40,6 +40,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn escapes_every_markup_character() {
+        assert_eq!(
+            escape_xml_text(r#"a & b < c > d "e" 'f'"#),
+            "a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#39;"
+        );
+        assert_eq!(escape_xml_text("&amp;"), "&amp;amp;");
+    }
+
+    #[test]
     fn escapes_text_content() {
         let input = "<script>alert('xss')</script>";
         assert_eq!(
