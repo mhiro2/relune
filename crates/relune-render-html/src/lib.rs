@@ -196,19 +196,102 @@ mod tests {
         assert!(result.contains(r#"data-id="posts""#));
     }
 
+    /// Returns the byte range of the metadata JSON inside its script element.
+    fn metadata_span(html: &str) -> std::ops::Range<usize> {
+        let open = r#"<script type="application/json" id="relune-metadata" data-relune-metadata>"#;
+        let start = html.find(open).expect("metadata script tag") + open.len();
+        let end = start
+            + html[start..]
+                .find("</script>")
+                .expect("metadata script end tag");
+        start..end
+    }
+
+    /// Extracts and parses the metadata JSON the viewer reads on load.
+    fn embedded_metadata(html: &str) -> serde_json::Value {
+        serde_json::from_str(&html[metadata_span(html)]).expect("metadata must be valid JSON")
+    }
+
     #[test]
-    fn test_render_html_contains_metadata() {
+    fn test_render_html_embeds_parseable_metadata() {
         let graph = create_test_graph();
         let svg = create_test_svg();
         let options = HtmlRenderOptions::default();
 
         let result = render_html(&graph, &svg, &options).unwrap();
+        let metadata = embedded_metadata(&result);
 
-        assert!(result.contains(r#"id="relune-metadata""#));
-        assert!(result.contains(r#""tables""#));
-        assert!(result.contains(r#""edges""#));
-        assert!(result.contains(r#""users""#));
-        assert!(result.contains(r#""posts""#));
+        let table_ids: Vec<&str> = metadata["tables"]
+            .as_array()
+            .expect("tables array")
+            .iter()
+            .filter_map(|table| table["id"].as_str())
+            .collect();
+        assert_eq!(table_ids, vec!["users", "posts"]);
+        assert_eq!(metadata["tables"][1]["columns"][1]["name"], "user_id");
+
+        let edges = metadata["edges"].as_array().expect("edges array");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0]["from"], "posts");
+        assert_eq!(edges[0]["to"], "users");
+        assert_eq!(edges[0]["from_columns"], serde_json::json!(["user_id"]));
+        assert_eq!(metadata["groups"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_render_html_keeps_hostile_names_inert_end_to_end() {
+        let payload = "</script><script>alert('xss')</script>";
+        let mut graph = create_test_graph();
+        graph.nodes[0].id = payload.to_string();
+        graph.nodes[0].label = payload.to_string();
+        graph.nodes[0].table_name = payload.to_string();
+        graph.nodes[0].columns[1].name = payload.to_string();
+        graph.edges[0].to = payload.to_string();
+        for (index, node) in graph.nodes.iter().enumerate() {
+            graph.node_index.insert(node.id.clone(), index);
+            graph.reverse_index.insert(index, node.id.clone());
+        }
+
+        // Lay out and render the SVG from the hostile graph instead of
+        // handing the HTML renderer a pre-escaped SVG.
+        let positioned = relune_layout::build_layout_from_graph_with_config(
+            &graph,
+            &relune_layout::LayoutConfig::default(),
+        )
+        .expect("layout");
+        let svg = relune_render_svg::render_svg(
+            &positioned,
+            relune_render_svg::SvgRenderOptions {
+                show_tooltips: true,
+                ..Default::default()
+            },
+        )
+        .expect("svg render");
+        let options = HtmlRenderOptions {
+            title: Some(payload.to_string()),
+            ..Default::default()
+        };
+
+        let result = render_html(&graph, &svg, &options).unwrap();
+
+        assert!(!result.contains(payload));
+        // Outside the metadata JSON, markup only carries entity-escaped names
+        // (title, heading, SVG text, and tooltips).
+        let span = metadata_span(&result);
+        let markup = format!("{}{}", &result[..span.start], &result[span.end..]);
+        assert!(!markup.contains("<script>alert"));
+        assert!(markup.contains("<title>&lt;/script&gt;&lt;script&gt;alert(&#39;xss&#39;)"));
+        assert!(markup.contains("<h1>&lt;/script&gt;&lt;script&gt;alert(&#39;xss&#39;)"));
+        // Inside it, nothing can close the script element or open a comment.
+        let json = result[span].to_ascii_lowercase();
+        assert!(!json.contains("</script"));
+        assert!(!json.contains("<!--"));
+
+        // The metadata survives escaping and decodes back to the raw names.
+        let metadata = embedded_metadata(&result);
+        assert_eq!(metadata["tables"][0]["id"], payload);
+        assert_eq!(metadata["tables"][0]["columns"][1]["name"], payload);
+        assert_eq!(metadata["edges"][0]["to"], payload);
     }
 
     #[test]
@@ -268,21 +351,6 @@ mod tests {
         assert!(result.contains("<link"));
         assert!(!result.contains("href=\"http"));
         assert!(!result.contains("src=\"http"));
-    }
-
-    #[test]
-    fn test_metadata_structure() {
-        let graph = create_test_graph();
-        let svg = create_test_svg();
-        let options = HtmlRenderOptions::default();
-
-        let result = render_html(&graph, &svg, &options).unwrap();
-
-        // Check metadata contains expected structure
-        assert!(result.contains(r#""id":"users""#));
-        assert!(result.contains(r#""id":"posts""#));
-        assert!(result.contains(r#""from":"posts""#));
-        assert!(result.contains(r#""to":"users""#));
     }
 
     #[test]

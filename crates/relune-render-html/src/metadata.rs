@@ -275,20 +275,11 @@ mod tests {
     }
 
     #[test]
-    fn test_build_metadata() {
-        let graph = create_test_graph();
-        let metadata = build_metadata_with_overlay(&graph, None);
-
-        assert_eq!(metadata.tables.len(), 1);
-        assert_eq!(metadata.edges.len(), 1);
-        assert_eq!(metadata.groups.len(), 1);
-    }
-
-    #[test]
     fn test_table_metadata() {
         let graph = create_test_graph();
         let metadata = build_metadata_with_overlay(&graph, None);
 
+        assert_eq!(metadata.tables.len(), 1);
         let table = &metadata.tables[0];
         assert_eq!(table.id, "users");
         assert_eq!(table.label, "public.users");
@@ -357,6 +348,7 @@ mod tests {
         let graph = create_test_graph();
         let metadata = build_metadata_with_overlay(&graph, None);
 
+        assert_eq!(metadata.edges.len(), 1);
         let edge = &metadata.edges[0];
         assert_eq!(edge.from, "posts");
         assert_eq!(edge.to, "users");
@@ -371,6 +363,7 @@ mod tests {
         let graph = create_test_graph();
         let metadata = build_metadata_with_overlay(&graph, None);
 
+        assert_eq!(metadata.groups.len(), 1);
         let group = &metadata.groups[0];
         assert_eq!(group.id, "schema_0");
         assert_eq!(group.label, "public");
