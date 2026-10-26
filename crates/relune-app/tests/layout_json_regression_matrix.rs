@@ -164,33 +164,31 @@ fn assert_fixture_direction_snapshots(fixture_name: &str) {
     }
 }
 
-macro_rules! layout_regression_matrix_test {
-    ($test_name:ident, $fixture_name:literal) => {
-        #[test]
-        fn $test_name() {
-            assert_fixture_direction_snapshots($fixture_name);
-        }
+macro_rules! layout_regression_matrix_tests {
+    ($($test_name:ident => $fixture_name:literal),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_fixture_direction_snapshots($fixture_name);
+            }
+        )+
+
+        /// Fixtures that have a regression matrix test registered above.
+        const MATRIX_FIXTURES: &[&str] = &[$($fixture_name),+];
     };
 }
 
-layout_regression_matrix_test!(layout_regression_simple_blog, "simple_blog.sql");
-layout_regression_matrix_test!(layout_regression_join_heavy, "join_heavy.sql");
-layout_regression_matrix_test!(layout_regression_cyclic_fk, "cyclic_fk.sql");
-layout_regression_matrix_test!(layout_regression_multi_schema, "multi_schema.sql");
-layout_regression_matrix_test!(layout_regression_ecommerce, "ecommerce.sql");
+layout_regression_matrix_tests! {
+    layout_regression_simple_blog => "simple_blog.sql",
+    layout_regression_join_heavy => "join_heavy.sql",
+    layout_regression_cyclic_fk => "cyclic_fk.sql",
+    layout_regression_multi_schema => "multi_schema.sql",
+    layout_regression_ecommerce => "ecommerce.sql",
+}
 
 #[test]
-fn layout_regression_fixture_list_stays_in_sync() {
-    assert_eq!(
-        layout_regression_fixture_names(),
-        &[
-            "simple_blog.sql",
-            "join_heavy.sql",
-            "cyclic_fk.sql",
-            "multi_schema.sql",
-            "ecommerce.sql",
-        ],
-    );
+fn layout_regression_matrix_covers_every_layout_fixture() {
+    assert_eq!(MATRIX_FIXTURES, layout_regression_fixture_names());
 }
 
 #[test]

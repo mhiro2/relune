@@ -44,18 +44,5 @@ expression: "fixture_audit_snapshot(\"simple_blog.sql\")"
         "posts[user_id] -> users[id] (304.0px)"
       ]
     }
-  },
-  "surfaces": {
-    "html": {
-      "bytes": 402910,
-      "contains_embedded_svg": true,
-      "contains_metadata": true,
-      "contains_viewport": true
-    },
-    "svg": {
-      "bytes": 22281,
-      "edge_groups": 13,
-      "node_groups": 3
-    }
   }
 }

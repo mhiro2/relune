@@ -44,18 +44,5 @@ expression: "fixture_audit_snapshot(\"multi_schema.sql\")"
         "sales.orders[customer_id] -> public.users[id] (145.0px)"
       ]
     }
-  },
-  "surfaces": {
-    "html": {
-      "bytes": 441967,
-      "contains_embedded_svg": true,
-      "contains_metadata": true,
-      "contains_viewport": true
-    },
-    "svg": {
-      "bytes": 55384,
-      "edge_groups": 25,
-      "node_groups": 7
-    }
   }
 }
