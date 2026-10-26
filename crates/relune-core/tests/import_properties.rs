@@ -7,8 +7,8 @@
 use proptest::prelude::*;
 use proptest::sample::select;
 use relune_core::export::{
-    ColumnExport, EnumExport, ForeignKeyExport, IndexExport, SchemaExport, TableExport, ViewExport,
-    export_schema, import_schema,
+    ColumnExport, EnumExport, ForeignKeyExport, ImportError, IndexExport, SchemaExport,
+    TableExport, ViewExport, export_schema, import_schema,
 };
 use relune_core::{
     CheckConstraint, ColumnSemantics, EffectiveDialect, GeneratedColumn, IdentitySpec, IndexColumn,
@@ -284,11 +284,49 @@ fn schema_export() -> impl Strategy<Value = SchemaExport> {
         })
 }
 
+/// Keeps only documents import must accept: the current version and a
+/// unique, non-empty id for every table, view, and enum.
+fn accepted_schema_export() -> impl Strategy<Value = SchemaExport> {
+    schema_export().prop_map(|export| {
+        let non_empty = |id: &str| !id.is_empty();
+        SchemaExport {
+            version: SchemaExport::VERSION.to_string(),
+            tables: first_per_id(export.tables, |table| &table.id)
+                .into_iter()
+                .filter(|table| non_empty(&table.id))
+                .collect(),
+            views: first_per_id(export.views, |view| &view.id)
+                .into_iter()
+                .filter(|view| non_empty(&view.id))
+                .collect(),
+            enums: first_per_id(export.enums, |enum_type| &enum_type.id)
+                .into_iter()
+                .filter(|enum_type| non_empty(&enum_type.id))
+                .collect(),
+        }
+    })
+}
+
+/// Independent oracle for whether import should reject a generated document.
+/// Generated indexes always carry key parts, so only the version and the
+/// stable ids can make a document invalid.
+fn expected_rejection(export: &SchemaExport) -> bool {
+    fn ids_invalid<'a>(ids: impl Iterator<Item = &'a str>) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        ids.into_iter().any(|id| id.is_empty() || !seen.insert(id))
+    }
+    // Only "2.0.0" in the version pool is a well-formed 2.x version.
+    export.version != "2.0.0"
+        || ids_invalid(export.tables.iter().map(|table| table.id.as_str()))
+        || ids_invalid(export.views.iter().map(|view| view.id.as_str()))
+        || ids_invalid(export.enums.iter().map(|enum_type| enum_type.id.as_str()))
+}
+
 /// Imports a document that went through JSON, as CLI and WASM inputs do.
-fn import_json(export: &SchemaExport) -> Option<Schema> {
+fn import_json(export: &SchemaExport) -> Result<Schema, ImportError> {
     let json = serde_json::to_string(export).expect("schema export serializes");
     let parsed: SchemaExport = serde_json::from_str(&json).expect("schema export deserializes");
-    import_schema(&parsed).ok()
+    import_schema(&parsed)
 }
 
 const DIALECTS: [EffectiveDialect; 4] = [
@@ -302,25 +340,25 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    fn imported_schemas_export_back_unchanged(export in schema_export()) {
-        let Some(schema) = import_json(&export) else {
-            return Ok(());
-        };
+    fn import_rejects_exactly_invalid_documents(export in schema_export()) {
+        prop_assert_eq!(import_json(&export).is_err(), expected_rejection(&export));
+    }
+
+    #[test]
+    fn imported_schemas_export_back_unchanged(export in accepted_schema_export()) {
+        let schema = import_json(&export).expect("accepted documents import");
         let _ = schema.validate();
-        let normalized = export_schema(&schema);
-        let reimported = import_schema(&normalized).expect("exported schemas import again");
-        prop_assert_eq!(export_schema(&reimported), normalized);
+        prop_assert_eq!(export_schema(&schema), export);
         prop_assert!(diff_schemas(&schema, &schema).is_empty());
     }
 
     #[test]
     fn analyses_accept_any_imported_schema(
-        before in schema_export(),
-        after in schema_export(),
+        before in accepted_schema_export(),
+        after in accepted_schema_export(),
     ) {
-        let (Some(before), Some(after)) = (import_json(&before), import_json(&after)) else {
-            return Ok(());
-        };
+        let before = import_json(&before).expect("accepted documents import");
+        let after = import_json(&after).expect("accepted documents import");
         let _ = lint_schema(&before);
         let _ = lint_schema(&after);
         let diff = diff_schemas(&before, &after);
