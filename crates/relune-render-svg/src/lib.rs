@@ -2088,7 +2088,6 @@ mod snapshot_tests {
             "simple_blog.sql" => include_str!("../../../fixtures/sql/simple_blog.sql"),
             "ecommerce.sql" => include_str!("../../../fixtures/sql/ecommerce.sql"),
             "multi_schema.sql" => include_str!("../../../fixtures/sql/multi_schema.sql"),
-            "broken_input.sql" => include_str!("../../../fixtures/sql/broken_input.sql"),
             "cyclic_fk.sql" => include_str!("../../../fixtures/sql/cyclic_fk.sql"),
             "join_heavy.sql" => include_str!("../../../fixtures/sql/join_heavy.sql"),
             "card_stress.sql" => include_str!("../../../fixtures/sql/card_stress.sql"),
@@ -2155,25 +2154,23 @@ mod snapshot_tests {
     }
 
     #[test]
-    fn test_snapshot_broken_input() {
-        let sql = read_fixture("broken_input.sql");
+    fn test_renders_tables_recovered_around_a_broken_statement() {
+        let sql = "CREATE TABLE users (id SERIAL PRIMARY KEY);\n\
+                   CREATE TABLE broken (id INTEGER,, name TEXT);\n\
+                   CREATE TABLE posts (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id));\n";
         let (parse_output, svg) = parse_and_render_fixture_svg(sql);
 
-        let snapshot_data = serde_json::json!({
-            "svg": svg,
-            "diagnostics": parse_output.diagnostics.iter().map(|d| serde_json::json!({
-                "severity": format!("{}", d.severity),
-                "code": d.code.full_code(),
-                "message": d.message,
-            })).collect::<Vec<_>>(),
-        });
-
-        insta::with_settings!({
-            snapshot_path => "snapshots",
-            prepend_module_to_snapshot => false,
-        }, {
-            insta::assert_json_snapshot!("broken_input", snapshot_data);
-        });
+        let codes: Vec<_> = parse_output
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.full_code())
+            .collect();
+        assert_eq!(codes, ["PARSE001"]);
+        let svg = svg.expect("the statements around the broken one should still render");
+        assert!(svg.contains(r#"data-table-id="users""#));
+        assert!(svg.contains(r#"data-table-id="posts""#));
+        assert!(!svg.contains(r#"data-table-id="broken""#));
+        assert_eq!(svg.matches(r#"class="edge-path""#).count(), 1);
     }
 
     #[test]
