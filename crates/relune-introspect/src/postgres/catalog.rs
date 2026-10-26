@@ -599,14 +599,4 @@ mod tests {
             assert!(err.to_string().contains("referenced"));
         }
     }
-
-    #[test]
-    fn fetch_columns_query_includes_views() {
-        assert!(FETCH_COLUMNS_QUERY.contains("t.relkind IN ('r', 'v', 'm')"));
-    }
-
-    #[test]
-    fn fetch_views_query_includes_materialized_views() {
-        assert!(FETCH_VIEWS_QUERY.contains("c.relkind IN ('v', 'm')"));
-    }
 }

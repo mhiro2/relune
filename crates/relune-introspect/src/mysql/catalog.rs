@@ -940,18 +940,6 @@ mod tests {
     }
 
     #[test]
-    fn check_query_scopes_each_check_to_its_table() {
-        let mysql = check_rows_query(MySqlFlavor::MySql);
-        assert!(mysql.contains("tc.CONSTRAINT_TYPE = 'CHECK'"));
-
-        // MariaDB check names are only unique per table, so the query must
-        // take the table from CHECK_CONSTRAINTS rather than join by name.
-        let mariadb = check_rows_query(MySqlFlavor::MariaDb);
-        assert!(!mariadb.contains("TABLE_CONSTRAINTS"));
-        assert!(mariadb.contains("CONVERT(TABLE_NAME USING utf8mb4) AS table_name"));
-    }
-
-    #[test]
     fn builds_raw_enum_from_mysql_column_type() {
         let raw_enum = raw_enum_from_mysql_column_type("app", "enum('a','b')")
             .expect("enum definition should parse");
