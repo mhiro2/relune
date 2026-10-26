@@ -1273,28 +1273,33 @@ fn test_auto_tuned_respects_minimum_spacing() {
 }
 
 #[test]
-#[allow(clippy::float_cmp)]
 fn test_auto_tune_disabled_preserves_custom_spacing() {
-    let config = LayoutConfig {
-        horizontal_spacing: 500.0,
-        vertical_spacing: 200.0,
-        auto_tune_spacing: false,
-        ..Default::default()
+    let graph = LayoutGraphBuilder::new().build(&make_test_schema());
+    let rank_gap = |auto_tune_spacing: bool| {
+        let config = LayoutConfig {
+            horizontal_spacing: 500.0,
+            vertical_spacing: 200.0,
+            auto_tune_spacing,
+            ..Default::default()
+        };
+        let positioned = build_layout_from_graph_with_config(&graph, &config).unwrap();
+        let node = |id: &str| {
+            positioned
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .unwrap_or_else(|| panic!("missing node {id}"))
+        };
+        let (users, posts) = (node("users"), node("posts"));
+        posts.y - (users.y + users.height)
     };
 
-    // auto_tuned() always mutates; the guard is in build_layout_from_graph_with_config.
-    // Verify the build-path logic inline.
-    let effective = if config.auto_tune_spacing {
-        config.clone().auto_tuned(50, 80)
-    } else {
-        config.clone()
-    };
-    assert_eq!(effective.horizontal_spacing, 500.0);
-    assert_eq!(effective.vertical_spacing, 200.0);
-
-    // Contrast: when enabled, spacing IS changed.
-    let tuned = config.auto_tuned(50, 80);
-    assert_ne!(tuned.horizontal_spacing, 500.0);
+    // Disabled, the requested rank gap reaches the placement untouched.
+    let fixed = rank_gap(false);
+    assert!((fixed - 200.0).abs() < 0.001, "fixed rank gap: {fixed}");
+    // Enabled, a sparse two-table graph tightens the same gap by 10%.
+    let tuned = rank_gap(true);
+    assert!((tuned - 180.0).abs() < 0.001, "tuned rank gap: {tuned}");
 }
 
 #[test]
