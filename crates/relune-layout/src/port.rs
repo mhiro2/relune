@@ -797,51 +797,49 @@ mod tests {
 
     #[test]
     fn test_column_y_offset_from_center_uses_matching_column_row() {
+        let column = |name: &str| PositionedColumn {
+            name: name.to_string(),
+            data_type: "int".to_string(),
+            flags: ColumnFlags {
+                nullable: false,
+                relation: ColumnRelationFlags {
+                    is_primary_key: false,
+                    is_foreign_key: true,
+                    is_indexed: false,
+                },
+            },
+            previous_data_type: None,
+        };
         let node = PositionedNode {
             omitted: None,
             id: "posts".to_string(),
             label: "posts".to_string(),
             kind: NodeKind::Table,
-            columns: vec![
-                PositionedColumn {
-                    name: "id".to_string(),
-                    data_type: "int".to_string(),
-                    flags: ColumnFlags {
-                        nullable: false,
-                        relation: ColumnRelationFlags {
-                            is_primary_key: true,
-                            is_foreign_key: false,
-                            is_indexed: false,
-                        },
-                    },
-                    previous_data_type: None,
-                },
-                PositionedColumn {
-                    name: "author_id".to_string(),
-                    data_type: "int".to_string(),
-                    flags: ColumnFlags {
-                        nullable: false,
-                        relation: ColumnRelationFlags {
-                            is_primary_key: false,
-                            is_foreign_key: true,
-                            is_indexed: true,
-                        },
-                    },
-                    previous_data_type: None,
-                },
-            ],
+            columns: vec![column("author_id"), column("editor_id"), column("owner_id")],
             x: 0.0,
             y: 0.0,
             width: 200.0,
-            height: 84.0,
+            height: 120.0,
             is_join_table_candidate: false,
             has_self_loop: false,
             group_index: None,
         };
 
-        let offset = column_y_offset_from_center(&node, &["author_id".to_string()]);
-
-        assert!(offset > 0.0);
+        // Each column anchors on its own row center, measured from the card
+        // center, so the first, middle, and last rows all differ.
+        for (row, name) in ["author_id", "editor_id", "owner_id"]
+            .into_iter()
+            .enumerate()
+        {
+            let offset = column_y_offset_from_center(&node, &[name.to_string()]);
+            #[allow(clippy::cast_precision_loss)]
+            let row_center = NODE_COLUMN_HEIGHT.mul_add(row as f32 + 0.5, NODE_FIRST_ROW_TOP);
+            let expected = row_center - node.height / 2.0;
+            assert!(
+                (offset - expected).abs() < 0.01,
+                "{name}: got {offset}, expected {expected}"
+            );
+        }
     }
 
     #[test]
