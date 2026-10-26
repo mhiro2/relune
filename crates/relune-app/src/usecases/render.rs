@@ -263,14 +263,15 @@ mod tests {
             );
         ";
 
-        let request = RenderRequest::from_sql(sql).with_output_format(OutputFormat::Svg);
+        // SVG is the default format; requesting it explicitly is identical.
+        let result = render(RenderRequest::from_sql(sql)).unwrap();
+        let explicit =
+            render(RenderRequest::from_sql(sql).with_output_format(OutputFormat::Svg)).unwrap();
 
-        let result = render(request);
-        assert!(result.is_ok());
-
-        let result = result.unwrap();
-        assert!(result.content.contains("<svg"));
+        assert!(result.content.starts_with("<svg"));
+        assert_eq!(result.content, explicit.content);
         assert_eq!(result.stats.table_count, 1);
+        assert_eq!(result.stats.column_count, 2);
     }
 
     #[test]

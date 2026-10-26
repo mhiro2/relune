@@ -146,40 +146,72 @@ mod tests {
                 id INT PRIMARY KEY,
                 post_id INT REFERENCES posts(id)
             );
+            CREATE TABLE reactions (
+                id INT PRIMARY KEY,
+                comment_id INT REFERENCES comments(id)
+            );
+            CREATE TABLE settings (
+                id INT PRIMARY KEY
+            );
         ";
+        let edge_ids = |content: &str| {
+            let graph: serde_json::Value = serde_json::from_str(content).unwrap();
+            graph["edges"]
+                .as_array()
+                .expect("edges array")
+                .iter()
+                .map(|edge| {
+                    (
+                        edge["from"].as_str().expect("from").to_string(),
+                        edge["to"].as_str().expect("to").to_string(),
+                    )
+                })
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let set = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let edge_set = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(from, to)| ((*from).to_string(), (*to).to_string()))
+                .collect::<std::collections::BTreeSet<_>>()
+        };
 
-        let request = ExportRequest::from_sql(sql)
-            .with_format(ExportFormat::GraphJson)
-            .with_focus(FocusSpec::new("posts", 1));
+        // Without focus the whole graph is exported.
+        let full =
+            export(ExportRequest::from_sql(sql).with_format(ExportFormat::GraphJson)).unwrap();
+        assert_eq!(
+            graph_table_names(&full.content),
+            set(&["comments", "posts", "reactions", "settings", "users"])
+        );
+        assert_eq!(
+            edge_ids(&full.content),
+            edge_set(&[
+                ("comments", "posts"),
+                ("posts", "users"),
+                ("reactions", "comments")
+            ])
+        );
 
-        let result = export(request).unwrap();
-        let graph: serde_json::Value = serde_json::from_str(&result.content).unwrap();
-        let nodes = graph["nodes"].as_array().expect("nodes array");
-        let node_ids = nodes
-            .iter()
-            .map(|node| node["table_name"].as_str().expect("table_name").to_string())
-            .collect::<std::collections::BTreeSet<_>>();
-        let edges = graph["edges"].as_array().expect("edges array");
-        let edge_ids = edges
-            .iter()
-            .map(|edge| {
-                (
-                    edge["from"].as_str().expect("from").to_string(),
-                    edge["to"].as_str().expect("to").to_string(),
-                )
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        let expected_nodes = ["comments", "posts", "users"]
-            .into_iter()
-            .map(str::to_string)
-            .collect::<std::collections::BTreeSet<_>>();
-        let expected_edges = [("comments", "posts"), ("posts", "users")]
-            .into_iter()
-            .map(|(from, to)| (from.to_string(), to.to_string()))
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert_eq!(node_ids, expected_nodes);
-        assert_eq!(edge_ids, expected_edges);
+        // A depth-1 focus on posts drops the two-hop and unconnected tables.
+        let focused = export(
+            ExportRequest::from_sql(sql)
+                .with_format(ExportFormat::GraphJson)
+                .with_focus(FocusSpec::new("posts", 1)),
+        )
+        .unwrap();
+        assert_eq!(
+            graph_table_names(&focused.content),
+            set(&["comments", "posts", "users"])
+        );
+        assert_eq!(
+            edge_ids(&focused.content),
+            edge_set(&[("comments", "posts"), ("posts", "users")])
+        );
     }
 
     #[test]
@@ -194,12 +226,20 @@ mod tests {
         let request = ExportRequest::from_sql(sql).with_format(ExportFormat::LayoutJson);
 
         let result = export(request).unwrap();
+        let graph = relune_testkit::parse_layout_json(&result.content);
 
-        assert!(result.content.contains("\"nodes\""));
-        assert!(result.content.contains("\"x\""));
-        assert!(result.content.contains("\"y\""));
-        assert!(result.content.contains("\"width\""));
-        assert!(result.content.contains("\"height\""));
+        assert_eq!(graph.nodes.len(), 1);
+        let users = &graph.nodes[0];
+        assert_eq!(users.id, "users");
+        assert!(users.x.is_finite() && users.y.is_finite());
+        assert!(users.width > 0.0 && users.height > 0.0);
+        let columns = users
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(columns, ["id", "name"]);
+        assert!(graph.edges.is_empty());
     }
 
     #[test]
@@ -312,21 +352,31 @@ mod tests {
 
     #[test]
     fn test_export_from_sql_file() {
-        // Create a temporary SQL file
-        let sql = "CREATE TABLE test (id INT PRIMARY KEY);";
-        let temp_path = std::env::temp_dir().join("relune_test_export.sql");
-        std::fs::write(&temp_path, sql).unwrap();
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("schema.sql");
+        std::fs::write(
+            &path,
+            "CREATE TABLE accounts (id INT PRIMARY KEY, email TEXT NOT NULL);",
+        )
+        .unwrap();
 
         let request = ExportRequest {
-            input: InputSource::sql_file(&temp_path),
+            input: InputSource::sql_file(&path),
             format: ExportFormat::SchemaJson,
             ..Default::default()
         };
 
-        let result = export(request);
-        assert!(result.is_ok());
-
-        // Cleanup
-        std::fs::remove_file(&temp_path).ok();
+        let result = export(request).unwrap();
+        let exported: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        let tables = exported["tables"].as_array().expect("tables array");
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0]["name"], "accounts");
+        let columns = tables[0]["columns"]
+            .as_array()
+            .expect("columns array")
+            .iter()
+            .map(|column| column["name"].as_str().expect("column name"))
+            .collect::<Vec<_>>();
+        assert_eq!(columns, ["id", "email"]);
     }
 }
