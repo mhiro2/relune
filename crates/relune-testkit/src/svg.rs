@@ -61,6 +61,18 @@ pub fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     Some(&tag[start..start + len])
 }
 
+/// Returns attribute `name` with the renderer's XML escaping undone.
+fn text_attr(tag: &str, name: &str) -> Option<String> {
+    attr(tag, name).map(|value| {
+        value
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&amp;", "&")
+    })
+}
+
 fn classes(tag: &str) -> BTreeSet<String> {
     attr(tag, "class")
         .unwrap_or_default()
@@ -97,7 +109,7 @@ fn rect_after(svg: &str, offset: usize, class: &str) -> SvgRect {
 fn table_node_markup<'a>(svg: &'a str, table_id: &str) -> Option<&'a str> {
     let mut nodes = start_tags(svg, "<g class=\"table-node").peekable();
     while let Some((start, tag)) = nodes.next() {
-        if attr(tag, "data-table-id") == Some(table_id) {
+        if text_attr(tag, "data-table-id").as_deref() == Some(table_id) {
             let end = nodes.peek().map_or(svg.len(), |(next, _)| *next);
             return Some(&svg[start..end]);
         }
@@ -105,11 +117,20 @@ fn table_node_markup<'a>(svg: &'a str, table_id: &str) -> Option<&'a str> {
     None
 }
 
-/// Returns the IDs of all rendered table nodes.
+/// Returns the IDs of all rendered nodes: tables, views, and enums.
+#[must_use]
+pub fn node_ids(svg: &str) -> BTreeSet<String> {
+    start_tags(svg, "<g class=\"table-node")
+        .filter_map(|(_, tag)| text_attr(tag, "data-table-id"))
+        .collect()
+}
+
+/// Returns the IDs of rendered nodes whose kind is `table`.
 #[must_use]
 pub fn table_ids(svg: &str) -> BTreeSet<String> {
     start_tags(svg, "<g class=\"table-node")
-        .filter_map(|(_, tag)| attr(tag, "data-table-id").map(str::to_string))
+        .filter(|(_, tag)| attr(tag, "data-node-kind") == Some("table"))
+        .filter_map(|(_, tag)| text_attr(tag, "data-table-id"))
         .collect()
 }
 
@@ -133,8 +154,8 @@ pub fn column_classes(svg: &str, table_id: &str, column: &str) -> Option<BTreeSe
 pub fn table_bodies(svg: &str) -> BTreeMap<String, SvgRect> {
     start_tags(svg, "<g class=\"table-node")
         .filter_map(|(start, tag)| {
-            let id = attr(tag, "data-table-id")?;
-            Some((id.to_string(), rect_after(svg, start, "table-body")))
+            let id = text_attr(tag, "data-table-id")?;
+            Some((id, rect_after(svg, start, "table-body")))
         })
         .collect()
 }
@@ -175,8 +196,8 @@ pub fn edges(svg: &str) -> Vec<SvgEdge> {
     start_tags(svg, "<g id=\"edge-")
         .filter_map(|(_, tag)| {
             Some(SvgEdge {
-                from: attr(tag, "data-from")?.to_string(),
-                to: attr(tag, "data-to")?.to_string(),
+                from: text_attr(tag, "data-from")?,
+                to: text_attr(tag, "data-to")?,
                 classes: classes(tag),
             })
         })
@@ -189,13 +210,15 @@ mod tests {
 
     const SVG: &str = concat!(
         r#"<g class="group" data-group-id="prefix_0"><rect class="group-box" x="0.0" y="0.0" width="100.0" height="100.0"/></g>"#,
-        r#"<g class="table-node node diff-modified" data-table-id="app_users" data-id="app_users">"#,
+        r#"<g class="table-node node diff-modified" data-table-id="app_users" data-id="app_users" data-node-kind="table">"#,
         r#"<rect class="table-body" x="10.0" y="10.0" width="50.0" height="50.0"/>"#,
         r#"<g class="column-row diff-removed" data-column-name="legacy" data-nullable="true"></g></g>"#,
-        r#"<g class="table-node node" data-table-id="cats" data-id="cats">"#,
+        r#"<g class="table-node node" data-table-id="cats" data-id="cats" data-node-kind="table">"#,
         r#"<rect class="table-body" x="200.0" y="10.0" width="50.0" height="50.0"/></g>"#,
         r#"<text class="group-label" data-group-id="prefix_0" x="1" y="1">app</text>"#,
         r#"<g id="edge-0" class="edge diff-removed" data-from="app_users" data-to="cats"></g>"#,
+        r#"<g class="table-node node" data-table-id="enum(&#39;a&#39;)" data-node-kind="enum">"#,
+        r#"<rect class="table-body" x="300.0" y="10.0" width="50.0" height="50.0"/></g>"#,
     );
 
     #[test]
@@ -203,6 +226,12 @@ mod tests {
         assert_eq!(
             table_ids(SVG),
             ["app_users", "cats"].map(str::to_string).into()
+        );
+        assert_eq!(
+            node_ids(SVG),
+            ["app_users", "cats", "enum('a')"]
+                .map(str::to_string)
+                .into()
         );
         assert!(
             table_classes(SVG, "app_users")

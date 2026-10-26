@@ -4,6 +4,7 @@
 //! fixture, and then invokes the `relune` binary as a subprocess to verify that
 //! the full pipeline (CLI → introspect → render / inspect / lint) works.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -16,7 +17,10 @@ use testcontainers_modules::postgres::Postgres;
 const POSTGRES_TAG: &str = "18";
 
 fn relune() -> Command {
-    Command::cargo_bin("relune").expect("Failed to find relune binary")
+    let mut cmd = Command::cargo_bin("relune").expect("Failed to find relune binary");
+    cmd.env_remove("DATABASE_URL");
+    cmd.env_remove("RUST_LOG");
+    cmd
 }
 
 fn fixtures_dir() -> PathBuf {
@@ -108,6 +112,95 @@ async fn sqlite_db(sql: &str) -> (String, tempfile::TempDir) {
     (url, dir)
 }
 
+/// Introspected tables are qualified with the schema (or database) they
+/// live in.
+fn qualified(schema: &str, table: &str) -> String {
+    format!("{schema}.{table}")
+}
+
+fn names(schema: &str, tables: &[&str]) -> BTreeSet<String> {
+    tables
+        .iter()
+        .map(|table| qualified(schema, table))
+        .collect()
+}
+
+fn edge_pairs(schema: &str, pairs: &[(&str, &str)]) -> BTreeSet<(String, String)> {
+    pairs
+        .iter()
+        .map(|(from, to)| (qualified(schema, from), qualified(schema, to)))
+        .collect()
+}
+
+/// Runs the CLI against `url` and parses its JSON stdout.
+fn run_json(url: &str, args: &[&str]) -> serde_json::Value {
+    let output = relune()
+        .args(args)
+        .args(["--db-url", url, "--format", "json"])
+        .assert()
+        .success();
+    serde_json::from_slice(&output.get_output().stdout).expect("stdout should be JSON")
+}
+
+/// Table names and foreign key count reported by `inspect`.
+fn inspect_summary(url: &str) -> (BTreeSet<String>, u64) {
+    let parsed = run_json(url, &["inspect"]);
+    let summary = &parsed["summary"];
+    let tables = summary["tables"]
+        .as_array()
+        .expect("summary tables")
+        .iter()
+        .map(|table| table["name"].as_str().expect("table name").to_string())
+        .collect();
+    let foreign_keys = summary["foreign_key_count"]
+        .as_u64()
+        .expect("foreign key count");
+    (tables, foreign_keys)
+}
+
+/// `(rule_id, table_name)` of every issue reported by `lint`.
+fn lint_issues(url: &str) -> BTreeSet<(String, String)> {
+    run_json(url, &["lint"])["issues"]
+        .as_array()
+        .expect("lint issues")
+        .iter()
+        .map(|issue| {
+            (
+                issue["rule_id"].as_str().expect("rule id").to_string(),
+                issue["table_name"]
+                    .as_str()
+                    .expect("table name")
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Renders `url` with `extra` arguments and returns the table IDs and
+/// `(from, to)` foreign key edges drawn in the output.
+fn rendered_tables_and_edges(
+    url: &str,
+    file_name: &str,
+    extra: &[&str],
+) -> (BTreeSet<String>, BTreeSet<(String, String)>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join(file_name);
+    relune()
+        .args(["render", "--db-url", url])
+        .args(extra)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .success();
+    let content = fs::read_to_string(&out).unwrap();
+    let edges = relune_testkit::svg::edges(&content)
+        .into_iter()
+        .filter(|edge| edge.classes.contains("edge-kind-foreign-key"))
+        .map(|edge| (edge.from, edge.to))
+        .collect();
+    (relune_testkit::svg::table_ids(&content), edges)
+}
+
 // ===========================================================================
 // PostgreSQL
 // ===========================================================================
@@ -115,16 +208,29 @@ async fn sqlite_db(sql: &str) -> (String, tempfile::TempDir) {
 mod postgres {
     use super::*;
 
+    const SCHEMA: &str = "public";
+
+    fn blog_tables() -> BTreeSet<String> {
+        names(SCHEMA, &["comments", "posts", "users"])
+    }
+
+    fn blog_edges() -> BTreeSet<(String, String)> {
+        edge_pairs(
+            SCHEMA,
+            &[
+                ("comments", "posts"),
+                ("comments", "users"),
+                ("posts", "users"),
+            ],
+        )
+    }
+
     #[tokio::test]
     async fn inspect_postgres() {
         let sql = fs::read_to_string(fixtures_dir().join("simple_blog.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        relune()
-            .args(["inspect", "--db-url", &url, "--format", "json"])
-            .assert()
-            .success()
-            .stdout(predicates::str::contains("\"tables\""));
+        assert_eq!(inspect_summary(&url), (blog_tables(), 3));
     }
 
     #[tokio::test]
@@ -132,17 +238,10 @@ mod postgres {
         let sql = fs::read_to_string(fixtures_dir().join("simple_blog.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let out = tmp.path().join("out.svg");
-
-        relune()
-            .args(["render", "--db-url", &url, "--out"])
-            .arg(&out)
-            .assert()
-            .success();
-
-        let content = fs::read_to_string(&out).unwrap();
-        assert!(content.contains("<svg"), "expected SVG output");
+        assert_eq!(
+            rendered_tables_and_edges(&url, "out.svg", &[]),
+            (blog_tables(), blog_edges())
+        );
     }
 
     #[tokio::test]
@@ -150,19 +249,9 @@ mod postgres {
         let sql = fs::read_to_string(fixtures_dir().join("simple_blog.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let out = tmp.path().join("out.html");
-
-        relune()
-            .args(["render", "--db-url", &url, "--format", "html", "--out"])
-            .arg(&out)
-            .assert()
-            .success();
-
-        let content = fs::read_to_string(&out).unwrap();
-        assert!(
-            content.contains("<!DOCTYPE html>") || content.contains("<html"),
-            "expected HTML output"
+        assert_eq!(
+            rendered_tables_and_edges(&url, "out.html", &["--format", "html"]),
+            (blog_tables(), blog_edges())
         );
     }
 
@@ -171,10 +260,16 @@ mod postgres {
         let sql = fs::read_to_string(fixtures_dir().join("simple_blog.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        relune()
-            .args(["lint", "--db-url", &url, "--format", "json"])
-            .assert()
-            .success();
+        let issues = lint_issues(&url);
+        for table in ["comments", "posts", "users"] {
+            assert!(
+                issues.contains(&(
+                    "missing-table-comment".to_string(),
+                    qualified(SCHEMA, table)
+                )),
+                "{table} has no comment in the database; got: {issues:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -182,11 +277,35 @@ mod postgres {
         let sql = fs::read_to_string(fixtures_dir().join("simple_blog.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        relune()
-            .args(["inspect", "--db-url", &url, "--table", "posts"])
-            .assert()
-            .success()
-            .stdout(predicates::str::contains("posts"));
+        let parsed = run_json(&url, &["inspect", "--table", "posts"]);
+        let table = &parsed["table"];
+        assert_eq!(table["name"], qualified(SCHEMA, "posts"));
+        let columns = table["columns"]
+            .as_array()
+            .expect("table columns")
+            .iter()
+            .map(|column| column["name"].as_str().expect("column name"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            columns,
+            [
+                "id",
+                "user_id",
+                "title",
+                "content",
+                "published_at",
+                "created_at",
+                "updated_at"
+            ]
+        );
+        let foreign_keys = table["foreign_keys"].as_array().expect("foreign keys");
+        assert_eq!(foreign_keys.len(), 1);
+        assert_eq!(
+            foreign_keys[0]["from_columns"],
+            serde_json::json!(["user_id"])
+        );
+        assert_eq!(foreign_keys[0]["to_table"], "users");
+        assert_eq!(foreign_keys[0]["to_columns"], serde_json::json!(["id"]));
     }
 
     #[tokio::test]
@@ -194,16 +313,19 @@ mod postgres {
         let sql = fs::read_to_string(fixtures_dir().join("ecommerce.sql")).unwrap();
         let (url, _c) = pg_container(&sql).await;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let out = tmp.path().join("focus.svg");
-
-        relune()
-            .args(["render", "--db-url", &url, "--focus", "orders", "--out"])
-            .arg(&out)
-            .assert()
-            .success();
-
-        assert!(out.exists(), "focused SVG should be created");
+        let (tables, edges) =
+            rendered_tables_and_edges(&url, "focus.svg", &["--focus", "orders", "--depth", "1"]);
+        assert_eq!(
+            tables,
+            names(SCHEMA, &["customers", "order_items", "orders"])
+        );
+        assert_eq!(
+            edges,
+            edge_pairs(
+                SCHEMA,
+                &[("order_items", "orders"), ("orders", "customers")]
+            )
+        );
     }
 }
 
@@ -214,16 +336,21 @@ mod postgres {
 mod mysql {
     use super::*;
 
+    const SCHEMA: &str = "relune_e2e";
+
+    fn ecommerce_tables() -> BTreeSet<String> {
+        names(
+            SCHEMA,
+            &["categories", "order_items", "orders", "products", "users"],
+        )
+    }
+
     #[tokio::test]
     async fn inspect_mysql() {
         let sql = fs::read_to_string(fixtures_dir().join("mysql_ecommerce.sql")).unwrap();
         let (url, _c) = mysql_container(&sql).await;
 
-        relune()
-            .args(["inspect", "--db-url", &url, "--format", "json"])
-            .assert()
-            .success()
-            .stdout(predicates::str::contains("\"tables\""));
+        assert_eq!(inspect_summary(&url), (ecommerce_tables(), 5));
     }
 
     #[tokio::test]
@@ -231,17 +358,22 @@ mod mysql {
         let sql = fs::read_to_string(fixtures_dir().join("mysql_ecommerce.sql")).unwrap();
         let (url, _c) = mysql_container(&sql).await;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let out = tmp.path().join("out.svg");
-
-        relune()
-            .args(["render", "--db-url", &url, "--out"])
-            .arg(&out)
-            .assert()
-            .success();
-
-        let content = fs::read_to_string(&out).unwrap();
-        assert!(content.contains("<svg"), "expected SVG output");
+        assert_eq!(
+            rendered_tables_and_edges(&url, "out.svg", &[]),
+            (
+                ecommerce_tables(),
+                edge_pairs(
+                    SCHEMA,
+                    &[
+                        ("categories", "categories"),
+                        ("order_items", "orders"),
+                        ("order_items", "products"),
+                        ("orders", "users"),
+                        ("products", "categories"),
+                    ]
+                )
+            )
+        );
     }
 
     #[tokio::test]
@@ -249,10 +381,14 @@ mod mysql {
         let sql = fs::read_to_string(fixtures_dir().join("mysql_ecommerce.sql")).unwrap();
         let (url, _c) = mysql_container(&sql).await;
 
-        relune()
-            .args(["lint", "--db-url", &url, "--format", "json"])
-            .assert()
-            .success();
+        let issues = lint_issues(&url);
+        assert!(
+            issues.contains(&(
+                "nullable-foreign-key-lazy-load".to_string(),
+                qualified(SCHEMA, "categories")
+            )),
+            "the nullable parent_id FK should be reported; got: {issues:?}"
+        );
     }
 }
 
@@ -263,16 +399,18 @@ mod mysql {
 mod sqlite {
     use super::*;
 
+    const SCHEMA: &str = "main";
+
+    fn blog_tables() -> BTreeSet<String> {
+        names(SCHEMA, &["comments", "post_tags", "posts", "tags", "users"])
+    }
+
     #[tokio::test]
     async fn inspect_sqlite() {
         let sql = fs::read_to_string(fixtures_dir().join("sqlite_blog.sql")).unwrap();
         let (url, _dir) = sqlite_db(&sql).await;
 
-        relune()
-            .args(["inspect", "--db-url", &url, "--format", "json"])
-            .assert()
-            .success()
-            .stdout(predicates::str::contains("\"tables\""));
+        assert_eq!(inspect_summary(&url), (blog_tables(), 5));
     }
 
     #[tokio::test]
@@ -280,17 +418,22 @@ mod sqlite {
         let sql = fs::read_to_string(fixtures_dir().join("sqlite_blog.sql")).unwrap();
         let (url, _dir) = sqlite_db(&sql).await;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let out = tmp.path().join("out.svg");
-
-        relune()
-            .args(["render", "--db-url", &url, "--out"])
-            .arg(&out)
-            .assert()
-            .success();
-
-        let content = fs::read_to_string(&out).unwrap();
-        assert!(content.contains("<svg"), "expected SVG output");
+        assert_eq!(
+            rendered_tables_and_edges(&url, "out.svg", &[]),
+            (
+                blog_tables(),
+                edge_pairs(
+                    SCHEMA,
+                    &[
+                        ("comments", "posts"),
+                        ("comments", "users"),
+                        ("post_tags", "posts"),
+                        ("post_tags", "tags"),
+                        ("posts", "users"),
+                    ]
+                )
+            )
+        );
     }
 
     #[tokio::test]
@@ -298,9 +441,13 @@ mod sqlite {
         let sql = fs::read_to_string(fixtures_dir().join("sqlite_blog.sql")).unwrap();
         let (url, _dir) = sqlite_db(&sql).await;
 
-        relune()
-            .args(["lint", "--db-url", &url, "--format", "json"])
-            .assert()
-            .success();
+        let issues = lint_issues(&url);
+        assert!(
+            issues.contains(&(
+                "missing-foreign-key-index".to_string(),
+                qualified(SCHEMA, "post_tags")
+            )),
+            "post_tags.tag_id has no index; got: {issues:?}"
+        );
     }
 }

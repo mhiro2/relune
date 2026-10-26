@@ -277,7 +277,7 @@ fn assert_surfaces_match_layout(
     layout_edges.sort();
 
     assert_eq!(
-        relune_testkit::svg::table_ids(svg),
+        relune_testkit::svg::node_ids(svg),
         layout_nodes,
         "{fixture_name}: SVG nodes differ from the layout"
     );
