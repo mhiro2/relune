@@ -239,7 +239,8 @@ Phases: build layout graph → grouping/focus → **card density** → layout al
 
 Fixture-level routing regressions are audited in
 `crates/relune-app/tests/fixture_render_audit.rs`, which snapshots `layout-json`
-and rendered outputs across the main SQL fixtures. A property test lays out
+routing patterns across the main SQL fixtures and checks that the rendered SVG
+and the HTML viewer metadata carry exactly the laid-out nodes and edges. A property test lays out
 generated schemas (self references, cycles, parallel foreign keys, schemas and
 prefixes) in every direction, algorithm, edge style, and grouping, and requires
 finite coordinates, non-overlapping nodes, edge endpoints on node borders
