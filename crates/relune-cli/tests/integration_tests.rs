@@ -21,9 +21,10 @@ use relune_testkit::{
 fn relune() -> Command {
     let mut cmd = Command::cargo_bin("relune").expect("Failed to find relune binary");
     // The CLI falls back to DATABASE_URL for live-DB input when no input flag
-    // is given; clear it so tests are deterministic regardless of the
-    // developer's shell environment.
+    // is given, and RUST_LOG takes precedence over -v; clear both so tests are
+    // deterministic regardless of the developer's shell environment.
     cmd.env_remove("DATABASE_URL");
+    cmd.env_remove("RUST_LOG");
     cmd
 }
 
@@ -80,6 +81,8 @@ fn relune_in_terminal(args: &[String]) -> (u32, String) {
         .expect("Failed to create PTY");
 
     let mut command = PtyCommandBuilder::new(assert_cmd::cargo::cargo_bin("relune"));
+    command.env_remove("DATABASE_URL");
+    command.env_remove("RUST_LOG");
     for arg in args {
         command.arg(arg);
     }
@@ -1586,6 +1589,26 @@ mod global_flag_tests {
         assert!(
             stderr.contains("render complete"),
             "verbose output should include render completion details"
+        );
+    }
+
+    #[test]
+    fn rust_log_overrides_verbose_flag() {
+        let output = relune()
+            .env("RUST_LOG", "warn")
+            .arg("-v")
+            .arg("render")
+            .arg("--sql")
+            .arg(simple_blog_fixture())
+            .arg("--stdout")
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "render should succeed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("parsed SQL"),
+            "RUST_LOG=warn should silence info logs despite -v; got: {stderr}"
         );
     }
 
