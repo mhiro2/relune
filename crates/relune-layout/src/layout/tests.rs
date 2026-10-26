@@ -2237,10 +2237,30 @@ fn test_route_edges_use_inter_rank_channel_for_hierarchical_flow() {
         .expect("ranked routing should succeed");
     let edge = edges.first().expect("edge");
 
+    // The channel runs halfway between the ranks; its turns line up with the
+    // endpoints and the label sits on the channel midpoint.
     assert_eq!(edge.route.control_points.len(), 2);
-    assert!((edge.route.control_points[0].1 - 140.0).abs() < 0.001);
-    assert!((edge.route.control_points[1].1 - 140.0).abs() < 0.001);
-    assert!((edge.route.label_position.1 - 140.0).abs() < 0.001);
+    let [(first_x, first_y), (second_x, second_y)] =
+        [edge.route.control_points[0], edge.route.control_points[1]];
+    assert!((first_y - 140.0).abs() < 0.001, "first turn y: {first_y}");
+    assert!(
+        (second_y - 140.0).abs() < 0.001,
+        "second turn y: {second_y}"
+    );
+    assert!(
+        (first_x - edge.route.x1).abs() < 0.001,
+        "first turn x: {first_x}"
+    );
+    assert!(
+        (second_x - edge.route.x2).abs() < 0.001,
+        "second turn x: {second_x}"
+    );
+    let (label_x, label_y) = edge.route.label_position;
+    assert!((label_y - 140.0).abs() < 0.001, "label y: {label_y}");
+    assert!(
+        (label_x - f32::midpoint(first_x, second_x)).abs() < 0.001,
+        "label x {label_x} should sit between {first_x} and {second_x}"
+    );
 }
 
 #[test]
