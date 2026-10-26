@@ -529,6 +529,20 @@ fn make_multi_schema_for_grouping() -> Schema {
     }
 }
 
+/// Groups `make_multi_schema_for_grouping` yields when grouped by schema.
+const SCHEMA_GROUPS: &[(&str, &[&str])] = &[
+    ("inventory", &["inventory.products", "inventory.stock"]),
+    ("public", &["public.posts", "public.users"]),
+    ("sales", &["sales.orders", "sales.shipments"]),
+];
+
+/// Groups `make_prefix_grouping_schema` yields when grouped by prefix.
+const PREFIX_GROUPS: &[(&str, &[&str])] = &[
+    ("order", &["order_items", "orders"]),
+    ("product", &["product", "product_categories"]),
+    ("user_", &["user_preferences", "user_profile"]),
+];
+
 fn make_prefix_grouping_schema() -> Schema {
     let mk_table = |id: u64, name: &str, fk: Option<&str>| Table {
         id: TableId(id),
@@ -589,6 +603,34 @@ fn make_prefix_grouping_schema() -> Schema {
     }
 }
 
+/// Asserts that the layout produced exactly the `expected` groups, each
+/// given as its label and member card ids, so an empty grouping cannot pass
+/// the overlap checks that follow.
+fn assert_group_members(positioned: &PositionedGraph, expected: &[(&str, &[&str])]) {
+    let mut actual: Vec<(&str, Vec<&str>)> = positioned
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| {
+            let mut members: Vec<&str> = positioned
+                .nodes
+                .iter()
+                .filter(|node| node.group_index == Some(index))
+                .map(|node| node.id.as_str())
+                .collect();
+            members.sort_unstable();
+            (group.label.as_str(), members)
+        })
+        .collect();
+    actual.sort_unstable();
+    let mut expected: Vec<(&str, Vec<&str>)> = expected
+        .iter()
+        .map(|(label, members)| (*label, members.to_vec()))
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(actual, expected);
+}
+
 fn assert_groups_disjoint(groups: &[PositionedGroup]) {
     for (i, a) in groups.iter().enumerate() {
         for b in groups.iter().skip(i + 1) {
@@ -628,11 +670,7 @@ fn grouped_hierarchical_layout_produces_disjoint_group_bboxes() {
         };
         let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
 
-        assert!(
-            positioned.groups.len() >= 2,
-            "expected multiple groups, got {}",
-            positioned.groups.len()
-        );
+        assert_group_members(&positioned, SCHEMA_GROUPS);
         assert_groups_disjoint(&positioned.groups);
     }
 }
@@ -663,6 +701,7 @@ fn grouped_hierarchical_layout_keeps_groups_apart_with_tiny_spacing() {
         };
         let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
 
+        assert_group_members(&positioned, SCHEMA_GROUPS);
         assert_groups_disjoint(&positioned.groups);
     }
 }
@@ -684,6 +723,7 @@ fn force_grouped_layout_produces_disjoint_group_bboxes_on_y() {
         ..LayoutConfig::default()
     };
     let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+    assert_group_members(&positioned, SCHEMA_GROUPS);
 
     for (i, a) in positioned.groups.iter().enumerate() {
         for b in positioned.groups.iter().skip(i + 1) {
@@ -714,6 +754,7 @@ fn force_grouped_layout_produces_disjoint_group_bboxes_on_x() {
         ..LayoutConfig::default()
     };
     let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+    assert_group_members(&positioned, SCHEMA_GROUPS);
 
     for (i, a) in positioned.groups.iter().enumerate() {
         for b in positioned.groups.iter().skip(i + 1) {
@@ -744,6 +785,7 @@ fn force_prefix_grouped_layout_produces_disjoint_group_bboxes_on_y() {
         ..LayoutConfig::default()
     };
     let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+    assert_group_members(&positioned, PREFIX_GROUPS);
 
     for (i, a) in positioned.groups.iter().enumerate() {
         for b in positioned.groups.iter().skip(i + 1) {
@@ -774,6 +816,7 @@ fn force_prefix_grouped_layout_keeps_groups_in_a_band_disjoint_on_x() {
         ..LayoutConfig::default()
     };
     let positioned = build_layout_with_config(&schema, &request, &config).unwrap();
+    assert_group_members(&positioned, PREFIX_GROUPS);
 
     for (i, a) in positioned.groups.iter().enumerate() {
         for b in positioned.groups.iter().skip(i + 1) {
