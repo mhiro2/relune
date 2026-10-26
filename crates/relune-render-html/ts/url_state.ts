@@ -88,7 +88,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
 
   let writeTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingPush = false;
-  let restoringFromPopstate = false;
+  let restoring = false;
 
   function scheduleWrite(): void {
     if (writeTimer !== null) {
@@ -98,7 +98,11 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   }
 
   function scheduleDiscreteWrite(): void {
-    pendingPush = true;
+    // Changes the viewer makes while applying the hash reproduce an entry the
+    // history already has, so they only normalize the URL in place.
+    if (!restoring) {
+      pendingPush = true;
+    }
     scheduleWrite();
   }
 
@@ -151,7 +155,7 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     if (newHash !== location.hash && newHash !== '#') {
       const url = newHash || location.pathname + location.search;
       try {
-        if (pendingPush && !restoringFromPopstate) {
+        if (pendingPush) {
           history.pushState(null, '', url);
         } else {
           history.replaceState(null, '', url);
@@ -175,11 +179,6 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
     // would queue a debounced hash write after restoringFromPopstate has
     // already flipped back to false, causing a spurious pushState.
     runtime.minimap?.setHidden(params.get(PARAM_MINIMAP_VISIBLE) !== '1', { silent: true });
-    if (params.toString() === '') {
-      // Going back to a clean hash drops whatever is still selected.
-      runtime.selection?.clear();
-      return;
-    }
 
     // Restore viewport first (before selection centering overrides it)
     const s = params.get(PARAM_SCALE);
@@ -194,28 +193,40 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
       }
     }
 
-    // Restore search query
+    // Everything below falls back to its default when the hash omits it, so
+    // navigating back to an earlier entry also undoes later searches,
+    // filters, and hidden groups.
     const query = params.get(PARAM_SEARCH);
-    if (query !== null && query !== '' && hasMetadataSearchMatch(query)) {
-      runtime.search?.setQuery(query);
+    const nextQuery = query !== null && hasMetadataSearchMatch(query) ? query : '';
+    if (runtime.search !== undefined && runtime.search.getQuery() !== nextQuery) {
+      runtime.search.setQuery(nextQuery);
     }
 
-    // Restore filter mode
     const fmRaw = params.get(PARAM_FILTER_MODE);
-    if (fmRaw === 'hide' || fmRaw === 'focus') {
-      runtime.filters?.setMode(fmRaw);
+    const nextMode = fmRaw === 'hide' || fmRaw === 'focus' ? fmRaw : 'dim';
+    if (runtime.filters !== undefined && runtime.filters.getMode() !== nextMode) {
+      runtime.filters.setMode(nextMode);
     }
 
-    // Restore facet selections
     for (const { param, facetId } of FACET_PARAMS) {
       const values = readList(params, param);
-      if (values.length > 0) {
+      const current = runtime.filters?.getFacetSelection(facetId as any) ?? [];
+      const sorted = values.toSorted();
+      if (
+        sorted.length !== current.length ||
+        sorted.some((value, index) => value !== current[index])
+      ) {
         runtime.filters?.setFacetSelection(facetId as any, values);
       }
     }
 
-    // Restore hidden groups
-    for (const groupId of readList(params, PARAM_HIDDEN_GROUPS)) {
+    const hiddenGroups = new Set(readList(params, PARAM_HIDDEN_GROUPS));
+    for (const groupId of runtime.groups?.getHiddenGroups() ?? []) {
+      if (!hiddenGroups.has(groupId)) {
+        runtime.groups?.setVisibility(groupId, true);
+      }
+    }
+    for (const groupId of hiddenGroups) {
       runtime.groups?.setVisibility(groupId, false);
     }
 
@@ -274,15 +285,21 @@ import { getViewerRuntime, waitForViewerModules, type ViewerModule } from './vie
   // popstate: re-apply state when the user navigates back/forward or edits hash
   // ---------------------------------------------------------------------------
 
-  window.addEventListener('popstate', () => {
-    restoringFromPopstate = true;
-    restoreFromHash();
-    restoringFromPopstate = false;
-  });
+  function applyHash(): void {
+    restoring = true;
+    pendingPush = false;
+    try {
+      restoreFromHash();
+    } finally {
+      restoring = false;
+    }
+  }
+
+  window.addEventListener('popstate', applyHash);
 
   // ---------------------------------------------------------------------------
   // Init: restore state after all modules have initialised
   // ---------------------------------------------------------------------------
 
-  waitForViewerModules(expectedViewerModules(), restoreFromHash);
+  waitForViewerModules(expectedViewerModules(), applyHash);
 }
