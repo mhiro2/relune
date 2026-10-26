@@ -2018,3 +2018,177 @@ pub(crate) fn build_css(
         viewer_shell_css = viewer_shell_css,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns the effective value of `property` for rules whose selector
+    /// list names `selector` exactly, ignoring rules inside at-rules.
+    /// Later rules win, as in the cascade.
+    fn css_value(css: &str, selector: &str, property: &str) -> Option<String> {
+        let css = strip_comments(css);
+        let mut value = None;
+        let mut rest = css.as_str();
+        while let Some(open) = rest.find('{') {
+            let header = rest[..open].trim();
+            let body_start = open + 1;
+            let mut depth = 1;
+            let mut close = rest.len();
+            for (offset, ch) in rest[body_start..].char_indices() {
+                match ch {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                if depth == 0 {
+                    close = body_start + offset;
+                    break;
+                }
+            }
+            let body = &rest[body_start..close];
+            if !header.starts_with('@') && header.split(',').any(|s| s.trim() == selector) {
+                for declaration in body.split(';') {
+                    if let Some((name, declared)) = declaration.split_once(':')
+                        && name.trim() == property
+                    {
+                        value = Some(declared.trim().to_string());
+                    }
+                }
+            }
+            rest = rest.get(close + 1..).unwrap_or_default();
+        }
+        value
+    }
+
+    fn strip_comments(text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(start) = rest.find("/*") {
+            out.push_str(&rest[..start]);
+            rest = rest[start..]
+                .find("*/")
+                .map_or("", |end| &rest[start + end + 2..]);
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn value(css: &str, selector: &str, property: &str) -> String {
+        css_value(css, selector, property)
+            .unwrap_or_else(|| panic!("{selector} should declare {property}"))
+    }
+
+    #[test]
+    fn css_value_reads_the_last_matching_declaration() {
+        let css = "/* note */ .a, .b { color: red; width: 1px }
+            @media (max-width: 10px) { .a { color: green; } }
+            .a { color: blue; }";
+
+        assert_eq!(css_value(css, ".a", "color").as_deref(), Some("blue"));
+        assert_eq!(css_value(css, ".b", "color").as_deref(), Some("red"));
+        assert_eq!(css_value(css, ".a", "width").as_deref(), Some("1px"));
+        assert_eq!(css_value(css, ".c", "color"), None);
+    }
+
+    #[test]
+    fn viewer_control_icons_are_sized_to_the_button() {
+        let css = build_css(Theme::Dark, false, true, true);
+
+        assert_eq!(value(&css, ".viewer-control-button svg", "width"), "16px");
+        assert_eq!(value(&css, ".viewer-control-button svg", "height"), "16px");
+        assert_eq!(
+            value(&css, ".viewer-control-button svg", "pointer-events"),
+            "none"
+        );
+    }
+
+    #[test]
+    fn detail_key_pills_reuse_the_card_badge_colors() {
+        for theme in [Theme::Dark, Theme::Light] {
+            let css = build_css(theme, false, false, true);
+            let badges = get_colors(theme).badges;
+
+            assert_eq!(
+                value(&css, ":root", "--badge-pk-bg"),
+                badge_background(badges.primary_key)
+            );
+            assert_eq!(
+                value(&css, ":root", "--badge-pk-text"),
+                badges.primary_key.text
+            );
+            assert_eq!(
+                value(&css, ":root", "--badge-fk-text"),
+                badges.foreign_key.text
+            );
+
+            for kind in ["pk", "fk", "ix"] {
+                let pill = format!(".detail-column-pill-{kind}");
+                assert_eq!(
+                    value(&css, &pill, "background"),
+                    format!("var(--badge-{kind}-bg)")
+                );
+                assert_eq!(
+                    value(&css, &pill, "color"),
+                    format!("var(--badge-{kind}-text)")
+                );
+            }
+            assert_eq!(value(&css, ".detail-column-pills", "display"), "flex");
+            assert_eq!(value(&css, ".detail-column-pill", "border-radius"), "999px");
+        }
+    }
+
+    #[test]
+    fn detail_drawer_lays_out_metrics_and_relations() {
+        let css = build_css(Theme::Dark, false, false, true);
+
+        assert_eq!(
+            value(&css, ".detail-metrics", "grid-template-columns"),
+            "repeat(2, minmax(0, 1fr))"
+        );
+        assert_eq!(
+            value(&css, ".detail-relations .detail-relation", "flex"),
+            "1 1 100%"
+        );
+        assert_eq!(value(&css, ".detail-relation-meta", "line-height"), "1.35");
+        assert_eq!(value(&css, ".detail-relation-meta", "margin-top"), "2px");
+    }
+
+    #[test]
+    fn major_panels_share_one_radius() {
+        let css = build_css(Theme::Dark, true, true, true);
+
+        for panel in [".search-panel", ".minimap-shell", ".detail-drawer"] {
+            assert_eq!(value(&css, panel, "border-radius"), "14px", "{panel}");
+        }
+    }
+
+    #[test]
+    fn minimap_marks_selection_hidden_nodes_and_the_frame() {
+        let css = build_css(Theme::Dark, false, true, true);
+
+        assert_eq!(value(&css, ".minimap-node.hidden", "display"), "none");
+        assert_eq!(
+            value(&css, ".minimap-node.selected", "fill"),
+            "var(--selection-color)"
+        );
+        assert_eq!(
+            value(&css, ".minimap-frame", "stroke"),
+            "var(--selection-color)"
+        );
+        assert_eq!(value(&css, ".minimap-frame", "stroke-dasharray"), "4 2");
+        // The minimap steps left of an open detail drawer, clearing its width.
+        assert_eq!(
+            value(&css, ".detail-drawer", "width"),
+            "min(320px, calc(100vw - 24px))"
+        );
+        assert_eq!(
+            value(
+                &css,
+                "body:has(#detail-drawer:not([hidden])) .minimap-shell",
+                "right"
+            ),
+            "calc(min(320px, 100vw - 24px) + 24px)"
+        );
+    }
+}
