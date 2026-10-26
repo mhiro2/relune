@@ -149,8 +149,6 @@ fn render_with_schema(
     let svg_options = SvgRenderOptions {
         theme: svg_theme,
         show_legend: request.options.show_legend,
-        show_stats: request.options.show_stats,
-        embed_css: true,
         show_tooltips: true,
         // The HTML viewer styles labels through their edge group.
         labels_on_top: request.output_format == OutputFormat::Svg,
