@@ -1,6 +1,7 @@
 //! SVG-to-PNG rasterization using resvg.
 
 use anyhow::{Context, Result, anyhow, bail};
+use resvg::usvg::fontdb::{Database, Family, Query};
 
 /// Maximum number of pixels we will rasterize into a PNG.
 ///
@@ -10,10 +11,22 @@ use anyhow::{Context, Result, anyhow, bail};
 /// rendered to SVG instead.
 const MAX_IMAGE_PIXELS: u64 = 100_000_000;
 
+/// Sans-serif families tried, in order, when the default generic family is not
+/// installed on the host.
+const FALLBACK_SANS_FAMILIES: &[&str] = &[
+    "DejaVu Sans",
+    "Liberation Sans",
+    "Noto Sans",
+    "Helvetica",
+    "Arial",
+];
+
 /// Rasterize an SVG string to PNG bytes.
 pub fn svg_to_png(svg: &str) -> Result<Vec<u8>> {
     let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    let fonts = options.fontdb_mut();
+    fonts.load_system_fonts();
+    use_installed_generic_families(fonts);
 
     let tree = resvg::usvg::Tree::from_str(svg, &options)
         .context("Failed to parse SVG for rasterization")?;
@@ -39,6 +52,45 @@ pub fn svg_to_png(svg: &str) -> Result<Vec<u8>> {
     let png_data = pixmap.encode_png().context("Failed to encode PNG")?;
 
     Ok(png_data)
+}
+
+/// Point the generic `sans-serif` and `serif` families at installed fonts.
+///
+/// fontdb maps them to Arial and Times New Roman, which most Linux hosts lack.
+/// usvg drops text whose families all fail to resolve, so without this the PNG
+/// would have no labels at all.
+fn use_installed_generic_families(fonts: &mut Database) {
+    let Some(family) = installed_sans_family(fonts) else {
+        return;
+    };
+    if !resolves(fonts, Family::SansSerif) {
+        fonts.set_sans_serif_family(family.clone());
+    }
+    // usvg appends `serif` to every font-family list as the last resort.
+    if !resolves(fonts, Family::Serif) {
+        fonts.set_serif_family(family);
+    }
+}
+
+fn installed_sans_family(fonts: &Database) -> Option<String> {
+    if let Some(name) = FALLBACK_SANS_FAMILIES
+        .iter()
+        .find(|name| resolves(fonts, Family::Name(name)))
+    {
+        return Some((*name).to_owned());
+    }
+    fonts
+        .faces()
+        .find_map(|face| face.families.first().map(|(name, _)| name.clone()))
+}
+
+fn resolves(fonts: &Database, family: Family<'_>) -> bool {
+    fonts
+        .query(&Query {
+            families: &[family],
+            ..Query::default()
+        })
+        .is_some()
 }
 
 /// Validate the rasterization target size before allocating the pixmap.
@@ -108,6 +160,24 @@ mod tests {
             message.contains("SVG"),
             "error should suggest SVG: {message}"
         );
+    }
+
+    #[test]
+    fn generic_families_fall_back_to_an_installed_font() {
+        let mut fonts = Database::new();
+        fonts.load_system_fonts();
+        if fonts.is_empty() {
+            eprintln!("no system fonts available; skipping the fallback check");
+            return;
+        }
+        // Simulate a host that lacks the default Arial / Times New Roman.
+        fonts.set_sans_serif_family("relune-missing-font");
+        fonts.set_serif_family("relune-missing-font");
+
+        use_installed_generic_families(&mut fonts);
+
+        assert!(resolves(&fonts, Family::SansSerif));
+        assert!(resolves(&fonts, Family::Serif));
     }
 
     /// Counts pixels that are not fully transparent in a PNG.
