@@ -47,12 +47,15 @@ jobs:
           after: fixtures/sql/simple_blog.sql
           binary-path: target/release/relune
       - name: Verify no changes detected
+        env:
+          HAS_CHANGES: ${{ steps.diff-no-changes.outputs.has-changes }}
+          OUTPUT_PATH: ${{ steps.diff-no-changes.outputs.output-path }}
         run: |
-          if [[ "${{ steps.diff-no-changes.outputs.has-changes }}" != "false" ]]; then
+          if [[ "${HAS_CHANGES}" != "false" ]]; then
             echo "::error::Expected has-changes=false for identical schemas"
             exit 1
           fi
-          if [[ "${{ steps.diff-no-changes.outputs.output-path }}" != "relune-diff.md" ]]; then
+          if [[ "${OUTPUT_PATH}" != "relune-diff.md" ]]; then
             echo "::error::Expected the markdown default output path relune-diff.md"
             exit 1
           fi
@@ -71,8 +74,9 @@ jobs:
       - name: Verify changes detected
         env:
           REPORT: ${{ steps.diff-with-changes.outputs.output-path }}
+          HAS_CHANGES: ${{ steps.diff-with-changes.outputs.has-changes }}
         run: |
-          if [[ "${{ steps.diff-with-changes.outputs.has-changes }}" != "true" ]]; then
+          if [[ "${HAS_CHANGES}" != "true" ]]; then
             echo "::error::Expected has-changes=true for different schemas"
             exit 1
           fi
@@ -98,16 +102,20 @@ jobs:
           deny: breaking
           binary-path: target/release/relune
       - name: Verify review (no findings)
+        env:
+          HAS_FINDINGS: ${{ steps.review-no-findings.outputs.has-findings }}
+          HAS_BLOCKING_FINDINGS: ${{ steps.review-no-findings.outputs.has-blocking-findings }}
+          OUTPUT_PATH: ${{ steps.review-no-findings.outputs.output-path }}
         run: |
-          if [[ "${{ steps.review-no-findings.outputs.has-findings }}" != "false" ]]; then
+          if [[ "${HAS_FINDINGS}" != "false" ]]; then
             echo "::error::Expected has-findings=false for identical schemas"
             exit 1
           fi
-          if [[ "${{ steps.review-no-findings.outputs.has-blocking-findings }}" != "false" ]]; then
+          if [[ "${HAS_BLOCKING_FINDINGS}" != "false" ]]; then
             echo "::error::Expected has-blocking-findings=false for identical schemas"
             exit 1
           fi
-          if [[ "${{ steps.review-no-findings.outputs.output-path }}" != "relune-review.md" ]]; then
+          if [[ "${OUTPUT_PATH}" != "relune-review.md" ]]; then
             echo "::error::Expected the markdown default output path relune-review.md"
             exit 1
           fi
@@ -126,16 +134,20 @@ jobs:
           deny: breaking
           binary-path: target/release/relune
       - name: Verify review (warning only)
+        env:
+          SUMMARY_WARNING: ${{ steps.review-warning.outputs.summary-warning }}
+          HAS_FINDINGS: ${{ steps.review-warning.outputs.has-findings }}
+          HAS_BLOCKING_FINDINGS: ${{ steps.review-warning.outputs.has-blocking-findings }}
         run: |
-          if [[ "${{ steps.review-warning.outputs.has-findings }}" != "true" ]]; then
+          if [[ "${HAS_FINDINGS}" != "true" ]]; then
             echo "::error::Expected has-findings=true for warning fixture"
             exit 1
           fi
-          if [[ "${{ steps.review-warning.outputs.has-blocking-findings }}" != "false" ]]; then
+          if [[ "${HAS_BLOCKING_FINDINGS}" != "false" ]]; then
             echo "::error::Expected has-blocking-findings=false (warning is below breaking)"
             exit 1
           fi
-          if [[ "${{ steps.review-warning.outputs.summary-warning }}" -lt 1 ]]; then
+          if [[ ! "${SUMMARY_WARNING}" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::Expected summary-warning >= 1"
             exit 1
           fi
@@ -158,20 +170,24 @@ jobs:
       - name: Verify review (lock-risk caution)
         env:
           REPORT: ${{ steps.review-lock-risk.outputs.output-path }}
+          HAS_FINDINGS: ${{ steps.review-lock-risk.outputs.has-findings }}
+          HAS_BLOCKING_FINDINGS: ${{ steps.review-lock-risk.outputs.has-blocking-findings }}
+          SUMMARY_CAUTION: ${{ steps.review-lock-risk.outputs.summary-caution }}
+          SUMMARY_BREAKING: ${{ steps.review-lock-risk.outputs.summary-breaking }}
         run: |
-          if [[ "${{ steps.review-lock-risk.outputs.has-findings }}" != "true" ]]; then
+          if [[ "${HAS_FINDINGS}" != "true" ]]; then
             echo "::error::Expected has-findings=true for lock-risk fixture under dialect: mysql"
             exit 1
           fi
-          if [[ "${{ steps.review-lock-risk.outputs.has-blocking-findings }}" != "false" ]]; then
+          if [[ "${HAS_BLOCKING_FINDINGS}" != "false" ]]; then
             echo "::error::Expected has-blocking-findings=false (caution is below breaking)"
             exit 1
           fi
-          if [[ "${{ steps.review-lock-risk.outputs.summary-caution }}" != "1" ]]; then
+          if [[ "${SUMMARY_CAUTION}" != "1" ]]; then
             echo "::error::Expected exactly one caution from risk/rewrite-table under dialect: mysql"
             exit 1
           fi
-          if [[ "${{ steps.review-lock-risk.outputs.summary-breaking }}" != "0" ]]; then
+          if [[ "${SUMMARY_BREAKING}" != "0" ]]; then
             echo "::error::Expected the rules filter to drop risk/drop-column"
             exit 1
           fi
@@ -194,16 +210,19 @@ jobs:
       - name: Verify review (breaking, no fail)
         env:
           REPORT: ${{ steps.review-breaking.outputs.output-path }}
+          SUMMARY_BREAKING: ${{ steps.review-breaking.outputs.summary-breaking }}
+          HAS_FINDINGS: ${{ steps.review-breaking.outputs.has-findings }}
+          HAS_BLOCKING_FINDINGS: ${{ steps.review-breaking.outputs.has-blocking-findings }}
         run: |
-          if [[ "${{ steps.review-breaking.outputs.has-findings }}" != "true" ]]; then
+          if [[ "${HAS_FINDINGS}" != "true" ]]; then
             echo "::error::Expected has-findings=true for breaking fixture"
             exit 1
           fi
-          if [[ "${{ steps.review-breaking.outputs.has-blocking-findings }}" != "true" ]]; then
+          if [[ "${HAS_BLOCKING_FINDINGS}" != "true" ]]; then
             echo "::error::Expected has-blocking-findings=true for breaking fixture"
             exit 1
           fi
-          if [[ "${{ steps.review-breaking.outputs.summary-breaking }}" -lt 1 ]]; then
+          if [[ ! "${SUMMARY_BREAKING}" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::Expected summary-breaking >= 1"
             exit 1
           fi
@@ -229,12 +248,15 @@ jobs:
           output-path: ${{ runner.temp }}/review-breaking-fail.md
           binary-path: target/release/relune
       - name: Verify review (breaking, fail-on-blocking)
+        env:
+          OUTCOME: ${{ steps.review-breaking-fail.outcome }}
+          HAS_BLOCKING_FINDINGS: ${{ steps.review-breaking-fail.outputs.has-blocking-findings }}
         run: |
-          if [[ "${{ steps.review-breaking-fail.outcome }}" != "failure" ]]; then
+          if [[ "${OUTCOME}" != "failure" ]]; then
             echo "::error::Expected step outcome=failure when fail-on-blocking=true and breaking finding present"
             exit 1
           fi
-          if [[ "${{ steps.review-breaking-fail.outputs.has-blocking-findings }}" != "true" ]]; then
+          if [[ "${HAS_BLOCKING_FINDINGS}" != "true" ]]; then
             echo "::error::Expected has-blocking-findings=true even when action fails"
             exit 1
           fi
@@ -249,8 +271,10 @@ jobs:
           after: fixtures/sql/simple_blog.sql
           binary-path: target/release/relune
       - name: Verify invalid mode fails
+        env:
+          OUTCOME: ${{ steps.review-invalid-mode.outcome }}
         run: |
-          if [[ "${{ steps.review-invalid-mode.outcome }}" != "failure" ]]; then
+          if [[ "${OUTCOME}" != "failure" ]]; then
             echo "::error::Expected step outcome=failure for unknown mode"
             exit 1
           fi
