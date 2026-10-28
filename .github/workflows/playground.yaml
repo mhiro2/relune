@@ -6,14 +6,12 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  id-token: write
-  pages: write
+permissions: {}
 
 concurrency:
   group: playground-pages
-  cancel-in-progress: true
+  # Let a running Pages deployment finish instead of cancelling it midway.
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -22,11 +20,15 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Install Rust toolchain
@@ -60,7 +62,11 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build
+    permissions:
+      id-token: write
+      pages: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

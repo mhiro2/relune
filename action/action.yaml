@@ -128,7 +128,7 @@ runs:
       env:
         VERSION: ${{ inputs.version }}
         GH_TOKEN: ${{ github.token }}
-      run: bash "${{ github.action_path }}/install.sh"
+      run: bash "${GITHUB_ACTION_PATH}/install.sh"
 
     # ------------------------------------------------------------------
     # 2. Run relune (diff or review depending on mode)
@@ -150,4 +150,4 @@ runs:
         EXCEPT_RULES: ${{ inputs.except-rules }}
         EXCEPT_TABLES: ${{ inputs.except-tables }}
         FAIL_ON_BLOCKING: ${{ inputs.fail-on-blocking }}
-      run: bash "${{ github.action_path }}/run.sh"
+      run: bash "${GITHUB_ACTION_PATH}/run.sh"

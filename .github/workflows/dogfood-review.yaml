@@ -18,9 +18,7 @@ on:
       - "crates/relune-app/**"
       - "crates/relune-core/**"
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: dogfood-review-${{ github.event.pull_request.number }}
@@ -35,10 +33,15 @@ jobs:
     # Skip fork PRs — GITHUB_TOKEN is read-only there and the upsert would 403.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
@@ -47,10 +50,12 @@ jobs:
       - name: Build relune
         run: cargo build -p relune-cli --release
       - name: Materialize before/after schemas
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           mkdir -p .relune
-          if git cat-file -e "${{ github.event.pull_request.base.sha }}:dogfood/schema.sql" 2>/dev/null; then
-            git show "${{ github.event.pull_request.base.sha }}:dogfood/schema.sql" > .relune/before.sql
+          if git cat-file -e "${BASE_SHA}:dogfood/schema.sql" 2>/dev/null; then
+            git show "${BASE_SHA}:dogfood/schema.sql" > .relune/before.sql
           else
             # First introduction of the file — compare against an empty schema.
             : > .relune/before.sql
@@ -69,19 +74,22 @@ jobs:
           fail-on-blocking: "false"
           binary-path: target/release/relune
       - name: Compose comment body
+        env:
+          HAS_FINDINGS: ${{ steps.review.outputs.has-findings }}
+          HAS_BLOCKING_FINDINGS: ${{ steps.review.outputs.has-blocking-findings }}
         run: |
           {
             echo "<!-- relune-dogfood-review -->"
-            if [[ "${{ steps.review.outputs.has-blocking-findings }}" == "true" ]]; then
+            if [[ "${HAS_BLOCKING_FINDINGS}" == "true" ]]; then
               echo "> [!CAUTION]"
               echo "> 🛑 **Blocking findings detected.** Resolve them before merging."
               echo ""
-            elif [[ "${{ steps.review.outputs.has-findings }}" == "true" ]]; then
+            elif [[ "${HAS_FINDINGS}" == "true" ]]; then
               echo "> [!WARNING]"
               echo "> 🔍 Findings detected — review the report below."
               echo ""
             fi
-            if [[ "${{ steps.review.outputs.has-findings }}" == "true" ]]; then
+            if [[ "${HAS_FINDINGS}" == "true" ]]; then
               cat .relune/review.md
             else
               echo "## Schema review"
