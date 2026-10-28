@@ -42,7 +42,10 @@ jobs:
           brew install zig@0.15
           echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
       - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --locked
+        # The tool version follows the install-action pin that Dependabot bumps.
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-zigbuild
       - name: Add Rust targets
         run: >-
           rustup target add
