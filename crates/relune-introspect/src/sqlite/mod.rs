@@ -7,7 +7,7 @@ use sqlx::sqlite::SqlitePoolOptions;
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::connect::{
-    acquire_timeout, close_pool_when_done, pool_max_connections_with_default,
+    acquire_timeout, close_pool_when_done, pool_max_connections_env, resolve_pool_max_connections,
     with_introspection_deadline,
 };
 use crate::error::{IntrospectError, connect_error};
@@ -86,7 +86,11 @@ pub async fn introspect_sqlite(database_url: &str) -> Result<Schema, IntrospectE
 /// concurrent attaches or read-replica setups.
 #[must_use]
 pub(crate) fn pool_max_connections() -> u32 {
-    pool_max_connections_with_default(DEFAULT_POOL_MAX_CONNECTIONS)
+    pool_max_connections_from(pool_max_connections_env().as_deref())
+}
+
+fn pool_max_connections_from(override_value: Option<&str>) -> u32 {
+    resolve_pool_max_connections(DEFAULT_POOL_MAX_CONNECTIONS, override_value)
 }
 
 #[cfg(test)]
@@ -114,9 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn pool_max_connections_is_positive() {
-        // Whichever value wins (default or env override), it must remain
-        // positive so the pool can be constructed.
-        assert!(pool_max_connections() > 0);
+    fn pool_max_connections_defaults_to_a_single_connection() {
+        assert_eq!(pool_max_connections_from(None), 1);
+        assert_eq!(pool_max_connections_from(Some("-1")), 1);
+        assert_eq!(pool_max_connections_from(Some("4")), 4);
     }
 }

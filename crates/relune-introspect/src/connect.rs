@@ -108,15 +108,19 @@ where
     }
 }
 
+/// Reads the raw `RELUNE_DB_POOL_MAX_CONNECTIONS` override, if set.
+#[must_use]
+pub(crate) fn pool_max_connections_env() -> Option<String> {
+    std::env::var(POOL_MAX_CONNECTIONS_ENV).ok()
+}
+
 /// Resolves the effective pool max connection count for a dialect.
 ///
-/// Reads `RELUNE_DB_POOL_MAX_CONNECTIONS`; if set to a positive integer the
-/// override wins, otherwise falls back to `default_max`. Invalid values
-/// (zero, negative, non-numeric, empty) are ignored.
+/// A positive integer override wins, otherwise falls back to `default_max`.
+/// Invalid values (zero, negative, non-numeric, empty) are ignored.
 #[must_use]
-pub(crate) fn pool_max_connections_with_default(default_max: u32) -> u32 {
-    pool_max_override_from(std::env::var(POOL_MAX_CONNECTIONS_ENV).ok().as_deref())
-        .unwrap_or(default_max)
+pub(crate) fn resolve_pool_max_connections(default_max: u32, override_value: Option<&str>) -> u32 {
+    pool_max_override_from(override_value).unwrap_or(default_max)
 }
 
 fn pool_max_override_from(value: Option<&str>) -> Option<u32> {
@@ -362,6 +366,48 @@ mod tests {
         let err = result.expect_err("operation error should be surfaced");
         assert!(matches!(err, IntrospectError::Query { .. }));
         assert!(err.to_string().contains("synthetic operation failure"));
+        assert!(
+            pool.is_closed(),
+            "pool must be drained even when the operation fails"
+        );
+    }
+
+    #[tokio::test]
+    async fn close_pool_when_done_reports_timeout_when_drain_hangs() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory pool should connect");
+        // A checked-out connection keeps `close()` waiting until the drain
+        // budget runs out; the paused clock skips that wait.
+        let _held = pool.acquire().await.expect("connection should be acquired");
+        tokio::time::pause();
+
+        let err = close_pool_when_done(&pool, async { Ok(()) })
+            .await
+            .expect_err("a hung drain should surface as an error");
+        assert!(matches!(err, IntrospectError::Timeout(_)));
+        assert!(err.to_string().contains("pool drain"));
+    }
+
+    #[tokio::test]
+    async fn close_pool_when_done_keeps_operation_error_when_drain_hangs() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory pool should connect");
+        let _held = pool.acquire().await.expect("connection should be acquired");
+        tokio::time::pause();
+
+        let result: Result<(), IntrospectError> = close_pool_when_done(&pool, async {
+            Err(IntrospectError::query("synthetic operation failure"))
+        })
+        .await;
+
+        let err = result.expect_err("operation error should be surfaced");
+        assert!(matches!(err, IntrospectError::Query { .. }));
     }
 
     #[test]
@@ -458,5 +504,13 @@ mod tests {
 
         let result = close_pool_when_done(&pool, async { Ok(42_u32) }).await;
         assert_eq!(result.expect("operation succeeds and close completes"), 42);
+        assert!(
+            pool.is_closed(),
+            "pool must be drained after a successful operation"
+        );
+        assert!(
+            matches!(pool.acquire().await, Err(sqlx::Error::PoolClosed)),
+            "a drained pool must refuse new connections"
+        );
     }
 }

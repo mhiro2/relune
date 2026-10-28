@@ -149,8 +149,6 @@ fn render_with_schema(
     let svg_options = SvgRenderOptions {
         theme: svg_theme,
         show_legend: request.options.show_legend,
-        show_stats: request.options.show_stats,
-        embed_css: true,
         show_tooltips: true,
         // The HTML viewer styles labels through their edge group.
         labels_on_top: request.output_format == OutputFormat::Svg,
@@ -1185,6 +1183,7 @@ fn resolve_fk_target_stable_id(
 mod tests {
     use super::*;
     use crate::schema_input::schema_from_input;
+    use relune_testkit::svg;
 
     #[test]
     fn test_diff_rejects_identity_errors_unless_allowed() {
@@ -1943,6 +1942,36 @@ mod tests {
     // Grouping × overlay interaction tests
     // ---------------------------------------------------------------
 
+    fn diff_svg(
+        before: &str,
+        after: &str,
+        filter: relune_core::FilterSpec,
+        strategy: relune_core::GroupingStrategy,
+    ) -> String {
+        let request = DiffRequest {
+            before: crate::request::InputSource::sql_text(before),
+            after: crate::request::InputSource::sql_text(after),
+            format: crate::request::DiffFormat::Svg,
+            filter,
+            grouping: relune_core::GroupingSpec { strategy },
+            ..Default::default()
+        };
+        diff(request)
+            .unwrap()
+            .rendered
+            .expect("SVG output expected")
+    }
+
+    fn names<const N: usize>(names: [&str; N]) -> std::collections::BTreeSet<String> {
+        names.into_iter().map(str::to_string).collect()
+    }
+
+    fn has_class(svg: &str, table: &str, class: &str) -> bool {
+        svg::table_classes(svg, table)
+            .unwrap_or_else(|| panic!("table {table} should be rendered"))
+            .contains(class)
+    }
+
     #[test]
     fn test_diff_svg_grouping_by_schema_preserves_overlay() {
         let before = "\
@@ -1959,29 +1988,28 @@ mod tests {
             CREATE TABLE hr.departments (id INT PRIMARY KEY);\n\
         ";
 
-        let request = DiffRequest {
-            before: crate::request::InputSource::sql_text(before),
-            after: crate::request::InputSource::sql_text(after),
-            format: crate::request::DiffFormat::Svg,
-            grouping: relune_core::GroupingSpec {
-                strategy: relune_core::GroupingStrategy::BySchema,
-            },
-            ..Default::default()
-        };
-        let result = diff(request).unwrap();
+        let svg = diff_svg(
+            before,
+            after,
+            relune_core::FilterSpec::default(),
+            relune_core::GroupingStrategy::BySchema,
+        );
 
-        let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(svg.contains("<svg"), "should produce valid SVG");
-        // Modified orders → warning
-        assert!(
-            svg.contains("diff-modified"),
-            "modified table should have modified marking"
+        assert_eq!(
+            svg::group_members(&svg),
+            std::collections::BTreeMap::from([
+                ("hr".to_string(), names(["hr.departments", "hr.employees"])),
+                ("sales".to_string(), names(["sales.orders"])),
+            ])
         );
-        // Added departments → info
+        assert!(has_class(&svg, "sales.orders", "diff-modified"));
         assert!(
-            svg.contains("diff-added"),
-            "added table should have added marking"
+            svg::column_classes(&svg, "sales.orders", "total")
+                .expect("added column should render")
+                .contains("diff-added")
         );
+        assert!(has_class(&svg, "hr.departments", "diff-added"));
+        assert!(!has_class(&svg, "hr.employees", "diff-modified"));
     }
 
     #[test]
@@ -1990,72 +2018,32 @@ mod tests {
             CREATE TABLE app_users (id INT PRIMARY KEY);\n\
             CREATE TABLE app_posts (id INT PRIMARY KEY);\n\
             CREATE TABLE sys_logs (id INT PRIMARY KEY);\n\
+            CREATE TABLE sys_audit (id INT PRIMARY KEY);\n\
         ";
         let after = "\
             CREATE TABLE app_users (id INT PRIMARY KEY, name VARCHAR(255));\n\
             CREATE TABLE app_posts (id INT PRIMARY KEY);\n\
+            CREATE TABLE sys_audit (id INT PRIMARY KEY);\n\
         ";
 
-        let request = DiffRequest {
-            before: crate::request::InputSource::sql_text(before),
-            after: crate::request::InputSource::sql_text(after),
-            format: crate::request::DiffFormat::Svg,
-            grouping: relune_core::GroupingSpec {
-                strategy: relune_core::GroupingStrategy::ByPrefix,
-            },
-            ..Default::default()
-        };
-        let result = diff(request).unwrap();
+        let svg = diff_svg(
+            before,
+            after,
+            relune_core::FilterSpec::default(),
+            relune_core::GroupingStrategy::ByPrefix,
+        );
 
-        let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(svg.contains("<svg"), "should produce valid SVG");
-        // Modified app_users → warning
-        assert!(
-            svg.contains("diff-modified"),
-            "modified table should have modified marking"
+        // The removed table stays in its prefix group next to the survivor.
+        assert_eq!(
+            svg::group_members(&svg),
+            std::collections::BTreeMap::from([
+                ("app_".to_string(), names(["app_posts", "app_users"])),
+                ("sys_".to_string(), names(["sys_audit", "sys_logs"])),
+            ])
         );
-        // Removed sys_logs → error
-        assert!(
-            svg.contains("diff-removed"),
-            "removed table should have removed marking"
-        );
-        // All tables should be present
-        assert!(svg.contains("app_users"), "app_users should appear");
-        assert!(svg.contains("sys_logs"), "removed table should appear");
-    }
-
-    #[test]
-    fn test_diff_svg_grouping_does_not_hide_removed_table() {
-        let before = "\
-            CREATE TABLE core_users (id INT PRIMARY KEY);\n\
-            CREATE TABLE core_sessions (id INT PRIMARY KEY);\n\
-        ";
-        let after = "CREATE TABLE core_users (id INT PRIMARY KEY);";
-
-        let request = DiffRequest {
-            before: crate::request::InputSource::sql_text(before),
-            after: crate::request::InputSource::sql_text(after),
-            format: crate::request::DiffFormat::Svg,
-            grouping: relune_core::GroupingSpec {
-                strategy: relune_core::GroupingStrategy::ByPrefix,
-            },
-            ..Default::default()
-        };
-        let result = diff(request).unwrap();
-
-        assert!(
-            !result.diff.removed_tables.is_empty(),
-            "should detect removal"
-        );
-        let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(
-            svg.contains("core_sessions"),
-            "removed table must remain visible with grouping active"
-        );
-        assert!(
-            svg.contains("diff-removed"),
-            "removed table should have removed marking"
-        );
+        assert!(has_class(&svg, "app_users", "diff-modified"));
+        assert!(has_class(&svg, "sys_logs", "diff-removed"));
+        assert!(!has_class(&svg, "sys_audit", "diff-removed"));
     }
 
     // ---------------------------------------------------------------
@@ -2068,40 +2056,37 @@ mod tests {
             CREATE TABLE app_users (id INT PRIMARY KEY);\n\
             CREATE TABLE app_posts (id INT PRIMARY KEY, user_id INT REFERENCES app_users(id));\n\
             CREATE TABLE sys_logs (id INT PRIMARY KEY);\n\
+            CREATE TABLE sys_audit (id INT PRIMARY KEY);\n\
         ";
         let after = "\
             CREATE TABLE app_users (id INT PRIMARY KEY, email VARCHAR(255));\n\
             CREATE TABLE app_posts (id INT PRIMARY KEY, user_id INT REFERENCES app_users(id));\n\
             CREATE TABLE app_tags (id INT PRIMARY KEY);\n\
+            CREATE TABLE sys_audit (id INT PRIMARY KEY);\n\
         ";
 
-        // Filter: include only app_* tables; grouping: by prefix
-        let request = DiffRequest {
-            before: crate::request::InputSource::sql_text(before),
-            after: crate::request::InputSource::sql_text(after),
-            format: crate::request::DiffFormat::Svg,
-            filter: relune_core::FilterSpec {
+        let svg = diff_svg(
+            before,
+            after,
+            relune_core::FilterSpec {
                 include: vec!["app_*".to_string()],
                 exclude: vec![],
             },
-            grouping: relune_core::GroupingSpec {
-                strategy: relune_core::GroupingStrategy::ByPrefix,
-            },
-            ..Default::default()
-        };
-        let result = diff(request).unwrap();
-
-        let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(svg.contains("<svg"));
-        // Modified app_users → warning
-        assert!(svg.contains("diff-modified"), "modified table overlay");
-        // Added app_tags → info
-        assert!(svg.contains("diff-added"), "added table overlay");
-        // sys_logs is removed but also filtered out by app_* include
-        assert!(
-            !svg.contains("sys_logs"),
-            "sys_logs should be excluded by filter"
+            relune_core::GroupingStrategy::ByPrefix,
         );
+
+        // The removed and unchanged sys_* tables are filtered out, so no
+        // sys_ group is left behind.
+        assert_eq!(
+            svg::group_members(&svg),
+            std::collections::BTreeMap::from([(
+                "app_".to_string(),
+                names(["app_posts", "app_tags", "app_users"])
+            )])
+        );
+        assert!(has_class(&svg, "app_users", "diff-modified"));
+        assert!(has_class(&svg, "app_tags", "diff-added"));
+        assert!(!has_class(&svg, "app_posts", "diff-modified"));
     }
 
     #[test]
@@ -2117,26 +2102,35 @@ mod tests {
             CREATE TABLE app_items (id INT PRIMARY KEY, order_id INT REFERENCES app_orders(id));\n\
         ";
 
-        // FK from orders→users removed; all tables visible with grouping
-        let request = DiffRequest {
-            before: crate::request::InputSource::sql_text(before),
-            after: crate::request::InputSource::sql_text(after),
-            format: crate::request::DiffFormat::Svg,
-            grouping: relune_core::GroupingSpec {
-                strategy: relune_core::GroupingStrategy::ByPrefix,
-            },
-            ..Default::default()
-        };
-        let result = diff(request).unwrap();
+        let svg = diff_svg(
+            before,
+            after,
+            relune_core::FilterSpec::default(),
+            relune_core::GroupingStrategy::ByPrefix,
+        );
 
-        let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(svg.contains("<svg"));
-        // app_orders is modified (FK removed)
-        assert!(svg.contains("diff-modified"), "modified table overlay");
-        // All three tables should be present
-        assert!(svg.contains("app_users"));
-        assert!(svg.contains("app_orders"));
-        assert!(svg.contains("app_items"));
+        assert_eq!(
+            svg::group_members(&svg),
+            std::collections::BTreeMap::from([(
+                "app_".to_string(),
+                names(["app_items", "app_orders", "app_users"])
+            )])
+        );
+        assert!(has_class(&svg, "app_orders", "diff-modified"));
+        let edges = svg::edges(&svg)
+            .into_iter()
+            .map(|edge| {
+                let removed = edge.classes.contains("diff-removed");
+                (edge.from, edge.to, removed)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            edges,
+            std::collections::BTreeSet::from([
+                ("app_items".to_string(), "app_orders".to_string(), false),
+                ("app_orders".to_string(), "app_users".to_string(), true),
+            ])
+        );
     }
 
     // ---------------------------------------------------------------
@@ -2149,30 +2143,38 @@ mod tests {
             CREATE SCHEMA public;\n\
             CREATE TABLE public.users (id INT PRIMARY KEY);\n\
             CREATE SCHEMA audit;\n\
-            CREATE TABLE audit.logs (id INT PRIMARY KEY);\n\
+            CREATE TABLE audit.logs (id INT PRIMARY KEY, user_id INT REFERENCES public.users(id));\n\
         ";
         let after = "\
             CREATE SCHEMA public;\n\
             CREATE TABLE public.users (id INT PRIMARY KEY, name VARCHAR(255));\n\
             CREATE SCHEMA audit;\n\
-            CREATE TABLE audit.logs (id INT PRIMARY KEY, action VARCHAR(50));\n\
+            CREATE TABLE audit.logs (id INT PRIMARY KEY, user_id INT REFERENCES public.users(id), action VARCHAR(50));\n\
             CREATE TABLE audit.events (id INT PRIMARY KEY);\n\
         ";
 
-        let request = DiffRequest {
-            before: crate::request::InputSource::sql_text(before),
-            after: crate::request::InputSource::sql_text(after),
-            format: crate::request::DiffFormat::Svg,
-            ..Default::default()
-        };
-        let result = diff(request).unwrap();
+        let svg = diff_svg(
+            before,
+            after,
+            relune_core::FilterSpec::default(),
+            relune_core::GroupingStrategy::None,
+        );
 
-        let svg = result.rendered.as_deref().expect("SVG output expected");
-        assert!(svg.contains("<svg"));
-        // Both modified tables → modified markings
-        assert!(svg.contains("diff-modified"), "modified tables overlay");
-        // Added events → added marking
-        assert!(svg.contains("diff-added"), "added table overlay");
+        assert_eq!(
+            svg::table_ids(&svg),
+            names(["audit.events", "audit.logs", "public.users"])
+        );
+        assert!(has_class(&svg, "public.users", "diff-modified"));
+        assert!(has_class(&svg, "audit.logs", "diff-modified"));
+        assert!(has_class(&svg, "audit.events", "diff-added"));
+        let edges = svg::edges(&svg)
+            .into_iter()
+            .map(|edge| (edge.from, edge.to))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            edges,
+            vec![("audit.logs".to_string(), "public.users".to_string())]
+        );
     }
 
     #[test]

@@ -4,9 +4,12 @@
 //! and filter/grouping specifications does not silently drop changes from
 //! the rendered output.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use relune_app::{
     DiffFormat, DiffRequest, FilterSpec, GroupingSpec, GroupingStrategy, InputSource, diff,
 };
+use relune_testkit::svg;
 
 /// Helper: run a diff request and return (`diff_result`, `svg_content`).
 fn diff_svg(
@@ -123,10 +126,28 @@ fn regression_modified_table_removed_columns_with_grouping() {
     let (result, svg) = diff_svg(before, after, FilterSpec::default(), grouping);
 
     assert_eq!(result.diff.modified_tables.len(), 2);
-    assert!(svg.contains("diff-modified"), "modified tables overlay");
-    // Both tables must appear
-    assert!(svg.contains("app_users"));
-    assert!(svg.contains("app_posts"));
+    assert_eq!(
+        svg::group_members(&svg),
+        BTreeMap::from([(
+            "app_".to_string(),
+            BTreeSet::from(["app_posts".to_string(), "app_users".to_string()])
+        )])
+    );
+    for table in ["app_users", "app_posts"] {
+        assert!(
+            svg::table_classes(&svg, table)
+                .expect("table should render")
+                .contains("diff-modified"),
+            "{table} should carry the modified overlay"
+        );
+    }
+    let column = |table, column| {
+        svg::column_classes(&svg, table, column)
+            .unwrap_or_else(|| panic!("{table}.{column} should render"))
+    };
+    assert!(column("app_users", "legacy_field").contains("diff-removed"));
+    assert!(!column("app_users", "name").contains("diff-removed"));
+    assert!(column("app_posts", "body").contains("diff-added"));
 }
 
 // ---------------------------------------------------------------------------
@@ -238,9 +259,19 @@ fn regression_filter_grouping_multi_schema_combined() {
     assert!(result.diff.modified_tables.len() >= 2);
     assert_eq!(result.diff.added_tables.len(), 1);
 
-    // Only public schema tables should render
-    assert!(svg.contains("users"));
-    assert!(svg.contains("posts"));
+    // Only public schema tables render, grouped under their schema.
+    assert_eq!(
+        svg::group_members(&svg),
+        BTreeMap::from([(
+            "public".to_string(),
+            BTreeSet::from(["public.posts".to_string(), "public.users".to_string()])
+        )])
+    );
+    assert!(
+        svg::table_classes(&svg, "public.users")
+            .expect("public.users should render")
+            .contains("diff-modified")
+    );
     assert!(
         !svg.contains("analytics"),
         "analytics schema should be filtered out"
@@ -290,9 +321,34 @@ fn regression_fk_replacement_on_modified_table() {
         "should have both removed and added FK diffs"
     );
 
-    assert!(svg.contains("diff-modified"), "modified table overlay");
-    // All three tables visible
-    assert!(svg.contains("users"));
-    assert!(svg.contains("categories"));
-    assert!(svg.contains("posts"));
+    assert!(
+        svg::table_classes(&svg, "posts")
+            .expect("posts should render")
+            .contains("diff-modified")
+    );
+    // The old FK stays visible as removed next to the new one.
+    let edges = svg::edges(&svg)
+        .into_iter()
+        .map(|edge| {
+            let state = ["diff-added", "diff-removed"]
+                .into_iter()
+                .find(|class| edge.classes.contains(*class));
+            (edge.from, edge.to, state)
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        edges,
+        BTreeSet::from([
+            (
+                "posts".to_string(),
+                "categories".to_string(),
+                Some("diff-added")
+            ),
+            (
+                "posts".to_string(),
+                "users".to_string(),
+                Some("diff-removed")
+            ),
+        ])
+    );
 }

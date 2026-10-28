@@ -1727,28 +1727,33 @@ mod tests {
 
     #[test]
     fn test_lint_result_filtering() {
+        // Rule and severity vary independently so that filtering by the wrong
+        // field, or returning a prefix, selects a different set of issues.
         let mut result = LintResult::new();
-        result.add_issue(LintIssue::new(
-            LintRuleId::NoPrimaryKey,
-            Severity::Warning,
-            "warning1",
-        ));
-        result.add_issue(LintIssue::new(
-            LintRuleId::NoPrimaryKey,
-            Severity::Warning,
-            "warning2",
-        ));
-        result.add_issue(LintIssue::new(
-            LintRuleId::OrphanTable,
-            Severity::Info,
-            "info1",
-        ));
+        for (rule_id, severity, message) in [
+            (LintRuleId::OrphanTable, Severity::Info, "orphan info"),
+            (LintRuleId::NoPrimaryKey, Severity::Warning, "no-pk warning"),
+            (LintRuleId::OrphanTable, Severity::Warning, "orphan warning"),
+            (LintRuleId::NoPrimaryKey, Severity::Error, "no-pk error"),
+        ] {
+            result.add_issue(LintIssue::new(rule_id, severity, message));
+        }
+        let messages = |issues: Vec<&LintIssue>| {
+            issues
+                .iter()
+                .map(|issue| issue.message.clone())
+                .collect::<Vec<_>>()
+        };
 
-        let warnings = result.issues_by_severity(Severity::Warning);
-        assert_eq!(warnings.len(), 2);
-
-        let no_pk_issues = result.issues_by_rule(LintRuleId::NoPrimaryKey);
-        assert_eq!(no_pk_issues.len(), 2);
+        assert_eq!(
+            messages(result.issues_by_severity(Severity::Warning)),
+            ["no-pk warning", "orphan warning"]
+        );
+        assert_eq!(
+            messages(result.issues_by_rule(LintRuleId::NoPrimaryKey)),
+            ["no-pk warning", "no-pk error"]
+        );
+        assert!(result.issues_by_severity(Severity::Hint).is_empty());
     }
 
     #[test]

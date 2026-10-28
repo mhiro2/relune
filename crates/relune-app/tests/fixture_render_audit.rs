@@ -1,6 +1,6 @@
 //! Fixture-level routing audit snapshots for channel design work.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use relune_app::{
     ExportFormat, ExportRequest, InputSource, LayoutDirection, LayoutSpec, OutputFormat,
@@ -256,6 +256,83 @@ fn parallel_group_examples(graph: &relune_layout::LayoutGraph) -> Vec<(String, u
     groups
 }
 
+/// Checks that the SVG and the HTML viewer metadata describe exactly the
+/// nodes and edges of the exported layout.
+fn assert_surfaces_match_layout(
+    fixture_name: &str,
+    layout: &PositionedGraph,
+    svg: &str,
+    html: &str,
+) {
+    let layout_nodes = layout
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut layout_edges = layout
+        .edges
+        .iter()
+        .map(|edge| (edge.from.clone(), edge.to.clone()))
+        .collect::<Vec<_>>();
+    layout_edges.sort();
+
+    assert_eq!(
+        relune_testkit::svg::node_ids(svg),
+        layout_nodes,
+        "{fixture_name}: SVG nodes differ from the layout"
+    );
+    let mut svg_edges = relune_testkit::svg::edges(svg)
+        .into_iter()
+        .map(|edge| (edge.from, edge.to))
+        .collect::<Vec<_>>();
+    svg_edges.sort();
+    assert_eq!(
+        svg_edges, layout_edges,
+        "{fixture_name}: SVG edges differ from the layout"
+    );
+
+    assert!(
+        html.contains(r#"id="viewport""#),
+        "{fixture_name}: html output is missing the viewport"
+    );
+    let metadata = html_metadata(html)
+        .unwrap_or_else(|| panic!("{fixture_name}: html output is missing embedded metadata"));
+    let metadata_nodes = metadata["tables"]
+        .as_array()
+        .expect("metadata tables")
+        .iter()
+        .map(|table| table["id"].as_str().expect("table id").to_string())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        metadata_nodes, layout_nodes,
+        "{fixture_name}: HTML metadata nodes differ from the layout"
+    );
+    let mut metadata_edges = metadata["edges"]
+        .as_array()
+        .expect("metadata edges")
+        .iter()
+        .map(|edge| {
+            (
+                edge["from"].as_str().expect("edge from").to_string(),
+                edge["to"].as_str().expect("edge to").to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    metadata_edges.sort();
+    assert_eq!(
+        metadata_edges, layout_edges,
+        "{fixture_name}: HTML metadata edges differ from the layout"
+    );
+}
+
+/// Parses the JSON payload of the viewer's `relune-metadata` script tag.
+fn html_metadata(html: &str) -> Option<serde_json::Value> {
+    let tag_start = html.find(r#"id="relune-metadata""#)?;
+    let body_start = tag_start + html[tag_start..].find('>')? + 1;
+    let body_len = html[body_start..].find("</script>")?;
+    serde_json::from_str(&html[body_start..body_start + body_len]).ok()
+}
+
 #[allow(clippy::too_many_lines)] // Snapshot assembly keeps the audit report readable in one place.
 fn fixture_audit_snapshot(fixture_name: &str) -> serde_json::Value {
     let layout = export_layout_fixture(fixture_name);
@@ -312,23 +389,7 @@ fn fixture_audit_snapshot(fixture_name: &str) -> serde_json::Value {
     });
 
     let parallel_groups = parallel_group_examples(&graph);
-    let svg_edge_groups = svg.matches("class=\"edge").count();
-    let svg_node_groups = svg.matches("class=\"table-node").count()
-        + svg.matches("class=\"enum-node").count()
-        + svg.matches("class=\"view-node").count();
-
-    assert!(
-        svg.contains("<svg"),
-        "svg output is missing the root element"
-    );
-    assert!(
-        html.contains("<!DOCTYPE html>"),
-        "html output is missing the doctype"
-    );
-    assert!(
-        html.contains(r#"id="relune-metadata""#),
-        "html output is missing embedded metadata"
-    );
+    assert_surfaces_match_layout(fixture_name, &layout, &svg, &html);
 
     serde_json::json!({
         "fixture": fixture_name,
@@ -337,19 +398,6 @@ fn fixture_audit_snapshot(fixture_name: &str) -> serde_json::Value {
             "height": round_f32(layout.height),
             "node_count": layout.nodes.len(),
             "edge_count": layout.edges.len(),
-        },
-        "surfaces": {
-            "svg": {
-                "bytes": svg.len(),
-                "edge_groups": svg_edge_groups,
-                "node_groups": svg_node_groups,
-            },
-            "html": {
-                "bytes": html.len(),
-                "contains_embedded_svg": html.contains("<svg"),
-                "contains_metadata": html.contains("data-relune-metadata"),
-                "contains_viewport": html.contains(r#"id="viewport""#),
-            },
         },
         "patterns": {
             "same_rank_edges": {
@@ -391,35 +439,33 @@ fn round_f32(value: f32) -> f32 {
     (value * 100.0).round() / 100.0
 }
 
-#[test]
-fn fixture_render_audit_stays_in_sync_with_layout_fixture_list() {
-    assert_eq!(
-        layout_regression_fixture_names(),
-        &[
-            "simple_blog.sql",
-            "join_heavy.sql",
-            "cyclic_fk.sql",
-            "multi_schema.sql",
-            "ecommerce.sql",
-        ],
-    );
-}
+macro_rules! fixture_render_audit_tests {
+    ($($test_name:ident => $fixture_name:literal),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                let snapshot_name = format!(
+                    "fixture_render_audit__{}",
+                    $fixture_name.trim_end_matches(".sql")
+                );
+                insta::assert_json_snapshot!(snapshot_name, fixture_audit_snapshot($fixture_name));
+            }
+        )+
 
-macro_rules! fixture_render_audit_test {
-    ($test_name:ident, $fixture_name:literal) => {
-        #[test]
-        fn $test_name() {
-            let snapshot_name = format!(
-                "fixture_render_audit__{}",
-                $fixture_name.trim_end_matches(".sql")
-            );
-            insta::assert_json_snapshot!(snapshot_name, fixture_audit_snapshot($fixture_name));
-        }
+        /// Fixtures that have an audit test registered above.
+        const AUDITED_FIXTURES: &[&str] = &[$($fixture_name),+];
     };
 }
 
-fixture_render_audit_test!(fixture_render_audit_simple_blog, "simple_blog.sql");
-fixture_render_audit_test!(fixture_render_audit_join_heavy, "join_heavy.sql");
-fixture_render_audit_test!(fixture_render_audit_cyclic_fk, "cyclic_fk.sql");
-fixture_render_audit_test!(fixture_render_audit_multi_schema, "multi_schema.sql");
-fixture_render_audit_test!(fixture_render_audit_ecommerce, "ecommerce.sql");
+fixture_render_audit_tests! {
+    fixture_render_audit_simple_blog => "simple_blog.sql",
+    fixture_render_audit_join_heavy => "join_heavy.sql",
+    fixture_render_audit_cyclic_fk => "cyclic_fk.sql",
+    fixture_render_audit_multi_schema => "multi_schema.sql",
+    fixture_render_audit_ecommerce => "ecommerce.sql",
+}
+
+#[test]
+fn fixture_render_audit_covers_every_layout_fixture() {
+    assert_eq!(AUDITED_FIXTURES, layout_regression_fixture_names());
+}

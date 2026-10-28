@@ -208,8 +208,11 @@ mod tests {
 
         let request = DocRequest::from_sql(sql);
         let result = doc(request).unwrap();
+        // Markdown is the default (and only) format.
+        let explicit = doc(DocRequest::from_sql(sql).with_format(DocFormat::Markdown)).unwrap();
 
-        assert!(result.content.contains("# Schema Documentation"));
+        assert_eq!(result.content, explicit.content);
+        assert!(result.content.starts_with("# Schema Documentation"));
         assert!(result.content.contains("### users"));
         assert!(result.content.contains("| id |"));
         assert!(result.content.contains("PK"));
@@ -253,14 +256,6 @@ mod tests {
         assert!(result.content.contains("**Indexes**"));
         assert!(result.content.contains("idx_users_email"));
         assert!(result.content.contains("YES"));
-    }
-
-    #[test]
-    fn test_doc_markdown_format() {
-        let sql = "CREATE TABLE test (id INT PRIMARY KEY);";
-        let request = DocRequest::from_sql(sql).with_format(DocFormat::Markdown);
-        let result = doc(request).unwrap();
-        assert!(result.content.starts_with("# Schema Documentation"));
     }
 
     #[test]

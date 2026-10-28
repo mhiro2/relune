@@ -15,7 +15,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use relune_introspect::postgres::introspect_postgres;
 //!
 //! #[tokio::main]
@@ -79,7 +79,9 @@ use crate::error::{IntrospectError, connect_error};
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// use relune_core::Schema;
+/// use relune_introspect::IntrospectError;
 /// use relune_introspect::postgres::introspect_postgres;
 ///
 /// async fn get_schema() -> Result<Schema, IntrospectError> {

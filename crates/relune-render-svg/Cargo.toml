@@ -17,6 +17,7 @@ thiserror.workspace = true
 [dev-dependencies]
 insta.workspace = true
 relune-parser-sql = { path = "../relune-parser-sql" }
+roxmltree.workspace = true
 serde_json.workspace = true
 
 [lints]

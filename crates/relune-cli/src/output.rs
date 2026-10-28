@@ -113,13 +113,8 @@ fn copy_temp_file_into_place(
     Ok(())
 }
 
-#[cfg(unix)]
-const CROSS_DEVICE_LINK_ERROR_CODE: i32 = 18;
-#[cfg(windows)]
-const CROSS_DEVICE_LINK_ERROR_CODE: i32 = 17;
-
 fn is_cross_device_link_error(error: &io::Error) -> bool {
-    error.raw_os_error() == Some(CROSS_DEVICE_LINK_ERROR_CODE)
+    error.kind() == io::ErrorKind::CrossesDevices
 }
 
 /// Diagnostic printer for stderr output.
@@ -446,25 +441,18 @@ mod tests {
 
     #[test]
     fn cross_device_error_detection_matches_platform_code() {
-        let error = io::Error::from_raw_os_error(CROSS_DEVICE_LINK_ERROR_CODE);
+        // EXDEV on Unix and ERROR_NOT_SAME_DEVICE on Windows, as the OS
+        // reports them when a rename crosses file systems.
+        #[cfg(unix)]
+        let raw_code = 18;
+        #[cfg(windows)]
+        let raw_code = 17;
+        let error = io::Error::from_raw_os_error(raw_code);
 
         assert!(is_cross_device_link_error(&error));
         assert!(!is_cross_device_link_error(&io::Error::other(
             "different error"
         )));
-    }
-
-    #[test]
-    fn diagnostic_helpers_detect_severity() {
-        let diagnostics = [
-            Diagnostic::info(codes::parse_skipped(), "ignored"),
-            Diagnostic::warning(LintRuleId::OrphanTable.diagnostic_code(), "warn"),
-            Diagnostic::error(codes::parse_error(), "err"),
-        ];
-
-        assert!(diagnostics.iter().any(|d| d.severity == Severity::Warning));
-        assert!(diagnostics.iter().any(|d| d.severity == Severity::Error));
-        assert_eq!(diagnostics[0].severity, Severity::Info);
     }
 
     #[test]

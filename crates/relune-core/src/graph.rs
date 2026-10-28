@@ -266,6 +266,12 @@ mod tests {
     fn collect_sql_relations_returns_ok_for_parseable_definition() {
         let references = collect_sql_relations("select id from public.users")
             .expect("definition should parse with at least one supported dialect");
-        assert!(references.iter().any(|reference| reference.name == "users"));
+        assert_eq!(
+            references,
+            HashSet::from([SqlRelation {
+                schema_name: Some("public".to_string()),
+                name: "users".to_string(),
+            }])
+        );
     }
 }

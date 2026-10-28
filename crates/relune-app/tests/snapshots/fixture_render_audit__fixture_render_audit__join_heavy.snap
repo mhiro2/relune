@@ -50,18 +50,5 @@ expression: "fixture_audit_snapshot(\"join_heavy.sql\")"
         "tasks[assignee_id] -> users[id] (16.4px)"
       ]
     }
-  },
-  "surfaces": {
-    "html": {
-      "bytes": 608145,
-      "contains_embedded_svg": true,
-      "contains_metadata": true,
-      "contains_viewport": true
-    },
-    "svg": {
-      "bytes": 202023,
-      "edge_groups": 161,
-      "node_groups": 23
-    }
   }
 }

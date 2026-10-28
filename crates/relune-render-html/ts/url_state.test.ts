@@ -123,6 +123,7 @@ function installRuntime() {
   };
   runtime.groups = {
     setVisibility: vi.fn((id: string, visible: boolean) => {
+      state.hiddenGroups = state.hiddenGroups.filter((hidden) => hidden !== id);
       if (!visible) state.hiddenGroups.push(id);
     }),
     getHiddenGroups: () => state.hiddenGroups,
@@ -134,6 +135,54 @@ function installRuntime() {
     setHidden: mocks.setHidden,
   };
   return { mocks, state };
+}
+
+/**
+ * Makes the runtime setters announce their changes the way the real search,
+ * filter, group, and selection modules do, so restoring from the hash feeds
+ * back into url_state's own write scheduling.
+ */
+function emitChangeEvents(): void {
+  const emit = (event: string): void => {
+    document.dispatchEvent(new CustomEvent(event));
+  };
+  const { search, selection, filters, groups } = getViewerRuntime();
+  if (search) {
+    const inner = { ...search };
+    search.setQuery = vi.fn((query: string) => {
+      inner.setQuery(query);
+      emit('relune:search-changed');
+    });
+  }
+  if (selection) {
+    const inner = { ...selection };
+    selection.select = vi.fn((id: string) => {
+      inner.select(id);
+      emit('relune:node-selected');
+    });
+    selection.clear = vi.fn(() => {
+      inner.clear();
+      emit('relune:node-cleared');
+    });
+  }
+  if (filters) {
+    const inner = { ...filters };
+    filters.setMode = vi.fn((mode: FilterMode) => {
+      inner.setMode(mode);
+      emit('relune:filters-changed');
+    });
+    filters.setFacetSelection = vi.fn((id: FacetId, values: string[]) => {
+      inner.setFacetSelection(id, values);
+      emit('relune:filters-changed');
+    });
+  }
+  if (groups) {
+    const inner = { ...groups };
+    groups.setVisibility = vi.fn((id: string, visible: boolean) => {
+      inner.setVisibility(id, visible);
+      emit('relune:groups-changed');
+    });
+  }
 }
 
 function markAllReady(): void {
@@ -291,6 +340,59 @@ describe('restoring state from the URL hash', () => {
     history.replaceState(null, '', '/diagram.html#t=public.users');
     window.dispatchEvent(new PopStateEvent('popstate'));
     expect(state.selected).toBe('public.users');
+  });
+
+  it('returns to the default view on popstate to a clean hash without adding history', async () => {
+    const { state } = installRuntime();
+    runtimeClear(state);
+    emitChangeEvents();
+    markAllReady();
+    vi.useFakeTimers();
+    const push = vi.spyOn(history, 'pushState');
+    history.replaceState(
+      null,
+      '',
+      '/diagram.html#q=email&t=public.posts&fs=public&fm=focus&hg=g-public&mv=1',
+    );
+    await loadUrlState();
+    vi.advanceTimersByTime(300);
+    expect(state.query).toBe('email');
+    expect(state.hiddenGroups).toEqual(['g-public']);
+
+    history.replaceState(null, '', '/diagram.html');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+
+    expect(state.query).toBe('');
+    expect(state.selected).toBeNull();
+    expect(Object.fromEntries(state.facets)).toEqual({ schema: [] });
+    expect(state.mode).toBe('dim');
+    expect(state.hiddenGroups).toEqual([]);
+    expect(state.minimapHidden).toBe(true);
+
+    // Applying the hash is not a new navigation: neither the load nor the
+    // popstate may push an entry, or Back would land on the same state.
+    vi.advanceTimersByTime(300);
+    expect(push).not.toHaveBeenCalled();
+    expect(location.hash).toBe('#s=1.0000&x=0.0&y=0.0');
+  });
+
+  it('keeps only what the new hash names on popstate', async () => {
+    const { state } = installRuntime();
+    emitChangeEvents();
+    markAllReady();
+    vi.useFakeTimers();
+    const push = vi.spyOn(history, 'pushState');
+    history.replaceState(null, '', '/diagram.html#q=email&ft=text&hg=g-public');
+    await loadUrlState();
+
+    history.replaceState(null, '', '/diagram.html#q=title');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    vi.advanceTimersByTime(300);
+
+    expect(state.query).toBe('title');
+    expect(Object.fromEntries(state.facets)).toEqual({ columnType: [] });
+    expect(state.hiddenGroups).toEqual([]);
+    expect(push).not.toHaveBeenCalled();
   });
 });
 

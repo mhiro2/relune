@@ -13,11 +13,16 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use relune_introspect::introspect_database;
+//! ```rust,no_run
+//! use relune_introspect::{IntrospectError, introspect_database};
 //!
-//! let schema = introspect_database(&database_url).await?;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), IntrospectError> {
+//! let database_url = "postgresql://user:password@localhost:5432/mydb";
+//! let schema = introspect_database(database_url).await?;
 //! println!("Found {} tables", schema.tables.len());
+//! # Ok(())
+//! # }
 //! ```
 
 mod catalog;

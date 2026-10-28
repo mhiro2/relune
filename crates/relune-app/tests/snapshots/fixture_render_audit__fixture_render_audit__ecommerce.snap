@@ -46,18 +46,5 @@ expression: "fixture_audit_snapshot(\"ecommerce.sql\")"
         "addresses[customer_id] -> customers[id] (52.0px)"
       ]
     }
-  },
-  "surfaces": {
-    "html": {
-      "bytes": 448349,
-      "contains_embedded_svg": true,
-      "contains_metadata": true,
-      "contains_viewport": true
-    },
-    "svg": {
-      "bytes": 61018,
-      "edge_groups": 29,
-      "node_groups": 7
-    }
   }
 }

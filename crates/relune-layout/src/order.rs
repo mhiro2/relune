@@ -860,19 +860,6 @@ mod tests {
     }
 
     #[test]
-    fn test_order_nodes_deterministic() {
-        let schema = make_test_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph);
-
-        let ordered1 = order_nodes_within_layers(&graph, &ranks);
-        let ordered2 = order_nodes_within_layers(&graph, &ranks);
-
-        // Ordering should be deterministic
-        assert_eq!(ordered1, ordered2);
-    }
-
-    #[test]
     fn test_order_nodes_deterministic_with_strategy() {
         let schema = make_test_schema();
         let graph = LayoutGraphBuilder::new().build(&schema);
@@ -893,57 +880,6 @@ mod tests {
                 "Strategy {strategy:?} should be deterministic",
             );
         }
-    }
-
-    #[test]
-    fn test_barycenter_ordering() {
-        let schema = make_test_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph);
-
-        let ordered = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
-            CrossingReductionStrategy::Barycenter,
-        );
-
-        // Verify all nodes are present
-        let total_nodes: usize = ordered.iter().map(Vec::len).sum();
-        assert_eq!(total_nodes, graph.nodes.len());
-    }
-
-    #[test]
-    fn test_median_ordering() {
-        let schema = make_test_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph);
-
-        let ordered = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
-            CrossingReductionStrategy::Median,
-        );
-
-        // Verify all nodes are present
-        let total_nodes: usize = ordered.iter().map(Vec::len).sum();
-        assert_eq!(total_nodes, graph.nodes.len());
-    }
-
-    #[test]
-    fn test_sifting_ordering() {
-        let schema = make_test_schema();
-        let graph = LayoutGraphBuilder::new().build(&schema);
-        let ranks = assign_ranks(&graph);
-
-        let ordered = order_nodes_within_layers_with_strategy(
-            &graph,
-            &ranks,
-            CrossingReductionStrategy::Sifting,
-        );
-
-        // Verify all nodes are present
-        let total_nodes: usize = ordered.iter().map(Vec::len).sum();
-        assert_eq!(total_nodes, graph.nodes.len());
     }
 
     #[test]
@@ -1111,11 +1047,20 @@ mod tests {
         let graph = LayoutGraphBuilder::new().build(&schema);
         let ranks = assign_ranks(&graph);
 
-        let original_nodes: Vec<std::collections::BTreeSet<usize>> = ranks
-            .nodes_by_rank
-            .iter()
-            .map(|layer| layer.iter().copied().collect())
-            .collect();
+        // Sorted layers keep duplicates, so a strategy that repeats one node
+        // in place of another cannot pass as a valid permutation.
+        let sorted_layers = |layers: &[Vec<usize>]| -> Vec<Vec<usize>> {
+            layers
+                .iter()
+                .map(|layer| {
+                    let mut layer = layer.clone();
+                    layer.sort_unstable();
+                    layer
+                })
+                .collect()
+        };
+        let original_nodes = sorted_layers(&ranks.nodes_by_rank);
+        assert!(original_nodes.iter().any(|layer| layer.len() > 1));
 
         for strategy in [
             CrossingReductionStrategy::Barycenter,
@@ -1125,23 +1070,12 @@ mod tests {
         ] {
             let ordered = order_nodes_within_layers_with_strategy(&graph, &ranks, strategy);
 
-            // Verify each layer contains exactly the same nodes
+            // Each layer is a permutation of the nodes ranked into it.
             assert_eq!(
-                ordered.len(),
-                original_nodes.len(),
-                "Strategy {strategy:?}: layer count mismatch",
+                sorted_layers(&ordered),
+                original_nodes,
+                "Strategy {strategy:?}: layers are not permutations of the ranked nodes",
             );
-
-            for (rank_idx, (ordered_layer, original_layer)) in
-                ordered.iter().zip(original_nodes.iter()).enumerate()
-            {
-                let ordered_set: std::collections::BTreeSet<usize> =
-                    ordered_layer.iter().copied().collect();
-                assert_eq!(
-                    &ordered_set, original_layer,
-                    "Strategy {strategy:?}: nodes in rank {rank_idx} don't match original",
-                );
-            }
         }
     }
 }

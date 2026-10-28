@@ -11,7 +11,7 @@ use crate::common::{
     RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
     RawTable, RawView, parse_referential_action,
 };
-use crate::connect::pool_max_connections_with_default;
+use crate::connect::{pool_max_connections_env, resolve_pool_max_connections};
 use crate::error::IntrospectError;
 
 /// `PostgreSQL` catalog reader.
@@ -384,7 +384,11 @@ fn require_fk_columns(
 /// environments can override the cap with `RELUNE_DB_POOL_MAX_CONNECTIONS`.
 #[must_use]
 pub(crate) fn pool_max_connections() -> u32 {
-    pool_max_connections_with_default(PARALLEL_CATALOG_QUERIES)
+    pool_max_connections_from(pool_max_connections_env().as_deref())
+}
+
+fn pool_max_connections_from(override_value: Option<&str>) -> u32 {
+    resolve_pool_max_connections(PARALLEL_CATALOG_QUERIES, override_value)
 }
 
 /// Fetches all catalog metadata from a `PostgreSQL` database.
@@ -561,112 +565,16 @@ struct RawEnumRow {
 
 #[cfg(test)]
 mod tests {
-    use relune_core::ReferentialAction;
-
     use super::*;
 
     #[test]
-    fn test_raw_table_fields() {
-        let table = RawTable {
-            table_name: "users".to_string(),
-            schema_name: "public".to_string(),
-            table_comment: Some("User accounts".to_string()),
-        };
-        assert_eq!(table.table_name, "users");
-        assert_eq!(table.schema_name, "public");
-    }
-
-    #[test]
-    fn test_raw_column_fields() {
-        let column = RawColumn::new(
-            "users".to_string(),
-            "public".to_string(),
-            "id".to_string(),
-            "integer".to_string(),
-            false,
-            true,
-            None,
-            1,
+    fn pool_max_connections_defaults_to_catalog_fan_out() {
+        assert_eq!(pool_max_connections_from(None), PARALLEL_CATALOG_QUERIES);
+        assert_eq!(
+            pool_max_connections_from(Some("0")),
+            PARALLEL_CATALOG_QUERIES
         );
-        assert_eq!(column.column_name, "id");
-        assert!(column.is_primary_key);
-        assert!(!column.is_nullable);
-    }
-
-    #[test]
-    fn test_raw_foreign_key_fields() {
-        let fk = RawForeignKey {
-            constraint_name: "fk_posts_user_id".to_string(),
-            schema_name: "public".to_string(),
-            from_table: "posts".to_string(),
-            from_columns: vec!["user_id".to_string()],
-            to_schema: Some("public".to_string()),
-            to_table: "users".to_string(),
-            to_columns: vec!["id".to_string()],
-            on_delete: ReferentialAction::Cascade,
-            on_update: ReferentialAction::NoAction,
-        };
-        assert_eq!(fk.constraint_name, "fk_posts_user_id");
-        assert_eq!(fk.from_table, "posts");
-        assert_eq!(fk.to_table, "users");
-    }
-
-    #[test]
-    fn test_raw_index_fields() {
-        let index = RawIndex {
-            index_name: "idx_users_email".to_string(),
-            schema_name: "public".to_string(),
-            table_name: "users".to_string(),
-            key_parts: vec![RawIndexKeyPart::column("email")],
-            is_unique: true,
-            is_primary: false,
-            predicate: None,
-            included_columns: Vec::new(),
-            method: Some("btree".to_string()),
-        };
-        assert_eq!(index.index_name, "idx_users_email");
-        assert!(index.is_unique);
-        assert!(!index.is_primary);
-    }
-
-    #[test]
-    fn test_raw_view_fields() {
-        let view = RawView {
-            view_name: "active_users".to_string(),
-            schema_name: "public".to_string(),
-            definition: Some("SELECT * FROM users WHERE active = true".to_string()),
-            view_comment: None,
-        };
-        assert_eq!(view.view_name, "active_users");
-    }
-
-    #[test]
-    fn test_raw_enum_fields() {
-        let enum_type = RawEnum {
-            enum_name: "status".to_string(),
-            schema_name: "public".to_string(),
-            values: vec!["active".to_string(), "inactive".to_string()],
-        };
-        assert_eq!(enum_type.enum_name, "status");
-        assert_eq!(enum_type.values.len(), 2);
-    }
-
-    #[test]
-    fn test_raw_schema_default() {
-        let schema = RawSchema::default();
-        assert!(schema.tables.is_empty());
-        assert!(schema.columns.is_empty());
-        assert!(schema.foreign_keys.is_empty());
-        assert!(schema.indexes.is_empty());
-        assert!(schema.views.is_empty());
-        assert!(schema.enums.is_empty());
-    }
-
-    #[test]
-    fn pool_max_connections_is_positive() {
-        // Whichever value wins (default or env override), it must remain
-        // positive so the pool can be constructed.
-        assert!(pool_max_connections() > 0);
+        assert_eq!(pool_max_connections_from(Some("3")), 3);
     }
 
     #[test]
@@ -690,15 +598,5 @@ mod tests {
             assert!(err.to_string().contains("fk_posts_user"));
             assert!(err.to_string().contains("referenced"));
         }
-    }
-
-    #[test]
-    fn fetch_columns_query_includes_views() {
-        assert!(FETCH_COLUMNS_QUERY.contains("t.relkind IN ('r', 'v', 'm')"));
-    }
-
-    #[test]
-    fn fetch_views_query_includes_materialized_views() {
-        assert!(FETCH_VIEWS_QUERY.contains("c.relkind IN ('v', 'm')"));
     }
 }

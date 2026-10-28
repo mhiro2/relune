@@ -452,13 +452,27 @@ mod tests {
     }
 
     #[test]
-    fn sql_file_input_is_read_through_the_bounded_reader() {
+    fn file_inputs_are_read_through_the_bounded_reader() {
         let temp = tempfile::NamedTempFile::new().expect("create temp file");
         std::fs::write(temp.path(), "CREATE TABLE t (id INT PRIMARY KEY);").expect("write SQL");
 
         let input = InputSource::sql_file(temp.path());
         let (schema, _diagnostics) = schema_from_input(&input).expect("schema");
         assert_eq!(schema.tables.len(), 1);
+
+        let oversized = tempfile::NamedTempFile::new().expect("create temp file");
+        oversized
+            .as_file()
+            .set_len(MAX_INPUT_FILE_SIZE_BYTES + 1)
+            .expect("sparse temp file");
+        for input in [
+            InputSource::sql_file(oversized.path()),
+            InputSource::schema_json_file(oversized.path()),
+        ] {
+            let err = schema_from_input(&input).expect_err("oversized file should be rejected");
+            assert!(matches!(err, AppError::Input { .. }), "{input:?}: {err}");
+            assert!(err.to_string().contains("too large"), "{input:?}: {err}");
+        }
     }
 
     #[test]

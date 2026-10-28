@@ -461,46 +461,143 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_version() {
-        let v = version();
-        assert!(!v.is_empty());
+    fn version_matches_workspace_package_version() {
+        let manifest = include_str!("../../../Cargo.toml");
+        let expected = manifest
+            .lines()
+            .skip_while(|line| line.trim() != "[workspace.package]")
+            .find_map(|line| line.trim().strip_prefix("version = "))
+            .map(|value| value.trim_matches('"'))
+            .expect("workspace manifest should declare a package version");
+        assert_eq!(version(), expected);
     }
 }
 
 #[cfg(all(test, target_arch = "wasm32"))]
 mod wasm_bindgen_tests {
-    use crate::request::{WasmDiffRequest, WasmLintRequest, WasmReviewRequest};
-    use relune_app::{DiffFormat, LintFormat, ReviewFormat};
+    use crate::request::{WasmDiffRequest, WasmReviewRequest};
+    use relune_app::{DiffFormat, ReviewFormat};
     use relune_core::ReviewSeverity;
+    use serde::Serialize;
+    use wasm_bindgen::JsValue;
     use wasm_bindgen_test::*;
 
-    use super::{diff_from_sql, lint_from_sql, review_from_schema_json, review_from_sql, version};
+    use super::{
+        diff_from_sql, export_from_sql, inspect_from_sql, lint_from_sql, render_from_sql,
+        review_from_schema_json, review_from_sql,
+    };
+
+    /// Builds a plain JS object the way browser callers pass requests.
+    fn js_request(value: &serde_json::Value) -> JsValue {
+        value
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .expect("serialize request as a plain JS object")
+    }
 
     #[wasm_bindgen_test]
-    fn wasm_version_is_non_empty() {
-        assert!(!version().is_empty());
+    fn wasm_render_from_sql_applies_filter_and_format() {
+        let input = js_request(&serde_json::json!({
+            "sql": "CREATE TABLE users (id INT PRIMARY KEY);
+                    CREATE TABLE audit_log (id INT PRIMARY KEY);",
+            "format": "graph-json",
+            "excludeTables": ["audit_*"],
+        }));
+
+        let result = render_from_sql(input).expect("render request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize render result");
+
+        // A non-default format: the content is graph JSON, not SVG markup.
+        let content = value["content"].as_str().expect("content string");
+        let graph: serde_json::Value =
+            serde_json::from_str(content).expect("graph-json content should be JSON");
+        let node_ids: Vec<&str> = graph["nodes"]
+            .as_array()
+            .expect("nodes array")
+            .iter()
+            .filter_map(|node| node["id"].as_str())
+            .collect();
+        assert_eq!(node_ids, vec!["users"]);
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_inspect_from_sql_returns_requested_table() {
+        let input = js_request(&serde_json::json!({
+            "sql": "CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);
+                    CREATE TABLE notes (body TEXT);",
+            "table": "users",
+        }));
+
+        let result = inspect_from_sql(input).expect("inspect request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize inspect result");
+
+        assert_eq!(value["summary"]["table_count"], 2);
+        assert_eq!(value["summary"]["tables_without_pk"], 1);
+        assert_eq!(value["table"]["name"], "users");
+        let columns: Vec<&str> = value["table"]["columns"]
+            .as_array()
+            .expect("columns array")
+            .iter()
+            .filter_map(|column| column["name"].as_str())
+            .collect();
+        assert_eq!(columns, vec!["id", "email"]);
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_export_from_sql_emits_requested_format() {
+        let input = js_request(&serde_json::json!({
+            "sql": "CREATE TABLE users (id INT PRIMARY KEY);
+                    CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id));",
+            "format": "mermaid",
+        }));
+
+        let result = export_from_sql(input).expect("export request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize export result");
+
+        let content = value["content"].as_str().expect("content string");
+        assert!(
+            content.starts_with("erDiagram"),
+            "expected Mermaid, got: {content}"
+        );
+        assert!(content.contains("users"));
+        assert!(content.contains("posts"));
     }
 
     #[wasm_bindgen_test]
     fn wasm_lint_from_sql() {
-        let input = serde_wasm_bindgen::to_value(&WasmLintRequest {
-            sql: Some("CREATE TABLE users (name TEXT);".to_string()),
-            schema_json: None,
-            profile: None,
-            format: Some(LintFormat::Json),
-            rules: vec![],
-            exclude_rules: vec![],
-            categories: vec![],
-            except_tables: vec![],
-            fail_on: None,
-        })
-        .expect("serialize lint request");
+        let input = js_request(&serde_json::json!({
+            "sql": "CREATE TABLE users (name TEXT);",
+            "format": "json",
+        }));
 
         let result = lint_from_sql(input).expect("lint request should succeed");
         let value: serde_json::Value =
             serde_wasm_bindgen::from_value(result).expect("deserialize lint result");
 
-        assert_eq!(value["stats"]["total"], 4);
+        let issues = value["issues"].as_array().expect("issues array");
+        let issue_of = |rule_id: &str| {
+            issues
+                .iter()
+                .find(|issue| issue["rule_id"] == rule_id)
+                .unwrap_or_else(|| panic!("missing {rule_id} issue: {issues:?}"))
+        };
+        let no_pk = issue_of("no-primary-key");
+        assert_eq!(no_pk["severity"], "warning");
+        assert_eq!(no_pk["table_name"], "users");
+        let orphan = issue_of("orphan-table");
+        assert_eq!(orphan["severity"], "info");
+        assert_eq!(orphan["table_name"], "users");
+
+        // Summary counts must agree with the issues actually returned.
+        let count = |severity: &str| issues.iter().filter(|i| i["severity"] == severity).count();
+        let stats = &value["stats"];
+        assert_eq!(stats["total"], issues.len());
+        assert_eq!(stats["errors"], count("error"));
+        assert_eq!(stats["warnings"], count("warning"));
+        assert_eq!(stats["infos"], count("info"));
+        assert_eq!(stats["hints"], count("hint"));
     }
 
     #[wasm_bindgen_test]
@@ -898,20 +995,16 @@ mod wasm_bindgen_tests {
         let err = WasmError::new("no code");
         let js_val: wasm_bindgen::JsValue = err.into();
 
-        let obj: serde_json::Value =
-            serde_wasm_bindgen::from_value(js_val).expect("should deserialize back");
-        assert_eq!(obj["message"], "no code");
-        assert!(obj.get("code").is_none() || obj["code"].is_null());
-    }
-
-    /// Verify the fallback path of `From<WasmError> for JsValue`:
-    /// when `serde_wasm_bindgen::to_value` fails, the implementation falls back
-    /// to `JsValue::from_str(&err.message)`, producing a plain string.
-    #[wasm_bindgen_test]
-    fn wasm_error_string_fallback_carries_message() {
-        let message = "serialization failed";
-        let fallback = wasm_bindgen::JsValue::from_str(message);
-        assert!(fallback.is_string(), "fallback should produce a JS string");
-        assert_eq!(fallback.as_string().unwrap(), message);
+        // Check the JS object itself: `code: null` or `code: undefined`
+        // would still be an own property.
+        assert!(js_sys::Reflect::has(&js_val, &JsValue::from_str("message")).unwrap());
+        assert!(!js_sys::Reflect::has(&js_val, &JsValue::from_str("code")).unwrap());
+        assert_eq!(
+            js_sys::Reflect::get(&js_val, &JsValue::from_str("message"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("no code")
+        );
     }
 }

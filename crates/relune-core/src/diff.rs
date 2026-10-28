@@ -2159,40 +2159,129 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_diff_serialization() {
-        let diff = SchemaDiff {
-            added_tables: vec!["new_table".to_string()],
-            removed_tables: vec![],
-            modified_tables: vec![],
-            added_views: vec![],
-            removed_views: vec![],
-            modified_views: vec![],
-            added_enums: vec![],
-            removed_enums: vec![],
-            modified_enums: vec![],
-            summary: DiffSummary {
-                tables_added: 1,
-                tables_removed: 0,
-                tables_modified: 0,
-                columns_changed: 0,
-                foreign_keys_changed: 0,
-                indexes_changed: 0,
-                check_constraints_changed: 0,
-                views_added: 0,
-                views_removed: 0,
-                views_modified: 0,
-                view_columns_changed: 0,
-                view_definitions_changed: 0,
-                enums_added: 0,
-                enums_removed: 0,
-                enums_modified: 0,
-                enum_values_changed: 0,
-            },
+    #[allow(clippy::too_many_lines)] // The literal JSON spells out the full wire format.
+    fn test_schema_diff_json_wire_format() {
+        let mut users_before = create_test_table(
+            "users",
+            vec![
+                ("id", "bigint", false, true),
+                ("email", "text", false, false),
+                ("org_id", "bigint", true, false),
+            ],
+            vec![],
+        );
+        users_before.columns[1].comment = Some("login".to_string());
+        let orgs = create_test_table("orgs", vec![("id", "bigint", false, true)], vec![]);
+        let legacy = create_test_table("legacy", vec![("id", "bigint", false, true)], vec![]);
+        let status = |values: &[&str]| Enum {
+            id: "status".to_string(),
+            schema_name: None,
+            name: "status".to_string(),
+            values: values.iter().map(ToString::to_string).collect(),
+        };
+        let before = Schema {
+            tables: vec![orgs.clone(), users_before, legacy],
+            views: vec![View {
+                id: "active_users".to_string(),
+                schema_name: None,
+                name: "active_users".to_string(),
+                columns: vec![],
+                definition: Some("SELECT id FROM users".to_string()),
+            }],
+            enums: vec![status(&["active", "inactive"])],
         };
 
-        let json = serde_json::to_string(&diff).unwrap();
-        let parsed: SchemaDiff = serde_json::from_str(&json).unwrap();
-        assert_eq!(diff, parsed);
+        let mut users_after = create_test_table(
+            "users",
+            vec![
+                ("id", "bigint", false, true),
+                ("email", "varchar(255)", false, false),
+                ("org_id", "bigint", true, false),
+            ],
+            vec![("users_org_fkey", vec!["org_id"], "orgs", vec!["id"])],
+        );
+        users_after.columns[1].comment = Some("login".to_string());
+        let audit = create_test_table("audit_log", vec![("id", "bigint", false, true)], vec![]);
+        let after = Schema {
+            tables: vec![orgs, users_after, audit],
+            views: vec![],
+            enums: vec![status(&["active", "inactive", "archived"])],
+        };
+
+        let diff = diff_schemas(&before, &after);
+        let expected = serde_json::json!({
+            "added_tables": ["audit_log"],
+            "removed_tables": ["legacy"],
+            "modified_tables": [{
+                "stable_id": "users",
+                "table_name": "users",
+                "change_kind": "modified",
+                "column_diffs": [{
+                    "column_name": "email",
+                    "change_kind": "modified",
+                    "old_value": {
+                        "name": "email",
+                        "data_type": "text",
+                        "nullable": false,
+                        "primary_key": false,
+                        "comment": "login"
+                    },
+                    "new_value": {
+                        "name": "email",
+                        "data_type": "varchar(255)",
+                        "nullable": false,
+                        "primary_key": false,
+                        "comment": "login"
+                    }
+                }],
+                "fk_diffs": [{
+                    "name": "users_org_fkey",
+                    "change_kind": "added",
+                    "old_value": null,
+                    "new_value": {
+                        "name": "users_org_fkey",
+                        "from_columns": ["org_id"],
+                        "to_table": "orgs",
+                        "to_columns": ["id"]
+                    }
+                }]
+            }],
+            "added_views": [],
+            "removed_views": ["active_users"],
+            "modified_views": [],
+            "added_enums": [],
+            "removed_enums": [],
+            "modified_enums": [{
+                "enum_name": "status",
+                "change_kind": "modified",
+                "value_diffs": [{
+                    "value": "archived",
+                    "change_kind": "added",
+                    "new_position": 2
+                }]
+            }],
+            "summary": {
+                "tables_added": 1,
+                "tables_removed": 1,
+                "tables_modified": 1,
+                "columns_changed": 1,
+                "foreign_keys_changed": 1,
+                "indexes_changed": 0,
+                "check_constraints_changed": 0,
+                "views_added": 0,
+                "views_removed": 1,
+                "views_modified": 0,
+                "view_columns_changed": 0,
+                "view_definitions_changed": 0,
+                "enums_added": 0,
+                "enums_removed": 0,
+                "enums_modified": 1,
+                "enum_values_changed": 1
+            }
+        });
+        assert_eq!(serde_json::to_value(&diff).unwrap(), expected);
+        let parsed: SchemaDiff = serde_json::from_value(expected).unwrap();
+        assert_eq!(parsed, diff);
     }
 
     #[test]

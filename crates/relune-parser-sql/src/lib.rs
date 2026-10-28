@@ -51,19 +51,9 @@ use view::parse_create_view;
 /// Error type for parse failures.
 #[derive(Debug, Error)]
 pub enum ParseError {
-    /// SQL parsing error message.
-    #[error("SQL parse error: {0}")]
-    Sql(String),
-
     /// Fatal error during schema construction.
     #[error("Schema error: {0}")]
     Schema(String),
-}
-
-impl From<sqlparser::parser::ParserError> for ParseError {
-    fn from(error: sqlparser::parser::ParserError) -> Self {
-        Self::Sql(error.to_string())
-    }
 }
 
 /// Output from parsing SQL with diagnostics support.

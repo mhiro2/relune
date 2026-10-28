@@ -779,21 +779,58 @@ mod tests {
     }
 
     #[test]
-    fn metadata_matches_rule_accessors() {
-        for rule in ReviewRuleId::all_rules() {
-            let metadata = rule.metadata();
-            assert_eq!(metadata.rule_id, *rule);
-            assert_eq!(metadata.default_severity, rule.default_severity());
-            assert_eq!(metadata.description, rule.description());
-        }
-    }
+    fn all_metadata_lists_every_rule_with_its_default_severity() {
+        let json = serde_json::to_value(ReviewRuleId::all_metadata()).unwrap();
+        let entries = json
+            .as_array()
+            .expect("metadata should serialize as an array");
 
-    #[test]
-    fn all_metadata_covers_every_rule() {
-        let metadata = ReviewRuleId::all_metadata();
-        assert_eq!(metadata.len(), ReviewRuleId::all_rules().len());
-        for (entry, rule) in metadata.iter().zip(ReviewRuleId::all_rules().iter()) {
-            assert_eq!(entry.rule_id, *rule);
+        let listed: Vec<(&str, &str)> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry["rule_id"].as_str().expect("rule_id string"),
+                    entry["default_severity"]
+                        .as_str()
+                        .expect("default_severity string"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("risk/drop-column", "breaking"),
+                ("risk/drop-table", "breaking"),
+                ("risk/drop-enum-value", "breaking"),
+                ("risk/drop-column-referenced", "breaking"),
+                ("risk/drop-table-referenced", "breaking"),
+                ("risk/add-not-null-on-existing", "warning"),
+                ("risk/type-narrow", "breaking"),
+                ("risk/drop-pk-or-unique", "warning"),
+                ("risk/add-unique-on-existing", "warning"),
+                ("risk/add-check-on-existing", "warning"),
+                ("risk/add-cascade-delete", "warning"),
+                ("risk/fk-without-index", "info"),
+                ("risk/add-index-on-large-table", "caution"),
+                ("risk/add-fk-on-existing", "caution"),
+                ("risk/alter-column-type", "caution"),
+                ("risk/rewrite-table", "caution"),
+            ]
+        );
+
+        let mut descriptions = HashSet::new();
+        for entry in entries {
+            let description = entry["description"].as_str().expect("description string");
+            assert!(
+                !description.trim().is_empty(),
+                "{} has an empty description",
+                entry["rule_id"]
+            );
+            assert!(
+                descriptions.insert(description),
+                "{} reuses another rule's description",
+                entry["rule_id"]
+            );
         }
     }
 

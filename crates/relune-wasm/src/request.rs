@@ -595,30 +595,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wasm_render_request_sql() {
-        let req = WasmRenderRequest {
-            sql: Some("CREATE TABLE test (id INT);".to_string()),
-            schema_json: None,
-            format: Some(OutputFormat::Svg),
-            focus_table: None,
-            depth: None,
-            include_tables: vec![],
-            exclude_tables: vec![],
-            group_by: None,
-            layout_direction: None,
-            layout_algorithm: None,
-            edge_style: None,
-            density: None,
-            horizontal_spacing: None,
-            vertical_spacing: None,
-            force_iterations: None,
-            theme: None,
-            show_legend: None,
-            show_stats: None,
-        };
+    fn test_wasm_render_request_maps_camel_case_js_fields() {
+        let req: WasmRenderRequest = serde_json::from_str(
+            r#"{
+                "sql": "CREATE TABLE test (id INT);",
+                "format": "html",
+                "includeTables": ["test*"],
+                "excludeTables": ["test_log"],
+                "groupBy": "prefix",
+                "layoutDirection": "left-to-right",
+                "horizontalSpacing": 120.0,
+                "verticalSpacing": 90.0
+            }"#,
+        )
+        .unwrap();
 
         let render_req = req.to_render_request().unwrap();
-        assert_eq!(render_req.output_format, OutputFormat::Svg);
+        match &render_req.input {
+            relune_app::InputSource::SqlText { sql, dialect } => {
+                assert_eq!(sql, "CREATE TABLE test (id INT);");
+                assert_eq!(*dialect, SqlDialect::Auto);
+            }
+            other => panic!("expected SqlText input, got {other:?}"),
+        }
+        assert_eq!(render_req.output_format, OutputFormat::Html);
+        assert_eq!(render_req.filter.include, vec!["test*"]);
+        assert_eq!(render_req.filter.exclude, vec!["test_log"]);
+        assert_eq!(render_req.grouping.strategy, GroupingStrategy::ByPrefix);
+        assert_eq!(render_req.layout.direction, LayoutDirection::LeftToRight);
+        assert!((render_req.layout.horizontal_spacing - 120.0).abs() < f32::EPSILON);
+        assert!((render_req.layout.vertical_spacing - 90.0).abs() < f32::EPSILON);
+        assert!(render_req.focus.is_none());
     }
 
     #[test]
@@ -941,45 +948,62 @@ mod tests {
     }
 
     #[test]
-    fn test_wasm_review_request_severity_override() {
+    fn test_wasm_review_request_maps_js_fields_and_severity_overrides() {
         use relune_core::ReviewRuleId;
 
-        let req = WasmReviewRequest {
-            before_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
-            before_schema_json: None,
-            after_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
-            after_schema_json: None,
-            format: None,
-            rules: vec![],
-            except_rules: vec![],
-            except_tables: vec![],
-            deny: None,
-            severity_overrides: vec![ReviewSeverityOverride {
-                rule_id: ReviewRuleId::AddNotNullOnExisting,
-                severity: ReviewSeverity::Info,
-            }],
-            dialect: None,
-            allow_invalid_schema: false,
-        };
+        // The JS shape documented on `review_from_sql`: camelCase request
+        // fields with `{ rule_id, severity }` override entries.
+        let req: WasmReviewRequest = serde_json::from_str(
+            r#"{
+                "beforeSql": "CREATE TABLE users (id INT PRIMARY KEY);",
+                "afterSql": "CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);",
+                "rules": ["add-not-null-on-existing"],
+                "exceptRules": ["risk/fk-without-index"],
+                "exceptTables": ["audit_*"],
+                "deny": "caution",
+                "severityOverrides": [
+                    { "rule_id": "risk/add-not-null-on-existing", "severity": "info" },
+                    { "rule_id": "risk/drop-table", "severity": "warning" }
+                ],
+                "allowInvalidSchema": true
+            }"#,
+        )
+        .expect("JS review request should deserialize");
 
-        // Round-trip the request through serde to make sure JS callers can
-        // serialize it with the same shape we round-trip via wasm-bindgen.
-        let json = serde_json::to_value(&req).expect("serialize");
-        let restored: WasmReviewRequest = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(restored.severity_overrides.len(), 1);
-        assert_eq!(
-            restored.severity_overrides[0].rule_id,
-            ReviewRuleId::AddNotNullOnExisting
-        );
-        assert_eq!(
-            restored.severity_overrides[0].severity,
-            ReviewSeverity::Info
-        );
-
-        // Default format should fall back to JSON when omitted.
-        let review_req = restored.to_review_request().unwrap();
+        let review_req = req.to_review_request().unwrap();
+        match (&review_req.before, &review_req.after) {
+            (
+                relune_app::InputSource::SqlText { sql: before, .. },
+                relune_app::InputSource::SqlText { sql: after, .. },
+            ) => {
+                assert_eq!(before, "CREATE TABLE users (id INT PRIMARY KEY);");
+                assert_eq!(
+                    after,
+                    "CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);"
+                );
+            }
+            other => panic!("expected SqlText inputs, got {other:?}"),
+        }
+        // Omitted format falls back to JSON.
         assert_eq!(review_req.format, ReviewFormat::Json);
-        assert_eq!(review_req.severity_overrides.len(), 1);
+        assert_eq!(review_req.rules, vec!["add-not-null-on-existing"]);
+        assert_eq!(review_req.except_rules, vec!["risk/fk-without-index"]);
+        assert_eq!(review_req.except_tables, vec!["audit_*"]);
+        assert_eq!(review_req.deny, Some(ReviewSeverity::Caution));
+        assert_eq!(
+            review_req.severity_overrides,
+            vec![
+                ReviewSeverityOverride {
+                    rule_id: ReviewRuleId::AddNotNullOnExisting,
+                    severity: ReviewSeverity::Info,
+                },
+                ReviewSeverityOverride {
+                    rule_id: ReviewRuleId::DropTable,
+                    severity: ReviewSeverity::Warning,
+                },
+            ]
+        );
+        assert!(review_req.allow_invalid_schema);
     }
 
     #[test]

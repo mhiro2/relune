@@ -50,18 +50,5 @@ expression: "fixture_audit_snapshot(\"cyclic_fk.sql\")"
         "cycle_c[cycle_b_id] -> cycle_b[id] (238.0px)"
       ]
     }
-  },
-  "surfaces": {
-    "html": {
-      "bytes": 471590,
-      "contains_embedded_svg": true,
-      "contains_metadata": true,
-      "contains_viewport": true
-    },
-    "svg": {
-      "bytes": 81615,
-      "edge_groups": 49,
-      "node_groups": 12
-    }
   }
 }

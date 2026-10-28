@@ -1237,86 +1237,73 @@ mod tests {
         assert!(errs[0].message.contains("unknown table"));
     }
 
+    /// Validates the schema with its tables in the given order and reversed,
+    /// so a resolver that just picks the first or last candidate cannot pass.
+    fn validate_in_both_orders(tables: Vec<Table>) -> [Vec<ValidationError>; 2] {
+        let mut reversed = tables.clone();
+        reversed.reverse();
+        [tables, reversed].map(|tables| {
+            Schema {
+                tables,
+                views: vec![],
+                enums: vec![],
+            }
+            .validate()
+        })
+    }
+
+    // In the resolution tests below only the intended target has the
+    // referenced `uid` column, so resolving to any other candidate reports a
+    // missing to_column.
+
     #[test]
     fn validate_fk_uses_explicit_schema_when_targets_share_a_name() {
-        let schema = Schema {
-            tables: vec![
-                make_table("users", Some("public"), &["id"], vec![]),
-                make_table("users", Some("auth"), &["id"], vec![]),
-                Table {
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["user_id".to_string()],
-                        to_schema: Some("auth".to_string()),
-                        to_table: "users".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    ..make_table("posts", None, &["id", "user_id"], vec![])
-                },
-            ],
-            views: vec![],
-            enums: vec![],
-        };
-        let errs = schema.validate();
-        assert!(errs.is_empty());
+        let errs = validate_in_both_orders(vec![
+            make_table("users", Some("public"), &["id"], vec![]),
+            make_table("users", Some("auth"), &["uid"], vec![]),
+            Table {
+                foreign_keys: vec![ForeignKey {
+                    to_schema: Some("auth".to_string()),
+                    ..make_fk("users", &["user_id"], &["uid"])
+                }],
+                ..make_table("posts", None, &["id", "user_id"], vec![])
+            },
+        ]);
+        assert_eq!(errs, [vec![], vec![]]);
     }
 
     #[test]
     fn validate_fk_prefers_table_name_over_colliding_stable_id() {
-        let schema = Schema {
-            tables: vec![
-                make_table("users", Some("public"), &["id"], vec![]),
-                Table {
-                    stable_id: "users".to_string(),
-                    ..make_table("accounts", Some("public"), &["id"], vec![])
-                },
-                Table {
-                    foreign_keys: vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["user_id".to_string()],
-                        to_schema: Some("public".to_string()),
-                        to_table: "users".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                    ..make_table("posts", None, &["id", "user_id"], vec![])
-                },
-            ],
-            views: vec![],
-            enums: vec![],
-        };
-        assert!(schema.validate().is_empty(), "{:?}", schema.validate());
+        let errs = validate_in_both_orders(vec![
+            make_table("users", Some("public"), &["uid"], vec![]),
+            Table {
+                stable_id: "users".to_string(),
+                ..make_table("accounts", Some("public"), &["id"], vec![])
+            },
+            Table {
+                foreign_keys: vec![ForeignKey {
+                    to_schema: Some("public".to_string()),
+                    ..make_fk("users", &["user_id"], &["uid"])
+                }],
+                ..make_table("posts", None, &["id", "user_id"], vec![])
+            },
+        ]);
+        assert_eq!(errs, [vec![], vec![]]);
     }
 
     #[test]
     fn validate_fk_without_schema_prefers_same_schema_target() {
-        let schema = Schema {
-            tables: vec![
-                make_table("users", Some("public"), &["id"], vec![]),
-                make_table("users", Some("auth"), &["id"], vec![]),
-                make_table(
-                    "posts",
-                    Some("auth"),
-                    &["id", "user_id"],
-                    vec![ForeignKey {
-                        name: None,
-                        from_columns: vec!["user_id".to_string()],
-                        to_schema: None,
-                        to_table: "users".to_string(),
-                        to_columns: vec!["id".to_string()],
-                        on_delete: ReferentialAction::NoAction,
-                        on_update: ReferentialAction::NoAction,
-                    }],
-                ),
-            ],
-            views: vec![],
-            enums: vec![],
-        };
-        let errs = schema.validate();
-        assert!(errs.is_empty());
+        let errs = validate_in_both_orders(vec![
+            make_table("users", Some("public"), &["id"], vec![]),
+            make_table("users", Some("auth"), &["uid"], vec![]),
+            make_table(
+                "posts",
+                Some("auth"),
+                &["id", "user_id"],
+                vec![make_fk("users", &["user_id"], &["uid"])],
+            ),
+        ]);
+        assert_eq!(errs, [vec![], vec![]]);
     }
 
     #[test]

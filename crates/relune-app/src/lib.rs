@@ -98,25 +98,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_render_from_sql_basic() {
-        let sql = r"
-            CREATE TABLE users (
-                id INT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL
-            );
-        ";
-
-        let request = RenderRequest::from_sql(sql);
-        let result = render(request);
-
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert!(result.content.contains("<svg"));
-        assert_eq!(result.stats.table_count, 1);
-        assert_eq!(result.stats.column_count, 2);
-    }
-
-    #[test]
     fn test_render_with_focus() {
         let sql = r"
             CREATE TABLE users (
@@ -130,8 +111,17 @@ mod tests {
                 id INT PRIMARY KEY,
                 post_id INT REFERENCES posts(id)
             );
+            CREATE TABLE reactions (
+                id INT PRIMARY KEY,
+                comment_id INT REFERENCES comments(id)
+            );
+            CREATE TABLE settings (
+                id INT PRIMARY KEY
+            );
         ";
 
+        // reactions is two hops away and settings is unconnected, so both
+        // fall outside a depth-1 focus on posts.
         let focus = FocusSpec::new("posts", 1);
 
         let request = RenderRequest::from_sql(sql)
@@ -165,95 +155,6 @@ mod tests {
 
         assert_eq!(node_ids, expected_nodes);
         assert_eq!(edge_ids, expected_edges);
-    }
-
-    #[test]
-    fn test_inspect_schema_summary() {
-        let sql = r"
-            CREATE TABLE users (
-                id INT PRIMARY KEY,
-                name VARCHAR(255)
-            );
-            CREATE TABLE posts (
-                id INT PRIMARY KEY,
-                user_id INT REFERENCES users(id)
-            );
-        ";
-
-        let request = InspectRequest::from_sql(sql);
-        let result = inspect(request).unwrap();
-
-        assert_eq!(result.summary.table_count, 2);
-        assert_eq!(result.summary.column_count, 4);
-        assert_eq!(result.summary.foreign_key_count, 1);
-    }
-
-    #[test]
-    fn test_inspect_table_details() {
-        let sql = r"
-            CREATE TABLE users (
-                id INT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL
-            );
-        ";
-
-        let request = InspectRequest::from_sql(sql).with_table("users");
-        let result = inspect(request).unwrap();
-
-        assert!(result.table.is_some());
-        let table = result.table.unwrap();
-        assert_eq!(table.name, "users");
-        assert_eq!(table.columns.len(), 2);
-        assert!(table.columns[0].is_primary_key);
-        assert!(!table.columns[1].nullable);
-    }
-
-    #[test]
-    fn test_export_schema_json() {
-        let sql = r"
-            CREATE TABLE users (
-                id INT PRIMARY KEY
-            );
-        ";
-
-        let request = ExportRequest::from_sql(sql).with_format(ExportFormat::SchemaJson);
-        let result = export(request).unwrap();
-
-        assert!(result.content.contains("\"tables\""));
-        assert!(result.content.contains("users"));
-    }
-
-    #[test]
-    fn test_export_graph_json() {
-        let sql = r"
-            CREATE TABLE users (
-                id INT PRIMARY KEY
-            );
-        ";
-
-        let request = ExportRequest::from_sql(sql).with_format(ExportFormat::GraphJson);
-        let result = export(request).unwrap();
-
-        assert!(result.content.contains("\"nodes\""));
-        assert!(result.content.contains("\"edges\""));
-    }
-
-    #[test]
-    fn test_format_inspect_output() {
-        let sql = r"
-            CREATE TABLE users (
-                id INT PRIMARY KEY,
-                name VARCHAR(255)
-            );
-        ";
-
-        let request = InspectRequest::from_sql(sql);
-        let result = inspect(request).unwrap();
-        let text = format_inspect_text(&result);
-
-        assert!(text.contains("Schema Summary"));
-        assert!(text.contains("Tables: 1"));
-        assert!(text.contains("users"));
     }
 
     #[test]
@@ -342,6 +243,9 @@ mod tests {
             CREATE TABLE app_posts (
                 id INT PRIMARY KEY
             );
+            CREATE TABLE settings (
+                id INT PRIMARY KEY
+            );
         ";
 
         let grouping = GroupingSpec {
@@ -351,6 +255,19 @@ mod tests {
         let request = RenderRequest::from_sql(sql).with_grouping(grouping);
         let result = render(request).unwrap();
 
-        assert!(result.content.contains("<svg"));
+        assert_eq!(
+            relune_testkit::svg::group_members(&result.content),
+            std::collections::BTreeMap::from([(
+                "app_".to_string(),
+                ["app_posts", "app_users"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            )])
+        );
+        assert!(
+            relune_testkit::svg::table_ids(&result.content).contains("settings"),
+            "ungrouped tables still render"
+        );
     }
 }

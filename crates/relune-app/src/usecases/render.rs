@@ -201,8 +201,6 @@ fn render_svg_output(
     let options = SvgRenderOptions {
         theme: map_svg_theme(options.theme),
         show_legend: options.show_legend,
-        show_stats: options.show_stats,
-        embed_css: true,
         show_tooltips: true,
         // Standalone SVG shows every label, so none may be cut through.
         labels_on_top: true,
@@ -222,8 +220,6 @@ fn render_html_output(
     let svg_options = SvgRenderOptions {
         theme: map_svg_theme(options.theme),
         show_legend: options.show_legend,
-        show_stats: options.show_stats,
-        embed_css: true,
         show_tooltips: true,
         // The viewer shows labels per line and styles them through the edge.
         labels_on_top: false,
@@ -267,14 +263,15 @@ mod tests {
             );
         ";
 
-        let request = RenderRequest::from_sql(sql).with_output_format(OutputFormat::Svg);
+        // SVG is the default format; requesting it explicitly is identical.
+        let result = render(RenderRequest::from_sql(sql)).unwrap();
+        let explicit =
+            render(RenderRequest::from_sql(sql).with_output_format(OutputFormat::Svg)).unwrap();
 
-        let result = render(request);
-        assert!(result.is_ok());
-
-        let result = result.unwrap();
-        assert!(result.content.contains("<svg"));
+        assert!(result.content.starts_with("<svg"));
+        assert_eq!(result.content, explicit.content);
         assert_eq!(result.stats.table_count, 1);
+        assert_eq!(result.stats.column_count, 2);
     }
 
     #[test]

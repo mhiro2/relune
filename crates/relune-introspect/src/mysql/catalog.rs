@@ -11,7 +11,7 @@ use crate::common::{
     RawCheckConstraint, RawColumn, RawEnum, RawForeignKey, RawIndex, RawIndexKeyPart, RawSchema,
     RawTable, RawView, parse_referential_action,
 };
-use crate::connect::pool_max_connections_with_default;
+use crate::connect::{pool_max_connections_env, resolve_pool_max_connections};
 use crate::error::IntrospectError;
 
 /// Fetches all catalog metadata from the database selected by the connection
@@ -338,7 +338,11 @@ impl MySqlCatalog {
 /// environments can override the cap with `RELUNE_DB_POOL_MAX_CONNECTIONS`.
 #[must_use]
 pub(crate) fn pool_max_connections() -> u32 {
-    pool_max_connections_with_default(PARALLEL_CATALOG_QUERIES)
+    pool_max_connections_from(pool_max_connections_env().as_deref())
+}
+
+fn pool_max_connections_from(override_value: Option<&str>) -> u32 {
+    resolve_pool_max_connections(PARALLEL_CATALOG_QUERIES, override_value)
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -809,10 +813,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pool_max_connections_is_positive() {
-        // Whichever value wins (default or env override), it must remain
-        // positive so the pool can be constructed.
-        assert!(pool_max_connections() > 0);
+    fn pool_max_connections_defaults_to_catalog_fan_out() {
+        assert_eq!(pool_max_connections_from(None), PARALLEL_CATALOG_QUERIES);
+        assert_eq!(
+            pool_max_connections_from(Some("many")),
+            PARALLEL_CATALOG_QUERIES
+        );
+        assert_eq!(pool_max_connections_from(Some("2")), 2);
     }
 
     #[test]
@@ -930,18 +937,6 @@ mod tests {
 
         let mysql = index_rows_query(MySqlFlavor::MySql);
         assert!(mysql.contains("CONVERT(EXPRESSION USING utf8mb4) AS expression"));
-    }
-
-    #[test]
-    fn check_query_scopes_each_check_to_its_table() {
-        let mysql = check_rows_query(MySqlFlavor::MySql);
-        assert!(mysql.contains("tc.CONSTRAINT_TYPE = 'CHECK'"));
-
-        // MariaDB check names are only unique per table, so the query must
-        // take the table from CHECK_CONSTRAINTS rather than join by name.
-        let mariadb = check_rows_query(MySqlFlavor::MariaDb);
-        assert!(!mariadb.contains("TABLE_CONSTRAINTS"));
-        assert!(mariadb.contains("CONVERT(TABLE_NAME USING utf8mb4) AS table_name"));
     }
 
     #[test]

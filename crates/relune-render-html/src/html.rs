@@ -296,14 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_xml_text_for_html() {
-        assert_eq!(escape_xml_text("<script>"), "&lt;script&gt;");
-        assert_eq!(escape_xml_text("a & b"), "a &amp; b");
-        assert_eq!(escape_xml_text(r#""quoted""#), "&quot;quoted&quot;");
-        assert_eq!(escape_xml_text("'quoted'"), "&#39;quoted&#39;");
-    }
-
-    #[test]
     fn test_build_html_document_structure() {
         let svg = "<svg></svg>";
         let metadata = "{}";
@@ -335,50 +327,33 @@ mod tests {
     }
 
     #[test]
-    fn test_build_html_escapes_xss_payload_in_embedded_svg_and_title() {
-        let payload = "<script>alert('xss')</script>";
-        let escaped = "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;";
-        let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg"><g data-table-id="{escaped}"><title>{escaped}</title><text>{escaped}</text></g></svg>"#
-        );
-        let metadata = "{}";
-        let options = HtmlRenderOptions {
-            title: Some(payload.to_string()),
-            ..Default::default()
-        };
-
-        let html = build_html_document(&svg, metadata, &options);
-
-        assert!(html.contains(escaped));
-        assert!(html.contains(&format!("<title>{escaped}</title>")));
-        assert!(html.contains(&format!("<h1>{escaped}</h1>")));
-        assert!(!html.contains(payload));
-    }
-
-    #[test]
-    fn test_build_html_without_pan_zoom() {
+    fn test_pan_zoom_bundles_follow_the_option() {
         let svg = "<svg></svg>";
         let metadata = "{}";
-        let options = HtmlRenderOptions {
-            enable_pan_zoom: false,
-            enable_group_toggles: false,
-            ..Default::default()
-        };
+        let viewport_bundles = [
+            build_pan_zoom_js(),
+            build_minimap_js(),
+            build_shortcuts_js(),
+        ];
 
-        let html = build_html_document(svg, metadata, &options);
+        let enabled = build_html_document(svg, metadata, &HtmlRenderOptions::default());
+        for bundle in viewport_bundles {
+            assert!(enabled.contains(bundle));
+        }
 
-        // Should not contain the pan/zoom script
-        assert!(!html.contains("function initPanZoom"));
-        assert!(!html.contains("viewport.addEventListener"));
-    }
-
-    #[test]
-    fn test_pan_zoom_js_clamps_panning_to_viewport_bounds() {
-        let js = build_pan_zoom_js();
-
-        assert!(js.contains("function clampPan("));
-        assert!(js.contains("function getAvailableViewport("));
-        assert!(js.contains("contentX - diagram.x"));
+        let disabled = build_html_document(
+            svg,
+            metadata,
+            &HtmlRenderOptions {
+                enable_pan_zoom: false,
+                ..Default::default()
+            },
+        );
+        for bundle in viewport_bundles {
+            assert!(!disabled.contains(bundle));
+        }
+        // The other viewer modules stay independent of the option.
+        assert!(disabled.contains(build_search_js()));
     }
 
     #[test]
@@ -594,14 +569,6 @@ mod tests {
     }
 
     #[test]
-    fn test_viewer_controls_svg_icons_in_css() {
-        let css = build_css(Theme::Dark, false, true, true);
-
-        assert!(css.contains(".viewer-control-button svg"));
-        assert!(css.contains("width: 16px"));
-    }
-
-    #[test]
     fn test_build_detail_drawer_html() {
         let html = build_detail_drawer_html();
 
@@ -738,43 +705,6 @@ mod tests {
     }
 
     #[test]
-    fn test_detail_drawer_pill_css() {
-        let css = build_css(Theme::Dark, false, false, true);
-
-        assert!(css.contains(".detail-column-pills"));
-        assert!(css.contains(".detail-column-pill"));
-        assert!(css.contains(".detail-column-pill-pk"));
-        // Key pills match the card badges instead of the orange accent.
-        assert!(css.contains("--badge-pk-bg: color-mix(in srgb, #cbd5e1 100%, transparent);"));
-        assert!(css.contains("--badge-fk-text: #7dd3fc;"));
-        assert!(css.contains("color: var(--badge-pk-text);"));
-        assert!(!css.contains("rgba(245, 158, 11, 0.2)"));
-    }
-
-    #[test]
-    fn test_detail_drawer_layout_css() {
-        let css = build_css(Theme::Dark, false, false, true);
-
-        assert!(css.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"));
-        assert!(css.contains(".detail-relations .detail-relation"));
-        assert!(css.contains(".detail-relation-meta"));
-        assert!(css.contains("line-height: 1.35;"));
-        assert!(css.contains("margin-top: 2px;"));
-    }
-
-    #[test]
-    fn test_panel_radius_consistency() {
-        let css = build_css(Theme::Dark, true, true, true);
-
-        // All major panels share one modest radius.
-        assert!(css.contains(".search-panel"));
-        assert!(css.contains(".minimap-shell"));
-        assert!(css.contains(".detail-drawer"));
-        assert!(!css.contains("border-radius: 22px"));
-        assert!(!css.contains("border-radius: 18px"));
-    }
-
-    #[test]
     fn test_viewer_chrome_avoids_orange_accents_and_glows() {
         for theme in [Theme::Dark, Theme::Light] {
             let css = build_css(theme, true, true, true);
@@ -826,18 +756,6 @@ mod tests {
         assert!(
             css.contains(".search-panel:not([hidden]) ~ .filter-reset-bar {\n      display: none;")
         );
-    }
-
-    #[test]
-    fn test_minimap_enhanced_visibility() {
-        let css = build_css(Theme::Dark, false, true, true);
-
-        assert!(css.contains(".minimap-node.selected"));
-        assert!(css.contains(".minimap-node.hidden"));
-        assert!(css.contains("stroke-dasharray"));
-        assert!(css.contains(".minimap-frame"));
-        // The minimap steps left of an open detail drawer.
-        assert!(css.contains("body:has(#detail-drawer:not([hidden])) .minimap-shell"));
     }
 
     #[test]

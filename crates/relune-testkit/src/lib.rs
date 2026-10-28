@@ -14,6 +14,8 @@ use relune_layout::route::{LABEL_HALF_H, estimate_label_half_width};
 use relune_layout::{PositionedEdge, PositionedGraph, PositionedNode};
 use relune_render_svg::{EdgeRenderOptions, edge::rendered_path_points};
 
+pub mod svg;
+
 /// Normalizes SVG content by trimming whitespace and removing empty lines.
 pub fn normalize_svg(svg: &str) -> String {
     svg.lines()

@@ -71,4 +71,20 @@ mod tests {
             "&quot; onload=&quot;alert(&#39;xss&#39;)"
         );
     }
+
+    #[test]
+    fn escapes_each_markup_character() {
+        for (input, expected) in [
+            ("a & b", "a &amp; b"),
+            ("a < b", "a &lt; b"),
+            ("a > b", "a &gt; b"),
+            (r#"a "b""#, "a &quot;b&quot;"),
+            ("a 'b'", "a &#39;b&#39;"),
+            // An existing entity is escaped again rather than passed through.
+            ("&lt;", "&amp;lt;"),
+        ] {
+            assert_eq!(escape_xml_text(input), expected, "{input}");
+            assert_eq!(escape_xml_attribute(input), expected, "{input}");
+        }
+    }
 }

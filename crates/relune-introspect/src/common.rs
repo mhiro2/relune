@@ -662,6 +662,38 @@ mod tests {
     }
 
     #[test]
+    fn raw_column_new_sets_core_fields_and_leaves_semantics_empty() {
+        let column = RawColumn::new(
+            "users".to_string(),
+            "public".to_string(),
+            "email".to_string(),
+            "text".to_string(),
+            true,
+            false,
+            Some("Login address".to_string()),
+            3,
+        );
+
+        assert_eq!(column.table_name, "users");
+        assert_eq!(column.schema_name, "public");
+        assert_eq!(column.column_name, "email");
+        assert_eq!(column.data_type, "text");
+        assert!(column.is_nullable);
+        assert!(!column.is_primary_key);
+        assert_eq!(column.column_comment.as_deref(), Some("Login address"));
+        assert_eq!(column.ordinal_position, 3);
+
+        assert_eq!(column.default_expression, None);
+        assert_eq!(column.generated_expression, None);
+        assert!(!column.generated_stored);
+        assert_eq!(column.identity_always, None);
+        assert!(!column.auto_increment);
+        assert_eq!(column.collation, None);
+        assert_eq!(column.character_set, None);
+        assert_eq!(column.on_update, None);
+    }
+
+    #[test]
     fn generate_stable_id_is_deterministic() {
         // Fixed expected values guarantee the hash algorithm is version-stable.
         assert_eq!(generate_stable_id("public.users"), 0x10a3_9729_896e_6dda);

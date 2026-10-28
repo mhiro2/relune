@@ -759,10 +759,22 @@ mod tests {
 
     #[test]
     fn test_request_serialization() {
-        let req = RenderRequest::from_sql("SELECT 1");
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains("\"input\""));
-        assert!(json.contains("\"output_format\""));
+        let req = RenderRequest::from_sql("SELECT 1")
+            .with_output_format(OutputFormat::GraphJson)
+            .with_focus(FocusSpec::new("users", 2));
+        let json = serde_json::to_value(&req).unwrap();
+
+        assert_eq!(
+            json["input"],
+            serde_json::json!({ "type": "sql_text", "sql": "SELECT 1", "dialect": "auto" })
+        );
+        assert_eq!(json["output_format"], "graph-json");
+        assert_eq!(
+            json["focus"],
+            serde_json::json!({ "table": "users", "depth": 2 })
+        );
+        assert_eq!(json["grouping"], serde_json::json!({ "strategy": "none" }));
+        assert_eq!(json["output_path"], serde_json::Value::Null);
     }
 
     #[test]

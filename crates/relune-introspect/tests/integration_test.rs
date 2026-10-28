@@ -4,6 +4,7 @@
 //! extracts schema metadata from a live `PostgreSQL` database and produces
 //! results consistent with parsing the same SQL DDL using `relune_parser_sql`.
 
+use relune_core::{ForeignKey, Index, ReferentialAction, Schema, Table};
 use relune_introspect::introspect_database;
 use relune_introspect::introspect_sqlite;
 use relune_introspect::postgres::introspect_postgres;
@@ -94,7 +95,7 @@ async fn test_introspect_simple_blog() {
         "Table names mismatch.\nIntrospected: {introspected_table_names:?}\nParsed: {parsed_table_names:?}",
     );
 
-    // --- Compare column names and types per table ---
+    // --- Compare column names and nullability per table ---
     for parsed_table in &parsed_schema.tables {
         let table_name_lower = parsed_table.name.to_lowercase();
 
@@ -185,6 +186,58 @@ async fn test_introspect_simple_blog() {
             "Foreign keys mismatch for table '{table_name_lower}'.\nIntrospected: {introspected_fks:?}\nParsed: {parsed_fks:?}",
         );
     }
+
+    // --- Catalog facts the parser comparison above does not cover ---
+    for table in &introspected_schema.tables {
+        let pk_columns: Vec<&str> = table
+            .columns
+            .iter()
+            .filter(|c| c.is_primary_key)
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(pk_columns, vec!["id"], "primary key of {}", table.name);
+    }
+
+    let posts = find_table(&introspected_schema, "posts");
+    assert_eq!(
+        find_fk(posts, &["user_id"]).on_delete,
+        ReferentialAction::Cascade
+    );
+
+    let published_idx = find_index(posts, "idx_posts_published_at");
+    assert_eq!(published_idx.column_names(), vec!["published_at"]);
+    assert!(
+        published_idx
+            .predicate
+            .as_deref()
+            .is_some_and(|p| p.contains("published_at IS NOT NULL")),
+        "partial index predicate: {:?}",
+        published_idx.predicate
+    );
+}
+
+fn find_table<'a>(schema: &'a Schema, name: &str) -> &'a Table {
+    schema
+        .tables
+        .iter()
+        .find(|t| t.name == name)
+        .unwrap_or_else(|| panic!("table {name} not introspected"))
+}
+
+fn find_fk<'a>(table: &'a Table, from_columns: &[&str]) -> &'a ForeignKey {
+    table
+        .foreign_keys
+        .iter()
+        .find(|fk| fk.from_columns == from_columns)
+        .unwrap_or_else(|| panic!("FK {from_columns:?} on {} not introspected", table.name))
+}
+
+fn find_index<'a>(table: &'a Table, name: &str) -> &'a Index {
+    table
+        .indexes
+        .iter()
+        .find(|i| i.name.as_deref() == Some(name))
+        .unwrap_or_else(|| panic!("index {name} on {} not introspected", table.name))
 }
 
 #[tokio::test]
@@ -226,6 +279,121 @@ async fn test_introspect_ecommerce() {
         introspected_table_names, parsed_table_names,
         "Table names mismatch.\nIntrospected: {introspected_table_names:?}\nParsed: {parsed_table_names:?}",
     );
+
+    // Composite primary key on the join table, in declaration order.
+    let product_categories = find_table(&introspected_schema, "product_categories");
+    let pk_columns: Vec<&str> = product_categories
+        .columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(pk_columns, vec!["product_id", "category_id"]);
+
+    // Self-referencing FK with SET NULL.
+    let categories = find_table(&introspected_schema, "categories");
+    let parent_fk = find_fk(categories, &["parent_id"]);
+    assert_eq!(parent_fk.to_table, "categories");
+    assert_eq!(parent_fk.to_columns, vec!["id"]);
+    assert_eq!(parent_fk.on_delete, ReferentialAction::SetNull);
+
+    // CASCADE and RESTRICT on the same table must stay distinct.
+    let order_items = find_table(&introspected_schema, "order_items");
+    assert_eq!(
+        find_fk(order_items, &["order_id"]).on_delete,
+        ReferentialAction::Cascade
+    );
+    assert_eq!(
+        find_fk(order_items, &["product_id"]).on_delete,
+        ReferentialAction::Restrict
+    );
+    let orders = find_table(&introspected_schema, "orders");
+    assert_eq!(
+        find_fk(orders, &["customer_id"]).on_delete,
+        ReferentialAction::Restrict
+    );
+
+    // The partial index keeps its predicate; a plain index has none.
+    let products = find_table(&introspected_schema, "products");
+    let active_idx = find_index(products, "idx_products_is_active");
+    assert_eq!(active_idx.column_names(), vec!["is_active"]);
+    assert!(
+        active_idx
+            .predicate
+            .as_deref()
+            .is_some_and(|p| p.contains("is_active")),
+        "partial index predicate: {:?}",
+        active_idx.predicate
+    );
+    assert_eq!(find_index(products, "idx_products_price").predicate, None);
+
+    // Inline column CHECKs become table check constraints.
+    let product_checks: Vec<&str> = products
+        .check_constraints
+        .iter()
+        .map(|c| c.expression.as_str())
+        .collect();
+    assert_eq!(
+        product_checks.len(),
+        3,
+        "product checks: {product_checks:?}"
+    );
+    for column in ["price", "compare_at_price", "stock_quantity"] {
+        assert!(
+            product_checks
+                .iter()
+                .any(|expr| expr.starts_with(&format!("({column} "))
+                    || expr.starts_with(&format!("{column} "))),
+            "missing CHECK on {column}: {product_checks:?}"
+        );
+    }
+
+    // The composite UNIQUE constraint is exposed as a unique index.
+    let addresses = find_table(&introspected_schema, "addresses");
+    assert!(
+        addresses
+            .indexes
+            .iter()
+            .any(|i| i.is_unique && i.column_names() == vec!["customer_id", "address_type"]),
+        "addresses indexes: {:?}",
+        addresses.indexes
+    );
+}
+
+#[tokio::test]
+async fn test_introspect_postgres_views_and_materialized_views() {
+    let sql = r"
+        CREATE TABLE users (
+            id INT PRIMARY KEY,
+            email TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT true
+        );
+        CREATE VIEW active_users AS
+            SELECT id, email FROM users WHERE active;
+        CREATE MATERIALIZED VIEW user_emails AS
+            SELECT email FROM users;
+    ";
+    let (database_url, _container) = setup_postgres_with_sql(sql).await.expect("postgres setup");
+    let schema = introspect_postgres(&database_url)
+        .await
+        .expect("introspect postgres");
+
+    let table_names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(table_names, vec!["users"], "views must not become tables");
+
+    let view_columns = |name: &str| -> Vec<String> {
+        schema
+            .views
+            .iter()
+            .find(|v| v.name == name)
+            .unwrap_or_else(|| panic!("view {name} not introspected: {:?}", schema.views))
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect()
+    };
+    assert_eq!(view_columns("active_users"), vec!["id", "email"]);
+    assert_eq!(view_columns("user_emails"), vec!["email"]);
 }
 
 #[tokio::test]
