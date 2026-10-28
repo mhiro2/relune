@@ -35,6 +35,7 @@ jobs:
     # Skip fork PRs — GITHUB_TOKEN is read-only there and the upsert would 403.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
