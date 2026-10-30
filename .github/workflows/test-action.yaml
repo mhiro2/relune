@@ -30,18 +30,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
       - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        uses: Swatinem/rust-cache@v2.9.3
       - name: Build relune
         run: cargo build -p relune-cli --release
       - name: Test action (no changes)
         id: diff-no-changes
-        uses: ./action
+        uses: $/action
         with:
           before: fixtures/sql/simple_blog.sql
           after: fixtures/sql/simple_blog.sql
@@ -65,7 +67,7 @@ jobs:
           fi
       - name: Test action (with changes)
         id: diff-with-changes
-        uses: ./action
+        uses: $/action
         with:
           before: fixtures/sql/simple_blog.sql
           after: fixtures/sql/ecommerce.sql
@@ -94,7 +96,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Test action (review, no findings)
         id: review-no-findings
-        uses: ./action
+        uses: $/action
         with:
           mode: review
           before: fixtures/sql/simple_blog.sql
@@ -126,7 +128,7 @@ jobs:
 
       - name: Test action (review, warning only)
         id: review-warning
-        uses: ./action
+        uses: $/action
         with:
           mode: review
           before: fixtures/review/add-not-null-on-existing/before.sql
@@ -157,7 +159,7 @@ jobs:
       # the dialect input reaches the CLI.
       - name: Test action (review, lock-risk caution with dialect)
         id: review-lock-risk
-        uses: ./action
+        uses: $/action
         with:
           mode: review
           before: fixtures/review/lock-risk/rewrite-table-mysql-column-drop/before.sql
@@ -198,7 +200,7 @@ jobs:
 
       - name: Test action (review, breaking, no fail)
         id: review-breaking
-        uses: ./action
+        uses: $/action
         with:
           mode: review
           before: fixtures/review/drop-column-referenced/before.sql
@@ -238,7 +240,7 @@ jobs:
       - name: Test action (review, breaking, fail-on-blocking)
         id: review-breaking-fail
         continue-on-error: true
-        uses: ./action
+        uses: $/action
         with:
           mode: review
           before: fixtures/review/drop-column-referenced/before.sql
@@ -264,7 +266,7 @@ jobs:
       - name: Test action (invalid mode)
         id: review-invalid-mode
         continue-on-error: true
-        uses: ./action
+        uses: $/action
         with:
           mode: bogus
           before: fixtures/sql/simple_blog.sql

@@ -23,12 +23,14 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
       - name: Verify Cargo version matches release tag
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -43,7 +45,7 @@ jobs:
           echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
       - name: Install cargo-zigbuild
         # The tool version follows the install-action pin that Dependabot bumps.
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@v2.87.29
         with:
           tool: cargo-zigbuild
       - name: Add Rust targets
@@ -54,9 +56,9 @@ jobs:
           x86_64-unknown-linux-musl
           aarch64-unknown-linux-musl
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        uses: anchore/sbom-action/download-syft@v0.24.3
       - name: Create/update draft release and upload assets
-        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        uses: goreleaser/goreleaser-action@v7.3.0
         with:
           version: "~> v2"
           args: release --clean
