@@ -39,14 +39,16 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
       - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: Swatinem/rust-cache@v2.9.3
       - name: Build relune
         run: cargo build -p relune-cli --release
       - name: Materialize before/after schemas
@@ -63,7 +65,7 @@ jobs:
           cp dogfood/schema.sql .relune/after.sql
       - name: Run relune review
         id: review
-        uses: ./action
+        uses: $/action
         with:
           mode: review
           before: .relune/before.sql
@@ -100,13 +102,13 @@ jobs:
           } > .relune/comment.md
       - name: Find existing sticky comment
         id: find
-        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
+        uses: peter-evans/find-comment@v4.0.0
         with:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: github-actions[bot]
           body-includes: "<!-- relune-dogfood-review -->"
       - name: Upsert sticky comment
-        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
+        uses: peter-evans/create-or-update-comment@v5.0.0
         with:
           comment-id: ${{ steps.find.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
