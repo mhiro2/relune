@@ -351,9 +351,11 @@ fn focus_lines(finding: &RiskFinding, lines: &[KeyedLine]) -> Vec<usize> {
         name.as_ref()
             .is_some_and(|name| names.contains(&name.to_ascii_lowercase()))
     };
-    // An unnamed key finding still points at the key over the same columns.
+    // A key finding without a constraint name still points at the key over
+    // the same columns. `fk_name` does not count: a dropped key's finding
+    // names the foreign key that still references it, not the key itself.
     let same_key = |line_columns: &[String]| {
-        names.is_empty()
+        finding.constraint_name.is_none()
             && !key_columns.is_empty()
             && line_columns.len() == key_columns.len()
             && line_columns
@@ -485,6 +487,19 @@ mod tests {
                 "  UNIQUE INDEX (tenant_id, email)"
             ]
         );
+
+        let dropped_pk =
+            RiskFinding::new(ReviewRuleId::DropPkOrUnique, ReviewSeverity::Breaking, "")
+                .with_table("accounts", "accounts")
+                .with_columns(["id"])
+                .with_fk_name("orders_account_fk");
+        let without_pk = table("CREATE TABLE accounts (id INT, tenant_id INT, email TEXT);");
+        let pk_lines = definition_diff(Some(&before), Some(&without_pk));
+        let focused: Vec<&str> = focus_lines(&dropped_pk, &pk_lines)
+            .into_iter()
+            .map(|index| pk_lines[index].text.as_str())
+            .collect();
+        assert!(focused.contains(&"  PRIMARY KEY (id)"), "{focused:?}");
 
         let table_level = RiskFinding::new(ReviewRuleId::DropTable, ReviewSeverity::Breaking, "")
             .with_table("accounts", "accounts");

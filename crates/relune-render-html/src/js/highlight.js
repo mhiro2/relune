@@ -1174,7 +1174,14 @@
         },
         getSelectedRelation: selectedRelationKey,
         focus(nodeId, columns) {
-          if (findNode(nodeId) === void 0) return false;
+          const node = findNode(nodeId);
+          if (node === void 0) return false;
+          if (node.classList.contains("hidden-by-group")) {
+            for (const group of metadata?.groups ?? []) {
+              if (group.table_ids.includes(nodeId)) runtime.groups?.setVisibility(group.id, true);
+            }
+          }
+          if (node.classList.contains("hidden-by-filter")) runtime.filters?.reset();
           setSelectedNode(nodeId, columns);
           centerNodeInViewport(nodeId);
           return true;

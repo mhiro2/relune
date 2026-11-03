@@ -1323,7 +1323,7 @@ fn check_drop_pk_or_unique_column(
 
     let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
         .with_table(&after_table.stable_id, &table_diff.table_name)
-        .with_columns(before_pk_cols.iter().cloned())
+        .with_columns(primary_key_names(before_table))
         .with_column(&column_diff.column_name)
         .with_mitigation(mitigation);
     if let Some((_, fk_text)) = related_fk {
@@ -1541,7 +1541,7 @@ fn check_drop_pk_or_unique_widened(
 
     let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
         .with_table(&after_table.stable_id, &table_diff.table_name)
-        .with_columns(before_pk_cols.iter().cloned())
+        .with_columns(primary_key_names(before_table))
         .with_mitigation(mitigation);
     if let Some((_, fk_text)) = related_fk {
         finding = finding.with_fk_name(fk_text);
@@ -1729,7 +1729,7 @@ fn check_add_pk_on_existing(
         ),
     )
     .with_table(&after_table.stable_id, &table_diff.table_name)
-    .with_columns(after_pk_cols.iter().cloned())
+    .with_columns(primary_key_names(after_table))
     .with_constraint_name_opt(after_table.primary_key_name.as_deref())
     .with_mitigation("Verify no duplicates exist or deduplicate before applying.");
     findings.push(finding);
@@ -2261,6 +2261,17 @@ fn check_rewrite_table(
         .with_mitigation(mitigation);
         findings.push(finding);
     }
+}
+
+/// Primary key column names as written, for finding metadata; comparisons
+/// use lowercase copies instead.
+fn primary_key_names(table: &Table) -> Vec<String> {
+    table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.name.clone())
+        .collect()
 }
 
 /// Leading word for findings about an added or a changed constraint.
@@ -3886,6 +3897,29 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
             .expect("expected DropPkOrUnique finding for index");
         assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn key_findings_keep_column_names_as_written() {
+        let before = schema(vec![table(
+            "users",
+            vec![col("UserID", "int", false, false)],
+            vec![],
+            vec![],
+        )]);
+        let after = schema(vec![table(
+            "users",
+            vec![col("UserID", "int", false, true)],
+            vec![],
+            vec![],
+        )]);
+        let findings = run_all(&before, &after);
+        let added_pk = findings
+            .iter()
+            .find(|finding| finding.rule_id == ReviewRuleId::AddUniqueOnExisting)
+            .expect("adding a primary key on existing rows is reported");
+        assert_eq!(added_pk.columns, ["UserID"]);
+        assert_eq!(added_pk.column_name.as_deref(), Some("UserID"));
     }
 
     #[test]

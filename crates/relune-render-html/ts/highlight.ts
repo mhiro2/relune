@@ -574,7 +574,16 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       },
       getSelectedRelation: selectedRelationKey,
       focus(nodeId: string, columns: readonly string[]): boolean {
-        if (findNode(nodeId) === undefined) return false;
+        const node = findNode(nodeId);
+        if (node === undefined) return false;
+        // A hidden group or a hide/focus filter would leave the target
+        // selected but off the diagram, so bring it back first.
+        if (node.classList.contains('hidden-by-group')) {
+          for (const group of metadata?.groups ?? []) {
+            if (group.table_ids.includes(nodeId)) runtime.groups?.setVisibility(group.id, true);
+          }
+        }
+        if (node.classList.contains('hidden-by-filter')) runtime.filters?.reset();
         setSelectedNode(nodeId, columns);
         centerNodeInViewport(nodeId);
         return true;
