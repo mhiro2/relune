@@ -396,6 +396,9 @@ pub struct ReviewConfig {
     /// Continue when an input has empty or duplicate object names.
     #[serde(default)]
     pub allow_invalid_schema: Option<bool>,
+    /// How the migration tool wraps each migration file in a transaction.
+    #[serde(default)]
+    pub migration_transaction: Option<crate::cli::MigrationTransactionArg>,
 }
 
 /// TOML representation of a single per-rule severity override.
@@ -840,6 +843,10 @@ impl ReluneConfig {
             fail_on_warning: args.fail_on_warning || self.review.fail_on_warning.unwrap_or(false),
             allow_invalid_schema: args.allow_invalid_schema
                 || self.review.allow_invalid_schema.unwrap_or(false),
+            migration_transaction: args
+                .migration_transaction
+                .or(self.review.migration_transaction)
+                .unwrap_or_default(),
             // The HTML report draws the same diagram as `diff --format html`.
             diagram: ReviewDiagramConfig {
                 theme: self.diff.theme.unwrap_or_default(),
@@ -1115,6 +1122,7 @@ pub struct MergedReviewConfig {
     pub severity_overrides: Vec<ReviewSeverityOverride>,
     pub fail_on_warning: bool,
     pub allow_invalid_schema: bool,
+    pub migration_transaction: crate::cli::MigrationTransactionArg,
     /// `[diff]` diagram settings used by the HTML report.
     pub diagram: ReviewDiagramConfig,
 }
@@ -2404,6 +2412,8 @@ direction = "left-to-right"
             after_schema_json: None,
             dialect: None,
             format: None,
+            migrations: vec![],
+            migration_transaction: None,
             out: None,
             stdout: false,
             rules: vec![],

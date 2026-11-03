@@ -2287,6 +2287,55 @@ pub(crate) const REVIEW_CSS: &str = r"
       margin: 4px;
       font-size: 12px;
       opacity: 0.68;
+    }
+
+    .review-execution-verdict {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 0 6px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border: 1px solid currentColor;
+    }
+
+    .review-execution-mitigated .review-execution-verdict { color: var(--diff-added); }
+    .review-execution-confirmed .review-execution-verdict { color: var(--risk-breaking); }
+    .review-execution-unverified .review-execution-verdict { color: var(--risk-warning); }
+
+    .review-sources {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .review-sources li + li {
+      margin-top: 6px;
+    }
+
+    .review-source-location {
+      font-family: var(--mono-font);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .review-source-transaction {
+      margin-left: 6px;
+      font-size: 10px;
+      opacity: 0.7;
+    }
+
+    .review-source-sql {
+      margin: 2px 0 0;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel-border) 30%, transparent);
+      font-family: var(--mono-font);
+      font-size: 11px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }";
 
 #[cfg(test)]

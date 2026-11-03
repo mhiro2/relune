@@ -29,8 +29,29 @@ export interface ReviewFinding {
   constraint_name?: string | null;
   columns?: string[];
   related_table_id?: string | null;
+  /** Migration statements that make the change. */
+  sources?: SourceLocation[];
+  /** How the migration SQL carries the change out. */
+  execution?: ExecutionNote | null;
   rule_description: string;
   focus_lines?: number[];
+}
+
+export interface SourceLocation {
+  file: string;
+  line: number;
+}
+
+export type ExecutionVerdict = 'mitigated' | 'confirmed' | 'unverified';
+
+export interface ExecutionNote {
+  verdict: ExecutionVerdict;
+  detail: string;
+}
+
+export interface ReportStatement extends SourceLocation {
+  sql: string;
+  in_transaction: boolean;
 }
 
 export interface ReviewSummary {
@@ -47,6 +68,13 @@ export interface ReviewReport {
   dialect_note?: string | null;
   coverage_notes?: string[];
   definitions?: Record<string, DefinitionDiff>;
+  migration_note?: string | null;
+  statements?: ReportStatement[];
+}
+
+/** `file:line`, as text reports print a source location. */
+export function sourceLabel(location: SourceLocation): string {
+  return `${location.file}:${location.line}`;
 }
 
 /** Severities from most to least severe, the order findings are listed in. */

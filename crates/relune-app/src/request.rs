@@ -586,6 +586,15 @@ pub struct ReviewDiagramSettings {
     pub grouping: GroupingSpec,
 }
 
+/// One migration SQL file, in the order the migrations run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MigrationInput {
+    /// Name shown in source locations, usually the file path.
+    pub name: String,
+    /// File contents.
+    pub sql: String,
+}
+
 /// Request to run migration risk review on two schemas.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReviewRequest {
@@ -637,6 +646,15 @@ pub struct ReviewRequest {
     /// Diagram settings used when `format` is `Html`.
     #[serde(default)]
     pub diagram: ReviewDiagramSettings,
+    /// Migration SQL that turns `before` into `after`, in execution order.
+    /// When given, renames line up the two schemas, findings point at the
+    /// statements that make each change, and on `PostgreSQL` the way the
+    /// statements run is judged (for example `CREATE INDEX CONCURRENTLY`).
+    #[serde(default)]
+    pub migrations: Vec<MigrationInput>,
+    /// How the migration tool wraps `migrations` in transactions.
+    #[serde(default)]
+    pub migration_transaction: relune_core::TransactionMode,
 }
 
 impl ReviewRequest {

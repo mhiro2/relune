@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use relune_core::{ReviewSummary, RiskFinding};
+use relune_core::{ReviewSummary, RiskFinding, SourceLocation};
 use serde::{Deserialize, Serialize};
 
 /// Review findings and the context needed to judge them.
@@ -27,6 +27,24 @@ pub struct ReviewReport {
     /// Definitions of every table a finding names, keyed by stable id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub definitions: BTreeMap<String, DefinitionDiff>,
+    /// Which migration SQL the review read, when it was given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration_note: Option<String>,
+    /// Migration statements the findings point at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statements: Vec<ReportStatement>,
+}
+
+/// A migration statement a finding points at.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReportStatement {
+    /// Where the statement is written.
+    #[serde(flatten)]
+    pub location: SourceLocation,
+    /// Statement text.
+    pub sql: String,
+    /// Whether it runs inside a transaction block.
+    pub in_transaction: bool,
 }
 
 /// One finding with the reasoning the viewer shows next to it.

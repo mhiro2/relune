@@ -219,6 +219,41 @@ describe('review panel', () => {
     expect(findingItems()[0]?.classList.contains('selected')).toBe(false);
   });
 
+  it('shows how the migration runs the change and the SQL behind it', async () => {
+    await loadPanel({
+      ...REPORT,
+      migration_note: 'Migration SQL: 1 file(s), 2 statement(s); transactions: explicit',
+      statements: [
+        {
+          file: '001.sql',
+          line: 3,
+          sql: 'CREATE INDEX CONCURRENTLY idx ON users (email)',
+          in_transaction: true,
+        },
+      ],
+      findings: [
+        finding({
+          rule_id: 'risk/add-index-on-large-table',
+          severity: 'caution',
+          sources: [{ file: '001.sql', line: 3 }],
+          execution: { verdict: 'confirmed', detail: 'Runs inside a transaction block.' },
+        }),
+      ],
+    });
+    expect(document.getElementById('review-dialect')?.textContent).toContain('Migration SQL: 1');
+    findingItems()[0]?.querySelector<HTMLButtonElement>('.review-finding-toggle')?.click();
+    const execution = document.querySelector('.review-execution');
+    expect(execution?.className).toContain('review-execution-confirmed');
+    expect(execution?.textContent).toBe('confirmedRuns inside a transaction block.');
+    expect(document.querySelector('.review-source-location')?.textContent).toBe('001.sql:3');
+    expect(document.querySelector('.review-source-transaction')?.textContent).toBe(
+      'in transaction',
+    );
+    expect(document.querySelector('.review-source-sql')?.textContent).toBe(
+      'CREATE INDEX CONCURRENTLY idx ON users (email)',
+    );
+  });
+
   it('says so when there are no findings', async () => {
     await loadPanel({
       ...REPORT,

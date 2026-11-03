@@ -84,6 +84,8 @@ These inputs are read only when `mode: review`. They are ignored in `diff` mode.
 | `rules` | `""` | Newline-separated rule ids. Each non-empty line becomes `--rules <id>` (repeatable). Both `risk/<id>` and the bare short form are accepted. |
 | `except-rules` | `""` | Newline-separated rule ids to suppress. Each line becomes `--except-rule <id>` (the action input is plural for YAML readability; the CLI flag is singular and repeatable). |
 | `except-tables` | `""` | Newline-separated table glob patterns to suppress (`*`, `?`, `[...]`). Each line becomes `--except-table <pattern>`. |
+| `migrations` | `""` | Newline-separated migration SQL files that turn `before` into `after`, in execution order. Each line becomes `--migration <file>`. Renames then line up the two schemas, findings point at the statements that make each change, and on PostgreSQL the way they run is judged (for example `CREATE INDEX CONCURRENTLY`, or `NOT VALID` followed by `VALIDATE CONSTRAINT`). |
+| `migration-transaction` | `""` | `explicit` (only `BEGIN` / `COMMIT` in the SQL open transactions) or `per-file` (the migration tool wraps each file in one transaction). Empty keeps the CLI default, `explicit`. |
 | `fail-on-blocking` | `"false"` | When `"true"`, the action exits non-zero whenever blocking findings are detected. Default keeps the workflow running so a follow-up step can post a PR comment first. |
 
 ### Output paths
@@ -231,12 +233,11 @@ read `relune.toml`, so `[review.severity_overrides]` only applies when you invok
 yourself).
 
 > [!NOTE]
-> **Lock-risk caution rules read schema state, not migration SQL.**
-> Lock-risk caution rules are based on **schema state-change diff**, not on the migration
-> SQL itself. They flag a state change that — if executed naively — would acquire a
-> problematic lock; they **do not** read your migration script and cannot detect that
-> you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a
-> "make sure you used the safe variant" reminder.
+> **Without `migrations`, lock-risk caution rules read schema state only.**
+> They flag a state change that — if executed naively — would acquire a problematic lock,
+> and cannot tell that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Pass
+> the migration files through `migrations` so PostgreSQL migrations are judged by how they
+> actually run (see [Migration SQL](../docs/cli-reference.md#migration-sql)).
 
 ---
 

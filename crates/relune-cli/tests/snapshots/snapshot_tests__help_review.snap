@@ -58,6 +58,18 @@ Options:
           - mysql:    `MySQL` dialect
           - sqlite:   `SQLite` dialect
 
+      --migration <FILE>
+          Migration SQL that turns before into after (can be repeated, in execution order). Renames
+          line up the two schemas, findings point at the statements that make each change, and on
+          postgres the way they run is judged (e.g. CREATE INDEX CONCURRENTLY, NOT VALID + VALIDATE)
+
+      --migration-transaction <MIGRATION_TRANSACTION>
+          How the migration tool wraps each migration file in a transaction
+
+          Possible values:
+          - explicit: Only BEGIN/COMMIT in the SQL open transaction blocks
+          - per-file: The migration tool runs each file inside one transaction
+
   -f, --format <FORMAT>
           Output format. Defaults to `text` after config merge
 

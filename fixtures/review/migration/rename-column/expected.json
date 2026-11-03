@@ -1,0 +1,17 @@
+[
+  {
+    "column_name": "full_name",
+    "message": "Column users.name is renamed to full_name (migrations/001_rename.sql:1). Its data is kept, but queries and application code that still use name fail.",
+    "mitigation": "Ship code that reads the new name first, or keep the old name available (a view or generated column) until every reader has moved.",
+    "rule_id": "risk/rename-column",
+    "severity": "warning",
+    "sources": [
+      {
+        "file": "migrations/001_rename.sql",
+        "line": 1
+      }
+    ],
+    "table_id": "users",
+    "table_name": "users"
+  }
+]

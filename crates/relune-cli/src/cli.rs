@@ -885,6 +885,17 @@ pub struct ReviewArgs {
     #[arg(long = "dialect", value_enum)]
     pub dialect: Option<DialectArg>,
 
+    /// Migration SQL that turns before into after (can be repeated, in
+    /// execution order). Renames line up the two schemas, findings point at
+    /// the statements that make each change, and on postgres the way they
+    /// run is judged (e.g. CREATE INDEX CONCURRENTLY, NOT VALID + VALIDATE).
+    #[arg(long = "migration", value_name = "FILE")]
+    pub migrations: Vec<PathBuf>,
+
+    /// How the migration tool wraps each migration file in a transaction.
+    #[arg(long = "migration-transaction", value_enum)]
+    pub migration_transaction: Option<MigrationTransactionArg>,
+
     /// Output format. Defaults to `text` after config merge.
     #[arg(short = 'f', long = "format", value_enum)]
     pub format: Option<ReviewFormat>,
@@ -957,6 +968,26 @@ pub enum ReviewFormat {
     Json,
     /// Self-contained HTML report: the diff diagram with a findings panel.
     Html,
+}
+
+/// How migration files are wrapped in transactions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MigrationTransactionArg {
+    /// Only BEGIN/COMMIT in the SQL open transaction blocks.
+    #[default]
+    Explicit,
+    /// The migration tool runs each file inside one transaction.
+    PerFile,
+}
+
+impl From<MigrationTransactionArg> for relune_core::TransactionMode {
+    fn from(value: MigrationTransactionArg) -> Self {
+        match value {
+            MigrationTransactionArg::Explicit => Self::Explicit,
+            MigrationTransactionArg::PerFile => Self::PerFile,
+        }
+    }
 }
 
 /// Severity level for review --deny option.

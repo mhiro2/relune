@@ -2822,6 +2822,81 @@ mod review_tests {
     }
 
     #[test]
+    fn review_reads_migration_sql_in_order() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let first = temp.path().join("001_add_fk.sql");
+        let second = temp.path().join("002_validate_fk.sql");
+        fs::write(
+            &first,
+            "ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;",
+        )
+        .unwrap();
+        fs::write(
+            &second,
+            "ALTER TABLE orders VALIDATE CONSTRAINT orders_user_fk;",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("review")
+            .arg("--dialect")
+            .arg("postgres")
+            .arg("--before-sql-text")
+            .arg(
+                "CREATE TABLE users (id BIGINT PRIMARY KEY);
+                 CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT);
+                 CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            )
+            .arg("--after-sql-text")
+            .arg(
+                "CREATE TABLE users (id BIGINT PRIMARY KEY);
+                 CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT,
+                   CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id));
+                 CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            )
+            .arg("--migration")
+            .arg(&first)
+            .arg("--migration")
+            .arg(&second)
+            .arg("--deny")
+            .arg("caution")
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "a validated NOT VALID foreign key should not reach caution: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let finding = &report["findings"][0];
+        assert_eq!(finding["rule_id"], "risk/add-fk-on-existing");
+        assert_eq!(finding["severity"], "info");
+        assert_eq!(finding["execution"]["verdict"], "mitigated");
+        assert_eq!(report["migration"]["statements"], 2);
+        assert_eq!(report["migration"]["transaction_mode"], "explicit");
+    }
+
+    #[test]
+    fn review_rejects_a_missing_migration_file() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("--migration")
+            .arg("does-not-exist.sql")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Failed to read migration file"));
+    }
+
+    #[test]
     fn review_list_rules_rejects_html_format() {
         let output = relune()
             .arg("review")
@@ -3014,6 +3089,11 @@ mod review_tests {
             ("risk/add-fk-on-existing", "caution"),
             ("risk/alter-column-type", "caution"),
             ("risk/rewrite-table", "caution"),
+            ("risk/concurrently-in-transaction", "breaking"),
+            ("risk/set-not-null-scan", "caution"),
+            ("risk/constraint-not-validated", "info"),
+            ("risk/rename-column", "warning"),
+            ("risk/rename-table", "warning"),
         ];
         expected.sort_unstable();
         assert_eq!(listed, expected, "unexpected rule listing:\n{stdout}");
@@ -3038,7 +3118,7 @@ mod review_tests {
         let entries = parsed
             .as_array()
             .expect("--list-rules JSON should be an array");
-        assert_eq!(entries.len(), 16, "expected metadata for every review rule");
+        assert_eq!(entries.len(), 21, "expected metadata for every review rule");
         let first = &entries[0];
         assert_eq!(first["rule_id"], "risk/drop-column");
         assert_eq!(first["default_severity"], "breaking");
