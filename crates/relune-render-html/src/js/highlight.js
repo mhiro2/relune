@@ -287,6 +287,7 @@
       return [];
     };
     return {
+      markColumns,
       clear() {
         for (const element of touched) {
           element.classList.remove(...HIGHLIGHT_CLASSES);
@@ -686,6 +687,7 @@
       hoveredNode: null,
       selectedNode: null,
       selectedEdge: null,
+      emphasizedColumns: [],
       traversalDepth: 1,
       tableById,
       inboundMap,
@@ -928,6 +930,7 @@
             state.traversalDepth
           );
           painter.applySelected(highlight);
+          painter.markColumns(state.selectedNode, state.emphasizedColumns);
           renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, (edge) => {
             selectRelation(edge, true);
           });
@@ -958,11 +961,12 @@
       };
       const lineKeys = relationKeys(state.edges);
       const selectedRelationKey = () => state.selectedEdge === null ? null : lineKeys[state.selectedEdge] ?? null;
-      const setSelectedNode = (tableId) => {
+      const setSelectedNode = (tableId, columns = []) => {
         const previous = state.selectedNode;
         const hadRelation = state.selectedEdge !== null;
         state.selectedNode = tableId;
         state.selectedEdge = null;
+        state.emphasizedColumns = tableId === null ? [] : [...columns];
         state.hoveredNode = null;
         renderInteraction();
         if (hadRelation) emitViewerEvent("relune:relation-cleared", void 0);
@@ -981,6 +985,7 @@
         const previous = state.selectedEdge;
         state.selectedNode = null;
         state.selectedEdge = edgeIndex;
+        state.emphasizedColumns = [];
         state.hoveredNode = null;
         relationOrigin = null;
         renderInteraction();
@@ -1167,7 +1172,13 @@
           setSelectedEdge(index);
           return true;
         },
-        getSelectedRelation: selectedRelationKey
+        getSelectedRelation: selectedRelationKey,
+        focus(nodeId, columns) {
+          if (findNode(nodeId) === void 0) return false;
+          setSelectedNode(nodeId, columns);
+          centerNodeInViewport(nodeId);
+          return true;
+        }
       };
       markViewerModuleReady("selection");
       renderInteraction();

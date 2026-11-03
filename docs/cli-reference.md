@@ -319,8 +319,9 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 
 | Option | Description |
 |--------|-------------|
-| `-f`, `--format text\|markdown\|json` | Output format (default `text`) |
+| `-f`, `--format text\|markdown\|json\|html` | Output format (default `text`) |
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
+| `--stdout` | Explicitly allow the raw HTML report on interactive stdout |
 | `--dialect` | Drives both SQL parsing and review rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree, and stays inactive (with a `REVIEW002` warning) when they disagree. |
 | `--rules <RULE>` | Repeatable; run only these rules (accepts `risk/<id>` or bare `<id>`) |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set |
@@ -369,6 +370,8 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers sixteen 
 
 Review only sees what the parser modeled. When an input produced no schema objects (`PARSE004`), or the parser skipped constructs it does not support (`PARSE002`, e.g. an unsupported `ALTER TABLE` form), the text and markdown reports print a "Review coverage is incomplete" warning above the findings, and the JSON report records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`). A run with no findings is then not evidence that the migration is safe. `--deny` only looks at findings, so add `--fail-on-warning` (or `[review] fail_on_warning = true`) to make CI fail on these warnings too. When both apply, `--deny` takes precedence (exit `10`).
 
+`--format html` writes a self-contained review report: the same diagram as `relune diff --format html` (drawn with the `[diff]` theme, layout, edge style, direction, density, grouping, and legend settings) with a **Review** panel in the sidebar. The panel lists the findings most severe first, with chips to show or hide each severity, and notes what the review could not evaluate (incomplete input coverage, findings on excepted tables). Choosing a finding (click, or `J` / `K` to step through them) selects its table, marks the columns it is about, centers the diagram on it, and opens its reasoning: the finding, why the rule fires, the table definition before and after the change as a line diff with the lines the finding is about marked, the affected tables (each one selects that table on the diagram), and what to do. `R` opens or closes the panel. The report needs no server, so the same file works as a CI artifact or a local review. Without `-o`, an interactive terminal requires `--stdout`. The JSON written by `--emit-summary` is unchanged.
+
 > [!NOTE]
 > **Lock-risk caution rules read schema state, not migration SQL.**
 > Lock-risk caution rules are based on **schema state-change diff**, not on the migration SQL itself. They flag a state change that — if executed naively — would acquire a problematic lock; they **do not** read your migration script and cannot detect that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder.
@@ -377,6 +380,7 @@ Review only sees what the parser modeled. When an input produced no schema objec
 relune review --before old.sql --after new.sql
 relune review --before old.sql --after new.sql --format markdown -o review.md
 relune review --before old.sql --after new.sql --format json -o review.json
+relune review --before old.sql --after new.sql --format html -o review.html
 relune review --before old.sql --after new.sql --deny breaking
 relune review --before old.sql --after new.sql --deny breaking --fail-on-warning  # also fail on skipped SQL
 relune review --before old.sql --after new.sql --except-rule fk-without-index

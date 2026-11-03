@@ -216,7 +216,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 
 | Key | Values |
 |-----|--------|
-| `format` | `text`, `markdown`, `json` |
+| `format` | `text`, `markdown`, `json`, `html` |
 | `dialect` | `auto`, `postgres`, `mysql`, `sqlite` |
 | `rules` | Array of rule IDs (`risk/<id>` or bare `<id>`); empty means "all rules" |
 | `except_rules` | Array of rule IDs to remove from the active set |
@@ -225,7 +225,7 @@ Use them with `render.viewpoint`, `export.viewpoint`, `relune render --viewpoint
 | `fail_on_warning` | Boolean; exit `3` on warning diagnostics, such as SQL the parser skipped as unsupported or an input with no schema objects |
 | `allow_invalid_schema` | Boolean; review inputs with empty or duplicate object names instead of failing |
 
-`rules`, `except_rules`, `except_tables`, and the severity overrides below also rank the risk labels of `relune diff --format svg|html`, so a diagram and `relune review` agree on the same config.
+`rules`, `except_rules`, `except_tables`, and the severity overrides below also rank the risk labels of `relune diff --format svg|html`, so a diagram and `relune review` agree on the same config. The diagram of `relune review --format html` is drawn with the `[diff]` settings `theme`, `layout`, `edge_style`, `direction`, `density`, `group_by`, and `show_legend`.
 
 `review` still requires before/after inputs on the CLI. The config file supplies defaults for `--format`, `--dialect`, `--rules`, `--except-rule`, `--except-table`, `--deny`, `--fail-on-warning`, and `--allow-invalid-schema`. CLI flags override config values when provided, and array settings follow the same replacement rule as `lint`: any CLI values fully replace the corresponding config list.
 

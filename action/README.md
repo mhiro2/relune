@@ -72,7 +72,7 @@ instead.
 | Mode | Accepted formats |
 |------|------------------|
 | `diff` | `text`, `json`, `markdown`, `svg`, `html` |
-| `review` | `text`, `json`, `markdown` (the CLI rejects `svg` / `html`) |
+| `review` | `text`, `json`, `markdown`, `html` (the CLI rejects `svg`) |
 
 ### Review-only
 
@@ -100,6 +100,7 @@ When `output-path` is omitted, the action derives a default from `mode` and `for
 | `review` | `markdown` | `relune-review.md` |
 | `review` | `json` | `relune-review.json` |
 | `review` | `text` | `relune-review.txt` |
+| `review` | `html` | `relune-review.html` |
 
 ---
 
@@ -300,11 +301,12 @@ with:
 
 `dialect` applies to both `diff` and `review`.
 
-### `format: svg` or `format: html` rejected in review mode
+### `format: svg` rejected in review mode
 
-The review CLI does not produce visual output. Use `markdown` (default), `text`, or
-`json`. The action does not validate `format` itself — the CLI returns a usage error
-that the action surfaces verbatim.
+The review CLI has no SVG output. Use `markdown` (default), `text`, `json`, or `html`
+(a self-contained report whose findings panel is linked to the diff diagram; upload it
+as a workflow artifact). The action does not validate `format` itself — the CLI returns
+a usage error that the action surfaces verbatim.
 
 ### `has-findings` is `"true"` but `has-blocking-findings` is `"false"`
 

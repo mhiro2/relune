@@ -893,6 +893,10 @@ pub struct ReviewArgs {
     #[arg(short = 'o', long = "out", value_name = "FILE")]
     pub out: Option<PathBuf>,
 
+    /// Allow the HTML report on stdout even when stdout is a terminal.
+    #[arg(long = "stdout", conflicts_with = "out")]
+    pub stdout: bool,
+
     /// Restrict execution to specific rules (can be repeated).
     #[arg(long = "rules", value_name = "RULE")]
     pub rules: Vec<String>,
@@ -951,6 +955,8 @@ pub enum ReviewFormat {
     Markdown,
     /// JSON output.
     Json,
+    /// Self-contained HTML report: the diff diagram with a findings panel.
+    Html,
 }
 
 /// Severity level for review --deny option.

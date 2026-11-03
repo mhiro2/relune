@@ -2785,6 +2785,58 @@ mod review_tests {
     }
 
     #[test]
+    fn review_html_format_writes_a_linked_report() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("review.html");
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("-f")
+            .arg("html")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review should succeed");
+        let html = fs::read_to_string(&output_path).expect("Failed to read review output");
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(html.contains(r#"id="review-panel""#));
+        let report = html
+            .split(r#"<script type="application/json" id="relune-review">"#)
+            .nth(1)
+            .and_then(|rest| rest.split("</script>").next())
+            .expect("the report embeds its findings");
+        let report: serde_json::Value =
+            serde_json::from_str(report.trim()).expect("embedded report is JSON");
+        assert!(
+            report["findings"]
+                .as_array()
+                .is_some_and(|findings| !findings.is_empty())
+        );
+        assert!(report["findings"][0]["rule_description"].is_string());
+    }
+
+    #[test]
+    fn review_list_rules_rejects_html_format() {
+        let output = relune()
+            .arg("review")
+            .arg("--list-rules")
+            .arg("--format")
+            .arg("html")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("html is not a supported format for --list-rules"));
+    }
+
+    #[test]
     fn review_uses_config_format() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");
         let config_path = temp.path().join("relune.toml");

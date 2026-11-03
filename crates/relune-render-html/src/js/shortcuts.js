@@ -69,6 +69,22 @@
             runtime.viewport?.fit();
           }
           break;
+        case "j":
+        case "J":
+        case "k":
+        case "K":
+          if (runtime.review !== void 0) {
+            event.preventDefault();
+            runtime.review.step(event.key.toLowerCase() === "j" ? 1 : -1);
+          }
+          break;
+        case "r":
+        case "R":
+          if (runtime.review !== void 0) {
+            event.preventDefault();
+            runtime.review.togglePanel();
+          }
+          break;
         case "+":
         case "=":
           event.preventDefault();

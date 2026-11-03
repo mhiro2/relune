@@ -12,9 +12,11 @@ use relune_core::{
 
 use crate::error::AppError;
 use crate::markdown;
-use crate::request::ReviewRequest;
+use crate::request::{ReviewFormat, ReviewRequest};
 use crate::result::{ReviewInputCoverage, ReviewInputs, ReviewResult};
 use crate::schema_input::{SchemaValidation, align_input_schemas, schema_from_input_checked};
+use crate::usecases::diff::render_review_diagram;
+use crate::usecases::review_report::build_review_report;
 
 /// Execute a review request.
 #[allow(clippy::needless_pass_by_value)]
@@ -80,14 +82,37 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         .deny
         .is_some_and(|threshold| core_result.summary.has_findings_at_or_above(threshold));
 
-    Ok(ReviewResult {
+    let mut result = ReviewResult {
         review: core_result,
         diagnostics,
         denied,
         requested_dialect: request.dialect,
         effective_dialect: effective.into(),
         inputs,
-    })
+        rendered: None,
+    };
+
+    if request.format == ReviewFormat::Html {
+        let report = build_review_report(
+            &result,
+            &before_schema,
+            &after_schema,
+            effective_dialect_text(&result),
+            input_coverage_notes(&result.inputs),
+        );
+        let (html, notice) = render_review_diagram(
+            &before_schema,
+            &after_schema,
+            &schema_diff,
+            &result.review.findings,
+            &request.diagram,
+            &report,
+        )?;
+        result.diagnostics.extend(notice);
+        result.rendered = Some(html);
+    }
+
+    Ok(result)
 }
 
 /// Rule settings shared by `review` and the risk labels of visual diffs.
@@ -629,6 +654,26 @@ mod tests {
             .map(|finding| finding.rule_id)
             .collect();
         assert_eq!(rule_ids, vec![ReviewRuleId::DropColumn]);
+    }
+
+    #[test]
+    fn html_review_renders_the_report_only_when_asked() {
+        let before = "CREATE TABLE users (id INT PRIMARY KEY, email TEXT);";
+        let after = "CREATE TABLE users (id INT PRIMARY KEY);";
+
+        let text = run(ReviewRequest::from_sql(before, after));
+        assert!(text.rendered.is_none());
+
+        let html = run(ReviewRequest::from_sql(before, after).with_format(ReviewFormat::Html));
+        let rendered = html
+            .rendered
+            .as_deref()
+            .expect("HTML review renders a report");
+        assert!(rendered.contains(r#"id="relune-review""#));
+        assert!(rendered.contains("risk/drop-column"));
+        assert!(rendered.contains("  email TEXT"));
+        // The JSON report stays the same shape.
+        assert!(!format_review_json(&html).unwrap().contains("rendered"));
     }
 
     #[test]

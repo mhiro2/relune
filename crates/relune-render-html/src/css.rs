@@ -2019,6 +2019,276 @@ pub(crate) fn build_css(
     )
 }
 
+/// Styles of the review findings panel, appended when a review report is
+/// embedded. Severity colors reuse the `--risk-*` tokens of the diagram.
+pub(crate) const REVIEW_CSS: &str = r"
+    /* A review report widens the sidebar for definitions and SQL. */
+    .search-panel:has(#review-panel) {
+      width: min(400px, calc(100vw - 24px));
+    }
+
+    .review-panel-body {
+      max-height: 62vh;
+      padding: 0 10px 8px;
+    }
+
+    .review-dialect,
+    .review-keys {
+      margin: 4px 4px 8px;
+      font-size: 11px;
+      opacity: 0.68;
+    }
+
+    .review-keys kbd {
+      font-family: var(--mono-font);
+      font-size: 10px;
+      padding: 0 4px;
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+    }
+
+    .review-coverage {
+      margin: 0 0 8px;
+      padding: 8px 10px;
+      border: 1px solid color-mix(in srgb, var(--risk-warning) 50%, var(--panel-border));
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .review-coverage strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .review-coverage ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+
+    .review-severity-filter {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 8px;
+    }
+
+    .review-severity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .review-severity-chip[aria-pressed='false'] {
+      opacity: 0.45;
+    }
+
+    .review-severity-chip:focus-visible,
+    .review-finding-toggle:focus-visible,
+    .review-link:focus-visible {
+      outline: 2px solid var(--selection-color);
+      outline-offset: 1px;
+    }
+
+    .review-severity-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .review-findings {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .review-finding {
+      margin-bottom: 6px;
+      border: 1px solid var(--panel-border);
+      border-left-width: 3px;
+      border-radius: 10px;
+    }
+
+    .review-finding[hidden] {
+      display: none;
+    }
+
+    .review-finding-breaking { border-left-color: var(--risk-breaking); }
+    .review-finding-caution { border-left-color: var(--risk-caution); }
+    .review-finding-warning { border-left-color: var(--risk-warning); }
+    .review-finding-info { border-left-color: var(--risk-info); }
+
+    .review-finding.selected {
+      border-color: var(--selection-color);
+      background: var(--selection-faint);
+    }
+
+    .review-finding-toggle {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 8px;
+      width: 100%;
+      padding: 7px 9px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .review-badge {
+      align-self: center;
+      padding: 1px 7px;
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .review-badge-breaking,
+    .review-severity-dot-breaking { background: var(--risk-breaking); color: var(--risk-text); }
+    .review-badge-caution,
+    .review-severity-dot-caution { background: var(--risk-caution); color: var(--risk-text); }
+    .review-badge-warning,
+    .review-severity-dot-warning { background: var(--risk-warning); color: var(--risk-text); }
+    .review-badge-info,
+    .review-severity-dot-info { background: var(--risk-info); color: var(--risk-text); }
+
+    .review-finding-target {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--mono-font);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .review-finding-summary {
+      grid-column: 1 / -1;
+      font-size: 12px;
+      opacity: 0.82;
+    }
+
+    .review-finding-detail {
+      padding: 0 10px 10px;
+      font-size: 12px;
+    }
+
+    .review-finding-detail[hidden] {
+      display: none;
+    }
+
+    .review-finding-detail h4 {
+      margin: 10px 0 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.6;
+    }
+
+    .review-finding-detail p {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .review-rule-id {
+      font-family: var(--mono-font);
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    .review-definition {
+      margin: 0;
+      padding: 6px 0;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel-border) 30%, transparent);
+      font-family: var(--mono-font);
+      font-size: 11px;
+      line-height: 1.55;
+      overflow-x: auto;
+    }
+
+    .review-definition-line {
+      display: block;
+      padding: 0 8px;
+      white-space: pre;
+    }
+
+    .review-definition-line::before {
+      display: inline-block;
+      width: 1.4em;
+      opacity: 0.7;
+      content: ' ';
+    }
+
+    .review-definition-line-added {
+      background: color-mix(in srgb, var(--diff-added) 16%, transparent);
+    }
+
+    .review-definition-line-added::before { content: '+'; }
+
+    .review-definition-line-removed {
+      background: color-mix(in srgb, var(--diff-removed) 16%, transparent);
+    }
+
+    .review-definition-line-removed::before { content: '\2212'; }
+
+    .review-definition-line-focus {
+      box-shadow: inset 3px 0 0 var(--selection-color);
+      font-weight: 700;
+    }
+
+    .review-definition-gap {
+      display: block;
+      padding: 0 8px;
+      opacity: 0.55;
+      font-style: italic;
+    }
+
+    .review-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .review-link {
+      padding: 2px 8px;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      background: transparent;
+      color: inherit;
+      font-family: var(--mono-font);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .review-link:hover {
+      border-color: var(--selection-color);
+    }
+
+    .review-link-role {
+      font-family: var(--ui-font);
+      opacity: 0.6;
+      margin-right: 4px;
+    }
+
+    .review-empty {
+      margin: 4px;
+      font-size: 12px;
+      opacity: 0.68;
+    }";
+
 #[cfg(test)]
 mod tests {
     use super::*;

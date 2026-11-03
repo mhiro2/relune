@@ -446,6 +446,10 @@ pub struct ReviewResult {
     /// this next to the findings rather than only in the diagnostics.
     #[serde(default)]
     pub inputs: ReviewInputs,
+    /// Self-contained HTML report, present when the request asked for HTML.
+    /// It is not part of the JSON report.
+    #[serde(skip)]
+    pub rendered: Option<String>,
 }
 
 /// Parse coverage of the before/after review inputs.
