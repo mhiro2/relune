@@ -1286,6 +1286,61 @@ mod tests {
     }
 
     #[test]
+    fn constraint_identity_and_table_reuse_do_not_borrow_evidence() {
+        use relune_core::ExecutionVerdict::{Confirmed, Unverified};
+
+        let mixed = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, a INT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, a INT,
+                CONSTRAINT positive_id CHECK (id > 0), CHECK (a > 0));",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CONSTRAINT positive_id CHECK (id > 0), ADD CHECK (a > 0) NOT VALID;
+                 ALTER TABLE t VALIDATE CONSTRAINT t_a_check;",
+            )],
+        );
+        let unnamed = mixed
+            .review
+            .findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting && f.message.contains("a > 0"))
+            .expect("unnamed check finding");
+        assert_eq!(unnamed.execution.as_ref().unwrap().verdict, Unverified);
+
+        let dropped_unnamed_proof = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT NOT NULL);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CHECK (email IS NOT NULL);
+                 ALTER TABLE t DROP CONSTRAINT t_email_check;
+                 ALTER TABLE t ALTER COLUMN email SET NOT NULL;",
+            )],
+        );
+        assert!(rule_ids(&dropped_unnamed_proof).contains(&ReviewRuleId::SetNotNullScan));
+
+        let reused = migration_review(
+            "CREATE TABLE p (id INT PRIMARY KEY);
+             CREATE TABLE a (id INT PRIMARY KEY, p_id INT);
+             CREATE TABLE b (id INT PRIMARY KEY, p_id INT);",
+            "CREATE TABLE p (id INT PRIMARY KEY);
+             CREATE TABLE b (id INT PRIMARY KEY, p_id INT,
+                CONSTRAINT fk FOREIGN KEY (p_id) REFERENCES p (id));",
+            &[(
+                "001.sql",
+                "ALTER TABLE a ADD CONSTRAINT fk FOREIGN KEY (p_id) REFERENCES p (id);
+                 ALTER TABLE b ADD CONSTRAINT fk FOREIGN KEY (p_id) REFERENCES p (id) NOT VALID;
+                 DROP TABLE b;
+                 ALTER TABLE a RENAME TO b;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&reused, ReviewRuleId::AddFkOnExisting),
+            [Some(Confirmed)]
+        );
+    }
+
+    #[test]
     fn an_index_attached_with_using_index_is_judged_by_its_build() {
         use relune_core::ExecutionVerdict::Mitigated;
 

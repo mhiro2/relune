@@ -133,24 +133,33 @@ impl<'a> Context<'a> {
     }
 
     /// The name a table written as `name` in statement `at` ends up with,
-    /// following the renames that run after it.
-    fn final_name(&self, name: &str, at: usize) -> String {
+    /// following the renames that run after it, or `None` when a later
+    /// statement drops it (a table taking its name later is another one).
+    fn final_name(&self, name: &str, at: usize) -> Option<String> {
         let mut current = name.to_string();
         for (index, operation) in self.script.operations() {
-            if let MigrationOperation::RenameTable { from, to } = operation
-                && index > at
-                && same(from, &current)
-            {
-                current.clone_from(to);
+            if index <= at {
+                continue;
+            }
+            match operation {
+                MigrationOperation::RenameTable { from, to } if same(from, &current) => {
+                    current.clone_from(to);
+                }
+                MigrationOperation::DropTable { tables }
+                    if tables.iter().any(|dropped| same(dropped, &current)) =>
+                {
+                    return None;
+                }
+                _ => {}
             }
         }
-        current
+        Some(current)
     }
 
     /// The table statement `at` names, in `schema` (whose renames are
     /// already applied). An ambiguous name resolves to nothing.
     fn resolve_in(&self, schema: &'a Schema, name: &str, at: usize) -> Option<&'a Table> {
-        find_table(schema, &self.final_name(name, at))
+        find_table(schema, &self.final_name(name, at)?)
     }
 
     /// The table statement `at` names, preferring the schema after the change.
@@ -176,10 +185,21 @@ impl<'a> Context<'a> {
             .collect()
     }
 
-    /// What is known about the validation of a constraint added `NOT VALID`
-    /// by statement `added`: `names` are the names it may have (the written
-    /// one, or the one `PostgreSQL` generates for an unnamed foreign key).
-    fn validation(&self, table: &Table, names: &[String], added: usize) -> Validation {
+    /// What is known about the validation of `operation`, a constraint
+    /// added `NOT VALID` by statement `added`.
+    fn validation(
+        &self,
+        table: &Table,
+        operation: &MigrationOperation,
+        added: usize,
+    ) -> Validation {
+        // The written name, or the one PostgreSQL generates for an unnamed
+        // foreign key.
+        let names = Self::constraint_names(table, operation);
+        let written = matches!(
+            operation,
+            MigrationOperation::AddConstraint { name: Some(_), .. }
+        );
         let validations: Vec<(usize, String)> = self
             .find(|index, operation| {
                 index > added
@@ -200,7 +220,7 @@ impl<'a> Context<'a> {
         }
         // Without a written name the validated constraint cannot be told
         // apart, so a validation of any constraint on the table may be it.
-        if !validations.is_empty() && !self.named(added) {
+        if !validations.is_empty() && !written {
             return Validation::Unknown;
         }
         Validation::None
@@ -235,19 +255,6 @@ impl<'a> Context<'a> {
                     .is_some_and(|expression| message.contains(&compact(expression))),
             }
         })
-    }
-
-    /// Whether the constraint added by statement `at` has a written name.
-    fn named(&self, at: usize) -> bool {
-        self.script.statements[at]
-            .operations
-            .iter()
-            .any(|operation| {
-                matches!(
-                    operation,
-                    MigrationOperation::AddConstraint { name: Some(_), .. }
-                )
-            })
     }
 
     /// Names a constraint added by `operation` may have.
@@ -510,8 +517,7 @@ impl<'a> Context<'a> {
             );
             return None;
         }
-        let names = Self::constraint_names(table, statements.last()?.1);
-        let validate = match self.validation(table, &names, index) {
+        let validate = match self.validation(table, statements.last()?.1, index) {
             Validation::At(validate) => Some(validate),
             Validation::None => None,
             Validation::Unknown => {
@@ -591,11 +597,7 @@ impl<'a> Context<'a> {
             );
             return None;
         }
-        let validate = match self.validation(
-            table,
-            &Self::constraint_names(table, operation),
-            index,
-        ) {
+        let validate = match self.validation(table, operation, index) {
             Validation::At(validate) => Some(validate),
             Validation::None => None,
             Validation::Unknown => {
@@ -834,19 +836,20 @@ impl<'a> Context<'a> {
             };
             let validated = !not_valid
                 || matches!(
-                    self.validation(table, &Self::constraint_names(table, operation), index),
+                    self.validation(table, operation, index),
                     Validation::At(validate) if validate < before
                 );
-            let dropped = name.as_deref().is_some_and(|name| {
-                !self
-                    .find(|at, candidate| {
-                        at > index
-                            && at <= before
-                            && matches!(candidate, MigrationOperation::DropConstraint { table: t, name: dropped }
-                                if same(dropped, name) && self.names(t, at, table))
-                    })
-                    .is_empty()
-            });
+            // An unnamed check may be the one any later DROP CONSTRAINT on
+            // the table removes.
+            let dropped = !self
+                .find(|at, candidate| {
+                    at > index
+                        && at <= before
+                        && matches!(candidate, MigrationOperation::DropConstraint { table: t, name: dropped }
+                            if name.as_deref().is_none_or(|name| same(dropped, name))
+                                && self.names(t, at, table))
+                })
+                .is_empty();
             validated && !dropped
         })
     }
@@ -866,10 +869,7 @@ impl<'a> Context<'a> {
             let Some(table) = self.resolve(name, index) else {
                 continue;
             };
-            if !matches!(
-                self.validation(table, &Self::constraint_names(table, operation), index),
-                Validation::None
-            ) {
+            if !matches!(self.validation(table, operation, index), Validation::None) {
                 continue;
             }
             let location = self.script.statements[index].location.clone();
