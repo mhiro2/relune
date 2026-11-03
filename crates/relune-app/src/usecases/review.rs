@@ -1115,6 +1115,195 @@ mod tests {
         assert_eq!(not_null.severity, ReviewSeverity::Warning);
     }
 
+    fn verdicts(
+        result: &ReviewResult,
+        rule: ReviewRuleId,
+    ) -> Vec<Option<relune_core::ExecutionVerdict>> {
+        result
+            .review
+            .findings
+            .iter()
+            .filter(|finding| finding.rule_id == rule)
+            .map(|finding| finding.execution.as_ref().map(|note| note.verdict))
+            .collect()
+    }
+
+    #[test]
+    fn a_rename_onto_a_dropped_column_still_reports_the_loss() {
+        let result = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, a TEXT, b TEXT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, b TEXT);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t DROP COLUMN b; ALTER TABLE t RENAME COLUMN a TO b;",
+            )],
+        );
+        let drop = finding(&result, ReviewRuleId::DropColumn);
+        assert_eq!(drop.column_name.as_deref(), Some("b (dropped)"));
+        assert!(rule_ids(&result).contains(&ReviewRuleId::RenameColumn));
+    }
+
+    #[test]
+    fn named_keys_are_matched_by_name_before_columns() {
+        use relune_core::ExecutionVerdict::{Confirmed, Mitigated};
+
+        let result = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, x INT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, x INT);
+             CREATE INDEX a ON t (x);
+             CREATE INDEX b ON t (x);",
+            &[(
+                "001.sql",
+                "CREATE INDEX a ON t (x);\nCREATE INDEX CONCURRENTLY b ON t (x);",
+            )],
+        );
+        let mut found = verdicts(&result, ReviewRuleId::AddIndexOnLargeTable);
+        found.sort_by_key(|verdict| verdict.map(|v| v.as_str()));
+        assert_eq!(found, [Some(Confirmed), Some(Mitigated)]);
+    }
+
+    #[test]
+    fn an_ambiguous_table_name_is_not_resolved_by_guessing() {
+        use relune_core::ExecutionVerdict::Unverified;
+
+        let result = migration_review(
+            "CREATE TABLE audit.orders (id INT PRIMARY KEY, x INT);
+             CREATE TABLE sales.orders (id INT PRIMARY KEY, x INT);",
+            "CREATE TABLE audit.orders (id INT PRIMARY KEY, x INT);
+             CREATE TABLE sales.orders (id INT PRIMARY KEY, x INT);
+             CREATE INDEX orders_x_idx ON audit.orders (x);",
+            &[(
+                "001.sql",
+                "CREATE INDEX CONCURRENTLY orders_x_idx ON orders (x);",
+            )],
+        );
+        assert_eq!(
+            verdicts(&result, ReviewRuleId::AddIndexOnLargeTable),
+            [Some(Unverified)]
+        );
+    }
+
+    #[test]
+    fn transaction_control_keeps_locks_where_postgres_keeps_them() {
+        use relune_core::ExecutionVerdict::Confirmed;
+
+        let chained = migration_review(
+            ORDERS_BEFORE,
+            ORDERS_INDEXED,
+            &[(
+                "001.sql",
+                "BEGIN; COMMIT AND CHAIN;
+                 CREATE INDEX CONCURRENTLY orders_user_id_idx ON orders (user_id); COMMIT;",
+            )],
+        );
+        assert!(rule_ids(&chained).contains(&ReviewRuleId::ConcurrentlyInTransaction));
+
+        let nested = migration_review(
+            ORDERS_INDEXED,
+            "CREATE TABLE users (id BIGINT PRIMARY KEY);
+             CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT,
+                 CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id));
+             CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            &[(
+                "001.sql",
+                "BEGIN;
+                 ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;
+                 BEGIN;
+                 ALTER TABLE orders VALIDATE CONSTRAINT orders_user_fk;
+                 COMMIT;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&nested, ReviewRuleId::AddFkOnExisting),
+            [Some(Confirmed)]
+        );
+    }
+
+    #[test]
+    fn unnamed_checks_are_judged_only_when_their_statement_is_known() {
+        use relune_core::ExecutionVerdict::{Confirmed, Unverified};
+
+        let before = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
+        let after =
+            "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT, CHECK (a > 0), CHECK (b > 0));";
+        let two = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CHECK (a > 0);\nALTER TABLE t ADD CHECK (b > 0) NOT VALID;",
+            )],
+        );
+        let checks = verdicts(&two, ReviewRuleId::AddCheckOnExisting);
+        assert!(checks.contains(&Some(Confirmed)), "{checks:?}");
+        assert!(
+            two.review
+                .findings
+                .iter()
+                .filter(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting)
+                .all(|f| f.severity == ReviewSeverity::Warning || f.message.contains("b > 0")),
+            "the validated check on a must keep its warning"
+        );
+
+        let generated = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY);",
+            "CREATE TABLE t (id INT PRIMARY KEY, CHECK (id > 0));",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CHECK (id > 0) NOT VALID;\nALTER TABLE t VALIDATE CONSTRAINT t_id_check;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&generated, ReviewRuleId::AddCheckOnExisting),
+            [Some(Unverified)]
+        );
+    }
+
+    #[test]
+    fn set_not_null_scan_needs_the_proof_in_place_and_follows_renames() {
+        let before = "CREATE TABLE t (id INT PRIMARY KEY, email TEXT);";
+        let dropped_proof = migration_review(
+            before,
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT NOT NULL);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CONSTRAINT nn CHECK (email IS NOT NULL);
+                 ALTER TABLE t DROP CONSTRAINT nn, ALTER COLUMN email SET NOT NULL;",
+            )],
+        );
+        assert!(rule_ids(&dropped_proof).contains(&ReviewRuleId::SetNotNullScan));
+
+        let renamed_later = migration_review(
+            before,
+            "CREATE TABLE u (id INT PRIMARY KEY, email TEXT NOT NULL);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ALTER COLUMN email SET NOT NULL;\nALTER TABLE t RENAME TO u;",
+            )],
+        );
+        let scan = finding(&renamed_later, ReviewRuleId::SetNotNullScan);
+        assert_eq!(scan.table_id.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn an_index_attached_with_using_index_is_judged_by_its_build() {
+        use relune_core::ExecutionVerdict::Mitigated;
+
+        let result = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT, CONSTRAINT t_email_key UNIQUE (email));",
+            &[(
+                "001.sql",
+                "CREATE UNIQUE INDEX CONCURRENTLY t_email_key ON t (email);
+                 ALTER TABLE t ADD CONSTRAINT t_email_key UNIQUE USING INDEX t_email_key;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&result, ReviewRuleId::AddIndexOnLargeTable),
+            [Some(Mitigated)]
+        );
+    }
+
     #[test]
     fn unreadable_migration_statements_are_reported_as_not_reviewed() {
         let result = migration_review(

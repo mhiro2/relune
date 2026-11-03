@@ -17,6 +17,9 @@ pub struct SourceLocation {
     pub file: String,
     /// 1-based line the statement starts on.
     pub line: usize,
+    /// 1-based column the statement starts at, telling apart statements
+    /// that share a line.
+    pub column: usize,
 }
 
 impl std::fmt::Display for SourceLocation {
@@ -281,31 +284,54 @@ pub fn split_table_name(name: &str) -> (Option<&str>, &str) {
         .map_or((None, name), |(schema, table)| (Some(schema), table))
 }
 
-/// Returns true when a table name written in migration SQL refers to `table`.
-///
-/// A qualified name must match the table's schema, unless the table is
-/// unqualified: review strips the default schema before comparing, so
-/// `public.users` in SQL names the unqualified `users`.
-#[must_use]
-pub fn names_table(name: &str, table: &Table) -> bool {
-    let (schema, bare) = split_table_name(name);
-    if !table.name.eq_ignore_ascii_case(bare) {
-        return false;
-    }
-    match (schema, table.schema_name.as_deref()) {
-        (Some(written), Some(actual)) => written.eq_ignore_ascii_case(actual),
-        (None, _) | (Some(_), None) => true,
-    }
-}
+/// Schema names review strips before comparing (`PostgreSQL` and `SQLite`).
+const DEFAULT_SCHEMAS: [&str; 2] = ["public", "main"];
 
-/// The table a migration names, preferring an exact `stable_id` match.
+/// The table a name written in migration SQL refers to, or `None` when no
+/// table, or more than one, could be meant.
+///
+/// An exact `stable_id` match wins. A name qualified with the default
+/// schema also names the unqualified table, since review strips that
+/// schema before comparing; another qualifier must match exactly. An
+/// unqualified name may still find the one qualified table of that name
+/// through the search path, but never one of several.
 #[must_use]
 pub fn find_table<'a>(schema: &'a Schema, name: &str) -> Option<&'a Table> {
-    schema
+    if let Some(table) = schema
         .tables
         .iter()
         .find(|table| table.stable_id.eq_ignore_ascii_case(name))
-        .or_else(|| schema.tables.iter().find(|table| names_table(name, table)))
+    {
+        return Some(table);
+    }
+    let (written_schema, bare) = split_table_name(name);
+    let named = |table: &&Table| table.name.eq_ignore_ascii_case(bare);
+    let candidates: Vec<&Table> = match written_schema {
+        Some(written)
+            if DEFAULT_SCHEMAS
+                .iter()
+                .any(|default| default.eq_ignore_ascii_case(written)) =>
+        {
+            schema
+                .tables
+                .iter()
+                .filter(named)
+                .filter(|table| table.schema_name.is_none())
+                .collect()
+        }
+        Some(_) => return None,
+        None => schema.tables.iter().filter(named).collect(),
+    };
+    match candidates.as_slice() {
+        [table] => Some(table),
+        _ => None,
+    }
+}
+
+/// Name given to an object that a rename replaces: the migration must have
+/// dropped it first, so it stays in the comparison as a dropped object.
+fn replaced_name(name: &str) -> String {
+    format!("{name} (dropped)")
 }
 
 fn rename_table(schema: &mut Schema, from: &str, to: &str) {
@@ -321,6 +347,18 @@ fn rename_table(schema: &mut Schema, from: &str, to: &str) {
     let old_schema = schema.tables[index].schema_name.clone();
     let (_, new_name) = split_table_name(to);
     let new_name = normalize_identifier(new_name);
+
+    // A table already holding the new name was dropped earlier in the
+    // migration; it must not merge with the renamed one.
+    let new_id = qualified_identifier(old_schema.as_deref(), &new_name);
+    if let Some(taken) = schema
+        .tables
+        .iter_mut()
+        .find(|table| table.stable_id == new_id)
+    {
+        taken.name = replaced_name(&taken.name);
+        taken.stable_id = qualified_identifier(taken.schema_name.as_deref(), &taken.name);
+    }
 
     let table = &mut schema.tables[index];
     table.name.clone_from(&new_name);
@@ -351,6 +389,24 @@ fn rename_column(schema: &mut Schema, table_name: &str, from: &str, to: &str) {
     );
     let from = normalize_identifier(from);
     let to = normalize_identifier(to);
+
+    // A column already holding the new name was dropped earlier in the
+    // migration; it stays apart so its loss is still reported.
+    if let Some(owner) = schema
+        .tables
+        .iter_mut()
+        .find(|table| table.stable_id == stable_id)
+        && owner
+            .columns
+            .iter()
+            .any(|column| column.name.eq_ignore_ascii_case(&from))
+        && let Some(taken) = owner
+            .columns
+            .iter_mut()
+            .find(|column| column.name.eq_ignore_ascii_case(&to))
+    {
+        taken.name = replaced_name(&taken.name);
+    }
     let rename = |name: &mut String| {
         if name.eq_ignore_ascii_case(&from) {
             name.clone_from(&to);
@@ -428,6 +484,7 @@ mod tests {
                 location: SourceLocation {
                     file: "001.sql".to_string(),
                     line: 1,
+                    column: 1,
                 },
                 sql: String::new(),
                 transaction: None,
@@ -511,10 +568,57 @@ mod tests {
     }
 
     #[test]
-    fn qualified_names_match_unqualified_default_schema_tables() {
-        let users = table("users", &["id"]);
-        assert!(names_table("public.users", &users));
-        assert!(names_table("users", &users));
-        assert!(!names_table("orders", &users));
+    fn table_names_resolve_without_guessing_between_schemas() {
+        let mut audit = table("orders", &["id"]);
+        audit.schema_name = Some("audit".to_string());
+        audit.stable_id = "audit.orders".to_string();
+        let mut sales = audit.clone();
+        sales.schema_name = Some("sales".to_string());
+        sales.stable_id = "sales.orders".to_string();
+        let schema = Schema {
+            tables: vec![table("users", &["id"]), audit, sales],
+            views: Vec::new(),
+            enums: Vec::new(),
+        };
+
+        assert_eq!(
+            find_table(&schema, "public.users").map(|t| t.stable_id.as_str()),
+            Some("users")
+        );
+        assert_eq!(
+            find_table(&schema, "users").map(|t| t.stable_id.as_str()),
+            Some("users")
+        );
+        assert!(find_table(&schema, "billing.users").is_none());
+        assert_eq!(
+            find_table(&schema, "audit.orders").map(|t| t.stable_id.as_str()),
+            Some("audit.orders")
+        );
+        // Two schemas hold an `orders`; the search path decides, so neither is assumed.
+        assert!(find_table(&schema, "orders").is_none());
+    }
+
+    #[test]
+    fn a_rename_onto_a_dropped_name_keeps_the_dropped_column_apart() {
+        let mut schema = schema();
+        script(vec![
+            MigrationOperation::DropColumn {
+                table: "users".to_string(),
+                column: "name".to_string(),
+            },
+            MigrationOperation::RenameColumn {
+                table: "users".to_string(),
+                from: "id".to_string(),
+                to: "name".to_string(),
+            },
+        ])
+        .apply_renames(&mut schema);
+
+        let names: Vec<&str> = schema.tables[0]
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect();
+        assert_eq!(names, ["name", "name (dropped)"]);
     }
 }

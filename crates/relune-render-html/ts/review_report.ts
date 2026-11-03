@@ -40,6 +40,7 @@ export interface ReviewFinding {
 export interface SourceLocation {
   file: string;
   line: number;
+  column: number;
 }
 
 export type ExecutionVerdict = 'mitigated' | 'confirmed' | 'unverified';
@@ -75,6 +76,11 @@ export interface ReviewReport {
 /** `file:line`, as text reports print a source location. */
 export function sourceLabel(location: SourceLocation): string {
   return `${location.file}:${location.line}`;
+}
+
+/** Identity of a statement, telling apart statements that share a line. */
+export function sourceKey(location: SourceLocation): string {
+  return `${location.file}:${location.line}:${location.column}`;
 }
 
 /** Severities from most to least severe, the order findings are listed in. */

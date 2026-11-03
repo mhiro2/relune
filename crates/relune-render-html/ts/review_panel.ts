@@ -5,12 +5,14 @@ import {
   findingColumns,
   findingTarget,
   parseReviewReport,
+  sourceKey,
   sourceLabel,
   stepFinding,
   type DefinitionDiff,
   type ReportStatement,
   type ReviewFinding,
   type ReviewReport,
+  type SourceLocation,
 } from './review_report';
 import { getViewerRuntime, persistDetailsOpen } from './viewer_api';
 
@@ -77,7 +79,7 @@ function mountReviewPanel(report: ReviewReport, elements: ReviewPanelElements): 
     elements.dialect.removeAttribute('hidden');
   }
   const statements = new Map(
-    (report.statements ?? []).map((statement) => [sourceLabel(statement), statement]),
+    (report.statements ?? []).map((statement) => [sourceKey(statement), statement]),
   );
   renderCoverage(elements.coverage, report);
 
@@ -296,7 +298,7 @@ function buildFindingItem(
 
   const sources = finding.sources ?? [];
   if (sources.length > 0) {
-    detail.append(section('Migration SQL', sourceList(sources.map(sourceLabel), statements)));
+    detail.append(section('Migration SQL', sourceList(sources, statements)));
   }
 
   if (definition !== undefined && definition.lines.length > 0) {
@@ -330,18 +332,18 @@ function buildFindingItem(
 }
 
 function sourceList(
-  labels: readonly string[],
+  sources: readonly SourceLocation[],
   statements: ReadonlyMap<string, ReportStatement>,
 ): HTMLOListElement {
   const list = document.createElement('ol');
   list.className = 'review-sources';
-  for (const label of labels) {
+  for (const source of sources) {
     const item = document.createElement('li');
     const location = document.createElement('span');
     location.className = 'review-source-location';
-    location.textContent = label;
+    location.textContent = sourceLabel(source);
     item.appendChild(location);
-    const statement = statements.get(label);
+    const statement = statements.get(sourceKey(source));
     if (statement !== undefined) {
       if (statement.in_transaction) {
         const badge = document.createElement('span');

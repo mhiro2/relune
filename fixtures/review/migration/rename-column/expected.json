@@ -7,6 +7,7 @@
     "severity": "warning",
     "sources": [
       {
+        "column": 1,
         "file": "migrations/001_rename.sql",
         "line": 1
       }

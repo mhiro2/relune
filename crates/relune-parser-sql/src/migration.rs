@@ -70,22 +70,37 @@ pub fn parse_migration(
             let operations = classify(grammar.as_ref(), &raw);
             let transaction = match mode {
                 TransactionMode::PerFile => file_transaction,
-                TransactionMode::Explicit => match operations.first() {
-                    Some(MigrationOperation::Begin) => {
+                TransactionMode::Explicit => {
+                    let ends = operations.iter().any(|operation| {
+                        matches!(
+                            operation,
+                            MigrationOperation::Commit | MigrationOperation::Rollback
+                        )
+                    });
+                    let begins = operations
+                        .iter()
+                        .any(|operation| matches!(operation, MigrationOperation::Begin));
+                    // The statement belongs to the transaction it ends.
+                    let current = if ends {
+                        open_transaction.take()
+                    } else {
+                        open_transaction
+                    };
+                    // `BEGIN` inside an open transaction only warns in
+                    // PostgreSQL; the transaction and its locks carry on.
+                    // `COMMIT AND CHAIN` starts the next one right away.
+                    if begins && open_transaction.is_none() {
                         next_transaction += 1;
                         open_transaction = Some(next_transaction);
-                        open_transaction
                     }
-                    Some(MigrationOperation::Commit | MigrationOperation::Rollback) => {
-                        open_transaction.take()
-                    }
-                    _ => open_transaction,
-                },
+                    if ends { current } else { open_transaction }
+                }
             };
             let statement = MigrationStatement {
                 location: SourceLocation {
                     file: file.name.clone(),
                     line: raw.line,
+                    column: raw.column,
                 },
                 sql: raw.sql,
                 transaction,
@@ -128,6 +143,7 @@ pub fn parse_migration(
 /// Statement text with the line it starts on and its significant tokens.
 struct RawStatement {
     line: usize,
+    column: usize,
     sql: String,
     tokens: Vec<Token>,
 }
@@ -144,6 +160,7 @@ fn split_statements(
         Err(error) => {
             return vec![RawStatement {
                 line: usize::try_from(error.location.line).unwrap_or(1).max(1),
+                column: 1,
                 sql: file.sql.trim().to_string(),
                 tokens: vec![Token::Word(sqlparser::tokenizer::Word {
                     value: format!("tokenizer error: {}", error.message),
@@ -167,6 +184,7 @@ fn split_statements(
                 if let (Some(start), Some(end)) = (start, end) {
                     statements.push(RawStatement {
                         line: usize::try_from(first.span.start.line).unwrap_or(1),
+                        column: usize::try_from(first.span.start.column).unwrap_or(1),
                         sql: file.sql[start..end.max(start)].to_string(),
                         tokens: current.iter().map(|token| token.token.clone()).collect(),
                     });
@@ -278,10 +296,20 @@ fn statement_operations(statement: &Statement) -> Vec<MigrationOperation> {
         Statement::StartTransaction { statements, .. } if statements.is_empty() => {
             vec![MigrationOperation::Begin]
         }
-        Statement::Commit { .. } => vec![MigrationOperation::Commit],
+        Statement::Commit { chain: false, .. } => vec![MigrationOperation::Commit],
+        Statement::Commit { chain: true, .. } => {
+            vec![MigrationOperation::Commit, MigrationOperation::Begin]
+        }
         Statement::Rollback {
-            savepoint: None, ..
-        } => vec![MigrationOperation::Rollback],
+            savepoint: None,
+            chain,
+        } => {
+            if *chain {
+                vec![MigrationOperation::Rollback, MigrationOperation::Begin]
+            } else {
+                vec![MigrationOperation::Rollback]
+            }
+        }
         Statement::CreateIndex(create) => vec![MigrationOperation::CreateIndex {
             table: table_name(&create.table_name),
             name: create.name.as_ref().map(table_name),
@@ -528,6 +556,44 @@ mod tests {
             }
         ));
         assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn chained_commits_and_nested_begins_keep_statements_in_a_transaction() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "BEGIN; COMMIT AND CHAIN; CREATE INDEX CONCURRENTLY a ON t (x); COMMIT;
+                 BEGIN; SELECT 1; BEGIN; SELECT 2; COMMIT; SELECT 3;",
+            )],
+            TransactionMode::Explicit,
+        );
+        let transactions: Vec<Option<usize>> = output
+            .script
+            .statements
+            .iter()
+            .map(|statement| statement.transaction)
+            .collect();
+        assert_eq!(
+            transactions,
+            [
+                Some(1),
+                Some(1),
+                Some(2),
+                Some(2),
+                Some(3),
+                Some(3),
+                Some(3),
+                Some(3),
+                Some(3),
+                None
+            ]
+        );
+        let columns: Vec<usize> = output.script.statements[..3]
+            .iter()
+            .map(|statement| statement.location.column)
+            .collect();
+        assert_eq!(columns, [1, 8, 26]);
     }
 
     #[test]

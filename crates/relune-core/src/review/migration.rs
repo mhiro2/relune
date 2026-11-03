@@ -12,9 +12,7 @@ use std::collections::HashSet;
 use super::{
     EffectiveDialect, ExecutionNote, ExecutionVerdict, ReviewRuleId, ReviewSeverity, RiskFinding,
 };
-use crate::migration::{
-    ConstraintKind, MigrationOperation, MigrationScript, find_table, names_table,
-};
+use crate::migration::{ConstraintKind, MigrationOperation, MigrationScript, find_table};
 use crate::model::{Schema, Table};
 
 /// Reconciles `findings` with the migration `script` that produced the
@@ -91,13 +89,28 @@ fn note(finding: &mut RiskFinding, verdict: ExecutionVerdict, detail: String) {
     finding.execution = Some(ExecutionNote { verdict, detail });
 }
 
+/// SQL text without whitespace, parentheses, or double quotes, lowercased,
+/// so differently formatted copies of one expression compare equal.
+fn compact(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '(' && *ch != ')' && *ch != '"')
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 /// A `CHECK` expression that only says `column IS NOT NULL`.
 fn is_not_null_check(expression: &str, column: &str) -> bool {
-    let compact: String = expression
-        .chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '(' && *ch != ')' && *ch != '"')
-        .collect();
-    compact == format!("{}isnotnull", column.to_ascii_lowercase())
+    compact(expression) == format!("{}isnotnull", column.to_ascii_lowercase())
+}
+
+/// What a migration shows about validating a `NOT VALID` constraint.
+enum Validation {
+    /// Validated by this statement.
+    At(usize),
+    /// Never validated.
+    None,
+    /// An unnamed constraint and a validation that may or may not be it.
+    Unknown,
 }
 
 impl<'a> Context<'a> {
@@ -119,38 +132,138 @@ impl<'a> Context<'a> {
             .find(|table| table.stable_id == id)
     }
 
-    /// Whether a table name written in the SQL refers to `table`, either
-    /// directly or under a name the script later renames to it.
-    fn names(&self, name: &str, table: &Table) -> bool {
-        if names_table(name, table) {
-            return true;
+    /// The name a table written as `name` in statement `at` ends up with,
+    /// following the renames that run after it.
+    fn final_name(&self, name: &str, at: usize) -> String {
+        let mut current = name.to_string();
+        for (index, operation) in self.script.operations() {
+            if let MigrationOperation::RenameTable { from, to } = operation
+                && index > at
+                && same(from, &current)
+            {
+                current.clone_from(to);
+            }
         }
-        self.script.operations().any(|(_, operation)| {
-            matches!(operation, MigrationOperation::RenameTable { from, to }
-                if same(from, name) && names_table(to, table))
-        })
+        current
+    }
+
+    /// The table statement `at` names, in `schema` (whose renames are
+    /// already applied). An ambiguous name resolves to nothing.
+    fn resolve_in(&self, schema: &'a Schema, name: &str, at: usize) -> Option<&'a Table> {
+        find_table(schema, &self.final_name(name, at))
+    }
+
+    /// The table statement `at` names, preferring the schema after the change.
+    fn resolve(&self, name: &str, at: usize) -> Option<&'a Table> {
+        self.resolve_in(self.after, name, at)
+            .or_else(|| self.resolve_in(self.before, name, at))
+    }
+
+    /// Whether `name` in statement `at` refers to `table`.
+    fn names(&self, name: &str, at: usize, table: &Table) -> bool {
+        self.resolve(name, at)
+            .is_some_and(|resolved| resolved.stable_id == table.stable_id)
     }
 
     /// Statements whose operation matches, in execution order.
     fn find(
         &self,
-        matches: impl Fn(&MigrationOperation) -> bool,
+        matches: impl Fn(usize, &MigrationOperation) -> bool,
     ) -> Vec<(usize, &'a MigrationOperation)> {
         self.script
             .operations()
-            .filter(|(_, operation)| matches(operation))
+            .filter(|(index, operation)| matches(*index, operation))
             .collect()
     }
 
-    /// `VALIDATE CONSTRAINT` of `name` on `table` after statement `after`.
-    fn validation(&self, table: &Table, name: &str, after: usize) -> Option<usize> {
-        self.find(|operation| {
-            matches!(operation, MigrationOperation::ValidateConstraint { table: t, name: n }
-                if same(n, name) && self.names(t, table))
+    /// What is known about the validation of a constraint added `NOT VALID`
+    /// by statement `added`: `names` are the names it may have (the written
+    /// one, or the one `PostgreSQL` generates for an unnamed foreign key).
+    fn validation(&self, table: &Table, names: &[String], added: usize) -> Validation {
+        let validations: Vec<(usize, String)> = self
+            .find(|index, operation| {
+                index > added
+                    && matches!(operation, MigrationOperation::ValidateConstraint { table: t, .. }
+                        if self.names(t, index, table))
+            })
+            .into_iter()
+            .filter_map(|(index, operation)| match operation {
+                MigrationOperation::ValidateConstraint { name, .. } => Some((index, name.clone())),
+                _ => None,
+            })
+            .collect();
+        if let Some((index, _)) = validations
+            .iter()
+            .find(|(_, name)| names.iter().any(|candidate| same(candidate, name)))
+        {
+            return Validation::At(*index);
+        }
+        // Without a written name the validated constraint cannot be told
+        // apart, so a validation of any constraint on the table may be it.
+        if !validations.is_empty() && !self.named(added) {
+            return Validation::Unknown;
+        }
+        Validation::None
+    }
+
+    /// `ADD ... CHECK` statements that add the constraint a finding names.
+    /// An unnamed finding is paired by the expression its message quotes.
+    fn check_statements(
+        &self,
+        finding: &RiskFinding,
+        table: &Table,
+    ) -> Vec<(usize, &'a MigrationOperation)> {
+        let message = compact(&finding.message);
+        self.find(|at, operation| {
+            let MigrationOperation::AddConstraint {
+                table: t,
+                name,
+                kind: ConstraintKind::Check,
+                expression,
+                ..
+            } = operation
+            else {
+                return false;
+            };
+            if !self.names(t, at, table) {
+                return false;
+            }
+            match (finding.constraint_name.as_deref(), name.as_deref()) {
+                (Some(wanted), Some(name)) => same(wanted, name),
+                _ => expression
+                    .as_deref()
+                    .is_some_and(|expression| message.contains(&compact(expression))),
+            }
         })
-        .into_iter()
-        .map(|(index, _)| index)
-        .find(|index| *index > after)
+    }
+
+    /// Whether the constraint added by statement `at` has a written name.
+    fn named(&self, at: usize) -> bool {
+        self.script.statements[at]
+            .operations
+            .iter()
+            .any(|operation| {
+                matches!(
+                    operation,
+                    MigrationOperation::AddConstraint { name: Some(_), .. }
+                )
+            })
+    }
+
+    /// Names a constraint added by `operation` may have.
+    fn constraint_names(table: &Table, operation: &MigrationOperation) -> Vec<String> {
+        match operation {
+            MigrationOperation::AddConstraint {
+                name: Some(name), ..
+            } => vec![name.clone()],
+            MigrationOperation::AddConstraint {
+                name: None,
+                kind: ConstraintKind::ForeignKey,
+                columns,
+                ..
+            } => vec![format!("{}_{}_fkey", table.name, columns.join("_"))],
+            _ => Vec::new(),
+        }
     }
 
     // One match arm per rule that names its statements; splitting it would
@@ -165,16 +278,19 @@ impl<'a> Context<'a> {
         } else {
             finding.columns.clone()
         };
-        let names_key = |name: &Option<String>, op_columns: &[String]| {
-            let named = finding
-                .constraint_name
-                .iter()
-                .chain(&finding.fk_name)
-                .any(|wanted| name.as_deref().is_some_and(|name| same(name, wanted)));
-            named || (!columns.is_empty() && same_columns(op_columns, &columns))
+        let wanted: Vec<&String> = finding
+            .constraint_name
+            .iter()
+            .chain(&finding.fk_name)
+            .collect();
+        // Two names decide on their own; columns only pair a key when one
+        // side has no name.
+        let names_key = |name: &Option<String>, op_columns: &[String]| match name {
+            Some(name) if !wanted.is_empty() => wanted.iter().any(|wanted| same(name, wanted)),
+            _ => !columns.is_empty() && same_columns(op_columns, &columns),
         };
-        let on_column = |op_table: &str, column: &str| {
-            self.names(op_table, table)
+        let on_column = |op_table: &str, at: usize, column: &str| {
+            self.names(op_table, at, table)
                 && finding
                     .column_name
                     .as_deref()
@@ -182,7 +298,7 @@ impl<'a> Context<'a> {
         };
 
         let index_builds = || {
-            self.find(|operation| match operation {
+            self.find(|at, operation| match operation {
                 MigrationOperation::CreateIndex {
                     table: t,
                     name,
@@ -195,36 +311,40 @@ impl<'a> Context<'a> {
                     kind: ConstraintKind::Unique | ConstraintKind::PrimaryKey,
                     columns,
                     ..
-                } => self.names(t, table) && names_key(name, columns),
+                } => self.names(t, at, table) && names_key(name, columns),
                 _ => false,
             })
         };
         let foreign_keys = || {
-            self.find(|operation| {
+            self.find(|at, operation| {
                 matches!(operation, MigrationOperation::AddConstraint {
                     table: t, name, kind: ConstraintKind::ForeignKey, columns, ..
-                } if self.names(t, table) && names_key(name, columns))
+                } if self.names(t, at, table) && names_key(name, columns))
             })
         };
 
         let statements: Vec<(usize, &MigrationOperation)> = match finding.rule_id {
             ReviewRuleId::DropColumn
             | ReviewRuleId::DropColumnReferenced
-            | ReviewRuleId::RewriteTable => self.find(|operation| {
+            | ReviewRuleId::RewriteTable => self.find(|at, operation| {
                 matches!(operation, MigrationOperation::DropColumn { table: t, column }
-                    if on_column(t, column))
+                    if on_column(t, at, column))
             }),
-            ReviewRuleId::DropTable | ReviewRuleId::DropTableReferenced => self.find(|operation| {
-                matches!(operation, MigrationOperation::DropTable { tables }
-                    if tables.iter().any(|name| self.names(name, table)))
-            }),
-            ReviewRuleId::TypeNarrow | ReviewRuleId::AlterColumnType => self.find(|operation| {
-                matches!(operation, MigrationOperation::AlterColumnType { table: t, column }
-                    if on_column(t, column))
-            }),
-            ReviewRuleId::AddNotNullOnExisting => self.find(|operation| match operation {
+            ReviewRuleId::DropTable | ReviewRuleId::DropTableReferenced => {
+                self.find(|at, operation| {
+                    matches!(operation, MigrationOperation::DropTable { tables }
+                        if tables.iter().any(|name| self.names(name, at, table)))
+                })
+            }
+            ReviewRuleId::TypeNarrow | ReviewRuleId::AlterColumnType => {
+                self.find(|at, operation| {
+                    matches!(operation, MigrationOperation::AlterColumnType { table: t, column }
+                        if on_column(t, at, column))
+                })
+            }
+            ReviewRuleId::AddNotNullOnExisting => self.find(|at, operation| match operation {
                 MigrationOperation::SetNotNull { table: t, column }
-                | MigrationOperation::AddColumn { table: t, column } => on_column(t, column),
+                | MigrationOperation::AddColumn { table: t, column } => on_column(t, at, column),
                 _ => false,
             }),
             ReviewRuleId::AddUniqueOnExisting | ReviewRuleId::AddIndexOnLargeTable => {
@@ -233,17 +353,10 @@ impl<'a> Context<'a> {
             ReviewRuleId::AddFkOnExisting
             | ReviewRuleId::FkWithoutIndex
             | ReviewRuleId::AddCascadeDelete => foreign_keys(),
-            ReviewRuleId::AddCheckOnExisting => self.find(|operation| {
-                matches!(operation, MigrationOperation::AddConstraint {
-                    table: t, name, kind: ConstraintKind::Check, ..
-                } if self.names(t, table)
-                    && finding.constraint_name.as_deref().is_none_or(|wanted| {
-                        name.as_deref().is_some_and(|name| same(name, wanted))
-                    }))
-            }),
-            ReviewRuleId::DropPkOrUnique => self.find(|operation| match operation {
+            ReviewRuleId::AddCheckOnExisting => self.check_statements(finding, table),
+            ReviewRuleId::DropPkOrUnique => self.find(|at, operation| match operation {
                 MigrationOperation::DropConstraint { table: t, name } => {
-                    self.names(t, table)
+                    self.names(t, at, table)
                         && finding
                             .constraint_name
                             .as_deref()
@@ -253,7 +366,7 @@ impl<'a> Context<'a> {
                     .constraint_name
                     .as_deref()
                     .is_some_and(|wanted| names.iter().any(|name| same(name, wanted))),
-                MigrationOperation::DropColumn { table: t, column } => on_column(t, column),
+                MigrationOperation::DropColumn { table: t, column } => on_column(t, at, column),
                 _ => false,
             }),
             _ => Vec::new(),
@@ -292,7 +405,7 @@ impl<'a> Context<'a> {
         table: &Table,
         statements: &[(usize, &MigrationOperation)],
     ) {
-        let Some(&(index, operation)) = statements.last() else {
+        let Some(&(mut index, mut operation)) = statements.last() else {
             note(
                 finding,
                 ExecutionVerdict::Unverified,
@@ -301,6 +414,34 @@ impl<'a> Context<'a> {
             );
             return;
         };
+        // `ADD CONSTRAINT ... USING INDEX` attaches an index built earlier;
+        // that build decides the lock.
+        if let MigrationOperation::AddConstraint {
+            using_index: Some(used),
+            ..
+        } = operation
+        {
+            let Some(&(build_at, build)) = self
+                .find(|at, candidate| {
+                    at < index
+                        && matches!(candidate, MigrationOperation::CreateIndex { name: Some(name), table: t, .. }
+                            if same(name, used) && self.names(t, at, table))
+                })
+                .last()
+            else {
+                note(
+                    finding,
+                    ExecutionVerdict::Unverified,
+                    format!(
+                        "ADD CONSTRAINT ... USING INDEX {used} ({}) attaches an index no statement here builds, so how it was built is unknown.",
+                        self.location(index)
+                    ),
+                );
+                return;
+            };
+            index = build_at;
+            operation = build;
+        }
         let at = self.location(index);
         match operation {
             MigrationOperation::CreateIndex {
@@ -347,12 +488,7 @@ impl<'a> Context<'a> {
         table: &Table,
         statements: &[(usize, &MigrationOperation)],
     ) -> Option<usize> {
-        let Some(&(
-            index,
-            MigrationOperation::AddConstraint {
-                name, not_valid, ..
-            },
-        )) = statements.last()
+        let Some(&(index, MigrationOperation::AddConstraint { not_valid, .. })) = statements.last()
         else {
             note(
                 finding,
@@ -374,9 +510,22 @@ impl<'a> Context<'a> {
             );
             return None;
         }
-        let validate = name
-            .as_deref()
-            .and_then(|name| self.validation(table, name, index));
+        let names = Self::constraint_names(table, statements.last()?.1);
+        let validate = match self.validation(table, &names, index) {
+            Validation::At(validate) => Some(validate),
+            Validation::None => None,
+            Validation::Unknown => {
+                note(
+                    finding,
+                    ExecutionVerdict::Unverified,
+                    format!(
+                        "Added NOT VALID ({at}) without a name, and a later VALIDATE CONSTRAINT on {} may validate it, so whether existing rows are checked under the same lock is unknown. Name the constraint.",
+                        table.qualified_name()
+                    ),
+                );
+                return None;
+            }
+        };
         match validate {
             Some(validate)
                 if self.transaction(validate).is_some()
@@ -415,12 +564,19 @@ impl<'a> Context<'a> {
         table: &Table,
         statements: &[(usize, &MigrationOperation)],
     ) -> Option<usize> {
-        let &(
-            index,
-            MigrationOperation::AddConstraint {
-                name, not_valid, ..
-            },
-        ) = statements.last()?
+        if statements.len() > 1 {
+            note(
+                finding,
+                ExecutionVerdict::Unverified,
+                format!(
+                    "Several statements may add this CHECK to {}, so which one does, and how, is unknown.",
+                    table.qualified_name()
+                ),
+            );
+            return None;
+        }
+        let &(index, operation @ MigrationOperation::AddConstraint { not_valid, .. }) =
+            statements.last()?
         else {
             return None;
         };
@@ -435,9 +591,25 @@ impl<'a> Context<'a> {
             );
             return None;
         }
-        let validate = name
-            .as_deref()
-            .and_then(|name| self.validation(table, name, index));
+        let validate = match self.validation(
+            table,
+            &Self::constraint_names(table, operation),
+            index,
+        ) {
+            Validation::At(validate) => Some(validate),
+            Validation::None => None,
+            Validation::Unknown => {
+                note(
+                    finding,
+                    ExecutionVerdict::Unverified,
+                    format!(
+                        "Added NOT VALID ({at}) without a name, and a later VALIDATE CONSTRAINT on {} may validate it, so whether existing rows are checked is unknown. Name the constraint.",
+                        table.qualified_name()
+                    ),
+                );
+                return None;
+            }
+        };
         match validate {
             Some(validate) => note(
                 finding,
@@ -472,8 +644,8 @@ impl<'a> Context<'a> {
         };
         let at = self.location(index);
         let update = self
-            .find(|operation| {
-                matches!(operation, MigrationOperation::Update { table: t } if self.names(t, table))
+            .find(|at, operation| {
+                matches!(operation, MigrationOperation::Update { table: t } if self.names(t, at, table))
             })
             .into_iter()
             .map(|(update, _)| update)
@@ -508,7 +680,7 @@ impl<'a> Context<'a> {
                 MigrationOperation::RenameTable { from, to }
                     if active.contains(&ReviewRuleId::RenameTable) =>
                 {
-                    let Some(table) = find_table(self.after, to) else {
+                    let Some(table) = self.resolve_in(self.after, to, index) else {
                         continue;
                     };
                     let mut finding = RiskFinding::new(
@@ -531,12 +703,7 @@ impl<'a> Context<'a> {
                     from,
                     to,
                 } if active.contains(&ReviewRuleId::RenameColumn) => {
-                    let Some(table) = self
-                        .after
-                        .tables
-                        .iter()
-                        .find(|table| self.names(name, table))
-                    else {
+                    let Some(table) = self.resolve_in(self.after, name, index) else {
                         continue;
                     };
                     let qname = table.qualified_name();
@@ -577,7 +744,7 @@ impl<'a> Context<'a> {
                         name.as_deref()
                             .map_or_else(String::new, |name| format!(" {name}"))
                     ),
-                    find_table(self.after, table).or_else(|| find_table(self.before, table)),
+                    self.resolve(table, index),
                 ),
                 MigrationOperation::DropIndex {
                     concurrently: true,
@@ -620,13 +787,13 @@ impl<'a> Context<'a> {
                 continue;
             };
             // A table created by the migration holds no rows to scan.
-            let Some(existing) = find_table(self.before, name) else {
+            let Some(existing) = self.resolve_in(self.before, name, index) else {
                 continue;
             };
             if self.not_null_proven(existing, column, index) {
                 continue;
             }
-            let table = find_table(self.after, name).unwrap_or(existing);
+            let table = self.resolve_in(self.after, name, index).unwrap_or(existing);
             let location = self.script.statements[index].location.clone();
             let qname = table.qualified_name();
             let mut finding = RiskFinding::new(
@@ -646,13 +813,16 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Whether a validated `CHECK (column IS NOT NULL)` exists on `table`
-    /// before statement `before`, which lets `SET NOT NULL` skip its scan.
+    /// Whether a validated `CHECK (column IS NOT NULL)` is in place on
+    /// `table` when statement `before` runs, which lets `SET NOT NULL` skip
+    /// its scan. A check dropped first, or by that same statement, no
+    /// longer proves anything.
     fn not_null_proven(&self, table: &Table, column: &str, before: usize) -> bool {
-        self.find(|operation| {
-            matches!(operation, MigrationOperation::AddConstraint {
-                table: t, kind: ConstraintKind::Check, expression: Some(expression), ..
-            } if self.names(t, table) && is_not_null_check(expression, column))
+        self.find(|at, operation| {
+            at < before
+                && matches!(operation, MigrationOperation::AddConstraint {
+                    table: t, kind: ConstraintKind::Check, expression: Some(expression), ..
+                } if self.names(t, at, table) && is_not_null_check(expression, column))
         })
         .into_iter()
         .any(|(index, operation)| {
@@ -662,12 +832,22 @@ impl<'a> Context<'a> {
             else {
                 return false;
             };
-            index < before
-                && (!not_valid
-                    || name.as_deref().is_some_and(|name| {
-                        self.validation(table, name, index)
-                            .is_some_and(|validate| validate < before)
-                    }))
+            let validated = !not_valid
+                || matches!(
+                    self.validation(table, &Self::constraint_names(table, operation), index),
+                    Validation::At(validate) if validate < before
+                );
+            let dropped = name.as_deref().is_some_and(|name| {
+                !self
+                    .find(|at, candidate| {
+                        at > index
+                            && at <= before
+                            && matches!(candidate, MigrationOperation::DropConstraint { table: t, name: dropped }
+                                if same(dropped, name) && self.names(t, at, table))
+                    })
+                    .is_empty()
+            });
+            validated && !dropped
         })
     }
 
@@ -683,15 +863,13 @@ impl<'a> Context<'a> {
             else {
                 continue;
             };
-            let Some(table) =
-                find_table(self.after, name).or_else(|| find_table(self.before, name))
-            else {
+            let Some(table) = self.resolve(name, index) else {
                 continue;
             };
-            if constraint
-                .as_deref()
-                .is_some_and(|constraint| self.validation(table, constraint, index).is_some())
-            {
+            if !matches!(
+                self.validation(table, &Self::constraint_names(table, operation), index),
+                Validation::None
+            ) {
                 continue;
             }
             let location = self.script.statements[index].location.clone();

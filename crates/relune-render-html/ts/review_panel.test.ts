@@ -227,15 +227,17 @@ describe('review panel', () => {
         {
           file: '001.sql',
           line: 3,
+          column: 1,
           sql: 'CREATE INDEX CONCURRENTLY idx ON users (email)',
           in_transaction: true,
         },
+        { file: '001.sql', line: 3, column: 48, sql: 'SELECT 1', in_transaction: false },
       ],
       findings: [
         finding({
           rule_id: 'risk/add-index-on-large-table',
           severity: 'caution',
-          sources: [{ file: '001.sql', line: 3 }],
+          sources: [{ file: '001.sql', line: 3, column: 1 }],
           execution: { verdict: 'confirmed', detail: 'Runs inside a transaction block.' },
         }),
       ],

@@ -15,6 +15,7 @@
     "severity": "caution",
     "sources": [
       {
+        "column": 1,
         "file": "migrations/001_index.sql",
         "line": 1
       }

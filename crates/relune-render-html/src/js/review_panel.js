@@ -19,6 +19,9 @@
   function sourceLabel(location) {
     return `${location.file}:${location.line}`;
   }
+  function sourceKey(location) {
+    return `${location.file}:${location.line}:${location.column}`;
+  }
   var REVIEW_SEVERITIES = [
     "breaking",
     "caution",
@@ -204,7 +207,7 @@
       elements.dialect.removeAttribute("hidden");
     }
     const statements = new Map(
-      (report.statements ?? []).map((statement) => [sourceLabel(statement), statement])
+      (report.statements ?? []).map((statement) => [sourceKey(statement), statement])
     );
     renderCoverage(elements.coverage, report);
     const findings = report.findings;
@@ -375,7 +378,7 @@
     }
     const sources = finding.sources ?? [];
     if (sources.length > 0) {
-      detail.append(section("Migration SQL", sourceList(sources.map(sourceLabel), statements)));
+      detail.append(section("Migration SQL", sourceList(sources, statements)));
     }
     if (definition !== void 0 && definition.lines.length > 0) {
       detail.append(section("Definition", definitionBlock(definition, finding.focus_lines ?? [])));
@@ -403,16 +406,16 @@
     root.append(toggle, detail);
     return { root, toggle, detail, links };
   }
-  function sourceList(labels, statements) {
+  function sourceList(sources, statements) {
     const list = document.createElement("ol");
     list.className = "review-sources";
-    for (const label of labels) {
+    for (const source of sources) {
       const item = document.createElement("li");
       const location = document.createElement("span");
       location.className = "review-source-location";
-      location.textContent = label;
+      location.textContent = sourceLabel(source);
       item.appendChild(location);
-      const statement = statements.get(label);
+      const statement = statements.get(sourceKey(source));
       if (statement !== void 0) {
         if (statement.in_transaction) {
           const badge = document.createElement("span");

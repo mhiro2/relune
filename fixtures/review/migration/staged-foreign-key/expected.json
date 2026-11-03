@@ -16,10 +16,12 @@
     "severity": "info",
     "sources": [
       {
+        "column": 1,
         "file": "migrations/001_add_fk.sql",
         "line": 1
       },
       {
+        "column": 1,
         "file": "migrations/002_validate_fk.sql",
         "line": 1
       }
