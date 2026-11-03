@@ -45,7 +45,7 @@ jobs:
           echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
       - name: Install cargo-zigbuild
         # The tool version follows the install-action pin that Dependabot bumps.
-        uses: taiki-e/install-action@v2.87.29
+        uses: taiki-e/install-action@v2.87.32
         with:
           tool: cargo-zigbuild
       - name: Add Rust targets
