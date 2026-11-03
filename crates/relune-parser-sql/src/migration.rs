@@ -158,12 +158,16 @@ fn split_statements(
     let tokens = match Tokenizer::new(grammar, &file.sql).tokenize_with_location() {
         Ok(tokens) => tokens,
         Err(error) => {
+            // The whole file is one statement starting at its first content;
+            // the error position (which can lie past the last line) goes in
+            // the reason instead.
+            let (line, column) = first_content(&file.sql);
             return vec![RawStatement {
-                line: usize::try_from(error.location.line).unwrap_or(1).max(1),
-                column: 1,
+                line,
+                column,
                 sql: file.sql.trim().to_string(),
                 tokens: vec![Token::Word(sqlparser::tokenizer::Word {
-                    value: format!("tokenizer error: {}", error.message),
+                    value: format!("tokenizer error: {error}"),
                     quote_style: None,
                     keyword: Keyword::NoKeyword,
                 })],
@@ -196,6 +200,18 @@ fn split_statements(
         }
     }
     statements
+}
+
+/// 1-based line and column of the first non-whitespace character.
+fn first_content(sql: &str) -> (usize, usize) {
+    sql.lines()
+        .enumerate()
+        .find_map(|(index, line)| {
+            line.char_indices()
+                .position(|(_, ch)| !ch.is_whitespace())
+                .map(|column| (index + 1, column + 1))
+        })
+        .unwrap_or((1, 1))
 }
 
 fn keyword_at(tokens: &[Token], index: usize) -> Option<Keyword> {
@@ -685,6 +701,15 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_file_the_tokenizer_rejects_starts_at_its_first_content() {
+        let output = parse(&[("001.sql", "\n  $$ \n")], TransactionMode::Explicit);
+        let statement = &output.script.statements[0];
+        assert!(statement.is_unanalyzed());
+        assert_eq!((statement.location.line, statement.location.column), (2, 3));
+        assert_eq!(statement.sql, "$$");
     }
 
     #[test]
