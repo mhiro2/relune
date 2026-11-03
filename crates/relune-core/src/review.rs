@@ -579,6 +579,13 @@ pub struct RiskFinding {
     /// Affected foreign key name, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fk_name: Option<String>,
+    /// Name of the affected index, UNIQUE, or CHECK constraint, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint_name: Option<String>,
+    /// Every column the affected key covers (index, constraint, or foreign
+    /// key columns), when the change concerns a key rather than one column.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<String>,
     /// Stable identifier of a related table (e.g. the referencing table
     /// for `risk/drop-column-referenced`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -602,6 +609,8 @@ impl RiskFinding {
             table_name: None,
             column_name: None,
             fk_name: None,
+            constraint_name: None,
+            columns: Vec::new(),
             related_table_id: None,
         }
     }
@@ -636,6 +645,32 @@ impl RiskFinding {
     #[must_use]
     pub fn with_fk_name(mut self, fk_name: impl Into<String>) -> Self {
         self.fk_name = Some(fk_name.into());
+        self
+    }
+
+    /// Sets the index, UNIQUE, or CHECK constraint name.
+    #[must_use]
+    pub fn with_constraint_name(mut self, name: impl Into<String>) -> Self {
+        self.constraint_name = Some(name.into());
+        self
+    }
+
+    /// Sets the constraint name when there is one.
+    #[must_use]
+    pub fn with_constraint_name_opt(mut self, name: Option<&str>) -> Self {
+        if let Some(name) = name {
+            self.constraint_name = Some(name.to_string());
+        }
+        self
+    }
+
+    /// Sets the key columns; a single key column also becomes `column_name`.
+    #[must_use]
+    pub fn with_columns(mut self, columns: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.columns = columns.into_iter().map(Into::into).collect();
+        if let [column] = self.columns.as_slice() {
+            self.column_name = Some(column.clone());
+        }
         self
     }
 
