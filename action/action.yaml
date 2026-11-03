@@ -26,7 +26,7 @@ inputs:
   format:
     description: >
       Output format. diff mode accepts text|json|markdown|svg|html;
-      review mode accepts text|markdown|json (svg/html will be rejected
+      review mode accepts text|markdown|json|html (svg will be rejected
       by the CLI).
     required: false
     default: markdown

@@ -93,6 +93,7 @@ function installRuntime() {
     getSelected: () => state.selected,
     selectRelation: mocks.selectRelation,
     getSelectedRelation: () => state.relation,
+    focus: vi.fn(() => true),
   };
   runtime.viewport = {
     zoomIn: vi.fn(),

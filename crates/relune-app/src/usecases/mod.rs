@@ -7,6 +7,7 @@ pub mod inspect;
 pub mod lint;
 pub mod render;
 pub mod review;
+mod review_report;
 
 pub use diff::{build_diff_overlay, build_diff_schema, diff};
 pub use doc::doc;

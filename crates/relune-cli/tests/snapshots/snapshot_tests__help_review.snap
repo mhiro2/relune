@@ -65,9 +65,13 @@ Options:
           - text:     Human-readable text output
           - markdown: GitHub-flavored Markdown output
           - json:     JSON output
+          - html:     Self-contained HTML report: the diff diagram with a findings panel
 
   -o, --out <FILE>
           Output file path; stdout if omitted
+
+      --stdout
+          Allow the HTML report on stdout even when stdout is a terminal
 
       --rules <RULE>
           Restrict execution to specific rules (can be repeated)

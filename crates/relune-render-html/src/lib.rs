@@ -9,10 +9,12 @@ mod error;
 mod html;
 mod metadata;
 mod options;
+mod review;
 
 pub use error::HtmlRenderError;
 pub use options::{HtmlRenderOptions, Theme};
 pub use relune_render_svg::SvgArtifact;
+pub use review::{DefinitionDiff, DefinitionLine, LineChange, ReviewReport, ReviewReportFinding};
 
 use relune_layout::LayoutGraph;
 
@@ -45,13 +47,43 @@ pub fn render_html_with_overlay(
     options: &HtmlRenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<String, HtmlRenderError> {
+    render_document(graph, svg, options, overlay, None)
+}
+
+/// Render a self-contained review report: the diff diagram with its overlay
+/// plus a findings panel linked to the diagram.
+///
+/// Choosing a finding in the panel selects its table, marks its columns,
+/// and shows the table definition before and after the change.
+pub fn render_review_html(
+    graph: &LayoutGraph,
+    svg: &SvgArtifact,
+    options: &HtmlRenderOptions,
+    overlay: Option<&relune_layout::DiagramOverlay>,
+    report: &ReviewReport,
+) -> Result<String, HtmlRenderError> {
+    render_document(graph, svg, options, overlay, Some(report))
+}
+
+fn render_document(
+    graph: &LayoutGraph,
+    svg: &SvgArtifact,
+    options: &HtmlRenderOptions,
+    overlay: Option<&relune_layout::DiagramOverlay>,
+    report: Option<&ReviewReport>,
+) -> Result<String, HtmlRenderError> {
     let metadata = metadata::build_metadata_with_overlay(graph, overlay);
-    let metadata_json = serde_json::to_string(&metadata)?;
-    let escaped_metadata = html::escape_json_for_script(&metadata_json);
+    let metadata_json = html::escape_json_for_script(&serde_json::to_string(&metadata)?);
+    let review_json = report
+        .map(|report| serde_json::to_string(report).map(|json| html::escape_json_for_script(&json)))
+        .transpose()?;
 
-    let html_document = html::build_html_document(svg.as_str(), &escaped_metadata, options);
-
-    Ok(html_document)
+    Ok(html::build_html_document_with_review(
+        svg.as_str(),
+        &metadata_json,
+        review_json.as_deref(),
+        options,
+    ))
 }
 
 #[cfg(test)]
@@ -181,6 +213,40 @@ mod tests {
         assert!(result.contains("</html>"));
         assert!(result.contains("<svg"));
         assert!(result.contains("data-relune-metadata"));
+    }
+
+    #[test]
+    fn test_render_review_html_embeds_the_report_and_panel() {
+        let graph = create_test_graph();
+        let svg = create_test_svg();
+        let finding = relune_core::RiskFinding::new(
+            relune_core::ReviewRuleId::DropColumn,
+            relune_core::ReviewSeverity::Breaking,
+            "Column users.name is dropped. </script><script>alert(1)</script>",
+        )
+        .with_table("users", "users")
+        .with_column("name");
+        let report = ReviewReport {
+            findings: vec![ReviewReportFinding {
+                finding,
+                rule_description: "Column is being dropped".to_string(),
+                focus_lines: vec![1],
+            }],
+            ..ReviewReport::default()
+        };
+
+        let html =
+            render_review_html(&graph, &svg, &HtmlRenderOptions::default(), None, &report).unwrap();
+
+        assert!(html.contains(r#"id="review-panel""#));
+        assert!(html.contains(r#"<script type="application/json" id="relune-review">"#));
+        assert!(html.contains("risk/drop-column"));
+        // Finding text is escaped like the diagram metadata.
+        assert!(!html.contains("</script><script>alert(1)"));
+
+        let plain = render_html(&graph, &svg, &HtmlRenderOptions::default()).unwrap();
+        assert!(!plain.contains("relune-review"));
+        assert!(!plain.contains(r#"id="review-panel""#));
     }
 
     #[test]

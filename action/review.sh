@@ -40,6 +40,7 @@ if [[ -z "${OUTPUT_PATH:-}" ]]; then
     markdown) OUTPUT_PATH="relune-review.md" ;;
     json)     OUTPUT_PATH="relune-review.json" ;;
     text)     OUTPUT_PATH="relune-review.txt" ;;
+    html)     OUTPUT_PATH="relune-review.html" ;;
     *)        OUTPUT_PATH="relune-review.txt" ;;
   esac
 fi

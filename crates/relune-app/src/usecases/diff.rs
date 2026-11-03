@@ -122,13 +122,40 @@ fn render_diff_visual(
     };
 
     // Use the render pipeline directly, but with the merged schema
-    render_with_schema(&merged, &render_request)
+    render_with_schema(&merged, &render_request, None)
+}
+
+/// Render the HTML review report: the diff diagram, ranked by `findings`,
+/// with `report` embedded as its findings panel. Also returns the density
+/// fallback notice when cards fell back to overview.
+pub(crate) fn render_review_diagram(
+    before: &Schema,
+    after: &Schema,
+    schema_diff: &relune_core::SchemaDiff,
+    findings: &[RiskFinding],
+    diagram: &crate::request::ReviewDiagramSettings,
+    report: &relune_render_html::ReviewReport,
+) -> Result<(String, Option<Diagnostic>), AppError> {
+    use crate::request::{OutputFormat, RenderRequest};
+
+    let merged = build_diff_schema(before, after, schema_diff);
+    let render_request = RenderRequest {
+        output_format: OutputFormat::Html,
+        grouping: diagram.grouping,
+        layout: diagram.layout.clone(),
+        options: diagram.options,
+        overlay: Some(build_diff_overlay(before, after, schema_diff, findings)),
+        ..RenderRequest::default()
+    };
+    render_with_schema(&merged, &render_request, Some(report))
 }
 
 /// Render pipeline that takes a pre-parsed schema instead of an input source.
+/// HTML output embeds `review` as a findings panel when one is given.
 fn render_with_schema(
     schema: &Schema,
     request: &crate::request::RenderRequest,
+    review: Option<&relune_render_html::ReviewReport>,
 ) -> Result<(String, Option<Diagnostic>), AppError> {
     use relune_layout::{LayoutConfig, build_layout_from_graph_with_config};
     use relune_render_html::{HtmlRenderOptions, Theme as HtmlTheme};
@@ -166,12 +193,21 @@ fn render_with_schema(
                 theme: html_theme,
                 ..Default::default()
             };
-            let html = relune_render_html::render_html_with_overlay(
-                &graph,
-                &svg,
-                &html_options,
-                request.overlay.as_ref(),
-            )?;
+            let html = match review {
+                Some(report) => relune_render_html::render_review_html(
+                    &graph,
+                    &svg,
+                    &html_options,
+                    request.overlay.as_ref(),
+                    report,
+                )?,
+                None => relune_render_html::render_html_with_overlay(
+                    &graph,
+                    &svg,
+                    &html_options,
+                    request.overlay.as_ref(),
+                )?,
+            };
             Ok((html, notice))
         }
         _ => unreachable!(),

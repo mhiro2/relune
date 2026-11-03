@@ -134,6 +134,7 @@ Compare schema revisions and integrate with tooling:
 - JSON output for CI and automation
 - `layout-json` with routing debug metadata for edge-side, slot, and channel inspection
 - SVG or HTML visual diff that shows each change's kind (`+` / `−` / `~` with a faint tint) apart from its review risk (`breaking 1`-style labels)
+- HTML review report (`relune review --format html`) whose findings panel is linked to the diagram: choosing a finding marks its table and columns, shows the definition before and after, and explains why it was flagged and what to do
 - [GitHub Actions integration](docs/github-actions.md) for automated schema review on pull requests
 
 ### Flexible input sources
@@ -200,6 +201,9 @@ relune diff --before old.sql --after new.sql
 
 # Review a migration for safety risks
 relune review --before old.sql --after new.sql
+
+# Review report with findings linked to the diagram
+relune review --before old.sql --after new.sql --format html -o review.html
 ```
 
 </details>

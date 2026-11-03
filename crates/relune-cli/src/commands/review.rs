@@ -1,15 +1,18 @@
 //! Review command implementation.
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use super::input::DiffInputSelection;
-use crate::cli::{ColorWhen, ReviewArgs, ReviewFormat, ReviewSeverityArg};
-use crate::config::ReluneConfig;
+use crate::cli::{ColorWhen, GroupByMode, ReviewArgs, ReviewFormat, ReviewSeverityArg};
+use crate::config::{ReluneConfig, ReviewDiagramConfig};
 use crate::error::{CliError, CliResult, schema_comparison_error};
 use crate::output::{
-    check_diagnostics, fail_on_diagnostics_at_or_above, print_success, write_output,
+    check_diagnostics, fail_on_diagnostics_at_or_above, print_success,
+    validate_markup_stdout_usage, write_output,
 };
 use relune_app::{
+    GroupingSpec, GroupingStrategy, RenderOptions, RenderTheme, ReviewDiagramSettings,
     ReviewFormat as AppReviewFormat, ReviewRequest, ReviewResult, format_review_json,
     format_review_markdown_with, format_review_text_with, review,
 };
@@ -37,6 +40,15 @@ pub fn run_review(
         )));
     }
 
+    if merged.format == ReviewFormat::Html {
+        validate_markup_stdout_usage(
+            "HTML",
+            args.out.is_some(),
+            args.stdout,
+            std::io::stdout().is_terminal(),
+        )?;
+    }
+
     let dialect = merged.dialect.into();
     let before = DiffInputSelection::from_review_before(args).resolve(dialect, "before")?;
     let after = DiffInputSelection::from_review_after(args).resolve(dialect, "after")?;
@@ -50,6 +62,7 @@ pub fn run_review(
             ReviewFormat::Text => AppReviewFormat::Text,
             ReviewFormat::Markdown => AppReviewFormat::Markdown,
             ReviewFormat::Json => AppReviewFormat::Json,
+            ReviewFormat::Html => AppReviewFormat::Html,
         },
         output_path: args.out.clone(),
         rules: merged.rules,
@@ -59,9 +72,10 @@ pub fn run_review(
         severity_overrides: merged.severity_overrides,
         dialect,
         allow_invalid_schema: merged.allow_invalid_schema,
+        diagram: diagram_settings(merged.diagram),
     };
 
-    let result = review(request)
+    let mut result = review(request)
         .map_err(|error| schema_comparison_error("Failed to review schema", &error))?;
 
     // Errors abort before any report is written. The warning gate is
@@ -84,6 +98,10 @@ pub fn run_review(
                 "Failed to serialize review result to JSON: {error}"
             ))
         })?,
+        ReviewFormat::Html => result
+            .rendered
+            .take()
+            .ok_or_else(|| CliError::general(anyhow::anyhow!("review produced no HTML report")))?,
     };
     write_output(&content, args.out.as_deref(), color)?;
 
@@ -126,14 +144,45 @@ pub fn run_review(
     Ok(())
 }
 
+fn diagram_settings(diagram: ReviewDiagramConfig) -> ReviewDiagramSettings {
+    ReviewDiagramSettings {
+        options: RenderOptions {
+            theme: match diagram.theme {
+                crate::cli::Theme::Light => RenderTheme::Light,
+                crate::cli::Theme::Dark => RenderTheme::Dark,
+            },
+            show_legend: diagram.show_legend,
+            show_stats: false,
+        },
+        layout: super::layout_spec(
+            diagram.layout,
+            diagram.edge_style,
+            diagram.direction,
+            diagram.density,
+        ),
+        grouping: GroupingSpec {
+            strategy: match diagram.group_by.unwrap_or(GroupByMode::None) {
+                GroupByMode::None => GroupingStrategy::None,
+                GroupByMode::Schema => GroupingStrategy::BySchema,
+                GroupByMode::Prefix => GroupingStrategy::ByPrefix,
+            },
+        },
+    }
+}
+
 fn run_list_rules(args: &ReviewArgs, format: ReviewFormat, color: ColorWhen) -> CliResult<()> {
     let metadata = ReviewRuleId::all_metadata();
     let content = match format {
         ReviewFormat::Text => format_rule_list_text(&metadata),
         ReviewFormat::Json => format_rule_list_json(&metadata)?,
-        ReviewFormat::Markdown => {
+        ReviewFormat::Markdown | ReviewFormat::Html => {
             return Err(CliError::usage(anyhow::anyhow!(
-                "markdown is not a supported format for --list-rules"
+                "{} is not a supported format for --list-rules",
+                if format == ReviewFormat::Html {
+                    "html"
+                } else {
+                    "markdown"
+                }
             )));
         }
     };

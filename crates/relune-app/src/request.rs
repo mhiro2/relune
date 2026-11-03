@@ -567,6 +567,23 @@ pub enum ReviewFormat {
     Markdown,
     /// JSON output.
     Json,
+    /// Self-contained HTML report: the diff diagram with a findings panel
+    /// linked to it.
+    Html,
+}
+
+/// How the diagram of an HTML review report is drawn.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReviewDiagramSettings {
+    /// Rendering options.
+    #[serde(default)]
+    pub options: RenderOptions,
+    /// Layout specification.
+    #[serde(default)]
+    pub layout: LayoutSpec,
+    /// Grouping specification.
+    #[serde(default)]
+    pub grouping: GroupingSpec,
 }
 
 /// Request to run migration risk review on two schemas.
@@ -617,6 +634,9 @@ pub struct ReviewRequest {
     /// as warnings instead of failing with `AppError::InvalidSchema`.
     #[serde(default)]
     pub allow_invalid_schema: bool,
+    /// Diagram settings used when `format` is `Html`.
+    #[serde(default)]
+    pub diagram: ReviewDiagramSettings,
 }
 
 impl ReviewRequest {

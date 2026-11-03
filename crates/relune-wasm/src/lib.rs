@@ -333,7 +333,8 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 ///   `empty = false, unsupported_constructs = 0` means the review may
 ///   have missed changes
 /// - `content`: CLI-equivalent rendering for the requested `format`
-///   (the `format = "json"` payload matches `relune review --format json`)
+///   (the `format = "json"` payload matches `relune review --format json`,
+///   and `format = "html"` is the self-contained HTML review report)
 /// - `applied_rule_details`: Metadata snapshots for each applied rule,
 ///   suitable for rendering the playground rule legend
 #[wasm_bindgen]
@@ -343,7 +344,7 @@ pub fn review_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
 
     let review_req = req.to_review_request().map_err(WasmError::input)?;
     let format = review_req.format;
-    let result = review(review_req).map_err(WasmError::from)?;
+    let mut result = review(review_req).map_err(WasmError::from)?;
 
     let content = match format {
         relune_app::ReviewFormat::Text => Some(format_review_text(&result)),
@@ -351,6 +352,7 @@ pub fn review_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
         relune_app::ReviewFormat::Json => {
             Some(format_review_json(&result).map_err(WasmError::from)?)
         }
+        relune_app::ReviewFormat::Html => result.rendered.take(),
     };
 
     let applied_rule_details = applied_rule_metadata(&result);
@@ -673,6 +675,33 @@ mod wasm_bindgen_tests {
                 .unwrap_or_default()
                 .contains("## Schema Diff")
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_from_sql_returns_the_html_report() {
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: Some("CREATE TABLE users (id INT PRIMARY KEY, email TEXT);".to_string()),
+            before_schema_json: None,
+            after_sql: Some("CREATE TABLE users (id INT PRIMARY KEY);".to_string()),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Html),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: None,
+            allow_invalid_schema: false,
+        })
+        .expect("serialize review request");
+
+        let result = review_from_sql(input).expect("review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        let content = value["content"].as_str().expect("HTML content");
+        assert!(content.contains(r#"id="relune-review""#));
+        assert!(content.contains("risk/drop-column"));
     }
 
     #[wasm_bindgen_test]

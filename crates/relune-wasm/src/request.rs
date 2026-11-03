@@ -7,8 +7,8 @@ use relune_app::{
     DiffFormat, DiffRequest, ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec,
     LayoutDirection, LayoutSpec, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewRuleSettings,
-    ReviewSeverityOverride, RouteStyle,
+    RenderRequest, RenderTheme, ReviewDiagramSettings, ReviewFormat, ReviewRequest,
+    ReviewRuleSettings, ReviewSeverityOverride, RouteStyle,
 };
 use relune_core::{
     CardDensity, LintProfile, LintRuleCategory, ReviewSeverity, Severity, SqlDialect,
@@ -523,7 +523,7 @@ pub struct WasmReviewRequest {
     pub after_sql: Option<String>,
     /// Updated schema JSON.
     pub after_schema_json: Option<String>,
-    /// Output format. `"text" | "markdown" | "json"` (default `json`).
+    /// Output format. `"text" | "markdown" | "json" | "html"` (default `json`).
     #[serde(default)]
     pub format: Option<ReviewFormat>,
     /// Optional rule allowlist. Each entry accepts the full `risk/<kebab>`
@@ -586,6 +586,7 @@ impl WasmReviewRequest {
             severity_overrides: self.severity_overrides.clone(),
             dialect: self.dialect.unwrap_or_default(),
             allow_invalid_schema: self.allow_invalid_schema,
+            diagram: ReviewDiagramSettings::default(),
         })
     }
 }

@@ -295,6 +295,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 relune review --before old.sql --after new.sql
 relune review --before old.sql --after new.sql --format markdown -o review.md
 relune review --before old.sql --after new.sql --format json -o review.json
+relune review --before old.sql --after new.sql --format html -o review.html
 relune review --before old.sql --after new.sql --deny breaking
 relune review --before old.sql --after new.sql --except-rule fk-without-index
 relune review --before old.sql --after new.sql --except-table 'audit_*'
@@ -311,7 +312,7 @@ relune review --list-rules --format json         # JSON catalog (for CI / docs)
 
 | Option | Values | Default |
 |--------|--------|---------|
-| `-f`, `--format` | `text`, `markdown`, `json` | `text` |
+| `-f`, `--format` | `text`, `markdown`, `json`, `html` -- `html` is a self-contained report whose findings panel selects each finding's table and columns on the diff diagram and shows the definition before and after | `text` |
 | `-o`, `--out` | Output file path | stdout |
 | `--dialect` | `auto`, `postgres`, `mysql`, `sqlite` -- `postgres` / `mysql` activate the lock-risk caution rules; `auto` is promoted to the parser-resolved dialect when `before` / `after` agree, and emits a `REVIEW002` warning when they disagree | `auto` |
 | `--rules <RULE>` | Repeatable; run only these rules (`risk/<id>` or bare `<id>`) | all rules |

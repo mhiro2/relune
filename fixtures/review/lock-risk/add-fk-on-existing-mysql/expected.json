@@ -1,6 +1,9 @@
 [
   {
     "column_name": "user_id",
+    "columns": [
+      "user_id"
+    ],
     "fk_name": "orders_user_id_fkey",
     "message": "New FK orders_user_id_fkey on existing table orders (mysql). FK creation locks the referencing table while every existing row is checked against the parent.",
     "mitigation": "Schedule during low-traffic windows, or stage referencing rows so validation is fast.",

@@ -1323,6 +1323,7 @@ fn check_drop_pk_or_unique_column(
 
     let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
         .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_columns(primary_key_names(before_table))
         .with_column(&column_diff.column_name)
         .with_mitigation(mitigation);
     if let Some((_, fk_text)) = related_fk {
@@ -1453,6 +1454,8 @@ fn check_drop_pk_or_unique_index(
     };
     let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
         .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_columns(old_columns.iter().map(ToString::to_string))
+        .with_constraint_name_opt(old.name.as_deref())
         .with_mitigation(mitigation);
     if let Some((_, fk_text)) = related_fk {
         finding = finding.with_fk_name(fk_text);
@@ -1538,6 +1541,7 @@ fn check_drop_pk_or_unique_widened(
 
     let mut finding = RiskFinding::new(ReviewRuleId::DropPkOrUnique, severity, message)
         .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_columns(primary_key_names(before_table))
         .with_mitigation(mitigation);
     if let Some((_, fk_text)) = related_fk {
         finding = finding.with_fk_name(fk_text);
@@ -1655,6 +1659,8 @@ fn check_add_unique_on_existing(
             },
         )
         .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_columns(new_columns.iter().cloned())
+        .with_constraint_name_opt(new.name.as_deref())
         .with_mitigation("Verify no duplicates exist or deduplicate before applying."),
     );
 }
@@ -1714,7 +1720,7 @@ fn check_add_pk_on_existing(
     }
 
     let columns = after_pk_cols.join(",");
-    let mut finding = RiskFinding::new(
+    let finding = RiskFinding::new(
         ReviewRuleId::AddUniqueOnExisting,
         ReviewSeverity::Warning,
         format!(
@@ -1723,10 +1729,9 @@ fn check_add_pk_on_existing(
         ),
     )
     .with_table(&after_table.stable_id, &table_diff.table_name)
+    .with_columns(primary_key_names(after_table))
+    .with_constraint_name_opt(after_table.primary_key_name.as_deref())
     .with_mitigation("Verify no duplicates exist or deduplicate before applying.");
-    if let [column] = after_pk_cols.as_slice() {
-        finding = finding.with_column(column);
-    }
     findings.push(finding);
 }
 
@@ -1760,6 +1765,7 @@ fn check_add_check_on_existing(
             ),
         )
         .with_table(&after_table.stable_id, &table_diff.table_name)
+        .with_constraint_name_opt(name)
         .with_mitigation(mitigation)
     };
 
@@ -1911,6 +1917,7 @@ fn check_add_cascade_delete(
         ),
     )
     .with_table(&after_table.stable_id, &table_diff.table_name)
+    .with_columns(new.from_columns.iter().cloned())
     .with_mitigation("Confirm the cascade scope is intended; consider RESTRICT/SET NULL if not.");
     if let Some(name) = &new.name {
         finding = finding.with_fk_name(name);
@@ -1967,10 +1974,7 @@ fn check_fk_without_index(
     if let Some(name) = &new.name {
         finding = finding.with_fk_name(name);
     }
-    if new.from_columns.len() == 1 {
-        finding = finding.with_column(new.from_columns[0].clone());
-    }
-    findings.push(finding);
+    findings.push(finding.with_columns(new.from_columns.iter().cloned()));
 }
 
 /// `risk/add-index-on-large-table` — index added on an existing table,
@@ -2024,16 +2028,15 @@ fn check_add_index_on_large_table(
         EffectiveDialect::Auto | EffectiveDialect::Sqlite => return,
     };
 
-    let mut finding = RiskFinding::new(
+    let finding = RiskFinding::new(
         ReviewRuleId::AddIndexOnLargeTable,
         ReviewSeverity::Caution,
         message,
     )
     .with_table(&after_table.stable_id, &table_diff.table_name)
+    .with_columns(new_columns)
+    .with_constraint_name_opt(new.name.as_deref())
     .with_mitigation(mitigation);
-    if new_columns.len() == 1 {
-        finding = finding.with_column(new_columns[0].clone());
-    }
     findings.push(finding);
 }
 
@@ -2117,13 +2120,10 @@ fn check_add_fk_on_existing(
     if let Some(name) = &new.name {
         finding = finding.with_fk_name(name);
     }
-    if new.from_columns.len() == 1 {
-        finding = finding.with_column(new.from_columns[0].clone());
-    }
     if let Some(id) = related_table_id {
         finding = finding.with_related_table(id);
     }
-    findings.push(finding);
+    findings.push(finding.with_columns(new.from_columns.iter().cloned()));
 }
 
 /// `risk/alter-column-type` — existing column's data type was changed;
@@ -2261,6 +2261,17 @@ fn check_rewrite_table(
         .with_mitigation(mitigation);
         findings.push(finding);
     }
+}
+
+/// Primary key column names as written, for finding metadata; comparisons
+/// use lowercase copies instead.
+fn primary_key_names(table: &Table) -> Vec<String> {
+    table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.name.clone())
+        .collect()
 }
 
 /// Leading word for findings about an added or a changed constraint.
@@ -3886,6 +3897,29 @@ mod tests {
             .find(|f| f.rule_id == ReviewRuleId::DropPkOrUnique)
             .expect("expected DropPkOrUnique finding for index");
         assert_eq!(f.severity, ReviewSeverity::Warning);
+    }
+
+    #[test]
+    fn key_findings_keep_column_names_as_written() {
+        let before = schema(vec![table(
+            "users",
+            vec![col("UserID", "int", false, false)],
+            vec![],
+            vec![],
+        )]);
+        let after = schema(vec![table(
+            "users",
+            vec![col("UserID", "int", false, true)],
+            vec![],
+            vec![],
+        )]);
+        let findings = run_all(&before, &after);
+        let added_pk = findings
+            .iter()
+            .find(|finding| finding.rule_id == ReviewRuleId::AddUniqueOnExisting)
+            .expect("adding a primary key on existing rows is reported");
+        assert_eq!(added_pk.columns, ["UserID"]);
+        assert_eq!(added_pk.column_name.as_deref(), Some("UserID"));
     }
 
     #[test]

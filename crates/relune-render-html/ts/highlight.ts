@@ -265,6 +265,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
           state.traversalDepth,
         );
         painter.applySelected(highlight);
+        painter.markColumns(state.selectedNode, state.emphasizedColumns);
         renderDrawer(state.tableById.get(state.selectedNode), state, drawerEls, (edge) => {
           selectRelation(edge, true);
         });
@@ -300,11 +301,12 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
     const selectedRelationKey = (): string | null =>
       state.selectedEdge === null ? null : (lineKeys[state.selectedEdge] ?? null);
 
-    const setSelectedNode = (tableId: string | null): void => {
+    const setSelectedNode = (tableId: string | null, columns: readonly string[] = []): void => {
       const previous = state.selectedNode;
       const hadRelation = state.selectedEdge !== null;
       state.selectedNode = tableId;
       state.selectedEdge = null;
+      state.emphasizedColumns = tableId === null ? [] : [...columns];
       state.hoveredNode = null;
       renderInteraction();
       if (hadRelation) emitViewerEvent('relune:relation-cleared', undefined);
@@ -333,6 +335,7 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
       const previous = state.selectedEdge;
       state.selectedNode = null;
       state.selectedEdge = edgeIndex;
+      state.emphasizedColumns = [];
       state.hoveredNode = null;
       relationOrigin = null;
       renderInteraction();
@@ -570,6 +573,21 @@ import { emitViewerEvent, getViewerRuntime, markViewerModuleReady } from './view
         return true;
       },
       getSelectedRelation: selectedRelationKey,
+      focus(nodeId: string, columns: readonly string[]): boolean {
+        const node = findNode(nodeId);
+        if (node === undefined) return false;
+        // A hidden group or a hide/focus filter would leave the target
+        // selected but off the diagram, so bring it back first.
+        if (node.classList.contains('hidden-by-group')) {
+          for (const group of metadata?.groups ?? []) {
+            if (group.table_ids.includes(nodeId)) runtime.groups?.setVisibility(group.id, true);
+          }
+        }
+        if (node.classList.contains('hidden-by-filter')) runtime.filters?.reset();
+        setSelectedNode(nodeId, columns);
+        centerNodeInViewport(nodeId);
+        return true;
+      },
     };
     markViewerModuleReady('selection');
 

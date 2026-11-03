@@ -5,6 +5,8 @@ export interface HighlightState {
   selectedNode: string | null;
   /** Index into `edges` of the selected relationship, if any. */
   selectedEdge: number | null;
+  /** Columns marked on the selected table, e.g. by a review finding. */
+  emphasizedColumns: string[];
   traversalDepth: number;
   tableById: Map<string, TableMetadata>;
   inboundMap: Record<string, { node: string; edge: EdgeMetadata }[]>;
@@ -30,6 +32,7 @@ export function createHighlightState(
     hoveredNode: null,
     selectedNode: null,
     selectedEdge: null,
+    emphasizedColumns: [],
     traversalDepth: 1,
     tableById,
     inboundMap,

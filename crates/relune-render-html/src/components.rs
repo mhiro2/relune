@@ -72,6 +72,11 @@ pub(crate) const fn build_load_motion_js() -> &'static str {
     include_str!("js/load_motion.js")
 }
 
+/// Build the review findings panel JavaScript.
+pub(crate) const fn build_review_panel_js() -> &'static str {
+    include_str!("js/review_panel.js")
+}
+
 /// Build the URL state synchronisation JavaScript.
 pub(crate) const fn build_url_state_js() -> &'static str {
     include_str!("js/url_state.js")
@@ -186,14 +191,38 @@ pub(crate) fn build_relation_card_html() -> String {
     .to_string()
 }
 
-/// Build the explorer sidebar. Search and the object list come first;
-/// filters and groups stay collapsed until a reader opens them.
+/// Build the review findings section of the explorer sidebar. The viewer
+/// fills it from the embedded review report.
 #[allow(clippy::needless_raw_string_hashes)]
-pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
+const fn build_review_panel_html() -> &'static str {
+    r#"    <details class="sidebar-section review-panel" id="review-panel" open>
+      <summary class="sidebar-section-summary" aria-keyshortcuts="R"><span class="sidebar-section-title">Review</span><span class="sidebar-section-meta" id="review-panel-meta"></span></summary>
+      <div class="sidebar-section-body review-panel-body">
+        <p class="review-dialect" id="review-dialect" hidden></p>
+        <div class="review-coverage" id="review-coverage" role="note" hidden></div>
+        <div class="review-severity-filter" id="review-severity-filter" role="group" aria-label="Show findings by severity"></div>
+        <ol class="review-findings" id="review-findings" aria-label="Findings"></ol>
+        <p class="review-empty" id="review-empty" hidden>No risk findings.</p>
+        <p class="review-keys">Use <kbd>J</kbd> / <kbd>K</kbd> to step through findings.</p>
+      </div>
+    </details>
+"#
+}
+
+/// Build the explorer sidebar. Search and the object list come first;
+/// filters and groups stay collapsed until a reader opens them. A review
+/// report puts its findings between search and the object list.
+#[allow(clippy::needless_raw_string_hashes)]
+pub(crate) fn build_search_panel_html(enable_group_toggles: bool, review: bool) -> String {
     let group_block = if enable_group_toggles {
         build_group_panel_html()
     } else {
         String::new()
+    };
+    let review_block = if review {
+        build_review_panel_html()
+    } else {
+        ""
     };
 
     format!(
@@ -209,7 +238,7 @@ pub(crate) fn build_search_panel_html(enable_group_toggles: bool) -> String {
       <button type="button" class="sidebar-collapse" id="sidebar-collapse" aria-controls="search-panel" aria-expanded="true" aria-keyshortcuts="S" title="Hide sidebar (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
     </div>
     <div class="search-results" id="search-results"></div>
-    <section class="object-browser-section" aria-label="Schema objects">
+{review_block}    <section class="object-browser-section" aria-label="Schema objects">
       <div class="object-browser-header">
         <span>Objects</span>
         <span class="object-browser-count" id="object-browser-count"></span>
