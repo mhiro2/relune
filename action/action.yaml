@@ -75,6 +75,20 @@ inputs:
       <pattern>` (repeatable).
     required: false
     default: ""
+  migrations:
+    description: >
+      review mode only. Newline-separated list of migration SQL files that
+      turn before into after, in execution order; each line is passed to
+      the CLI as `--migration <file>` (repeatable).
+    required: false
+    default: ""
+  migration-transaction:
+    description: >
+      review mode only. How the migration tool wraps each migration file:
+      explicit (only BEGIN/COMMIT in the SQL) or per-file. Empty keeps the
+      CLI default (explicit).
+    required: false
+    default: ""
   fail-on-blocking:
     description: >
       review mode only. When "true", the action exits non-zero whenever
@@ -149,5 +163,7 @@ runs:
         RULES: ${{ inputs.rules }}
         EXCEPT_RULES: ${{ inputs.except-rules }}
         EXCEPT_TABLES: ${{ inputs.except-tables }}
+        MIGRATIONS: ${{ inputs.migrations }}
+        MIGRATION_TRANSACTION: ${{ inputs.migration-transaction }}
         FAIL_ON_BLOCKING: ${{ inputs.fail-on-blocking }}
       run: bash "${GITHUB_ACTION_PATH}/run.sh"

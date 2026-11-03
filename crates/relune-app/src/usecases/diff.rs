@@ -68,6 +68,7 @@ pub fn diff(request: DiffRequest) -> Result<DiffResult, AppError> {
                 &before_schema,
                 &after_schema,
                 dialect,
+                None,
             )?;
             let (content, notice) = render_diff_visual(
                 &before_schema,

@@ -5,10 +5,14 @@ import {
   findingColumns,
   findingTarget,
   parseReviewReport,
+  sourceKey,
+  sourceLabel,
   stepFinding,
   type DefinitionDiff,
+  type ReportStatement,
   type ReviewFinding,
   type ReviewReport,
+  type SourceLocation,
 } from './review_report';
 import { getViewerRuntime, persistDetailsOpen } from './viewer_api';
 
@@ -67,15 +71,27 @@ function mountReviewPanel(report: ReviewReport, elements: ReviewPanelElements): 
 
   persistDetailsOpen(elements.panel, 'relune-review-panel-open');
   elements.meta.textContent = summaryText(report);
-  if (report.dialect_note != null) {
-    elements.dialect.textContent = report.dialect_note;
+  const notes = [report.dialect_note, report.migration_note].filter(
+    (note): note is string => note != null,
+  );
+  if (notes.length > 0) {
+    elements.dialect.textContent = notes.join(' · ');
     elements.dialect.removeAttribute('hidden');
   }
+  const statements = new Map(
+    (report.statements ?? []).map((statement) => [sourceKey(statement), statement]),
+  );
   renderCoverage(elements.coverage, report);
 
   const findings = report.findings;
   const items = findings.map((finding, index) =>
-    buildFindingItem(finding, index, report.definitions?.[finding.table_id ?? ''], tableLabel),
+    buildFindingItem(
+      finding,
+      index,
+      report.definitions?.[finding.table_id ?? ''],
+      statements,
+      tableLabel,
+    ),
   );
   elements.list.append(...items.map((item) => item.root));
   elements.empty.toggleAttribute('hidden', findings.length > 0);
@@ -237,6 +253,7 @@ function buildFindingItem(
   finding: ReviewFinding,
   index: number,
   definition: DefinitionDiff | undefined,
+  statements: ReadonlyMap<string, ReportStatement>,
   tableLabel: (id: string) => string,
 ): FindingItem {
   const root = document.createElement('li');
@@ -269,6 +286,21 @@ function buildFindingItem(
   ruleId.textContent = finding.rule_id;
   detail.append(ruleId, section('Finding', paragraph(finding.message)));
 
+  if (finding.execution != null) {
+    const execution = document.createElement('p');
+    execution.className = `review-execution review-execution-${finding.execution.verdict}`;
+    const verdict = document.createElement('span');
+    verdict.className = 'review-execution-verdict';
+    verdict.textContent = finding.execution.verdict;
+    execution.append(verdict, finding.execution.detail);
+    detail.append(section('How the migration runs it', execution));
+  }
+
+  const sources = finding.sources ?? [];
+  if (sources.length > 0) {
+    detail.append(section('Migration SQL', sourceList(sources, statements)));
+  }
+
   if (definition !== undefined && definition.lines.length > 0) {
     detail.append(section('Definition', definitionBlock(definition, finding.focus_lines ?? [])));
   }
@@ -297,6 +329,36 @@ function buildFindingItem(
 
   root.append(toggle, detail);
   return { root, toggle, detail, links };
+}
+
+function sourceList(
+  sources: readonly SourceLocation[],
+  statements: ReadonlyMap<string, ReportStatement>,
+): HTMLOListElement {
+  const list = document.createElement('ol');
+  list.className = 'review-sources';
+  for (const source of sources) {
+    const item = document.createElement('li');
+    const location = document.createElement('span');
+    location.className = 'review-source-location';
+    location.textContent = sourceLabel(source);
+    item.appendChild(location);
+    const statement = statements.get(sourceKey(source));
+    if (statement !== undefined) {
+      if (statement.in_transaction) {
+        const badge = document.createElement('span');
+        badge.className = 'review-source-transaction';
+        badge.textContent = 'in transaction';
+        item.appendChild(badge);
+      }
+      const sql = document.createElement('pre');
+      sql.className = 'review-source-sql';
+      sql.textContent = statement.sql;
+      item.appendChild(sql);
+    }
+    list.appendChild(item);
+  }
+  return list;
 }
 
 function section(title: string, body: HTMLElement): DocumentFragment {

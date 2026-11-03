@@ -323,6 +323,8 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `-o`, `--out <FILE>` | Optional file (else stdout) |
 | `--stdout` | Explicitly allow the raw HTML report on interactive stdout |
 | `--dialect` | Drives both SQL parsing and review rule evaluation. `postgres` / `mysql` activate the lock-risk caution rules; `sqlite` skips them. `auto` (default) is promoted to the parser-resolved dialect when both inputs agree, and stays inactive (with a `REVIEW002` warning) when they disagree. |
+| `--migration <FILE>` | Repeatable; migration SQL that turns `before` into `after`, in execution order (see [Migration SQL](#migration-sql)) |
+| `--migration-transaction explicit\|per-file` | How the migration tool wraps each file in a transaction (default `explicit`) |
 | `--rules <RULE>` | Repeatable; run only these rules (accepts `risk/<id>` or bare `<id>`) |
 | `--except-rule <RULE>` | Repeatable; remove rules from the active set |
 | `--except-table <PATTERN>` | Repeatable; suppress findings for matching tables (see [Table patterns](#table-patterns)) |
@@ -333,7 +335,7 @@ Compare a `before` schema with an `after` schema and emit migration risk finding
 | `--emit-summary <PATH>` | Always write the full review JSON (same shape as `--format json`) to `PATH`, even when `--deny` or `--fail-on-warning` short-circuits (rc=10 / rc=3) |
 | `--allow-invalid-schema` | Review inputs that fail identity validation instead of exiting `1` (same rules as [`diff`](#diff)) |
 
-Rule IDs are kebab-case under the `risk/` namespace. The catalog covers sixteen rules:
+Rule IDs are kebab-case under the `risk/` namespace. The catalog covers twenty-one rules; the last five read migration SQL and only fire with `--migration`:
 
 | Rule ID | Default severity | Dialect |
 |---------|------------------|---------|
@@ -353,8 +355,13 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers sixteen 
 | `risk/add-fk-on-existing` | caution | postgres / mysql |
 | `risk/alter-column-type` | caution | postgres / mysql |
 | `risk/rewrite-table` | caution | mysql |
+| `risk/concurrently-in-transaction` | breaking | postgres |
+| `risk/set-not-null-scan` | caution | postgres |
+| `risk/constraint-not-validated` | info | postgres |
+| `risk/rename-column` | warning | any |
+| `risk/rename-table` | warning | any |
 
-`risk/drop-table` and `risk/drop-column` flag every dropped table and every dropped stored column (generated columns are skipped) because their data is permanently lost, whether or not anything references them. When a foreign key still references the dropped object, `risk/drop-table-referenced` / `risk/drop-column-referenced` additionally report that the migration itself will fail. `risk/drop-enum-value` flags values removed from a named enum type (once per pre-existing column that still uses it) or from an inline `ENUM(...)` / `SET(...)` column, because rows holding the removed value fail the migration or lose it. Review compares schema states, so a rename of a table, column, or enum value shows up as a drop plus an add and is reported by these rules too; exclude them with `--except-rule` / `--except-table` for intentional renames and cleanups.
+`risk/drop-table` and `risk/drop-column` flag every dropped table and every dropped stored column (generated columns are skipped) because their data is permanently lost, whether or not anything references them. When a foreign key still references the dropped object, `risk/drop-table-referenced` / `risk/drop-column-referenced` additionally report that the migration itself will fail. `risk/drop-enum-value` flags values removed from a named enum type (once per pre-existing column that still uses it) or from an inline `ENUM(...)` / `SET(...)` column, because rows holding the removed value fail the migration or lose it. Review compares schema states, so without migration SQL a rename of a table, column, or enum value shows up as a drop plus an add and is reported by these rules too; pass the migration with `--migration` so table and column renames are recognized (see [Migration SQL](#migration-sql)), or exclude the rules with `--except-rule` / `--except-table` for intentional renames and cleanups.
 
 `risk/add-not-null-on-existing` skips a new NOT NULL column that the database fills for existing rows: one with a non-NULL `DEFAULT`, an identity or generated definition, or an auto-increment / `SERIAL` type. Changing an existing nullable column to NOT NULL is always reported, because existing NULLs fail regardless of the default.
 
@@ -366,15 +373,45 @@ Rule IDs are kebab-case under the `risk/` namespace. The catalog covers sixteen 
 
 `--rules` and `--except-rule` accept either the fully-qualified form (`risk/fk-without-index`) or the short form (`fk-without-index`).
 
-`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all sixteen rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 or rc=3 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
+`--list-rules` is the single source of truth for the rule catalog (CI / docs automation can pipe `--format json` into `jq` to enumerate all twenty-one rules). `--emit-summary` is intended for CI pipelines that need to read the structured report even when the user-visible run exits with rc=10 or rc=3 (e.g. PR comment generation in a single pass); reusing the same path as `--out` is rejected as a usage error.
 
 Review only sees what the parser modeled. When an input produced no schema objects (`PARSE004`), or the parser skipped constructs it does not support (`PARSE002`, e.g. an unsupported `ALTER TABLE` form), the text and markdown reports print a "Review coverage is incomplete" warning above the findings, and the JSON report records it under `inputs.before` / `inputs.after` (`empty`, `unsupported_constructs`). A run with no findings is then not evidence that the migration is safe. `--deny` only looks at findings, so add `--fail-on-warning` (or `[review] fail_on_warning = true`) to make CI fail on these warnings too. When both apply, `--deny` takes precedence (exit `10`).
 
 `--format html` writes a self-contained review report: the same diagram as `relune diff --format html` (drawn with the `[diff]` theme, layout, edge style, direction, density, grouping, and legend settings) with a **Review** panel in the sidebar. The panel lists the findings most severe first, with chips to show or hide each severity, and notes what the review could not evaluate (incomplete input coverage, findings on excepted tables). Choosing a finding (click, or `J` / `K` to step through them) selects its table, marks the columns it is about, centers the diagram on it, and opens its reasoning: the finding, why the rule fires, the table definition before and after the change as a line diff with the lines the finding is about marked, the affected tables (each one selects that table on the diagram), and what to do. `R` opens or closes the panel. The report needs no server, so the same file works as a CI artifact or a local review. Without `-o`, an interactive terminal requires `--stdout`. The JSON written by `--emit-summary` is unchanged.
 
 > [!NOTE]
-> **Lock-risk caution rules read schema state, not migration SQL.**
-> Lock-risk caution rules are based on **schema state-change diff**, not on the migration SQL itself. They flag a state change that — if executed naively — would acquire a problematic lock; they **do not** read your migration script and cannot detect that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder.
+> **Without `--migration`, lock-risk caution rules read schema state only.**
+> They flag a state change that — if executed naively — would acquire a problematic lock, and cannot tell that you wrote `CREATE INDEX CONCURRENTLY` or `ALGORITHM=INPLACE`. Treat the caution as a "make sure you used the safe variant" reminder, or pass the migration SQL so PostgreSQL migrations are judged by how they actually run.
+
+### Migration SQL
+
+Pass the migration that turns `before` into `after` with `--migration <FILE>` (repeat it for several files, in the order they run) to review **how** the change is made, not only what changes:
+
+```bash
+relune review --before old.sql --after new.sql --dialect postgres \
+  --migration migrations/001_add_constraints.sql \
+  --migration migrations/002_validate.sql
+```
+
+The schemas still decide what changed; the SQL adds the order, the transactions, and the way each statement runs:
+
+- **Renames** (`ALTER TABLE ... RENAME COLUMN` / `RENAME TO`, MySQL `CHANGE` and `RENAME TABLE`) are applied to `before` before comparing, so a renamed column or table is no longer reported as dropped plus added. `risk/rename-column` / `risk/rename-table` report it instead: the data is kept, but queries that still use the old name fail.
+- **Sources.** Each finding lists the statements that make its change (`at: 001.sql:3` in text, `sources` in JSON, with the SQL in the HTML report).
+- **Execution** (PostgreSQL). Findings whose risk depends on how the statement runs get an `execution` note with a verdict:
+  - `risk/add-index-on-large-table`: `CREATE INDEX CONCURRENTLY` outside a transaction block is **mitigated** (lowered to `info`); a plain `CREATE INDEX` or an index built by `ADD CONSTRAINT ... UNIQUE` is **confirmed**.
+  - `risk/add-fk-on-existing`: `ADD CONSTRAINT ... NOT VALID` followed by `VALIDATE CONSTRAINT` in a separate transaction (or never validated here) is **mitigated**; validating in the same transaction, or adding without `NOT VALID`, is **confirmed**.
+  - `risk/add-check-on-existing`: `NOT VALID` without a validation here is **mitigated**; with a validation, existing rows are still checked, so it stays **confirmed**.
+  - `risk/add-not-null-on-existing`: with no `UPDATE` of the table before `SET NOT NULL` it is **confirmed**. An earlier `UPDATE` leaves it **unverified**, because Relune cannot tell whether it fills every NULL.
+  - A finding that no statement makes is **unverified**.
+  A mitigated finding is lowered to `info`, whatever `severity_overrides` say, so `--deny caution` passes a migration that uses the safe form.
+- **Statement-order rules** (PostgreSQL): `risk/concurrently-in-transaction` (breaking) for `CREATE INDEX` / `DROP INDEX` / `REINDEX ... CONCURRENTLY` inside a transaction block, which PostgreSQL rejects; `risk/set-not-null-scan` (caution) for `SET NOT NULL` on an existing table without an earlier validated `CHECK (column IS NOT NULL)`, which PostgreSQL 12+ would use to skip the full-table scan; `risk/constraint-not-validated` (info) for a constraint added `NOT VALID` and never validated in the migration.
+
+Statements are paired with findings by object name first and by columns only when a name is missing on one side; a constraint added without a name is matched by its columns or `CHECK` expression, and a later `VALIDATE CONSTRAINT` on the same table that may or may not be it leaves the finding **unverified** (PostgreSQL's generated foreign key name `<table>_<columns>_fkey` is recognized). Table names written in the SQL resolve like the comparison does: `public.orders` names the unqualified `orders`, other qualifiers must match exactly, and an unqualified name shared by tables in several schemas is not guessed. A rename onto a name the migration dropped earlier keeps the dropped object as `<name> (dropped)`, so its loss is still reported.
+
+Transactions follow `BEGIN` / `START TRANSACTION` and `COMMIT` / `END` / `ROLLBACK` in each file (a `BEGIN` inside an open transaction does not start a new one, and `COMMIT AND CHAIN` / `ROLLBACK AND CHAIN` start the next one at once) (`--migration-transaction explicit`, the default); a transaction left open at the end of a file closes there. When the migration tool wraps every file in a transaction, pass `--migration-transaction per-file`, so `CONCURRENTLY` in such a file is reported as failing.
+
+Statements the parser cannot read (for example `DO` blocks) are kept as **not analyzed**: each one is a `REVIEW003` warning naming its file and line, the reports list them under the coverage warning, and the JSON records them under `migration.unanalyzed`. Changes they make are not reviewed, so add `--fail-on-warning` to fail CI on them. The JSON report also records the files, the statement count, and the transaction mode under `migration`. MySQL migrations get sources and rename handling, but no execution verdicts.
+
 
 ```bash
 relune review --before old.sql --after new.sql
@@ -388,7 +425,8 @@ relune review --before old.sql --after new.sql --except-table 'audit_*'
 relune review --before old.sql --after new.sql --exit-code  # exits 10 if findings exist
 relune review --before old.sql --after new.sql --deny breaking --emit-summary review.json
 relune review --before old.sql --after new.sql --dialect postgres --deny caution
-relune review --list-rules                       # text listing of all 16 rules
+relune review --before old.sql --after new.sql --dialect postgres --migration 001.sql --migration 002.sql
+relune review --list-rules                       # text listing of all 21 rules
 relune review --list-rules --format json | jq '.[0]'
 relune --config relune.toml review --before old.sql --after new.sql
 ```

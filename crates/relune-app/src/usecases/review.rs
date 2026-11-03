@@ -4,16 +4,19 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use relune_core::{
-    Diagnostic, EffectiveDialect, ReviewResult as CoreReviewResult, ReviewRuleId,
-    ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding, Schema,
-    SqlDialect, diagnostic::codes, diff_schemas, lock_risk_skip_diagnostic,
-    pattern::matches_table_pattern,
+    Diagnostic, EffectiveDialect, ExecutionVerdict, MigrationOperation, MigrationScript,
+    ReviewResult as CoreReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity,
+    ReviewSeverityOverride, ReviewSummary, RiskFinding, Schema, SqlDialect, assess_migration,
+    diagnostic::codes, diff_schemas, lock_risk_skip_diagnostic, pattern::matches_table_pattern,
 };
+use relune_parser_sql::{MigrationFile, parse_migration};
 
 use crate::error::AppError;
 use crate::markdown;
 use crate::request::{ReviewFormat, ReviewRequest};
-use crate::result::{ReviewInputCoverage, ReviewInputs, ReviewResult};
+use crate::result::{
+    MigrationCoverage, ReviewInputCoverage, ReviewInputs, ReviewResult, UnanalyzedStatement,
+};
 use crate::schema_input::{SchemaValidation, align_input_schemas, schema_from_input_checked};
 use crate::usecases::diff::render_review_diagram;
 use crate::usecases::review_report::build_review_report;
@@ -43,13 +46,20 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
     let before_dialect = before_context.resolved_dialect;
     let after_dialect = after_context.resolved_dialect;
 
-    let schema_diff = diff_schemas(&before_schema, &after_schema);
-
     let (effective, promotion_diagnostic) =
         resolve_effective_dialect(request.dialect, before_dialect, after_dialect);
     if let Some(diagnostic) = promotion_diagnostic {
         diagnostics.push(diagnostic);
     }
+
+    // Renames in the migration line the schemas up before they are compared,
+    // so a renamed column is not reported as dropped and re-added.
+    let script = read_migration(&request, effective, &mut diagnostics);
+    if let Some(script) = &script {
+        script.apply_renames(&mut before_schema);
+    }
+
+    let schema_diff = diff_schemas(&before_schema, &after_schema);
     let RuleEvaluation {
         findings,
         suppressed,
@@ -65,6 +75,7 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         &before_schema,
         &after_schema,
         effective,
+        script.as_ref(),
     )?;
 
     // Surface a single info-level diagnostic when the caller explicitly
@@ -89,6 +100,9 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
         requested_dialect: request.dialect,
         effective_dialect: effective.into(),
         inputs,
+        migration: script
+            .as_ref()
+            .map(|script| migration_coverage(&request, script)),
         rendered: None,
     };
 
@@ -97,8 +111,9 @@ pub fn review(request: ReviewRequest) -> Result<ReviewResult, AppError> {
             &result,
             &before_schema,
             &after_schema,
+            script.as_ref(),
             effective_dialect_text(&result),
-            input_coverage_notes(&result.inputs),
+            coverage_notes(&result),
         );
         let (html, notice) = render_review_diagram(
             &before_schema,
@@ -136,17 +151,32 @@ pub(crate) struct RuleEvaluation {
 
 /// Runs the selected rules on a schema diff and applies severity overrides
 /// and table suppression, the same way for `review` and visual diffs.
+///
+/// With a migration `script`, findings are then reconciled with the
+/// statements that make the change; a finding whose risk the statements
+/// avoid keeps the `info` severity that sets, whatever the overrides say.
 pub(crate) fn evaluate_rules(
     selection: RuleSelection<'_>,
     schema_diff: &relune_core::SchemaDiff,
     before: &Schema,
     after: &Schema,
     dialect: EffectiveDialect,
+    script: Option<&MigrationScript>,
 ) -> Result<RuleEvaluation, AppError> {
     let applied_rules = resolve_active_rules(selection.rules, selection.except_rules)?;
     let override_map = build_override_map(selection.severity_overrides)?;
     let mut raw_findings =
         relune_core::run_rules(schema_diff, before, after, &applied_rules, dialect);
+    if let Some(script) = script {
+        assess_migration(
+            &mut raw_findings,
+            script,
+            before,
+            after,
+            &applied_rules,
+            dialect,
+        );
+    }
     apply_severity_overrides(&mut raw_findings, &override_map);
     let (findings, suppressed) = partition_suppressed(raw_findings, selection.except_tables);
     Ok(RuleEvaluation {
@@ -154,6 +184,69 @@ pub(crate) fn evaluate_rules(
         suppressed,
         applied_rules,
     })
+}
+
+/// Parses the request's migration SQL, when it has any, in the review dialect.
+fn read_migration(
+    request: &ReviewRequest,
+    dialect: EffectiveDialect,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<MigrationScript> {
+    if request.migrations.is_empty() {
+        return None;
+    }
+    let files: Vec<MigrationFile> = request
+        .migrations
+        .iter()
+        .map(|migration| MigrationFile {
+            name: migration.name.clone(),
+            sql: migration.sql.clone(),
+        })
+        .collect();
+    let output = parse_migration(&files, dialect.into(), request.migration_transaction);
+    diagnostics.extend(output.diagnostics);
+    Some(output.script)
+}
+
+fn migration_coverage(request: &ReviewRequest, script: &MigrationScript) -> MigrationCoverage {
+    MigrationCoverage {
+        files: request
+            .migrations
+            .iter()
+            .map(|migration| migration.name.clone())
+            .collect(),
+        statements: script.statements.len(),
+        transaction_mode: script.transaction_mode,
+        unanalyzed: script
+            .unanalyzed()
+            .map(|statement| UnanalyzedStatement {
+                location: statement.location.clone(),
+                reason: statement
+                    .operations
+                    .iter()
+                    .find_map(|operation| match operation {
+                        MigrationOperation::Unanalyzed { reason } => Some(reason.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    }
+}
+
+/// Everything the review could not evaluate: incomplete inputs and
+/// migration statements it could not read.
+fn coverage_notes(result: &ReviewResult) -> Vec<String> {
+    let mut notes = input_coverage_notes(&result.inputs);
+    if let Some(migration) = &result.migration {
+        notes.extend(migration.unanalyzed.iter().map(|statement| {
+            format!(
+                "Migration statement at {} was not analyzed ({}); changes it makes are not reviewed.",
+                statement.location, statement.reason
+            )
+        }));
+    }
+    notes
 }
 
 fn input_coverage(schema: &Schema, diagnostics: &[Diagnostic]) -> ReviewInputCoverage {
@@ -229,7 +322,13 @@ fn apply_severity_overrides(
     if overrides.is_empty() {
         return;
     }
-    for finding in findings.iter_mut() {
+    let mitigated = |finding: &RiskFinding| {
+        finding
+            .execution
+            .as_ref()
+            .is_some_and(|note| note.verdict == ExecutionVerdict::Mitigated)
+    };
+    for finding in findings.iter_mut().filter(|finding| !mitigated(finding)) {
         if let Some(severity) = overrides.get(&finding.rule_id) {
             finding.severity = *severity;
         }
@@ -254,9 +353,12 @@ pub fn format_review_text_with(result: &ReviewResult, quiet: bool) -> String {
     if let Some(line) = effective_dialect_text(result) {
         let _ = writeln!(output, "  {line}");
     }
+    if let Some(line) = migration_text(result) {
+        let _ = writeln!(output, "  {line}");
+    }
     output.push('\n');
 
-    let coverage_notes = input_coverage_notes(&result.inputs);
+    let coverage_notes = coverage_notes(result);
     if !coverage_notes.is_empty() {
         let _ = writeln!(output, "  {INCOMPLETE_COVERAGE_HEADING}");
         for note in &coverage_notes {
@@ -325,9 +427,12 @@ pub fn format_review_markdown_with(result: &ReviewResult, quiet: bool) -> String
     if let Some(line) = effective_dialect_text(result) {
         let _ = writeln!(output, "_{line}_");
     }
+    if let Some(line) = migration_text(result) {
+        let _ = writeln!(output, "_{}_", markdown::text(&line));
+    }
     output.push('\n');
 
-    let coverage_notes = input_coverage_notes(&result.inputs);
+    let coverage_notes = coverage_notes(result);
     if !coverage_notes.is_empty() {
         let _ = writeln!(output, "> [!WARNING]");
         let _ = writeln!(output, "> {INCOMPLETE_COVERAGE_HEADING}");
@@ -464,9 +569,44 @@ fn write_text_finding(output: &mut String, finding: &RiskFinding) {
     let target = format_target(finding);
     let _ = writeln!(output, "    [{}] {}", finding.rule_id.as_str(), target);
     let _ = writeln!(output, "      {}", finding.message);
+    if let Some(sources) = sources_text(finding) {
+        let _ = writeln!(output, "      at: {sources}");
+    }
+    if let Some(execution) = &finding.execution {
+        let _ = writeln!(
+            output,
+            "      execution ({}): {}",
+            execution.verdict.as_str(),
+            execution.detail
+        );
+    }
     if let Some(mitigation) = &finding.mitigation {
         let _ = writeln!(output, "      mitigation: {mitigation}");
     }
+}
+
+/// Migration statements a finding points at, e.g. `001.sql:3, 002.sql:1`.
+fn sources_text(finding: &RiskFinding) -> Option<String> {
+    (!finding.sources.is_empty()).then(|| {
+        finding
+            .sources
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+}
+
+/// One-line summary of the migration SQL the review read.
+fn migration_text(result: &ReviewResult) -> Option<String> {
+    result.migration.as_ref().map(|migration| {
+        format!(
+            "Migration SQL: {} file(s), {} statement(s); transactions: {}",
+            migration.files.len(),
+            migration.statements,
+            migration.transaction_mode
+        )
+    })
 }
 
 fn write_markdown_finding(output: &mut String, finding: &RiskFinding) {
@@ -478,6 +618,17 @@ fn write_markdown_finding(output: &mut String, finding: &RiskFinding) {
         markdown::code(&target)
     );
     let _ = writeln!(output, "  {}", markdown::text(&finding.message));
+    if let Some(sources) = sources_text(finding) {
+        let _ = writeln!(output, "  at {}", markdown::code(&sources));
+    }
+    if let Some(execution) = &finding.execution {
+        let _ = writeln!(
+            output,
+            "  _execution ({}): {}_",
+            execution.verdict.as_str(),
+            markdown::text(&execution.detail)
+        );
+    }
     if let Some(mitigation) = &finding.mitigation {
         let _ = writeln!(output, "  _mitigation: {}_", markdown::text(mitigation));
     }
@@ -674,6 +825,563 @@ mod tests {
         assert!(rendered.contains("  email TEXT"));
         // The JSON report stays the same shape.
         assert!(!format_review_json(&html).unwrap().contains("rendered"));
+    }
+
+    fn migration_review(before: &str, after: &str, files: &[(&str, &str)]) -> ReviewResult {
+        use crate::request::{InputSource, MigrationInput};
+        run(ReviewRequest {
+            before: InputSource::sql_text_with_dialect(before, SqlDialect::Postgres),
+            after: InputSource::sql_text_with_dialect(after, SqlDialect::Postgres),
+            dialect: SqlDialect::Postgres,
+            migrations: files
+                .iter()
+                .map(|(name, sql)| MigrationInput {
+                    name: (*name).to_string(),
+                    sql: (*sql).to_string(),
+                })
+                .collect(),
+            ..ReviewRequest::from_sql("", "")
+        })
+    }
+
+    fn finding(result: &ReviewResult, rule: ReviewRuleId) -> &RiskFinding {
+        result
+            .review
+            .findings
+            .iter()
+            .find(|finding| finding.rule_id == rule)
+            .unwrap_or_else(|| panic!("expected {rule} in {:#?}", result.review.findings))
+    }
+
+    fn rule_ids(result: &ReviewResult) -> Vec<ReviewRuleId> {
+        result.review.findings.iter().map(|f| f.rule_id).collect()
+    }
+
+    const ORDERS_BEFORE: &str = "
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT);
+    ";
+    const ORDERS_INDEXED: &str = "
+        CREATE TABLE users (id BIGINT PRIMARY KEY);
+        CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT);
+        CREATE INDEX orders_user_id_idx ON orders (user_id);
+    ";
+
+    #[test]
+    fn index_build_method_decides_the_lock_risk() {
+        use relune_core::ExecutionVerdict;
+
+        let blocking = migration_review(
+            ORDERS_BEFORE,
+            ORDERS_INDEXED,
+            &[(
+                "001.sql",
+                "CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            )],
+        );
+        let index = finding(&blocking, ReviewRuleId::AddIndexOnLargeTable);
+        assert_eq!(index.severity, ReviewSeverity::Caution);
+        assert_eq!(
+            index.execution.as_ref().unwrap().verdict,
+            ExecutionVerdict::Confirmed
+        );
+        assert_eq!(index.sources[0].to_string(), "001.sql:1");
+
+        let concurrent = migration_review(
+            ORDERS_BEFORE,
+            ORDERS_INDEXED,
+            &[(
+                "001.sql",
+                "-- no transaction\nCREATE INDEX CONCURRENTLY orders_user_id_idx ON orders (user_id);",
+            )],
+        );
+        let index = finding(&concurrent, ReviewRuleId::AddIndexOnLargeTable);
+        assert_eq!(index.severity, ReviewSeverity::Info);
+        let note = index.execution.as_ref().unwrap();
+        assert_eq!(note.verdict, ExecutionVerdict::Mitigated);
+        assert!(note.detail.contains("001.sql:2"), "{}", note.detail);
+        assert!(
+            !concurrent
+                .review
+                .summary
+                .has_findings_at_or_above(ReviewSeverity::Caution)
+        );
+
+        let in_transaction = migration_review(
+            ORDERS_BEFORE,
+            ORDERS_INDEXED,
+            &[(
+                "001.sql",
+                "BEGIN;\nCREATE INDEX CONCURRENTLY orders_user_id_idx ON orders (user_id);\nCOMMIT;",
+            )],
+        );
+        let failure = finding(&in_transaction, ReviewRuleId::ConcurrentlyInTransaction);
+        assert_eq!(failure.severity, ReviewSeverity::Breaking);
+        assert_eq!(failure.table_id.as_deref(), Some("orders"));
+
+        let per_file = run(ReviewRequest {
+            migration_transaction: relune_core::TransactionMode::PerFile,
+            ..ReviewRequest {
+                before: crate::request::InputSource::sql_text_with_dialect(
+                    ORDERS_BEFORE,
+                    SqlDialect::Postgres,
+                ),
+                after: crate::request::InputSource::sql_text_with_dialect(
+                    ORDERS_INDEXED,
+                    SqlDialect::Postgres,
+                ),
+                migrations: vec![crate::request::MigrationInput {
+                    name: "001.sql".to_string(),
+                    sql: "CREATE INDEX CONCURRENTLY orders_user_id_idx ON orders (user_id);"
+                        .to_string(),
+                }],
+                ..ReviewRequest::from_sql("", "")
+            }
+        });
+        assert!(rule_ids(&per_file).contains(&ReviewRuleId::ConcurrentlyInTransaction));
+    }
+
+    #[test]
+    fn foreign_key_validation_steps_decide_the_lock_risk() {
+        use relune_core::ExecutionVerdict;
+
+        let after = "
+            CREATE TABLE users (id BIGINT PRIMARY KEY);
+            CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT,
+                CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id));
+            CREATE INDEX orders_user_id_idx ON orders (user_id);
+        ";
+        let before = ORDERS_INDEXED;
+
+        let direct = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id);",
+            )],
+        );
+        let fk = finding(&direct, ReviewRuleId::AddFkOnExisting);
+        assert_eq!(
+            fk.execution.as_ref().unwrap().verdict,
+            ExecutionVerdict::Confirmed
+        );
+        assert_eq!(fk.severity, ReviewSeverity::Caution);
+
+        let staged = migration_review(
+            before,
+            after,
+            &[
+                (
+                    "001.sql",
+                    "ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;",
+                ),
+                (
+                    "002.sql",
+                    "ALTER TABLE orders VALIDATE CONSTRAINT orders_user_fk;",
+                ),
+            ],
+        );
+        let fk = finding(&staged, ReviewRuleId::AddFkOnExisting);
+        assert_eq!(
+            fk.execution.as_ref().unwrap().verdict,
+            ExecutionVerdict::Mitigated
+        );
+        assert_eq!(fk.severity, ReviewSeverity::Info);
+        let sources: Vec<String> = fk.sources.iter().map(ToString::to_string).collect();
+        assert_eq!(sources, ["001.sql:1", "002.sql:1"]);
+        assert!(!rule_ids(&staged).contains(&ReviewRuleId::ConstraintNotValidated));
+
+        let same_transaction = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "BEGIN;
+                 ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;
+                 ALTER TABLE orders VALIDATE CONSTRAINT orders_user_fk;
+                 COMMIT;",
+            )],
+        );
+        let fk = finding(&same_transaction, ReviewRuleId::AddFkOnExisting);
+        assert_eq!(
+            fk.execution.as_ref().unwrap().verdict,
+            ExecutionVerdict::Confirmed
+        );
+        assert!(
+            fk.execution
+                .as_ref()
+                .unwrap()
+                .detail
+                .contains("same transaction")
+        );
+
+        let never_validated = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;",
+            )],
+        );
+        assert!(rule_ids(&never_validated).contains(&ReviewRuleId::ConstraintNotValidated));
+    }
+
+    #[test]
+    fn rename_keeps_data_where_drop_and_add_lose_it() {
+        let before = "CREATE TABLE users (id BIGINT PRIMARY KEY, name TEXT);
+                      CREATE INDEX users_name_idx ON users (name);";
+        let after = "CREATE TABLE users (id BIGINT PRIMARY KEY, full_name TEXT);
+                     CREATE INDEX users_name_idx ON users (full_name);";
+
+        let renamed = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE users RENAME COLUMN name TO full_name;",
+            )],
+        );
+        assert_eq!(rule_ids(&renamed), [ReviewRuleId::RenameColumn]);
+        let rename = finding(&renamed, ReviewRuleId::RenameColumn);
+        assert_eq!(rename.column_name.as_deref(), Some("full_name"));
+        assert!(
+            rename
+                .message
+                .contains("users.name is renamed to full_name")
+        );
+
+        let rebuilt = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE users DROP COLUMN name;
+                 ALTER TABLE users ADD COLUMN full_name TEXT;
+                 DROP INDEX users_name_idx;
+                 CREATE INDEX CONCURRENTLY users_name_idx ON users (full_name);",
+            )],
+        );
+        let drop = finding(&rebuilt, ReviewRuleId::DropColumn);
+        assert_eq!(drop.severity, ReviewSeverity::Breaking);
+        assert_eq!(drop.sources[0].to_string(), "001.sql:1");
+        assert!(!rule_ids(&rebuilt).contains(&ReviewRuleId::RenameColumn));
+    }
+
+    #[test]
+    fn set_not_null_scan_and_backfill_follow_the_statements() {
+        use relune_core::ExecutionVerdict;
+
+        let before = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);";
+        let after = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);";
+
+        let direct = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE users ALTER COLUMN email SET NOT NULL;",
+            )],
+        );
+        assert!(rule_ids(&direct).contains(&ReviewRuleId::SetNotNullScan));
+        let not_null = finding(&direct, ReviewRuleId::AddNotNullOnExisting);
+        assert_eq!(
+            not_null.execution.as_ref().unwrap().verdict,
+            ExecutionVerdict::Confirmed
+        );
+
+        let staged = migration_review(
+            before,
+            after,
+            &[
+                (
+                    "001.sql",
+                    "UPDATE users SET email = '' WHERE email IS NULL;
+                     ALTER TABLE users ADD CONSTRAINT email_nn CHECK (email IS NOT NULL) NOT VALID;",
+                ),
+                (
+                    "002.sql",
+                    "ALTER TABLE users VALIDATE CONSTRAINT email_nn;
+                     ALTER TABLE users ALTER COLUMN email SET NOT NULL;
+                     ALTER TABLE users DROP CONSTRAINT email_nn;",
+                ),
+            ],
+        );
+        assert!(!rule_ids(&staged).contains(&ReviewRuleId::SetNotNullScan));
+        // An UPDATE is not proof that every NULL was filled.
+        let not_null = finding(&staged, ReviewRuleId::AddNotNullOnExisting);
+        let note = not_null.execution.as_ref().unwrap();
+        assert_eq!(note.verdict, ExecutionVerdict::Unverified);
+        assert_eq!(not_null.severity, ReviewSeverity::Warning);
+    }
+
+    fn verdicts(
+        result: &ReviewResult,
+        rule: ReviewRuleId,
+    ) -> Vec<Option<relune_core::ExecutionVerdict>> {
+        result
+            .review
+            .findings
+            .iter()
+            .filter(|finding| finding.rule_id == rule)
+            .map(|finding| finding.execution.as_ref().map(|note| note.verdict))
+            .collect()
+    }
+
+    #[test]
+    fn a_rename_onto_a_dropped_column_still_reports_the_loss() {
+        let result = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, a TEXT, b TEXT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, b TEXT);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t DROP COLUMN b; ALTER TABLE t RENAME COLUMN a TO b;",
+            )],
+        );
+        let drop = finding(&result, ReviewRuleId::DropColumn);
+        assert_eq!(drop.column_name.as_deref(), Some("b (dropped)"));
+        assert!(rule_ids(&result).contains(&ReviewRuleId::RenameColumn));
+    }
+
+    #[test]
+    fn named_keys_are_matched_by_name_before_columns() {
+        use relune_core::ExecutionVerdict::{Confirmed, Mitigated};
+
+        let result = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, x INT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, x INT);
+             CREATE INDEX a ON t (x);
+             CREATE INDEX b ON t (x);",
+            &[(
+                "001.sql",
+                "CREATE INDEX a ON t (x);\nCREATE INDEX CONCURRENTLY b ON t (x);",
+            )],
+        );
+        let mut found = verdicts(&result, ReviewRuleId::AddIndexOnLargeTable);
+        found.sort_by_key(|verdict| verdict.map(|v| v.as_str()));
+        assert_eq!(found, [Some(Confirmed), Some(Mitigated)]);
+    }
+
+    #[test]
+    fn an_ambiguous_table_name_is_not_resolved_by_guessing() {
+        use relune_core::ExecutionVerdict::Unverified;
+
+        let result = migration_review(
+            "CREATE TABLE audit.orders (id INT PRIMARY KEY, x INT);
+             CREATE TABLE sales.orders (id INT PRIMARY KEY, x INT);",
+            "CREATE TABLE audit.orders (id INT PRIMARY KEY, x INT);
+             CREATE TABLE sales.orders (id INT PRIMARY KEY, x INT);
+             CREATE INDEX orders_x_idx ON audit.orders (x);",
+            &[(
+                "001.sql",
+                "CREATE INDEX CONCURRENTLY orders_x_idx ON orders (x);",
+            )],
+        );
+        assert_eq!(
+            verdicts(&result, ReviewRuleId::AddIndexOnLargeTable),
+            [Some(Unverified)]
+        );
+    }
+
+    #[test]
+    fn transaction_control_keeps_locks_where_postgres_keeps_them() {
+        use relune_core::ExecutionVerdict::Confirmed;
+
+        let chained = migration_review(
+            ORDERS_BEFORE,
+            ORDERS_INDEXED,
+            &[(
+                "001.sql",
+                "BEGIN; COMMIT AND CHAIN;
+                 CREATE INDEX CONCURRENTLY orders_user_id_idx ON orders (user_id); COMMIT;",
+            )],
+        );
+        assert!(rule_ids(&chained).contains(&ReviewRuleId::ConcurrentlyInTransaction));
+
+        let nested = migration_review(
+            ORDERS_INDEXED,
+            "CREATE TABLE users (id BIGINT PRIMARY KEY);
+             CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT,
+                 CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id));
+             CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            &[(
+                "001.sql",
+                "BEGIN;
+                 ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;
+                 BEGIN;
+                 ALTER TABLE orders VALIDATE CONSTRAINT orders_user_fk;
+                 COMMIT;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&nested, ReviewRuleId::AddFkOnExisting),
+            [Some(Confirmed)]
+        );
+    }
+
+    #[test]
+    fn unnamed_checks_are_judged_only_when_their_statement_is_known() {
+        use relune_core::ExecutionVerdict::{Confirmed, Unverified};
+
+        let before = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
+        let after =
+            "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT, CHECK (a > 0), CHECK (b > 0));";
+        let two = migration_review(
+            before,
+            after,
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CHECK (a > 0);\nALTER TABLE t ADD CHECK (b > 0) NOT VALID;",
+            )],
+        );
+        let checks = verdicts(&two, ReviewRuleId::AddCheckOnExisting);
+        assert!(checks.contains(&Some(Confirmed)), "{checks:?}");
+        assert!(
+            two.review
+                .findings
+                .iter()
+                .filter(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting)
+                .all(|f| f.severity == ReviewSeverity::Warning || f.message.contains("b > 0")),
+            "the validated check on a must keep its warning"
+        );
+
+        let generated = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY);",
+            "CREATE TABLE t (id INT PRIMARY KEY, CHECK (id > 0));",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CHECK (id > 0) NOT VALID;\nALTER TABLE t VALIDATE CONSTRAINT t_id_check;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&generated, ReviewRuleId::AddCheckOnExisting),
+            [Some(Unverified)]
+        );
+    }
+
+    #[test]
+    fn set_not_null_scan_needs_the_proof_in_place_and_follows_renames() {
+        let before = "CREATE TABLE t (id INT PRIMARY KEY, email TEXT);";
+        let dropped_proof = migration_review(
+            before,
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT NOT NULL);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CONSTRAINT nn CHECK (email IS NOT NULL);
+                 ALTER TABLE t DROP CONSTRAINT nn, ALTER COLUMN email SET NOT NULL;",
+            )],
+        );
+        assert!(rule_ids(&dropped_proof).contains(&ReviewRuleId::SetNotNullScan));
+
+        let renamed_later = migration_review(
+            before,
+            "CREATE TABLE u (id INT PRIMARY KEY, email TEXT NOT NULL);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ALTER COLUMN email SET NOT NULL;\nALTER TABLE t RENAME TO u;",
+            )],
+        );
+        let scan = finding(&renamed_later, ReviewRuleId::SetNotNullScan);
+        assert_eq!(scan.table_id.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn constraint_identity_and_table_reuse_do_not_borrow_evidence() {
+        use relune_core::ExecutionVerdict::{Confirmed, Unverified};
+
+        let mixed = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, a INT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, a INT,
+                CONSTRAINT positive_id CHECK (id > 0), CHECK (a > 0));",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CONSTRAINT positive_id CHECK (id > 0), ADD CHECK (a > 0) NOT VALID;
+                 ALTER TABLE t VALIDATE CONSTRAINT t_a_check;",
+            )],
+        );
+        let unnamed = mixed
+            .review
+            .findings
+            .iter()
+            .find(|f| f.rule_id == ReviewRuleId::AddCheckOnExisting && f.message.contains("a > 0"))
+            .expect("unnamed check finding");
+        assert_eq!(unnamed.execution.as_ref().unwrap().verdict, Unverified);
+
+        let dropped_unnamed_proof = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT NOT NULL);",
+            &[(
+                "001.sql",
+                "ALTER TABLE t ADD CHECK (email IS NOT NULL);
+                 ALTER TABLE t DROP CONSTRAINT t_email_check;
+                 ALTER TABLE t ALTER COLUMN email SET NOT NULL;",
+            )],
+        );
+        assert!(rule_ids(&dropped_unnamed_proof).contains(&ReviewRuleId::SetNotNullScan));
+
+        let reused = migration_review(
+            "CREATE TABLE p (id INT PRIMARY KEY);
+             CREATE TABLE a (id INT PRIMARY KEY, p_id INT);
+             CREATE TABLE b (id INT PRIMARY KEY, p_id INT);",
+            "CREATE TABLE p (id INT PRIMARY KEY);
+             CREATE TABLE b (id INT PRIMARY KEY, p_id INT,
+                CONSTRAINT fk FOREIGN KEY (p_id) REFERENCES p (id));",
+            &[(
+                "001.sql",
+                "ALTER TABLE a ADD CONSTRAINT fk FOREIGN KEY (p_id) REFERENCES p (id);
+                 ALTER TABLE b ADD CONSTRAINT fk FOREIGN KEY (p_id) REFERENCES p (id) NOT VALID;
+                 DROP TABLE b;
+                 ALTER TABLE a RENAME TO b;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&reused, ReviewRuleId::AddFkOnExisting),
+            [Some(Confirmed)]
+        );
+    }
+
+    #[test]
+    fn an_index_attached_with_using_index_is_judged_by_its_build() {
+        use relune_core::ExecutionVerdict::Mitigated;
+
+        let result = migration_review(
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT);",
+            "CREATE TABLE t (id INT PRIMARY KEY, email TEXT, CONSTRAINT t_email_key UNIQUE (email));",
+            &[(
+                "001.sql",
+                "CREATE UNIQUE INDEX CONCURRENTLY t_email_key ON t (email);
+                 ALTER TABLE t ADD CONSTRAINT t_email_key UNIQUE USING INDEX t_email_key;",
+            )],
+        );
+        assert_eq!(
+            verdicts(&result, ReviewRuleId::AddIndexOnLargeTable),
+            [Some(Mitigated)]
+        );
+    }
+
+    #[test]
+    fn unreadable_migration_statements_are_reported_as_not_reviewed() {
+        let result = migration_review(
+            ORDERS_BEFORE,
+            ORDERS_INDEXED,
+            &[(
+                "001.sql",
+                "DO $$ BEGIN PERFORM 1; END $$;\nCREATE INDEX CONCURRENTLY orders_user_id_idx ON orders (user_id);",
+            )],
+        );
+        let migration = result.migration.as_ref().expect("migration coverage");
+        assert_eq!(migration.statements, 2);
+        assert_eq!(migration.unanalyzed[0].location.to_string(), "001.sql:1");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == codes::review_migration_unanalyzed())
+        );
+        let text = format_review_text(&result);
+        assert!(text.contains("Migration statement at 001.sql:1 was not analyzed"));
+        assert!(text.contains("execution (mitigated)"));
+        assert!(text.contains("at: 001.sql:2"));
     }
 
     #[test]

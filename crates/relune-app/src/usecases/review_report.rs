@@ -4,9 +4,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
-use relune_core::{CheckConstraint, Column, ForeignKey, Index, RiskFinding, Schema, Table};
+use relune_core::{
+    CheckConstraint, Column, ForeignKey, Index, MigrationScript, RiskFinding, Schema, Table,
+};
 use relune_render_html::{
-    DefinitionDiff, DefinitionLine, LineChange, ReviewReport, ReviewReportFinding,
+    DefinitionDiff, DefinitionLine, LineChange, ReportStatement, ReviewReport, ReviewReportFinding,
 };
 
 use crate::result::ReviewResult;
@@ -16,6 +18,7 @@ pub(crate) fn build_review_report(
     result: &ReviewResult,
     before: &Schema,
     after: &Schema,
+    script: Option<&MigrationScript>,
     dialect_note: Option<String>,
     coverage_notes: Vec<String>,
 ) -> ReviewReport {
@@ -47,8 +50,37 @@ pub(crate) fn build_review_report(
         })
         .collect();
 
+    let statements = script.map_or_else(Vec::new, |script| {
+        script
+            .statements
+            .iter()
+            .filter(|statement| {
+                result
+                    .review
+                    .findings
+                    .iter()
+                    .any(|finding| finding.sources.contains(&statement.location))
+            })
+            .map(|statement| ReportStatement {
+                location: statement.location.clone(),
+                sql: statement.sql.clone(),
+                in_transaction: statement.transaction.is_some(),
+            })
+            .collect()
+    });
+    let migration_note = result.migration.as_ref().map(|migration| {
+        format!(
+            "Migration SQL: {} file(s), {} statement(s); transactions: {}",
+            migration.files.len(),
+            migration.statements,
+            migration.transaction_mode
+        )
+    });
+
     ReviewReport {
         summary: result.review.summary.clone(),
+        migration_note,
+        statements,
         findings,
         suppressed: result.review.suppressed.len(),
         dialect_note,

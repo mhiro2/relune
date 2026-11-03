@@ -12,9 +12,9 @@ use crate::output::{
     validate_markup_stdout_usage, write_output,
 };
 use relune_app::{
-    GroupingSpec, GroupingStrategy, RenderOptions, RenderTheme, ReviewDiagramSettings,
-    ReviewFormat as AppReviewFormat, ReviewRequest, ReviewResult, format_review_json,
-    format_review_markdown_with, format_review_text_with, review,
+    GroupingSpec, GroupingStrategy, MigrationInput, RenderOptions, RenderTheme,
+    ReviewDiagramSettings, ReviewFormat as AppReviewFormat, ReviewRequest, ReviewResult,
+    format_review_json, format_review_markdown_with, format_review_text_with, review,
 };
 use relune_core::{ReviewRuleId, ReviewRuleMetadata, ReviewSeverity, Severity};
 
@@ -54,6 +54,7 @@ pub fn run_review(
     let after = DiffInputSelection::from_review_after(args).resolve(dialect, "after")?;
 
     let deny = merged.deny.map(review_severity_to_core);
+    let migrations = read_migrations(&args.migrations)?;
 
     let request = ReviewRequest {
         before,
@@ -73,6 +74,8 @@ pub fn run_review(
         dialect,
         allow_invalid_schema: merged.allow_invalid_schema,
         diagram: diagram_settings(merged.diagram),
+        migrations,
+        migration_transaction: merged.migration_transaction.into(),
     };
 
     let mut result = review(request)
@@ -142,6 +145,25 @@ pub fn run_review(
     }
 
     Ok(())
+}
+
+/// Reads `--migration` files in the order given.
+fn read_migrations(paths: &[PathBuf]) -> CliResult<Vec<MigrationInput>> {
+    paths
+        .iter()
+        .map(|path| {
+            let sql = relune_app::read_input_file(path).map_err(|error| {
+                CliError::usage(anyhow::anyhow!(
+                    "Failed to read migration file: {}: {error}",
+                    path.display()
+                ))
+            })?;
+            Ok(MigrationInput {
+                name: path.display().to_string(),
+                sql,
+            })
+        })
+        .collect()
 }
 
 fn diagram_settings(diagram: ReviewDiagramConfig) -> ReviewDiagramSettings {

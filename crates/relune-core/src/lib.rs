@@ -41,6 +41,8 @@ pub mod graph;
 pub mod layout;
 /// Lint engine for schema analysis.
 pub mod lint;
+/// Ordered migration SQL as a sequence of operations.
+pub mod migration;
 /// Core data model types.
 pub mod model;
 /// Glob matching for table-name patterns.
@@ -61,6 +63,10 @@ pub use lint::{
     LintIssue, LintProfile, LintResult, LintRuleCategory, LintRuleId, LintRuleMetadata, LintStats,
     lint_schema,
 };
+pub use migration::{
+    ConstraintKind, MigrationOperation, MigrationScript, MigrationStatement, SourceLocation,
+    TransactionMode,
+};
 pub use model::{
     CheckConstraint, Column, ColumnId, ColumnSemantics, Enum, ForeignKey, GeneratedColumn,
     IdentitySpec, Index, IndexColumn, IndexKey, NullsOrder, ReferentialAction, Schema, SchemaStats,
@@ -68,6 +74,7 @@ pub use model::{
     normalize_identifier, qualified_identifier,
 };
 pub use review::{
-    EffectiveDialect, ReviewResult, ReviewRuleId, ReviewRuleMetadata, ReviewSeverity,
-    ReviewSeverityOverride, ReviewSummary, RiskFinding, lock_risk_skip_diagnostic, run_rules,
+    EffectiveDialect, ExecutionNote, ExecutionVerdict, ReviewResult, ReviewRuleId,
+    ReviewRuleMetadata, ReviewSeverity, ReviewSeverityOverride, ReviewSummary, RiskFinding,
+    assess_migration, lock_risk_skip_diagnostic, run_rules,
 };

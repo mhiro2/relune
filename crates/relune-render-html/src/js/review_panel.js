@@ -16,6 +16,12 @@
   }
 
   // ts/review_report.ts
+  function sourceLabel(location) {
+    return `${location.file}:${location.line}`;
+  }
+  function sourceKey(location) {
+    return `${location.file}:${location.line}:${location.column}`;
+  }
   var REVIEW_SEVERITIES = [
     "breaking",
     "caution",
@@ -193,14 +199,26 @@
     const tableLabel = (id) => tables.get(id)?.label ?? id;
     persistDetailsOpen(elements.panel, "relune-review-panel-open");
     elements.meta.textContent = summaryText(report);
-    if (report.dialect_note != null) {
-      elements.dialect.textContent = report.dialect_note;
+    const notes = [report.dialect_note, report.migration_note].filter(
+      (note) => note != null
+    );
+    if (notes.length > 0) {
+      elements.dialect.textContent = notes.join(" \xB7 ");
       elements.dialect.removeAttribute("hidden");
     }
+    const statements = new Map(
+      (report.statements ?? []).map((statement) => [sourceKey(statement), statement])
+    );
     renderCoverage(elements.coverage, report);
     const findings = report.findings;
     const items = findings.map(
-      (finding, index) => buildFindingItem(finding, index, report.definitions?.[finding.table_id ?? ""], tableLabel)
+      (finding, index) => buildFindingItem(
+        finding,
+        index,
+        report.definitions?.[finding.table_id ?? ""],
+        statements,
+        tableLabel
+      )
     );
     elements.list.append(...items.map((item) => item.root));
     elements.empty.toggleAttribute("hidden", findings.length > 0);
@@ -322,7 +340,7 @@
       container.appendChild(chip);
     }
   }
-  function buildFindingItem(finding, index, definition, tableLabel) {
+  function buildFindingItem(finding, index, definition, statements, tableLabel) {
     const root = document.createElement("li");
     root.className = `review-finding review-finding-${finding.severity}`;
     const detailId = `review-finding-detail-${index}`;
@@ -349,6 +367,19 @@
     ruleId.className = "review-rule-id";
     ruleId.textContent = finding.rule_id;
     detail.append(ruleId, section("Finding", paragraph(finding.message)));
+    if (finding.execution != null) {
+      const execution = document.createElement("p");
+      execution.className = `review-execution review-execution-${finding.execution.verdict}`;
+      const verdict = document.createElement("span");
+      verdict.className = "review-execution-verdict";
+      verdict.textContent = finding.execution.verdict;
+      execution.append(verdict, finding.execution.detail);
+      detail.append(section("How the migration runs it", execution));
+    }
+    const sources = finding.sources ?? [];
+    if (sources.length > 0) {
+      detail.append(section("Migration SQL", sourceList(sources, statements)));
+    }
     if (definition !== void 0 && definition.lines.length > 0) {
       detail.append(section("Definition", definitionBlock(definition, finding.focus_lines ?? [])));
     }
@@ -374,6 +405,32 @@
     }
     root.append(toggle, detail);
     return { root, toggle, detail, links };
+  }
+  function sourceList(sources, statements) {
+    const list = document.createElement("ol");
+    list.className = "review-sources";
+    for (const source of sources) {
+      const item = document.createElement("li");
+      const location = document.createElement("span");
+      location.className = "review-source-location";
+      location.textContent = sourceLabel(source);
+      item.appendChild(location);
+      const statement = statements.get(sourceKey(source));
+      if (statement !== void 0) {
+        if (statement.in_transaction) {
+          const badge = document.createElement("span");
+          badge.className = "review-source-transaction";
+          badge.textContent = "in transaction";
+          item.appendChild(badge);
+        }
+        const sql = document.createElement("pre");
+        sql.className = "review-source-sql";
+        sql.textContent = statement.sql;
+        item.appendChild(sql);
+      }
+      list.appendChild(item);
+    }
+    return list;
   }
   function section(title, body) {
     const fragment = document.createDocumentFragment();

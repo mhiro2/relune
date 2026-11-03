@@ -14,7 +14,9 @@ mod review;
 pub use error::HtmlRenderError;
 pub use options::{HtmlRenderOptions, Theme};
 pub use relune_render_svg::SvgArtifact;
-pub use review::{DefinitionDiff, DefinitionLine, LineChange, ReviewReport, ReviewReportFinding};
+pub use review::{
+    DefinitionDiff, DefinitionLine, LineChange, ReportStatement, ReviewReport, ReviewReportFinding,
+};
 
 use relune_layout::LayoutGraph;
 

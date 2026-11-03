@@ -39,16 +39,17 @@ pub mod usecases;
 // Re-export request types
 pub use request::{
     DiffFormat, DiffRequest, DocFormat, DocRequest, ExportFormat, ExportRequest, InputSource,
-    InspectFormat, InspectRequest, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme, ReviewDiagramSettings, ReviewFormat, ReviewRequest,
+    InspectFormat, InspectRequest, LintFormat, LintRequest, MigrationInput, OutputFormat,
+    RenderOptions, RenderRequest, RenderTheme, ReviewDiagramSettings, ReviewFormat, ReviewRequest,
     ReviewRuleSettings,
 };
 
 // Re-export result types
 pub use result::{
     ColumnDetails, DiffResult, DocResult, ExportResult, ForeignKeyDetails, IndexDetails,
-    InspectResult, LintResult, LintReview, RenderResult, RenderStats, ReviewInputCoverage,
-    ReviewInputs, ReviewResult, SchemaSummary, TableDetails, TableSummary,
+    InspectResult, LintResult, LintReview, MigrationCoverage, RenderResult, RenderStats,
+    ReviewInputCoverage, ReviewInputs, ReviewResult, SchemaSummary, TableDetails, TableSummary,
+    UnanalyzedStatement,
 };
 
 // Re-export error type

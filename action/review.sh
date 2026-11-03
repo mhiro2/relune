@@ -93,6 +93,16 @@ while IFS= read -r line; do
   args+=(--except-table "${line}")
 done <<< "${EXCEPT_TABLES:-}"
 
+while IFS= read -r line; do
+  line="${line%$'\r'}"
+  [[ -z "${line}" ]] && continue
+  args+=(--migration "${line}")
+done <<< "${MIGRATIONS:-}"
+
+if [[ -n "${MIGRATION_TRANSACTION:-}" ]]; then
+  args+=(--migration-transaction "${MIGRATION_TRANSACTION}")
+fi
+
 if [[ -n "${DENY:-}" ]]; then
   args+=(--deny "${DENY}")
 fi

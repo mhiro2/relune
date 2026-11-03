@@ -446,10 +446,37 @@ pub struct ReviewResult {
     /// this next to the findings rather than only in the diagnostics.
     #[serde(default)]
     pub inputs: ReviewInputs,
+    /// What the review read from the migration SQL, when it was given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration: Option<MigrationCoverage>,
     /// Self-contained HTML report, present when the request asked for HTML.
     /// It is not part of the JSON report.
     #[serde(skip)]
     pub rendered: Option<String>,
+}
+
+/// How much of the migration SQL the review could read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MigrationCoverage {
+    /// Migration files, in execution order.
+    pub files: Vec<String>,
+    /// Number of statements across every file.
+    pub statements: usize,
+    /// How the statements were assigned to transactions.
+    pub transaction_mode: relune_core::TransactionMode,
+    /// Statements that could not be analyzed; changes they make are not
+    /// reviewed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unanalyzed: Vec<UnanalyzedStatement>,
+}
+
+/// A migration statement the review could not analyze.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnanalyzedStatement {
+    /// Where the statement is written.
+    pub location: relune_core::SourceLocation,
+    /// Why it was not analyzed.
+    pub reason: String,
 }
 
 /// Parse coverage of the before/after review inputs.

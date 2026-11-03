@@ -1,0 +1,26 @@
+[
+  {
+    "column_name": "status",
+    "columns": [
+      "status"
+    ],
+    "constraint_name": "orders_status_idx",
+    "execution": {
+      "detail": "Built with CREATE INDEX CONCURRENTLY outside a transaction block (migrations/001_index.sql:1), so writes to orders continue during the build. A failed build leaves an INVALID index to drop before retrying.",
+      "verdict": "mitigated"
+    },
+    "message": "New index orders_status_idx on existing table orders (status) (postgres). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
+    "mitigation": "Use CREATE INDEX CONCURRENTLY (and DROP INDEX CONCURRENTLY for rollback) in postgres.",
+    "rule_id": "risk/add-index-on-large-table",
+    "severity": "info",
+    "sources": [
+      {
+        "column": 1,
+        "file": "migrations/001_index.sql",
+        "line": 1
+      }
+    ],
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

@@ -19,6 +19,7 @@ mod diagnostics;
 mod dialect;
 mod drop;
 mod enum_type;
+mod migration;
 mod mysql_enum;
 mod names;
 mod query_columns;
@@ -34,6 +35,7 @@ use thiserror::Error;
 pub use relune_core::diagnostic::codes;
 
 pub use dialect::detect_dialect;
+pub use migration::{MigrationFile, MigrationParseOutput, parse_migration};
 
 use alter_table::apply_alter_table_operations;
 use comment::parse_comment;

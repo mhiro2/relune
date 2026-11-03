@@ -55,6 +55,8 @@ struct WasmReviewResponse {
     requested_dialect: relune_core::SqlDialect,
     effective_dialect: relune_core::SqlDialect,
     inputs: relune_app::ReviewInputs,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    migration: Option<relune_app::MigrationCoverage>,
 }
 
 /// Set the panic hook for better error messages in the browser.
@@ -328,6 +330,9 @@ pub fn diff_from_schema_json(input: JsValue) -> Result<JsValue, JsValue> {
 ///   `"auto"` if unset)
 /// - `effective_dialect`: The dialect actually used for review
 ///   evaluation, after auto-promotion
+/// - `migration`: Present when `migrations` were given: the files, the
+///   statement count, the transaction mode, and statements that could not
+///   be analyzed
 /// - `inputs`: Parse coverage per side (`before` / `after`, each with
 ///   `empty` and `unsupported_constructs`); anything other than
 ///   `empty = false, unsupported_constructs = 0` means the review may
@@ -365,6 +370,7 @@ pub fn review_from_sql(input: JsValue) -> Result<JsValue, JsValue> {
         requested_dialect: result.requested_dialect,
         effective_dialect: result.effective_dialect,
         inputs: result.inputs,
+        migration: result.migration,
     };
 
     Ok(serde_wasm_bindgen::to_value(&response).map_err(WasmError::from)?)
@@ -692,6 +698,8 @@ mod wasm_bindgen_tests {
             severity_overrides: vec![],
             dialect: None,
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         })
         .expect("serialize review request");
 
@@ -702,6 +710,39 @@ mod wasm_bindgen_tests {
         let content = value["content"].as_str().expect("HTML content");
         assert!(content.contains(r#"id="relune-review""#));
         assert!(content.contains("risk/drop-column"));
+    }
+
+    #[wasm_bindgen_test]
+    fn wasm_review_from_sql_reads_migration_sql() {
+        let input = serde_wasm_bindgen::to_value(&WasmReviewRequest {
+            before_sql: Some("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);".to_string()),
+            before_schema_json: None,
+            after_sql: Some("CREATE TABLE users (id INT PRIMARY KEY, full_name TEXT);".to_string()),
+            after_schema_json: None,
+            format: Some(ReviewFormat::Json),
+            rules: vec![],
+            except_rules: vec![],
+            except_tables: vec![],
+            deny: None,
+            severity_overrides: vec![],
+            dialect: None,
+            allow_invalid_schema: false,
+            migrations: vec![relune_app::MigrationInput {
+                name: "001.sql".to_string(),
+                sql: "ALTER TABLE users RENAME COLUMN name TO full_name;".to_string(),
+            }],
+            migration_transaction: None,
+        })
+        .expect("serialize review request");
+
+        let result = review_from_sql(input).expect("review request should succeed");
+        let value: serde_json::Value =
+            serde_wasm_bindgen::from_value(result).expect("deserialize review result");
+
+        let findings = value["review"]["findings"].as_array().expect("findings");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["rule_id"], "risk/rename-column");
+        assert_eq!(findings[0]["sources"][0]["file"], "001.sql");
     }
 
     #[wasm_bindgen_test]
@@ -728,6 +769,8 @@ mod wasm_bindgen_tests {
             severity_overrides: vec![],
             dialect: None,
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         })
         .expect("serialize review request");
 
@@ -755,6 +798,8 @@ mod wasm_bindgen_tests {
             severity_overrides: vec![],
             dialect: None,
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         })
         .expect("serialize review request");
 
@@ -818,6 +863,8 @@ mod wasm_bindgen_tests {
             severity_overrides: vec![],
             dialect: None,
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         })
         .expect("serialize review request");
 
@@ -890,6 +937,8 @@ mod wasm_bindgen_tests {
             severity_overrides: vec![],
             dialect: None,
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         })
         .expect("serialize review request");
 
@@ -930,6 +979,8 @@ mod wasm_bindgen_tests {
             severity_overrides: vec![],
             dialect: Some(relune_core::SqlDialect::Postgres),
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         })
         .expect("serialize review request");
 
@@ -981,6 +1032,8 @@ mod wasm_bindgen_tests {
                 severity_overrides: vec![],
                 dialect: None,
                 allow_invalid_schema: false,
+                migrations: vec![],
+                migration_transaction: None,
             })
             .expect("serialize review request");
 
