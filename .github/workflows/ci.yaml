@@ -72,11 +72,11 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2.9.3
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2.87.32
+        uses: taiki-e/install-action@v2.90.0
         with:
           tool: cargo-llvm-cov
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.87.32
+        uses: taiki-e/install-action@v2.90.0
         with:
           tool: wasm-pack
       - name: Set up Node.js
@@ -106,7 +106,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2.9.3
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.87.32
+        uses: taiki-e/install-action@v2.90.0
         with:
           tool: wasm-pack
       - name: Install pnpm
@@ -156,7 +156,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2.9.3
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2.87.32
+        uses: taiki-e/install-action@v2.90.0
         with:
           tool: cargo-deny
       - name: Run cargo-deny

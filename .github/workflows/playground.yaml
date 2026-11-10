@@ -39,7 +39,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2.9.3
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.87.32
+        uses: taiki-e/install-action@v2.90.0
         with:
           tool: wasm-pack
       - name: Install pnpm
