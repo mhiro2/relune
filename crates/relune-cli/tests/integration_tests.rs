@@ -2785,6 +2785,133 @@ mod review_tests {
     }
 
     #[test]
+    fn review_html_format_writes_a_linked_report() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let output_path = temp.path().join("review.html");
+
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("-f")
+            .arg("html")
+            .arg("--out")
+            .arg(&output_path)
+            .output()
+            .expect("command should run");
+
+        assert!(output.status.success(), "review should succeed");
+        let html = fs::read_to_string(&output_path).expect("Failed to read review output");
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(html.contains(r#"id="review-panel""#));
+        let report = html
+            .split(r#"<script type="application/json" id="relune-review">"#)
+            .nth(1)
+            .and_then(|rest| rest.split("</script>").next())
+            .expect("the report embeds its findings");
+        let report: serde_json::Value =
+            serde_json::from_str(report.trim()).expect("embedded report is JSON");
+        assert!(
+            report["findings"]
+                .as_array()
+                .is_some_and(|findings| !findings.is_empty())
+        );
+        assert!(report["findings"][0]["rule_description"].is_string());
+    }
+
+    #[test]
+    fn review_reads_migration_sql_in_order() {
+        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+        let first = temp.path().join("001_add_fk.sql");
+        let second = temp.path().join("002_validate_fk.sql");
+        fs::write(
+            &first,
+            "ALTER TABLE orders ADD CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID;",
+        )
+        .unwrap();
+        fs::write(
+            &second,
+            "ALTER TABLE orders VALIDATE CONSTRAINT orders_user_fk;",
+        )
+        .unwrap();
+
+        let output = relune()
+            .arg("review")
+            .arg("--dialect")
+            .arg("postgres")
+            .arg("--before-sql-text")
+            .arg(
+                "CREATE TABLE users (id BIGINT PRIMARY KEY);
+                 CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT);
+                 CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            )
+            .arg("--after-sql-text")
+            .arg(
+                "CREATE TABLE users (id BIGINT PRIMARY KEY);
+                 CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT,
+                   CONSTRAINT orders_user_fk FOREIGN KEY (user_id) REFERENCES users (id));
+                 CREATE INDEX orders_user_id_idx ON orders (user_id);",
+            )
+            .arg("--migration")
+            .arg(&first)
+            .arg("--migration")
+            .arg(&second)
+            .arg("--deny")
+            .arg("caution")
+            .arg("-f")
+            .arg("json")
+            .output()
+            .expect("command should run");
+
+        assert!(
+            output.status.success(),
+            "a validated NOT VALID foreign key should not reach caution: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let finding = &report["findings"][0];
+        assert_eq!(finding["rule_id"], "risk/add-fk-on-existing");
+        assert_eq!(finding["severity"], "info");
+        assert_eq!(finding["execution"]["verdict"], "mitigated");
+        assert_eq!(report["migration"]["statements"], 2);
+        assert_eq!(report["migration"]["transaction_mode"], "explicit");
+    }
+
+    #[test]
+    fn review_rejects_a_missing_migration_file() {
+        let output = relune()
+            .arg("review")
+            .arg("--before-sql-text")
+            .arg(DROP_FK_BEFORE)
+            .arg("--after-sql-text")
+            .arg(DROP_FK_AFTER)
+            .arg("--migration")
+            .arg("does-not-exist.sql")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Failed to read migration file"));
+    }
+
+    #[test]
+    fn review_list_rules_rejects_html_format() {
+        let output = relune()
+            .arg("review")
+            .arg("--list-rules")
+            .arg("--format")
+            .arg("html")
+            .output()
+            .expect("command should run");
+
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("html is not a supported format for --list-rules"));
+    }
+
+    #[test]
     fn review_uses_config_format() {
         let temp = tempfile::tempdir().expect("Failed to create temp dir");
         let config_path = temp.path().join("relune.toml");
@@ -2962,6 +3089,11 @@ mod review_tests {
             ("risk/add-fk-on-existing", "caution"),
             ("risk/alter-column-type", "caution"),
             ("risk/rewrite-table", "caution"),
+            ("risk/concurrently-in-transaction", "breaking"),
+            ("risk/set-not-null-scan", "caution"),
+            ("risk/constraint-not-validated", "info"),
+            ("risk/rename-column", "warning"),
+            ("risk/rename-table", "warning"),
         ];
         expected.sort_unstable();
         assert_eq!(listed, expected, "unexpected rule listing:\n{stdout}");
@@ -2986,7 +3118,7 @@ mod review_tests {
         let entries = parsed
             .as_array()
             .expect("--list-rules JSON should be an array");
-        assert_eq!(entries.len(), 16, "expected metadata for every review rule");
+        assert_eq!(entries.len(), 21, "expected metadata for every review rule");
         let first = &entries[0];
         assert_eq!(first["rule_id"], "risk/drop-column");
         assert_eq!(first["default_severity"], "breaking");

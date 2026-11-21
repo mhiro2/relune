@@ -9,8 +9,10 @@ use std::fmt::Write as _;
 use proptest::prelude::*;
 use proptest::sample::select;
 use relune_core::export::{SchemaExport, export_schema, import_schema};
-use relune_core::{Schema, SqlDialect};
-use relune_parser_sql::parse_sql_to_schema_with_diagnostics_and_dialect;
+use relune_core::{Schema, SqlDialect, TransactionMode};
+use relune_parser_sql::{
+    MigrationFile, parse_migration, parse_sql_to_schema_with_diagnostics_and_dialect,
+};
 
 const DIALECTS: [SqlDialect; 4] = [
     SqlDialect::Auto,
@@ -29,7 +31,8 @@ const TOKENS: &[&str] = &[
     "EXISTS", "OR", "REPLACE", "SELECT", "FROM", "WHERE", "JOIN", "WITH", "GENERATED", "ALWAYS",
     "STORED", "INT", "BIGINT", "TEXT", "VARCHAR(10)", "NUMERIC(10,2)", "ENUM('a','b')", "SERIAL",
     "INTEGER", "ENGINE=InnoDB", "AUTO_INCREMENT", "WITHOUT ROWID", "STRICT", "PARTITION", "OF",
-    "LIKE", "INCLUDE", "USING", "btree", "DELIMITER", ";;", "users", "posts", "id", "user_id",
+    "LIKE", "INCLUDE", "USING", "btree", "DELIMITER", ";;", "CONCURRENTLY", "VALID",
+    "VALIDATE", "BEGIN", "COMMIT", "END", "ROLLBACK", "REINDEX", "DO", "users", "posts", "id", "user_id",
     "public", "public.users", "\"Quoted\"", "`tick`", "[bracket]", "'str'", "''", "(", ")", ",",
     ";", ".", "=", "--", "/*", "*/", "\n", "$$", "é", "テーブル",
 ];
@@ -262,6 +265,28 @@ proptest! {
             let output = parse_sql_to_schema_with_diagnostics_and_dialect(&input, dialect);
             if let Some(schema) = &output.schema {
                 assert_json_round_trip(schema)?;
+            }
+        }
+    }
+
+    #[test]
+    fn migration_statements_keep_their_lines_in_every_dialect(
+        first in token_soup(),
+        second in "\\PC{0,120}",
+    ) {
+        let files = [
+            MigrationFile { name: "001.sql".to_string(), sql: first.clone() },
+            MigrationFile { name: "002.sql".to_string(), sql: second.clone() },
+        ];
+        for dialect in DIALECTS {
+            for mode in [TransactionMode::Explicit, TransactionMode::PerFile] {
+                let output = parse_migration(&files, dialect, mode);
+                for statement in &output.script.statements {
+                    let sql = if statement.location.file == "001.sql" { &first } else { &second };
+                    prop_assert!(statement.location.line >= 1);
+                    prop_assert!(statement.location.line <= sql.lines().count().max(1));
+                    prop_assert!(sql.contains(statement.sql.as_str()));
+                }
             }
         }
     }

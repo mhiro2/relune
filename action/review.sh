@@ -40,6 +40,7 @@ if [[ -z "${OUTPUT_PATH:-}" ]]; then
     markdown) OUTPUT_PATH="relune-review.md" ;;
     json)     OUTPUT_PATH="relune-review.json" ;;
     text)     OUTPUT_PATH="relune-review.txt" ;;
+    html)     OUTPUT_PATH="relune-review.html" ;;
     *)        OUTPUT_PATH="relune-review.txt" ;;
   esac
 fi
@@ -91,6 +92,16 @@ while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
   args+=(--except-table "${line}")
 done <<< "${EXCEPT_TABLES:-}"
+
+while IFS= read -r line; do
+  line="${line%$'\r'}"
+  [[ -z "${line}" ]] && continue
+  args+=(--migration "${line}")
+done <<< "${MIGRATIONS:-}"
+
+if [[ -n "${MIGRATION_TRANSACTION:-}" ]]; then
+  args+=(--migration-transaction "${MIGRATION_TRANSACTION}")
+fi
 
 if [[ -n "${DENY:-}" ]]; then
   args+=(--deny "${DENY}")

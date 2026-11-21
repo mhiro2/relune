@@ -396,6 +396,9 @@ pub struct ReviewConfig {
     /// Continue when an input has empty or duplicate object names.
     #[serde(default)]
     pub allow_invalid_schema: Option<bool>,
+    /// How the migration tool wraps each migration file in a transaction.
+    #[serde(default)]
+    pub migration_transaction: Option<crate::cli::MigrationTransactionArg>,
 }
 
 /// TOML representation of a single per-rule severity override.
@@ -470,6 +473,7 @@ pub enum ReviewFormatConfig {
     Text,
     Markdown,
     Json,
+    Html,
 }
 
 /// Review severity configuration (mirrors CLI `ReviewSeverityArg`).
@@ -550,6 +554,7 @@ impl From<ReviewFormatConfig> for ReviewFormat {
             ReviewFormatConfig::Text => Self::Text,
             ReviewFormatConfig::Markdown => Self::Markdown,
             ReviewFormatConfig::Json => Self::Json,
+            ReviewFormatConfig::Html => Self::Html,
         }
     }
 }
@@ -838,6 +843,20 @@ impl ReluneConfig {
             fail_on_warning: args.fail_on_warning || self.review.fail_on_warning.unwrap_or(false),
             allow_invalid_schema: args.allow_invalid_schema
                 || self.review.allow_invalid_schema.unwrap_or(false),
+            migration_transaction: args
+                .migration_transaction
+                .or(self.review.migration_transaction)
+                .unwrap_or_default(),
+            // The HTML report draws the same diagram as `diff --format html`.
+            diagram: ReviewDiagramConfig {
+                theme: self.diff.theme.unwrap_or_default(),
+                layout: self.diff.layout.unwrap_or_default(),
+                edge_style: self.diff.edge_style.unwrap_or_default(),
+                direction: self.diff.direction.unwrap_or_default(),
+                density: self.diff.density,
+                group_by: self.diff.group_by,
+                show_legend: self.diff.show_legend.unwrap_or(false),
+            },
         })
     }
 
@@ -1103,6 +1122,22 @@ pub struct MergedReviewConfig {
     pub severity_overrides: Vec<ReviewSeverityOverride>,
     pub fail_on_warning: bool,
     pub allow_invalid_schema: bool,
+    pub migration_transaction: crate::cli::MigrationTransactionArg,
+    /// `[diff]` diagram settings used by the HTML report.
+    pub diagram: ReviewDiagramConfig,
+}
+
+/// Diagram settings of the HTML review report, taken from `[diff]`.
+#[derive(Debug, Clone, Copy)]
+pub struct ReviewDiagramConfig {
+    pub theme: Theme,
+    pub layout: LayoutAlgorithmArg,
+    pub edge_style: EdgeStyleArg,
+    pub direction: DirectionArg,
+    /// `None` leaves the density to layout's large-schema fallback.
+    pub density: Option<DensityArg>,
+    pub group_by: Option<GroupByMode>,
+    pub show_legend: bool,
 }
 
 impl MergedRenderConfig {
@@ -2377,7 +2412,10 @@ direction = "left-to-right"
             after_schema_json: None,
             dialect: None,
             format: None,
+            migrations: vec![],
+            migration_transaction: None,
             out: None,
+            stdout: false,
             rules: vec![],
             except_rules: vec![],
             except_tables: vec![],

@@ -57,6 +57,22 @@ import { getViewerRuntime, isEditableTarget } from './viewer_api';
           runtime.viewport?.fit();
         }
         break;
+      case 'j':
+      case 'J':
+      case 'k':
+      case 'K':
+        if (runtime.review !== undefined) {
+          event.preventDefault();
+          runtime.review.step(event.key.toLowerCase() === 'j' ? 1 : -1);
+        }
+        break;
+      case 'r':
+      case 'R':
+        if (runtime.review !== undefined) {
+          event.preventDefault();
+          runtime.review.togglePanel();
+        }
+        break;
       case '+':
       case '=':
         event.preventDefault();

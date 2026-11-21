@@ -26,7 +26,7 @@ inputs:
   format:
     description: >
       Output format. diff mode accepts text|json|markdown|svg|html;
-      review mode accepts text|markdown|json (svg/html will be rejected
+      review mode accepts text|markdown|json|html (svg will be rejected
       by the CLI).
     required: false
     default: markdown
@@ -73,6 +73,20 @@ inputs:
       review mode only. Newline-separated list of table glob patterns (`*`, `?`, `[...]`)
       to suppress; each line is passed to the CLI as `--except-table
       <pattern>` (repeatable).
+    required: false
+    default: ""
+  migrations:
+    description: >
+      review mode only. Newline-separated list of migration SQL files that
+      turn before into after, in execution order; each line is passed to
+      the CLI as `--migration <file>` (repeatable).
+    required: false
+    default: ""
+  migration-transaction:
+    description: >
+      review mode only. How the migration tool wraps each migration file:
+      explicit (only BEGIN/COMMIT in the SQL) or per-file. Empty keeps the
+      CLI default (explicit).
     required: false
     default: ""
   fail-on-blocking:
@@ -149,5 +163,7 @@ runs:
         RULES: ${{ inputs.rules }}
         EXCEPT_RULES: ${{ inputs.except-rules }}
         EXCEPT_TABLES: ${{ inputs.except-tables }}
+        MIGRATIONS: ${{ inputs.migrations }}
+        MIGRATION_TRANSACTION: ${{ inputs.migration-transaction }}
         FAIL_ON_BLOCKING: ${{ inputs.fail-on-blocking }}
       run: bash "${GITHUB_ACTION_PATH}/run.sh"

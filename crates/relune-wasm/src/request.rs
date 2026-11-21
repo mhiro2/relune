@@ -6,12 +6,13 @@
 use relune_app::{
     DiffFormat, DiffRequest, ExportFormat, ExportRequest, FilterSpec, FocusSpec, GroupingSpec,
     GroupingStrategy, InspectFormat, InspectRequest, LayoutAlgorithm, LayoutCompactionSpec,
-    LayoutDirection, LayoutSpec, LintFormat, LintRequest, OutputFormat, RenderOptions,
-    RenderRequest, RenderTheme, ReviewFormat, ReviewRequest, ReviewRuleSettings,
-    ReviewSeverityOverride, RouteStyle,
+    LayoutDirection, LayoutSpec, LintFormat, LintRequest, MigrationInput, OutputFormat,
+    RenderOptions, RenderRequest, RenderTheme, ReviewDiagramSettings, ReviewFormat, ReviewRequest,
+    ReviewRuleSettings, ReviewSeverityOverride, RouteStyle,
 };
 use relune_core::{
     CardDensity, LintProfile, LintRuleCategory, ReviewSeverity, Severity, SqlDialect,
+    TransactionMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -523,7 +524,7 @@ pub struct WasmReviewRequest {
     pub after_sql: Option<String>,
     /// Updated schema JSON.
     pub after_schema_json: Option<String>,
-    /// Output format. `"text" | "markdown" | "json"` (default `json`).
+    /// Output format. `"text" | "markdown" | "json" | "html"` (default `json`).
     #[serde(default)]
     pub format: Option<ReviewFormat>,
     /// Optional rule allowlist. Each entry accepts the full `risk/<kebab>`
@@ -558,6 +559,14 @@ pub struct WasmReviewRequest {
     /// the validation errors as warnings instead of failing.
     #[serde(default)]
     pub allow_invalid_schema: bool,
+    /// Migration SQL files that turn before into after, in execution order
+    /// (`[{ name, sql }]`).
+    #[serde(default)]
+    pub migrations: Vec<MigrationInput>,
+    /// How the migration tool wraps each file in a transaction:
+    /// `"explicit"` (default) or `"per-file"`.
+    #[serde(default)]
+    pub migration_transaction: Option<TransactionMode>,
 }
 
 impl WasmReviewRequest {
@@ -586,6 +595,9 @@ impl WasmReviewRequest {
             severity_overrides: self.severity_overrides.clone(),
             dialect: self.dialect.unwrap_or_default(),
             allow_invalid_schema: self.allow_invalid_schema,
+            diagram: ReviewDiagramSettings::default(),
+            migrations: self.migrations.clone(),
+            migration_transaction: self.migration_transaction.unwrap_or_default(),
         })
     }
 }
@@ -888,6 +900,8 @@ mod tests {
             severity_overrides: vec![],
             dialect: Some(SqlDialect::Postgres),
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         };
 
         let review_req = req.to_review_request().unwrap();
@@ -921,6 +935,8 @@ mod tests {
             severity_overrides: vec![],
             dialect: Some(SqlDialect::Postgres),
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         };
         let review_req = req.to_review_request().unwrap();
         assert_eq!(review_req.dialect, SqlDialect::Postgres);
@@ -1021,6 +1037,8 @@ mod tests {
             severity_overrides: vec![],
             dialect: None,
             allow_invalid_schema: false,
+            migrations: vec![],
+            migration_transaction: None,
         };
 
         let err = req

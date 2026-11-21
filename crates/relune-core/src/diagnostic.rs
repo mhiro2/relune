@@ -226,6 +226,13 @@ pub mod codes {
         DiagnosticCode::new("REVIEW", 2)
     }
 
+    /// Returns the code emitted when a migration statement could not be
+    /// analyzed, so the changes it makes are not reviewed.
+    #[must_use]
+    pub fn review_migration_unanalyzed() -> DiagnosticCode {
+        DiagnosticCode::new("REVIEW", 3)
+    }
+
     /// Returns the code emitted when a large schema without an explicit card
     /// density is laid out at the overview density.
     #[must_use]

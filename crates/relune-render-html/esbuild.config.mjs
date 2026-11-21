@@ -17,6 +17,7 @@ const entries = [
   'shortcuts',
   'load_motion',
   'url_state',
+  'review_panel',
 ];
 
 await Promise.all(

@@ -102,6 +102,8 @@ export interface HighlightPainter {
   applyHoverPreview(preview: HoverPreview): void;
   /** Emphasizes one relationship: its path, ports, endpoint tables, and columns. */
   applyRelation(relation: RelationHighlight): void;
+  /** Marks column rows of one table, like the columns of a relationship. */
+  markColumns(nodeId: string, columns: readonly string[]): void;
 }
 
 const HIGHLIGHT_CLASSES = [
@@ -211,6 +213,8 @@ export function createHighlightPainter(targets: HighlightTargets): HighlightPain
   };
 
   return {
+    markColumns,
+
     clear(): void {
       for (const element of touched) {
         element.classList.remove(...HIGHLIGHT_CLASSES);

@@ -216,3 +216,41 @@ describe('moving between relationship lines', () => {
     expect(tabStops()).toEqual([0]);
   });
 });
+
+describe('selection focus', () => {
+  beforeEach(async () => {
+    resetViewerRuntime();
+    renderViewer();
+    vi.resetModules();
+    await import('./highlight');
+  });
+
+  it('marks the given columns on the selected table', () => {
+    const posts = document.querySelector('.node[data-id="posts"]');
+    posts?.insertAdjacentHTML(
+      'beforeend',
+      '<g class="column-row" data-column-name="user_id"><text class="column-name" y="40"/></g>',
+    );
+    expect(getViewerRuntime().selection?.focus('posts', ['user_id'])).toBe(true);
+    expect(getViewerRuntime().selection?.getSelected()).toBe('posts');
+    expect(posts?.querySelector('.column-row')?.classList.contains('relation-column')).toBe(true);
+    expect(getViewerRuntime().selection?.focus('missing', [])).toBe(false);
+  });
+
+  it('brings back a table hidden by a filter before selecting it', () => {
+    const reset = vi.fn();
+    getViewerRuntime().filters = {
+      reset,
+      hasActiveFilters: () => true,
+      getMode: () => 'hide',
+      setMode: vi.fn(),
+      getFacetSelection: () => [],
+      setFacetSelection: vi.fn(),
+      getAvailableFacets: () => [],
+    };
+    document.querySelector('.node[data-id="users"]')?.classList.add('hidden-by-filter');
+    getViewerRuntime().selection?.focus('users', []);
+    expect(reset).toHaveBeenCalled();
+    expect(getViewerRuntime().selection?.getSelected()).toBe('users');
+  });
+});

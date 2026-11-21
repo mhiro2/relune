@@ -54,6 +54,18 @@ export interface ViewerSelectionApi {
   /** Selects the relationship with this key; returns whether one matched. */
   selectRelation(key: string): boolean;
   getSelectedRelation(): string | null;
+  /**
+   * Selects a table, marks the given columns on its card, and centers it in
+   * the viewport; returns whether the table is on the diagram.
+   */
+  focus(nodeId: string, columns: readonly string[]): boolean;
+}
+
+export interface ViewerReviewApi {
+  /** Selects the next (`1`) or previous (`-1`) visible finding. */
+  step(delta: 1 | -1): void;
+  /** Opens or closes the findings panel, bringing back a hidden sidebar. */
+  togglePanel(): void;
 }
 
 export interface ViewerGroupsApi {
@@ -81,6 +93,7 @@ export interface ViewerRuntime {
   groups?: ViewerGroupsApi;
   minimap?: ViewerMinimapApi;
   sidebar?: ViewerSidebarApi;
+  review?: ViewerReviewApi;
 }
 
 export type ViewerModule = 'viewport' | 'filters' | 'search' | 'selection' | 'groups' | 'minimap';

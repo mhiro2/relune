@@ -55,6 +55,27 @@ resolve to different dialects, the run stays lock-risk-inactive and emits a
 `REVIEW002` warning instead of silently skipping. Pair the input with `deny: caution`
 when the workflow should gate on lock-risk findings.
 
+Pass the pull request's migration files through `migrations` (newline-separated, in
+execution order) to review how the change is made: renames stop showing up as drops,
+each finding points at its statements, and on PostgreSQL a `CREATE INDEX CONCURRENTLY`
+or a `NOT VALID` + `VALIDATE CONSTRAINT` pair lowers the matching lock-risk finding to
+`info`, so `deny: caution` gates only migrations that run the risky way. Set
+`migration-transaction: per-file` when your migration tool wraps each file in a
+transaction. See [Migration SQL](cli-reference.md#migration-sql).
+
+```yaml
+- uses: mhiro2/relune/action@54221dc4b373100b19f3e8a5d302cfe580844630 # v0.11.0
+  with:
+    mode: review
+    before: base-schema.sql
+    after: head-schema.sql
+    dialect: postgres
+    deny: caution
+    migrations: |
+      db/migrations/20261101_add_order_status_index.sql
+      db/migrations/20261102_validate_order_user_fk.sql
+```
+
 The full input / output reference lives in [`action/README.md`](../action/README.md).
 
 ---

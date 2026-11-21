@@ -1,5 +1,10 @@
 [
   {
+    "column_name": "email",
+    "columns": [
+      "email"
+    ],
+    "constraint_name": "users_email_key",
     "message": "UNIQUE index users_email_key on (email) is being added to existing table users. Existing duplicate rows will fail the constraint.",
     "mitigation": "Verify no duplicates exist or deduplicate before applying.",
     "rule_id": "risk/add-unique-on-existing",
@@ -9,6 +14,10 @@
   },
   {
     "column_name": "email",
+    "columns": [
+      "email"
+    ],
+    "constraint_name": "users_email_key",
     "message": "New index users_email_key on existing table users (email) (postgres). A non-CONCURRENT CREATE INDEX takes a SHARE lock that blocks writes for the duration of the build.",
     "mitigation": "Use CREATE INDEX CONCURRENTLY (and DROP INDEX CONCURRENTLY for rollback) in postgres.",
     "rule_id": "risk/add-index-on-large-table",

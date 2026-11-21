@@ -6,10 +6,10 @@ use crate::components::{
     build_detail_drawer_html, build_filter_engine_js, build_filter_reset_bar_html,
     build_group_panel_html, build_group_toggle_js, build_highlight_js, build_hover_popover_html,
     build_load_motion_js, build_minimap_js, build_pan_zoom_js, build_relation_card_html,
-    build_search_js, build_search_panel_html, build_shortcuts_js, build_sidebar_js,
-    build_sidebar_open_html, build_url_state_js, build_viewer_controls_html,
+    build_review_panel_js, build_search_js, build_search_panel_html, build_shortcuts_js,
+    build_sidebar_js, build_sidebar_open_html, build_url_state_js, build_viewer_controls_html,
 };
-use crate::css::build_css;
+use crate::css::{REVIEW_CSS, build_css};
 use crate::options::HtmlRenderOptions;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use relune_render_theme::escape_xml_text;
@@ -71,17 +71,36 @@ fn matches_ascii_ci(bytes: &[u8], start: usize, needle: &[u8]) -> bool {
 }
 
 /// Build the complete HTML document.
+#[cfg(test)]
+pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderOptions) -> String {
+    build_html_document_with_review(svg, metadata_json, None, options)
+}
+
+/// Build the complete HTML document, with a review findings panel when
+/// `review_json` carries a review report.
+///
+/// The panel lives in the explorer sidebar, so it is only shown when
+/// search is enabled.
 #[allow(clippy::needless_raw_string_hashes)]
 #[allow(clippy::too_many_lines)]
-pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderOptions) -> String {
+pub fn build_html_document_with_review(
+    svg: &str,
+    metadata_json: &str,
+    review_json: Option<&str>,
+    options: &HtmlRenderOptions,
+) -> String {
     let title = options.title.as_deref().unwrap_or("Relune ERD");
+    let review_json = review_json.filter(|_| options.enable_search);
 
-    let css = build_css(
+    let mut css = build_css(
         options.theme,
         options.enable_group_toggles,
         options.enable_search,
         options.enable_highlight,
     );
+    if review_json.is_some() {
+        css.push_str(REVIEW_CSS);
+    }
     // Combine all enabled JS modules
     let mut js_parts: Vec<&str> = Vec::new();
     if options.enable_pan_zoom {
@@ -99,6 +118,9 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     }
     if options.enable_highlight {
         js_parts.push(build_highlight_js());
+    }
+    if review_json.is_some() {
+        js_parts.push(build_review_panel_js());
     }
     js_parts.push(build_load_motion_js());
     js_parts.push(build_url_state_js());
@@ -126,7 +148,10 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
     };
 
     let search_panel = if options.enable_search {
-        Some(build_search_panel_html(options.enable_group_toggles))
+        Some(build_search_panel_html(
+            options.enable_group_toggles,
+            review_json.is_some(),
+        ))
     } else {
         None
     };
@@ -192,7 +217,7 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
   </div>
   <script type="application/json" id="relune-metadata" data-relune-metadata>
 {metadata_json}
-  </script>
+  </script>{review_data}
 {js}
 </body>
 </html>"#,
@@ -210,6 +235,11 @@ pub fn build_html_document(svg: &str, metadata_json: &str, options: &HtmlRenderO
         css = css,
         svg = indent_svg(svg),
         metadata_json = metadata_json,
+        review_data = review_json
+            .map(|json| format!(
+                "\n  <script type=\"application/json\" id=\"relune-review\">\n{json}\n  </script>"
+            ))
+            .unwrap_or_default(),
         js = js
             .map(|j| format!("\n  <script>\n{j}\n  </script>"))
             .unwrap_or_default()
@@ -496,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_search_panel_html_structure() {
-        let html = build_search_panel_html(true);
+        let html = build_search_panel_html(true, false);
 
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains(r#"class="search-icon""#));
@@ -515,7 +545,7 @@ mod tests {
 
     #[test]
     fn test_search_panel_html_without_groups() {
-        let html = build_search_panel_html(false);
+        let html = build_search_panel_html(false, false);
 
         assert!(html.contains(r#"class="search-panel""#));
         assert!(html.contains("filter-section"));
@@ -717,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_sidebar_puts_search_and_objects_before_collapsed_sections() {
-        let html = build_search_panel_html(true);
+        let html = build_search_panel_html(true, false);
 
         let search = html.find(r#"id="table-search""#).unwrap();
         let objects = html.find(r#"id="object-browser-list""#).unwrap();

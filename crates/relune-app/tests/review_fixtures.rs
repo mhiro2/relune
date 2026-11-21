@@ -5,6 +5,9 @@
 //! recursively so per-rule fixture groups can live in subdirectories
 //! (`fixtures/review/lock-risk/<rule>-<dialect>/...`).
 //!
+//! An optional `migrations/` directory holds the migration SQL that turns
+//! before into after; its `.sql` files run in file-name order.
+//!
 //! An optional per-fixture `meta.toml` configures the request; an
 //! optional `expected_diagnostics.json` locks down the diagnostics
 //! payload. Fixtures without `meta.toml` keep running with default
@@ -17,7 +20,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use relune_app::{InputSource, ReviewRequest, review};
+use relune_app::{InputSource, MigrationInput, ReviewRequest, review};
 use relune_core::SqlDialect;
 use relune_testkit::workspace_root;
 use serde::Deserialize;
@@ -101,7 +104,8 @@ fn run_fixture(fixture: &Fixture, update: bool) -> Result<(), String> {
     let after = read_required(&fixture.path.join("after.sql"));
     let meta = load_meta(&fixture.path.join("meta.toml"));
 
-    let request = build_request(before, after, meta);
+    let mut request = build_request(before, after, meta);
+    request.migrations = read_migrations(&fixture.path.join("migrations"));
     let result = review(request).map_err(|err| {
         format!(
             "fixture `{name}` failed to run: {err:?}",
@@ -221,6 +225,28 @@ fn write_expected(path: &Path, pretty: &str) {
 fn read_required(path: &Path) -> String {
     fs::read_to_string(path)
         .unwrap_or_else(|err| panic!("failed to read fixture file {}: {err}", path.display()))
+}
+
+fn read_migrations(dir: &Path) -> Vec<MigrationInput> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+        .collect();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| MigrationInput {
+            name: path
+                .file_name()
+                .map(|name| format!("migrations/{}", name.to_string_lossy()))
+                .unwrap_or_default(),
+            sql: read_required(&path),
+        })
+        .collect()
 }
 
 fn load_meta(path: &Path) -> FixtureMeta {

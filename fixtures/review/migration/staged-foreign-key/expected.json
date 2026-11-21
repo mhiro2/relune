@@ -1,0 +1,32 @@
+[
+  {
+    "column_name": "user_id",
+    "columns": [
+      "user_id"
+    ],
+    "execution": {
+      "detail": "Added NOT VALID (migrations/001_add_fk.sql:1) and validated in a separate transaction (migrations/002_validate_fk.sql:1). VALIDATE CONSTRAINT checks existing rows under a lock that lets writes continue.",
+      "verdict": "mitigated"
+    },
+    "fk_name": "orders_user_fk",
+    "message": "New FK orders_user_fk on existing table orders (postgres). Adding a FK validates all existing rows under SHARE ROW EXCLUSIVE lock.",
+    "mitigation": "Use ADD CONSTRAINT ... NOT VALID, then VALIDATE CONSTRAINT in a separate transaction.",
+    "related_table_id": "users",
+    "rule_id": "risk/add-fk-on-existing",
+    "severity": "info",
+    "sources": [
+      {
+        "column": 1,
+        "file": "migrations/001_add_fk.sql",
+        "line": 1
+      },
+      {
+        "column": 1,
+        "file": "migrations/002_validate_fk.sql",
+        "line": 1
+      }
+    ],
+    "table_id": "orders",
+    "table_name": "orders"
+  }
+]

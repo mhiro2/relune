@@ -10,13 +10,16 @@
 
 use crate::SqlDialect;
 use crate::diagnostic::{Diagnostic, codes};
+use crate::migration::SourceLocation;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
 
+mod migration;
 mod rules;
 
+pub use migration::assess_migration;
 pub use rules::run_rules;
 
 /// Dialect that the review pipeline actually evaluates against.
@@ -281,6 +284,19 @@ pub enum ReviewRuleId {
     /// Schema change forces a full table rebuild on `MySQL` 5.7-compatible
     /// engines (PK rotation or existing column drop).
     RewriteTable,
+    /// A `CONCURRENTLY` index operation runs inside a transaction block,
+    /// where `PostgreSQL` rejects it. Needs migration SQL.
+    ConcurrentlyInTransaction,
+    /// `SET NOT NULL` scans an existing table under an exclusive lock.
+    /// Needs migration SQL.
+    SetNotNullScan,
+    /// A constraint added `NOT VALID` is never validated. Needs migration
+    /// SQL.
+    ConstraintNotValidated,
+    /// A column is renamed. Needs migration SQL.
+    RenameColumn,
+    /// A table is renamed. Needs migration SQL.
+    RenameTable,
 }
 
 /// Dialect scope of a review rule.
@@ -326,7 +342,27 @@ impl ReviewRuleId {
             Self::AddFkOnExisting,
             Self::AlterColumnType,
             Self::RewriteTable,
+            // Rules that read migration SQL.
+            Self::ConcurrentlyInTransaction,
+            Self::SetNotNullScan,
+            Self::ConstraintNotValidated,
+            Self::RenameColumn,
+            Self::RenameTable,
         ]
+    }
+
+    /// Returns true when the rule reads migration SQL and so only fires
+    /// when the review is given the migration.
+    #[must_use]
+    pub const fn requires_migration(&self) -> bool {
+        matches!(
+            self,
+            Self::ConcurrentlyInTransaction
+                | Self::SetNotNullScan
+                | Self::ConstraintNotValidated
+                | Self::RenameColumn
+                | Self::RenameTable
+        )
     }
 
     /// Stable string identifier in `risk/<kebab>` form.
@@ -349,6 +385,11 @@ impl ReviewRuleId {
             Self::AddFkOnExisting => "risk/add-fk-on-existing",
             Self::AlterColumnType => "risk/alter-column-type",
             Self::RewriteTable => "risk/rewrite-table",
+            Self::ConcurrentlyInTransaction => "risk/concurrently-in-transaction",
+            Self::SetNotNullScan => "risk/set-not-null-scan",
+            Self::ConstraintNotValidated => "risk/constraint-not-validated",
+            Self::RenameColumn => "risk/rename-column",
+            Self::RenameTable => "risk/rename-table",
         }
     }
 
@@ -392,6 +433,21 @@ impl ReviewRuleId {
             Self::RewriteTable => {
                 "Schema change forces a table rebuild on MySQL 5.7-compatible engines"
             }
+            Self::ConcurrentlyInTransaction => {
+                "CONCURRENTLY index operation runs inside a transaction block, where PostgreSQL rejects it"
+            }
+            Self::SetNotNullScan => {
+                "SET NOT NULL scans the whole table under an exclusive lock without a validated IS NOT NULL check"
+            }
+            Self::ConstraintNotValidated => {
+                "Constraint added NOT VALID is never validated; existing rows stay unchecked"
+            }
+            Self::RenameColumn => {
+                "Column is renamed; its data is kept but queries using the old name fail"
+            }
+            Self::RenameTable => {
+                "Table is renamed; its rows are kept but queries using the old name fail"
+            }
         }
     }
 
@@ -407,17 +463,21 @@ impl ReviewRuleId {
             | Self::DropEnumValue
             | Self::DropColumnReferenced
             | Self::DropTableReferenced
-            | Self::TypeNarrow => ReviewSeverity::Breaking,
+            | Self::TypeNarrow
+            | Self::ConcurrentlyInTransaction => ReviewSeverity::Breaking,
             Self::AddNotNullOnExisting
             | Self::AddUniqueOnExisting
             | Self::AddCheckOnExisting
             | Self::AddCascadeDelete
-            | Self::DropPkOrUnique => ReviewSeverity::Warning,
-            Self::FkWithoutIndex => ReviewSeverity::Info,
+            | Self::DropPkOrUnique
+            | Self::RenameColumn
+            | Self::RenameTable => ReviewSeverity::Warning,
+            Self::FkWithoutIndex | Self::ConstraintNotValidated => ReviewSeverity::Info,
             Self::AddIndexOnLargeTable
             | Self::AddFkOnExisting
             | Self::AlterColumnType
-            | Self::RewriteTable => ReviewSeverity::Caution,
+            | Self::RewriteTable
+            | Self::SetNotNullScan => ReviewSeverity::Caution,
         }
     }
 
@@ -445,11 +505,16 @@ impl ReviewRuleId {
             | Self::AddUniqueOnExisting
             | Self::AddCheckOnExisting
             | Self::AddCascadeDelete
-            | Self::FkWithoutIndex => DialectScope::Any,
+            | Self::FkWithoutIndex
+            | Self::RenameColumn
+            | Self::RenameTable => DialectScope::Any,
             Self::AddIndexOnLargeTable | Self::AddFkOnExisting | Self::AlterColumnType => {
                 DialectScope::OneOf(&[SqlDialect::Postgres, SqlDialect::Mysql])
             }
             Self::RewriteTable => DialectScope::OneOf(&[SqlDialect::Mysql]),
+            Self::ConcurrentlyInTransaction
+            | Self::SetNotNullScan
+            | Self::ConstraintNotValidated => DialectScope::OneOf(&[SqlDialect::Postgres]),
         }
     }
 
@@ -579,10 +644,60 @@ pub struct RiskFinding {
     /// Affected foreign key name, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fk_name: Option<String>,
+    /// Name of the affected index, UNIQUE, or CHECK constraint, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint_name: Option<String>,
+    /// Every column the affected key covers (index, constraint, or foreign
+    /// key columns), when the change concerns a key rather than one column.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<String>,
     /// Stable identifier of a related table (e.g. the referencing table
     /// for `risk/drop-column-referenced`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub related_table_id: Option<String>,
+    /// Migration statements that make the change, when the review was
+    /// given migration SQL.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<SourceLocation>,
+    /// How the migration SQL carries the change out, when that decides
+    /// the risk (for example `CREATE INDEX CONCURRENTLY`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionNote>,
+}
+
+/// What the migration SQL shows about how a risky change runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecutionNote {
+    /// Whether the way the change runs avoids, confirms, or leaves open
+    /// the risk.
+    pub verdict: ExecutionVerdict,
+    /// Explanation naming the statements it is based on.
+    pub detail: String,
+}
+
+/// Outcome of reading the migration SQL for a finding.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionVerdict {
+    /// The statements avoid the risk; the finding is lowered to `info`.
+    Mitigated,
+    /// The statements run the change in the risky way.
+    Confirmed,
+    /// The SQL alone cannot settle it, such as a backfill `UPDATE` whose
+    /// coverage is unknown, or a change no statement makes.
+    Unverified,
+}
+
+impl ExecutionVerdict {
+    /// Stable lowercase representation.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Mitigated => "mitigated",
+            Self::Confirmed => "confirmed",
+            Self::Unverified => "unverified",
+        }
+    }
 }
 
 impl RiskFinding {
@@ -602,7 +717,11 @@ impl RiskFinding {
             table_name: None,
             column_name: None,
             fk_name: None,
+            constraint_name: None,
+            columns: Vec::new(),
             related_table_id: None,
+            sources: Vec::new(),
+            execution: None,
         }
     }
 
@@ -636,6 +755,32 @@ impl RiskFinding {
     #[must_use]
     pub fn with_fk_name(mut self, fk_name: impl Into<String>) -> Self {
         self.fk_name = Some(fk_name.into());
+        self
+    }
+
+    /// Sets the index, UNIQUE, or CHECK constraint name.
+    #[must_use]
+    pub fn with_constraint_name(mut self, name: impl Into<String>) -> Self {
+        self.constraint_name = Some(name.into());
+        self
+    }
+
+    /// Sets the constraint name when there is one.
+    #[must_use]
+    pub fn with_constraint_name_opt(mut self, name: Option<&str>) -> Self {
+        if let Some(name) = name {
+            self.constraint_name = Some(name.to_string());
+        }
+        self
+    }
+
+    /// Sets the key columns; a single key column also becomes `column_name`.
+    #[must_use]
+    pub fn with_columns(mut self, columns: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.columns = columns.into_iter().map(Into::into).collect();
+        if let [column] = self.columns.as_slice() {
+            self.column_name = Some(column.clone());
+        }
         self
     }
 
@@ -815,6 +960,11 @@ mod tests {
                 ("risk/add-fk-on-existing", "caution"),
                 ("risk/alter-column-type", "caution"),
                 ("risk/rewrite-table", "caution"),
+                ("risk/concurrently-in-transaction", "breaking"),
+                ("risk/set-not-null-scan", "caution"),
+                ("risk/constraint-not-validated", "info"),
+                ("risk/rename-column", "warning"),
+                ("risk/rename-table", "warning"),
             ]
         );
 
@@ -908,6 +1058,8 @@ mod tests {
             ReviewRuleId::AddCheckOnExisting,
             ReviewRuleId::AddCascadeDelete,
             ReviewRuleId::FkWithoutIndex,
+            ReviewRuleId::RenameColumn,
+            ReviewRuleId::RenameTable,
         ] {
             assert_eq!(
                 rule.dialect_scope(),

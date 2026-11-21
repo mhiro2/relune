@@ -567,6 +567,32 @@ pub enum ReviewFormat {
     Markdown,
     /// JSON output.
     Json,
+    /// Self-contained HTML report: the diff diagram with a findings panel
+    /// linked to it.
+    Html,
+}
+
+/// How the diagram of an HTML review report is drawn.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReviewDiagramSettings {
+    /// Rendering options.
+    #[serde(default)]
+    pub options: RenderOptions,
+    /// Layout specification.
+    #[serde(default)]
+    pub layout: LayoutSpec,
+    /// Grouping specification.
+    #[serde(default)]
+    pub grouping: GroupingSpec,
+}
+
+/// One migration SQL file, in the order the migrations run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MigrationInput {
+    /// Name shown in source locations, usually the file path.
+    pub name: String,
+    /// File contents.
+    pub sql: String,
 }
 
 /// Request to run migration risk review on two schemas.
@@ -617,6 +643,18 @@ pub struct ReviewRequest {
     /// as warnings instead of failing with `AppError::InvalidSchema`.
     #[serde(default)]
     pub allow_invalid_schema: bool,
+    /// Diagram settings used when `format` is `Html`.
+    #[serde(default)]
+    pub diagram: ReviewDiagramSettings,
+    /// Migration SQL that turns `before` into `after`, in execution order.
+    /// When given, renames line up the two schemas, findings point at the
+    /// statements that make each change, and on `PostgreSQL` the way the
+    /// statements run is judged (for example `CREATE INDEX CONCURRENTLY`).
+    #[serde(default)]
+    pub migrations: Vec<MigrationInput>,
+    /// How the migration tool wraps `migrations` in transactions.
+    #[serde(default)]
+    pub migration_transaction: relune_core::TransactionMode,
 }
 
 impl ReviewRequest {
