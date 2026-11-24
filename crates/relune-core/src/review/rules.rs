@@ -1159,10 +1159,13 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
         }
     }
 
-    // NUMERIC(P, S).
+    // NUMERIC(P, S) holds `P - S` integer digits and `S` fractional digits;
+    // losing either rejects or rounds existing values, as in
+    // NUMERIC(10,2) -> NUMERIC(10,4) (12345678.00 no longer fits).
     if let (Some((old_p, old_s)), Some((new_p, new_s))) =
         (parse_numeric(&old_norm), parse_numeric(&new_norm))
-        && (new_p < old_p || new_s < old_s)
+        && (i64::from(new_p) - i64::from(new_s) < i64::from(old_p) - i64::from(old_s)
+            || new_s < old_s)
     {
         return Some((
             format!("NUMERIC({old_p},{old_s})"),
@@ -1219,19 +1222,18 @@ fn parse_string_type(value: &str) -> Option<(&'static str, Option<u32>)> {
     Some((kind, Some(n)))
 }
 
+/// Parse `NUMERIC(P, S)` / `DECIMAL(P, S)` into precision and scale. A
+/// missing scale is 0 in standard SQL, `PostgreSQL`, and `MySQL`. A bare
+/// `NUMERIC` is not parsed: it is unbounded in `PostgreSQL` but
+/// `DECIMAL(10,0)` in `MySQL`.
 fn parse_numeric(value: &str) -> Option<(u32, u32)> {
     let rest = value
         .strip_prefix("NUMERIC")
         .or_else(|| value.strip_prefix("DECIMAL"))?
         .trim();
     let inner = rest.strip_prefix('(')?.strip_suffix(')')?;
-    let mut parts = inner.split(',');
-    let p = parts.next()?.trim().parse::<u32>().ok()?;
-    let s = parts.next()?.trim().parse::<u32>().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((p, s))
+    let (p, s) = inner.split_once(',').unwrap_or((inner, "0"));
+    Some((p.trim().parse().ok()?, s.trim().parse().ok()?))
 }
 
 fn int_rank(value: &str) -> Option<u32> {
@@ -3804,6 +3806,24 @@ mod tests {
         // Bare VARCHAR / CHARACTER VARYING stays unbounded.
         assert!(detect_type_narrowing("VARCHAR", "VARCHAR(50)").is_some());
         assert!(detect_type_narrowing("VARCHAR(50)", "VARCHAR").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_compares_numeric_integer_and_fraction_digits() {
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(8,2)").is_some());
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(10,1)").is_some());
+        // Same precision with a larger scale drops integer digits (8 -> 6).
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(10,4)").is_some());
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(12,4)").is_none());
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(11,2)").is_none());
+        // A missing scale is 0.
+        assert!(detect_type_narrowing("DECIMAL(10)", "DECIMAL(5)").is_some());
+        assert!(detect_type_narrowing("DECIMAL(10)", "DECIMAL(10,2)").is_some());
+        assert!(detect_type_narrowing("DECIMAL(10)", "DECIMAL(12,2)").is_none());
+        assert!(detect_type_narrowing("NUMERIC(10, 0)", "NUMERIC(10)").is_none());
+        // Bare NUMERIC differs by dialect, so it is not compared.
+        assert!(detect_type_narrowing("NUMERIC", "NUMERIC(10,2)").is_none());
+        assert!(detect_type_narrowing("NUMERIC(10,2,1)", "NUMERIC(1,0)").is_none());
     }
 
     #[test]
