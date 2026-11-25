@@ -12,6 +12,10 @@ use crate::diff::{render_change_marker, render_risk_pill};
 use crate::node::{ColumnBadge, render_column_badge};
 use crate::theme::ThemeColors;
 
+/// Height of the legend bar before any scaling.
+const LEGEND_BAR_HEIGHT: f32 = 42.0;
+/// Space kept between the legend and the canvas sides and bottom.
+const LEGEND_MARGIN: f32 = 18.0;
 /// Width taken by the title, badges, and nullable marker, including padding.
 const LEGEND_ITEMS_WIDTH: f32 = 488.0;
 /// Width added for the diff change kinds, the risk label, and their divider.
@@ -19,11 +23,53 @@ const LEGEND_DIFF_WIDTH: f32 = 392.0;
 /// Width added for the statistics block and its divider.
 const LEGEND_STATS_WIDTH: f32 = 160.0;
 
+/// Horizontal placement of the legend bar on a canvas.
+struct LegendFrame {
+    x: f32,
+    width: f32,
+    /// Factor applied to the whole bar when the canvas is narrower than its items.
+    scale: f32,
+}
+
+impl LegendFrame {
+    fn new(svg_width: f32, stats: bool, diff: bool) -> Self {
+        let available_width = LEGEND_MARGIN.mul_add(-2.0, svg_width);
+        // The legend never shrinks below its items; on narrower canvases the
+        // whole bar is scaled down instead of letting items run off the edge.
+        let content_width = LEGEND_ITEMS_WIDTH
+            + if diff { LEGEND_DIFF_WIDTH } else { 0.0 }
+            + if stats { LEGEND_STATS_WIDTH } else { 0.0 };
+        let width = available_width.clamp(content_width, content_width.max(640.0));
+        let scale = if width > available_width && available_width > 0.0 {
+            available_width / width
+        } else {
+            1.0
+        };
+        Self {
+            x: (svg_width - width) * 0.5,
+            width,
+            scale,
+        }
+    }
+}
+
+/// Returns the canvas height the legend needs below the graph.
+///
+/// The legend sits in a footer of this height under the graph bounds, so it
+/// never covers a card, line, or label. A legend scaled down for a narrow
+/// canvas needs a correspondingly shorter footer.
+#[must_use]
+pub fn legend_footer_height(svg_width: f32, stats: Option<&SchemaStats>, diff: bool) -> f32 {
+    let frame = LegendFrame::new(svg_width, stats.is_some(), diff);
+    LEGEND_BAR_HEIGHT.mul_add(frame.scale, LEGEND_MARGIN)
+}
+
 /// Renders a legend block explaining the marks node cards draw.
 ///
 /// The PK, FK, and IX badges and the nullable marker are drawn exactly as on
 /// the cards. Diff diagrams add the change kind markers and the risk label;
-/// statistics are included if provided.
+/// statistics are included if provided. The bar is drawn from `top` down;
+/// reserve [`legend_footer_height`] below the graph for it.
 ///
 /// # Arguments
 /// * `out` - The output string buffer
@@ -31,7 +77,7 @@ const LEGEND_STATS_WIDTH: f32 = 160.0;
 /// * `stats` - Optional schema statistics to display
 /// * `diff` - Whether to explain the diff change kinds and risk label
 /// * `svg_width` - Width of the SVG canvas (for positioning)
-/// * `svg_height` - Height of the SVG canvas (for positioning)
+/// * `top` - Y coordinate of the legend's top edge, usually the graph height
 #[allow(clippy::too_many_lines)]
 pub fn render_legend(
     out: &mut String,
@@ -39,29 +85,21 @@ pub fn render_legend(
     stats: Option<&SchemaStats>,
     diff: bool,
     svg_width: f32,
-    svg_height: f32,
+    top: f32,
 ) -> fmt::Result {
-    let bar_height = 42.0;
-    let side_padding = 18.0;
-    let available_width = svg_width - side_padding * 2.0;
-    // The legend never shrinks below its items; on narrower canvases the
-    // whole bar is scaled down instead of letting items run off the edge.
-    let content_width = LEGEND_ITEMS_WIDTH
-        + if diff { LEGEND_DIFF_WIDTH } else { 0.0 }
-        + if stats.is_some() {
-            LEGEND_STATS_WIDTH
-        } else {
-            0.0
-        };
-    let legend_width = available_width.clamp(content_width, content_width.max(640.0));
-    let legend_x = (svg_width - legend_width) * 0.5;
-    let legend_y = svg_height - bar_height - 18.0;
+    let bar_height = LEGEND_BAR_HEIGHT;
+    let LegendFrame {
+        x: legend_x,
+        width: legend_width,
+        scale,
+    } = LegendFrame::new(svg_width, stats.is_some(), diff);
+    let legend_y = top;
     let mut cursor_x = legend_x + 16.0;
     let baseline_y = legend_y + 25.0;
 
-    if legend_width > available_width && available_width > 0.0 {
-        let scale = available_width / legend_width;
-        let (cx, cy) = (svg_width * 0.5, legend_y + bar_height);
+    if scale < 1.0 {
+        // Scale about the top centre so the bar stays inside its footer.
+        let (cx, cy) = (svg_width * 0.5, legend_y);
         write!(
             out,
             r#"<g class="legend" transform="translate({cx:.1} {cy:.1}) scale({scale:.3}) translate({:.1} {:.1})">"#,
@@ -274,8 +312,32 @@ mod tests {
 
         render_legend_ok(&mut out, &colors, None, 800.0, 600.0);
 
-        // Bottom bar layout centers the legend horizontally near the canvas edge.
-        assert!(out.contains("x=\"80.0\""));
-        assert!(out.contains("y=\"540.0\""));
+        // The bar is centered horizontally and starts at the given top edge.
+        assert!(out.contains(r#"class="legend-background" x="80.0" y="600.0""#));
+    }
+
+    #[test]
+    fn test_legend_footer_fits_the_scaled_bar() {
+        // A full-size bar plus the bottom margin.
+        assert!((legend_footer_height(800.0, None, false) - 60.0).abs() < 0.01);
+        // A bar scaled to 0.746 needs a shorter footer.
+        assert!(
+            (legend_footer_height(400.0, None, false) - 42.0f32.mul_add(0.746, 18.0)).abs() < 0.05
+        );
+        // Diff marks widen the bar, so the same canvas scales it further.
+        assert!(legend_footer_height(400.0, None, true) < legend_footer_height(400.0, None, false));
+    }
+
+    #[test]
+    fn test_scaled_legend_stays_below_its_top() {
+        let colors = test_theme_colors();
+        let mut out = String::new();
+
+        render_legend_ok(&mut out, &colors, None, 400.0, 600.0);
+
+        // Scaling about the top centre keeps the bar from rising into the graph.
+        assert!(out.starts_with(
+            r#"<g class="legend" transform="translate(200.0 600.0) scale(0.746) translate(-200.0 -600.0)">"#
+        ));
     }
 }

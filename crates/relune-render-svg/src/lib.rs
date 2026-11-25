@@ -21,7 +21,7 @@ mod theme;
 pub use edge::EdgeRenderOptions;
 pub use error::SvgRenderError;
 pub use group::{ambiguous_groups, render_group, render_group_background, render_group_label};
-pub use legend::render_legend;
+pub use legend::{legend_footer_height, render_legend};
 pub use options::SvgRenderOptions;
 pub use theme::{Theme, ThemeColors, get_colors};
 
@@ -100,12 +100,20 @@ pub fn render_svg_with_overlay(
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<SvgArtifact, SvgRenderError> {
     let colors = get_colors(options.theme);
+    let diff = overlay.is_some_and(|overlay| !overlay.is_empty());
+    // The legend gets its own footer below the graph instead of covering it.
+    let height = graph.height
+        + if options.show_legend {
+            legend_footer_height(graph.width, None, diff)
+        } else {
+            0.0
+        };
     let mut out = String::with_capacity(estimate_svg_capacity(graph, options, overlay));
 
     write!(
         out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{:.0}" height="{:.0}" viewBox="0 0 {:.0} {:.0}" fill="none">"#,
-        graph.width, graph.height, graph.width, graph.height
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{:.0}" height="{height:.0}" viewBox="0 0 {:.0} {height:.0}" fill="none">"#,
+        graph.width, graph.width
     )?;
     out_push_defs(&mut out, &colors)?;
     write!(
@@ -167,7 +175,6 @@ pub fn render_svg_with_overlay(
 
     // Render legend if requested
     if options.show_legend {
-        let diff = overlay.is_some_and(|overlay| !overlay.is_empty());
         render_legend(&mut out, &colors, None, diff, graph.width, graph.height)?;
     }
 
@@ -1355,6 +1362,45 @@ mod tests {
         assert!(svg.contains("Foreign key"));
         assert!(svg.contains("Indexed"));
         assert!(svg.contains("nullable"));
+    }
+
+    #[test]
+    fn test_legend_footer_keeps_the_graph_uncovered() {
+        // A wide canvas keeps the bar at full size; a narrow one scales it.
+        for width in [900.0, 320.0] {
+            let graph = relune_layout::PositionedGraph {
+                width,
+                ..single_node_graph()
+            };
+            let canvas_height = |show_legend| {
+                let svg = render_svg(
+                    &graph,
+                    SvgRenderOptions {
+                        show_legend,
+                        ..Default::default()
+                    },
+                );
+                let doc = roxmltree::Document::parse(&svg).expect("SVG should be well-formed XML");
+                let root = doc.root_element();
+                let height: f32 = root.attribute("height").unwrap().parse().unwrap();
+                let view_box = root.attribute("viewBox").unwrap();
+                assert!(view_box.ends_with(&format!(" {height:.0}")), "{view_box}");
+                let legend_top = doc
+                    .descendants()
+                    .find(|node| node.attribute("class") == Some("legend-background"))
+                    .map(|rect| rect.attribute("y").unwrap().parse::<f32>().unwrap());
+                (height, legend_top)
+            };
+
+            assert_eq!(canvas_height(false), (graph.height, None));
+            let (height, legend_top) = canvas_height(true);
+            let footer = legend_footer_height(width, None, false);
+            assert!(
+                (height - (graph.height + footer).round()).abs() < 0.5,
+                "{width}"
+            );
+            assert_eq!(legend_top, Some(graph.height), "{width}");
+        }
     }
 
     #[test]
