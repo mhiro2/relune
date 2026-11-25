@@ -2,7 +2,6 @@
 
 use web_time::Instant;
 
-use relune_core::SchemaStats;
 use relune_layout::{
     FocusExtractor, LayoutConfig, LayoutGraphBuilder, build_layout_from_graph_with_config,
 };
@@ -128,16 +127,12 @@ pub fn render(request: RenderRequest) -> Result<RenderResult, AppError> {
     let content = {
         let _span = info_span!("render", format = ?request.output_format).entered();
         match render_path {
-            RenderPath::Svg { positioned } => render_svg_output(
-                &positioned,
-                &stats,
-                request.options,
-                request.overlay.as_ref(),
-            )?,
+            RenderPath::Svg { positioned } => {
+                render_svg_output(&positioned, request.options, request.overlay.as_ref())?
+            }
             RenderPath::Html { graph, positioned } => render_html_output(
                 &positioned,
                 &graph,
-                &stats,
                 request.options,
                 request.overlay.as_ref(),
             )?,
@@ -194,7 +189,6 @@ pub(crate) fn build_graph(
 /// Render to SVG format.
 fn render_svg_output(
     positioned: &relune_layout::PositionedGraph,
-    _stats: &SchemaStats,
     options: RenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<String, AppError> {
@@ -212,7 +206,6 @@ fn render_svg_output(
 fn render_html_output(
     positioned: &relune_layout::PositionedGraph,
     graph: &relune_layout::LayoutGraph,
-    _stats: &SchemaStats,
     options: RenderOptions,
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<String, AppError> {

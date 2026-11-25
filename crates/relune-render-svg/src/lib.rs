@@ -104,7 +104,7 @@ pub fn render_svg_with_overlay(
     // The legend gets its own footer below the graph instead of covering it.
     let height = graph.height
         + if options.show_legend {
-            legend_footer_height(graph.width, None, diff)
+            legend_footer_height(graph.width, diff)
         } else {
             0.0
         };
@@ -175,7 +175,7 @@ pub fn render_svg_with_overlay(
 
     // Render legend if requested
     if options.show_legend {
-        render_legend(&mut out, &colors, None, diff, graph.width, graph.height)?;
+        render_legend(&mut out, &colors, diff, graph.width, graph.height)?;
     }
 
     out.push_str("</svg>");
@@ -1394,7 +1394,7 @@ mod tests {
 
             assert_eq!(canvas_height(false), (graph.height, None));
             let (height, legend_top) = canvas_height(true);
-            let footer = legend_footer_height(width, None, false);
+            let footer = legend_footer_height(width, false);
             assert!(
                 (height - (graph.height + footer).round()).abs() < 0.5,
                 "{width}"
