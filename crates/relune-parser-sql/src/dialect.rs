@@ -249,13 +249,13 @@ pub(crate) fn tokenize(
     dialect: &dyn Dialect,
     sql: &str,
 ) -> (Vec<TokenWithSpan>, Option<TokenizerError>) {
+    if dialect.is::<PostgreSqlDialect>() {
+        return crate::postgres::tokenize(sql);
+    }
     let mut tokens = Vec::new();
     let error = Tokenizer::new(dialect, sql)
         .tokenize_with_location_into_buf(&mut tokens)
         .err();
-    if dialect.is::<PostgreSqlDialect>() {
-        tokens = crate::postgres::join_string_continuations(tokens);
-    }
     (tokens, error)
 }
 

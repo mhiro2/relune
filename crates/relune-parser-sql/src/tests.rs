@@ -1309,6 +1309,28 @@ fn postgres_string_continuations_follow_server_rules() {
 }
 
 #[test]
+fn postgres_string_constants_are_read_in_their_lexer_mode() {
+    // An escape string continuation ends at the server's quote, not at `\'`,
+    // and UESCAPE picks the escape character of a Unicode string. Either used
+    // to fail tokenizing and lose every table.
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, name TEXT);
+    COMMENT ON TABLE users IS E'User''s '
+        'table\'s data';
+    COMMENT ON COLUMN users.name IS U&'d!0061t!+01F600' UESCAPE '!';
+    CREATE TABLE posts (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users(id));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.tables.len(), 2);
+    let users = &schema.tables[0];
+    assert_eq!(users.comment.as_deref(), Some("User's table's data"));
+    assert_eq!(users.columns[1].comment.as_deref(), Some("dat😀"));
+}
+
+#[test]
 fn tokenizer_errors_keep_the_statements_before_them() {
     for dialect in [SqlDialect::Postgres, SqlDialect::Mysql, SqlDialect::Sqlite] {
         let sql = "CREATE TABLE a (id INT);\nCREATE TABLE b (id INT REFERENCES a(id));\nCREATE TABLE c (name TEXT DEFAULT 'unterminated);\n";
