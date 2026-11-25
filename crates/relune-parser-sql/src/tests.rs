@@ -1173,6 +1173,72 @@ fn handles_comment_on_unknown_column() {
 }
 
 #[test]
+fn postgres_string_continuations_are_one_literal_in_every_statement() {
+    // PostgreSQL joins string literals separated by a newline. A split
+    // DEFAULT used to drop the whole table, and a split comment kept only its
+    // first fragment.
+    let sql = r"
+    CREATE TYPE mood AS ENUM ('ha'
+        'ppy', 'sad');
+    CREATE TABLE users (
+        id BIGINT PRIMARY KEY,
+        name TEXT DEFAULT 'anon'
+            'ymous' NOT NULL,
+        status TEXT CHECK (status IN ('act'
+            'ive', 'gone'))
+    );
+    COMMENT ON TABLE users IS 'Registered; '
+        -- the server joins across line comments too
+        'it''s every account.';
+    COMMENT ON COLUMN users.name IS 'Display '
+        'name';
+    CREATE TABLE posts (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users(id));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.enums[0].values, ["happy", "sad"]);
+    let users = &schema.tables[0];
+    assert_eq!(
+        users.comment.as_deref(),
+        Some("Registered; it's every account.")
+    );
+    assert_eq!(users.columns[1].comment.as_deref(), Some("Display name"));
+    assert_eq!(
+        users.columns[1].semantics.default_expression.as_deref(),
+        Some("'anonymous'")
+    );
+    assert_eq!(
+        users.columns[2].semantics.check_constraints[0].expression,
+        "status IN ('active', 'gone')"
+    );
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+}
+
+#[test]
+fn postgres_string_continuations_follow_server_rules() {
+    // Literals on one line, or split by a block comment, stay separate and
+    // are rejected as the server rejects them; the next statement recovers.
+    for comment in [
+        "COMMENT ON TABLE t IS 'first' 'same line';",
+        "COMMENT ON TABLE t IS 'first' /* c */\n'second';",
+    ] {
+        let sql =
+            format!("CREATE TABLE t (id INT);\n{comment}\nCREATE TABLE after_comment (id INT);");
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Postgres);
+        assert!(output.has_errors(), "{comment}");
+        let schema = output.schema.unwrap();
+        assert_eq!(
+            schema.tables[0].comment.as_deref(),
+            Some("first"),
+            "{comment}"
+        );
+        assert_eq!(schema.tables.len(), 2, "{comment}");
+    }
+}
+
+#[test]
 fn parses_create_view() {
     let sql = r"
     CREATE TABLE users (

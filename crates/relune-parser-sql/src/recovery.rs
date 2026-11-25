@@ -1,10 +1,11 @@
 //! Statement-level parsing with error recovery.
 
 use crate::context::{LineOffsets, ParseContext, source_span_from_sql_span};
+use crate::dialect::tokenize;
 use relune_core::{Diagnostic, diagnostic::codes};
 use sqlparser::ast::Statement;
 use sqlparser::dialect::Dialect;
-use sqlparser::parser::Parser;
+use sqlparser::parser::{Parser, ParserError};
 use sqlparser::tokenizer::Token;
 
 /// Parse SQL statements with error recovery.
@@ -24,14 +25,13 @@ pub(crate) fn parse_statements_with_recovery(
     offsets: &LineOffsets,
     ctx: &mut ParseContext,
 ) -> Vec<Statement> {
-    // First, try the fast path: parse all at once
-    let mut parser = match Parser::new(dialect).try_with_sql(input) {
-        Ok(p) => p,
+    let mut parser = match tokenize(dialect, input) {
+        Ok(tokens) => Parser::new(dialect).with_tokens_with_locations(tokens),
         Err(e) => {
             // Tokenizer error — nothing can be parsed
             ctx.diagnostics.push(Diagnostic::error(
                 codes::parse_error(),
-                format!("SQL parse error: {e}"),
+                format!("SQL parse error: {}", ParserError::from(e)),
             ));
             return Vec::new();
         }

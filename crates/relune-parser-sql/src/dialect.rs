@@ -2,7 +2,7 @@
 
 use relune_core::SqlDialect;
 use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
-use sqlparser::tokenizer::{Token, Tokenizer};
+use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer, TokenizerError};
 
 /// Detect the SQL dialect from the content of the SQL string.
 ///
@@ -240,4 +240,18 @@ pub(crate) fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
         SqlDialect::Mysql => Box::new(MySqlDialect {}),
         SqlDialect::Sqlite => Box::new(SQLiteDialect {}),
     }
+}
+
+/// Tokenizes `sql` the way `dialect` reads it, including the lexical rules
+/// sqlparser's dialect leaves out.
+pub(crate) fn tokenize(
+    dialect: &dyn Dialect,
+    sql: &str,
+) -> Result<Vec<TokenWithSpan>, TokenizerError> {
+    let tokens = Tokenizer::new(dialect, sql).tokenize_with_location()?;
+    Ok(if dialect.is::<PostgreSqlDialect>() {
+        crate::postgres::join_string_continuations(tokens)
+    } else {
+        tokens
+    })
 }

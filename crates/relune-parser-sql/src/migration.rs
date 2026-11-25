@@ -15,11 +15,11 @@ use sqlparser::ast::{
     TableConstraint, TableFactor,
 };
 use sqlparser::keywords::Keyword;
-use sqlparser::parser::Parser;
-use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
+use sqlparser::parser::{Parser, ParserError};
+use sqlparser::tokenizer::{Token, TokenWithSpan};
 
 use crate::context::LineOffsets;
-use crate::dialect::{dialect_impl, resolve_dialect};
+use crate::dialect::{dialect_impl, resolve_dialect, tokenize};
 use crate::names::{normalized_stable_id, split_object_name};
 
 /// One migration file, in the order it runs.
@@ -155,7 +155,7 @@ fn split_statements(
     file: &MigrationFile,
 ) -> Vec<RawStatement> {
     let offsets = LineOffsets::new(&file.sql);
-    let tokens = match Tokenizer::new(grammar, &file.sql).tokenize_with_location() {
+    let tokens = match tokenize(grammar, &file.sql) {
         Ok(tokens) => tokens,
         Err(error) => {
             // The whole file is one statement starting at its first content;
@@ -273,9 +273,13 @@ fn classify(
         _ => {}
     }
 
-    let statement = Parser::new(grammar)
-        .try_with_sql(&raw.sql)
-        .and_then(|mut parser| parser.parse_statement());
+    let statement = tokenize(grammar, &raw.sql)
+        .map_err(ParserError::from)
+        .and_then(|tokens| {
+            Parser::new(grammar)
+                .with_tokens_with_locations(tokens)
+                .parse_statement()
+        });
     match statement {
         Ok(statement) => statement_operations(&statement),
         Err(error) => unanalyzed(format!("SQL parse error: {error}")),
@@ -729,5 +733,21 @@ mod tests {
             codes::review_migration_unanalyzed()
         );
         assert!(output.diagnostics[0].message.contains("001.sql:1"));
+    }
+
+    #[test]
+    fn split_postgres_literals_do_not_leave_a_statement_unanalyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'act'\n  'ive';",
+            )],
+            TransactionMode::Explicit,
+        );
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert!(matches!(
+            output.script.statements[0].operations[..],
+            [MigrationOperation::AddColumn { .. }]
+        ));
     }
 }
