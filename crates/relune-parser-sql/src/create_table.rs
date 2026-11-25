@@ -560,6 +560,7 @@ pub(crate) fn column_attributes_from_options<'a>(
             | ColumnOption::Ephemeral(_)
             | ColumnOption::Alias(_)
             | ColumnOption::Options(_)
+            | ColumnOption::GenericOptions(_)
             | ColumnOption::OnConflict(_)
             | ColumnOption::Policy(_)
             | ColumnOption::Tags(_)
