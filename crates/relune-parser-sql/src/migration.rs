@@ -14,17 +14,19 @@ use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, Ident, ObjectName, RenameTableNameKind, Statement,
     TableConstraint, TableFactor,
 };
-use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::dialect::{Dialect, PostgreSqlDialect};
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
-use sqlparser::tokenizer::{Token, TokenWithSpan};
+use sqlparser::tokenizer::{Token, TokenWithSpan, Whitespace};
 
 use crate::context::LineOffsets;
 use crate::dialect::{
-    complete_statements, dialect_impl, rescue_dialect, resolve_dialect, tokenize,
+    Rescue, complete_statements, dialect_impl, rescue, resolve_dialect, tokenize,
 };
 use crate::names::{normalized_stable_id, split_object_name};
+use crate::pg_dump::{self, Rescued};
 use crate::postgres::parse_comment;
+use crate::recovery::parse_whole_statement;
 
 /// One migration file, in the order it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,7 +202,15 @@ fn split_tokens(
         .iter()
         .chain(std::iter::once(&TokenWithSpan::wrap(Token::SemiColon)))
     {
-        if token.token == Token::SemiColon {
+        // A psql meta-command such as `\restrict key` ends at its line end.
+        let meta_command_ends = current
+            .first()
+            .is_some_and(|first| first.token == Token::Backslash)
+            && matches!(
+                token.token,
+                Token::Whitespace(Whitespace::Newline | Whitespace::SingleLineComment { .. })
+            );
+        if token.token == Token::SemiColon || meta_command_ends {
             if let (Some(first), Some(last)) = (current.first(), current.last()) {
                 let start = offsets.location_to_offset(&file.sql, first.span.start);
                 let end = offsets.location_to_offset(&file.sql, last.span.end);
@@ -280,7 +290,7 @@ fn classify(
         _ => {}
     }
 
-    let parse = |dialect: &dyn sqlparser::dialect::Dialect| match tokenize(dialect, &raw.sql) {
+    let parse = |dialect: &dyn Dialect| match tokenize(dialect, &raw.sql) {
         (_, Some(error)) => Err(ParserError::from(error)),
         (tokens, None) => {
             let mut parser = Parser::new(dialect).with_tokens_with_locations(tokens);
@@ -288,17 +298,30 @@ fn classify(
                 // A comment changes no table, whatever object it describes.
                 parse_comment(&mut parser).map(|_| vec![MigrationOperation::Other])
             } else {
-                parser
-                    .parse_statement()
-                    .map(|statement| statement_operations(&statement))
+                parse_whole_statement(&mut parser).map(|statement| statement_operations(&statement))
             }
         }
     };
-    let operations = parse(grammar).or_else(|error| match rescue_dialect(grammar) {
-        Some(rescue) => parse(rescue).map_err(|_| error),
-        None => Err(error),
-    });
-    operations.unwrap_or_else(|error| unanalyzed(format!("SQL parse error: {error}")))
+    let error = match parse(grammar) {
+        Ok(operations) => return operations,
+        Err(error) => error,
+    };
+    let rescued = match rescue(grammar) {
+        Some(Rescue::Grammar(rescue)) => parse(rescue).ok(),
+        Some(Rescue::PgDump) => match tokenize(grammar, &raw.sql) {
+            (tokens, None) => {
+                let mut parser = Parser::new(grammar).with_tokens_with_locations(tokens);
+                pg_dump::rescue(&mut parser, grammar).map(|rescued| match rescued {
+                    Rescued::Statement(statement) => statement_operations(&statement),
+                    // Nothing the schema models changes.
+                    Rescued::Skipped { .. } => vec![MigrationOperation::Other],
+                })
+            }
+            (_, Some(_)) => None,
+        },
+        None => None,
+    };
+    rescued.unwrap_or_else(|| unanalyzed(format!("SQL parse error: {error}")))
 }
 
 fn table_name(name: &ObjectName) -> String {
@@ -824,6 +847,57 @@ mod tests {
                 .statements
                 .iter()
                 .all(|statement| !statement.is_unanalyzed())
+        );
+    }
+
+    #[test]
+    fn pg_dump_statements_are_analyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "\\restrict abc123\nCREATE TABLE t (id int);\nALTER PROCEDURE public.run(IN a numeric) OWNER TO postgres;\nCREATE MATERIALIZED VIEW mv AS SELECT id FROM t WITH NO DATA;\nCREATE INDEX t_id ON ONLY t (id);\nALTER TABLE ONLY t ALTER COLUMN id SET COMPRESSION pglz;",
+            )],
+            TransactionMode::Explicit,
+        );
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        let operations: Vec<_> = output
+            .script
+            .statements
+            .iter()
+            .map(|statement| statement.operations.clone())
+            .collect();
+        assert_eq!(operations.len(), 6, "{operations:?}");
+        assert!(
+            operations
+                .iter()
+                .flatten()
+                .all(|operation| !matches!(operation, MigrationOperation::Unanalyzed { .. }))
+        );
+        assert!(matches!(
+            operations[1][..],
+            [MigrationOperation::CreateTable { .. }]
+        ));
+        assert!(matches!(
+            operations[4][..],
+            [MigrationOperation::CreateIndex { .. }]
+        ));
+    }
+
+    #[test]
+    fn broken_postgres_statements_stay_unanalyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "ALTER TYPE mood ADD VALUE;\nCREATE TABLE t (id int,);",
+            )],
+            TransactionMode::Explicit,
+        );
+        assert!(
+            output
+                .script
+                .statements
+                .iter()
+                .all(relune_core::MigrationStatement::is_unanalyzed)
         );
     }
 }

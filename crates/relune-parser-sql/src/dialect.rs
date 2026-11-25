@@ -275,12 +275,25 @@ pub(crate) fn complete_statements(
     tokens
 }
 
-/// The grammar that re-reads statements `dialect` rejects, if it has one.
+/// How statements `dialect` rejects get a second reading.
 ///
-/// It is only consulted after the stock grammar fails, so it can never change
-/// how an accepted statement is read.
-pub(crate) fn rescue_dialect(dialect: &dyn Dialect) -> Option<&'static dyn Dialect> {
-    dialect
-        .is::<SQLiteDialect>()
-        .then_some(&crate::sqlite::SqliteRescue as &dyn Dialect)
+/// A rescue is only consulted after the stock grammar fails, so it can never
+/// change how an accepted statement is read.
+#[derive(Clone, Copy)]
+pub(crate) enum Rescue {
+    /// Re-read with a more permissive grammar over the same tokens.
+    Grammar(&'static dyn Dialect),
+    /// Rewrite or skip what `pg_dump` writes (module `pg_dump`).
+    PgDump,
+}
+
+/// The rescue for statements `dialect` rejects, if it has one.
+pub(crate) fn rescue(dialect: &dyn Dialect) -> Option<Rescue> {
+    if dialect.is::<SQLiteDialect>() {
+        Some(Rescue::Grammar(&crate::sqlite::SqliteRescue))
+    } else if dialect.is::<PostgreSqlDialect>() {
+        Some(Rescue::PgDump)
+    } else {
+        None
+    }
 }

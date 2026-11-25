@@ -1635,6 +1635,12 @@ mod snapshot_tests {
     }
 
     #[test]
+    fn snapshot_pg_dump() {
+        let sql = read_sql_fixture("pg_dump.sql");
+        snapshot_fixture_with_dialect("pg_dump", &sql, SqlDialect::Postgres);
+    }
+
+    #[test]
     fn snapshot_sqlite_blog() {
         let sql = read_sql_fixture("sqlite_blog.sql");
         snapshot_fixture_with_dialect("sqlite_blog", &sql, SqlDialect::Sqlite);
@@ -3720,4 +3726,34 @@ fn mysql_inline_column_comment_is_captured() {
         .find(|c| c.name == "email")
         .expect("email column");
     assert_eq!(email.comment.as_deref(), Some("login email"));
+}
+
+#[test]
+fn pg_dump_output_parses_without_errors() {
+    let sql = read_sql_fixture("pg_dump.sql");
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Postgres);
+    let errors: Vec<_> = output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let schema = output.schema.expect("schema");
+    let tables: Vec<&str> = schema
+        .tables
+        .iter()
+        .map(|table| table.name.as_str())
+        .collect();
+    assert_eq!(tables, ["orders", "orders_2026", "users"]);
+    // The materialized view `pg_dump` writes WITH NO DATA is kept.
+    assert_eq!(schema.views.len(), 1);
+    // The index on the partitioned parent is read from `ON ONLY`.
+    assert!(
+        schema.tables[0]
+            .indexes
+            .iter()
+            .any(|index| index.name.as_deref() == Some("orders_user_idx"))
+    );
+    // The identity column added with `SEQUENCE NAME` keeps its identity.
+    assert!(schema.tables[2].columns[0].semantics.identity.is_some());
 }

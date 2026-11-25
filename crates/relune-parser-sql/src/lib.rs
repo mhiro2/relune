@@ -22,6 +22,7 @@ mod enum_type;
 mod migration;
 mod mysql_enum;
 mod names;
+mod pg_dump;
 mod postgres;
 mod query_columns;
 mod recovery;
