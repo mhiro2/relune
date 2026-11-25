@@ -14,6 +14,7 @@ use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, Ident, ObjectName, RenameTableNameKind, Statement,
     TableConstraint, TableFactor,
 };
+use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
 use sqlparser::tokenizer::{Token, TokenWithSpan};
@@ -21,6 +22,7 @@ use sqlparser::tokenizer::{Token, TokenWithSpan};
 use crate::context::LineOffsets;
 use crate::dialect::{dialect_impl, resolve_dialect, tokenize};
 use crate::names::{normalized_stable_id, split_object_name};
+use crate::postgres::parse_comment;
 
 /// One migration file, in the order it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,17 +275,20 @@ fn classify(
         _ => {}
     }
 
-    let statement = tokenize(grammar, &raw.sql)
+    let operations = tokenize(grammar, &raw.sql)
         .map_err(ParserError::from)
         .and_then(|tokens| {
-            Parser::new(grammar)
-                .with_tokens_with_locations(tokens)
-                .parse_statement()
+            let mut parser = Parser::new(grammar).with_tokens_with_locations(tokens);
+            if grammar.is::<PostgreSqlDialect>() && parser.peek_keyword(Keyword::COMMENT) {
+                // A comment changes no table, whatever object it describes.
+                parse_comment(&mut parser).map(|_| vec![MigrationOperation::Other])
+            } else {
+                parser
+                    .parse_statement()
+                    .map(|statement| statement_operations(&statement))
+            }
         });
-    match statement {
-        Ok(statement) => statement_operations(&statement),
-        Err(error) => unanalyzed(format!("SQL parse error: {error}")),
-    }
+    operations.unwrap_or_else(|error| unanalyzed(format!("SQL parse error: {error}")))
 }
 
 fn table_name(name: &ObjectName) -> String {
@@ -749,5 +754,27 @@ mod tests {
             output.script.statements[0].operations[..],
             [MigrationOperation::AddColumn { .. }]
         ));
+    }
+
+    #[test]
+    fn postgres_comments_on_any_object_are_analyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "COMMENT ON FUNCTION calc(integer, text) IS 'calc';\nCOMMENT ON CONSTRAINT pk ON t IS $$pk$$;\nCOMMENT ON FUNCTION f(INTERVAL IS 'unclosed';",
+            )],
+            TransactionMode::Explicit,
+        );
+        let statements = &output.script.statements;
+        assert!(matches!(
+            statements[0].operations[..],
+            [MigrationOperation::Other]
+        ));
+        assert!(matches!(
+            statements[1].operations[..],
+            [MigrationOperation::Other]
+        ));
+        assert!(statements[2].is_unanalyzed());
+        assert_eq!(output.diagnostics.len(), 1);
     }
 }

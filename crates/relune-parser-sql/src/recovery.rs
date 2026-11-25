@@ -2,9 +2,11 @@
 
 use crate::context::{LineOffsets, ParseContext, source_span_from_sql_span};
 use crate::dialect::tokenize;
+use crate::postgres::{Comment, parse_comment};
 use relune_core::{Diagnostic, diagnostic::codes};
 use sqlparser::ast::Statement;
-use sqlparser::dialect::Dialect;
+use sqlparser::dialect::{Dialect, PostgreSqlDialect};
+use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
 use sqlparser::tokenizer::Token;
 
@@ -37,6 +39,7 @@ pub(crate) fn parse_statements_with_recovery(
         }
     };
 
+    let postgres = dialect.is::<PostgreSqlDialect>();
     let mut statements = Vec::new();
 
     loop {
@@ -47,10 +50,25 @@ pub(crate) fn parse_statements_with_recovery(
             break;
         }
 
-        match parser.parse_statement() {
-            Ok(stmt) => {
+        let parsed = if postgres && parser.peek_keyword(Keyword::COMMENT) {
+            parse_comment(&mut parser).map(|comment| match comment {
+                Comment::Applied(statement) => Some(*statement),
+                Comment::Ignored { object, span } => {
+                    ctx.warn_unsupported(
+                        &format!("COMMENT ON {object}"),
+                        source_span_from_sql_span(input, offsets, span),
+                    );
+                    None
+                }
+            })
+        } else {
+            parser.parse_statement().map(Some)
+        };
+        match parsed {
+            Ok(Some(stmt)) => {
                 statements.push(stmt);
             }
+            Ok(None) => {}
             Err(e) => {
                 let error_msg = format!("SQL parse error: {e}");
                 // Try to extract location from the error token's current position

@@ -1,7 +1,10 @@
 //! `PostgreSQL` syntax that sqlparser's `PostgreSqlDialect` does not handle.
 
+use sqlparser::ast::{CommentObject, Statement};
 use sqlparser::dialect::PostgreSqlDialect;
-use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer, Whitespace};
+use sqlparser::keywords::Keyword;
+use sqlparser::parser::{Parser, ParserError};
+use sqlparser::tokenizer::{Span, Token, TokenWithSpan, Tokenizer, Whitespace};
 
 /// Joins string literals that `PostgreSQL` treats as one constant.
 ///
@@ -88,6 +91,168 @@ fn continuation_text(head: &Token, continuation: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Object kinds `COMMENT ON` accepts, with each phrase listed before any
+/// shorter phrase it starts with.
+const COMMENT_OBJECTS: &[&str] = &[
+    "ACCESS METHOD",
+    "AGGREGATE",
+    "CAST",
+    "COLLATION",
+    "COLUMN",
+    "CONSTRAINT",
+    "CONVERSION",
+    "DATABASE",
+    "DOMAIN",
+    "EVENT TRIGGER",
+    "EXTENSION",
+    "FOREIGN DATA WRAPPER",
+    "FOREIGN TABLE",
+    "FUNCTION",
+    "INDEX",
+    "LARGE OBJECT",
+    "MATERIALIZED VIEW",
+    "OPERATOR CLASS",
+    "OPERATOR FAMILY",
+    "OPERATOR",
+    "POLICY",
+    "PROCEDURAL LANGUAGE",
+    "LANGUAGE",
+    "PROCEDURE",
+    "PUBLICATION",
+    "ROLE",
+    "ROUTINE",
+    "RULE",
+    "SCHEMA",
+    "SEQUENCE",
+    "SERVER",
+    "STATISTICS",
+    "SUBSCRIPTION",
+    "TABLE",
+    "TABLESPACE",
+    "TEXT SEARCH CONFIGURATION",
+    "TEXT SEARCH DICTIONARY",
+    "TEXT SEARCH PARSER",
+    "TEXT SEARCH TEMPLATE",
+    "TRANSFORM FOR",
+    "TRIGGER",
+    "TYPE",
+    "VIEW",
+];
+
+/// A `COMMENT ON` statement as `PostgreSQL` reads it.
+pub(crate) enum Comment {
+    /// A table or column comment, which the schema records.
+    Applied(Box<Statement>),
+    /// A comment on any other object, which the schema has no place for.
+    Ignored {
+        /// The object kind, such as `FUNCTION` or `CONSTRAINT`.
+        object: &'static str,
+        /// The object kind and reference.
+        span: Span,
+    },
+}
+
+/// Parses `COMMENT ON` with `PostgreSQL`'s grammar.
+///
+/// sqlparser rejects several forms `pg_dump` writes, such as routine
+/// signatures (`FUNCTION f(integer)`), objects named relative to a table
+/// (`CONSTRAINT c ON t`), and dollar-quoted text. Only table and column
+/// comments reach the schema, so any other object reference is checked for
+/// balance and skipped up to its `IS`.
+pub(crate) fn parse_comment(parser: &mut Parser<'_>) -> Result<Comment, ParserError> {
+    parser.expect_keywords(&[Keyword::COMMENT, Keyword::ON])?;
+    let start = parser.peek_token().span;
+    let Some(object) = COMMENT_OBJECTS.iter().copied().find(|object| {
+        object
+            .split(' ')
+            .enumerate()
+            .all(|(n, word)| is_bare_word(&parser.peek_nth_token(n).token, word))
+    }) else {
+        return parser.expected("COMMENT ON object type", parser.peek_token());
+    };
+    for _ in object.split(' ') {
+        parser.advance_token();
+    }
+
+    let target = match object {
+        "TABLE" => Some((CommentObject::Table, parser.parse_object_name(false)?)),
+        "COLUMN" => Some((CommentObject::Column, parser.parse_object_name(false)?)),
+        _ => {
+            skip_object_reference(parser)?;
+            None
+        }
+    };
+    let span = start.union(&parser.get_current_token().span);
+    parser.expect_keyword_is(Keyword::IS)?;
+    let comment = parse_comment_text(parser)?;
+    let next = parser.peek_token();
+    if !matches!(next.token, Token::SemiColon | Token::EOF) {
+        return parser.expected("end of COMMENT statement", next);
+    }
+
+    Ok(match target {
+        Some((object_type, object_name)) => Comment::Applied(Box::new(Statement::Comment {
+            object_type,
+            object_name,
+            comment,
+            if_exists: false,
+        })),
+        None => Comment::Ignored { object, span },
+    })
+}
+
+fn is_bare_word(token: &Token, expected: &str) -> bool {
+    matches!(token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case(expected))
+}
+
+/// Skips an object reference up to the `IS` that ends it, keeping parentheses
+/// balanced so an unclosed signature is still an error.
+fn skip_object_reference(parser: &mut Parser<'_>) -> Result<(), ParserError> {
+    let mut depth = 0_usize;
+    let mut empty = true;
+    loop {
+        let next = parser.peek_token();
+        match &next.token {
+            Token::Word(word)
+                if depth == 0 && word.keyword == Keyword::IS && word.quote_style.is_none() =>
+            {
+                return if empty {
+                    parser.expected("object name", next)
+                } else {
+                    Ok(())
+                };
+            }
+            Token::LParen => depth += 1,
+            Token::RParen if depth > 0 => depth -= 1,
+            Token::RParen | Token::SemiColon | Token::EOF => {
+                return parser.expected(if depth > 0 { ")" } else { "IS" }, next);
+            }
+            _ => {}
+        }
+        parser.advance_token();
+        empty = false;
+    }
+}
+
+/// `NULL`, which removes the comment, or any string constant form.
+fn parse_comment_text(parser: &mut Parser<'_>) -> Result<Option<String>, ParserError> {
+    if parser.parse_keyword(Keyword::NULL) {
+        return Ok(None);
+    }
+    // Peek first so a missing text leaves the `;` for statement recovery.
+    let next = parser.peek_token();
+    let text = match next.token {
+        Token::SingleQuotedString(text)
+        | Token::EscapedStringLiteral(text)
+        | Token::UnicodeStringLiteral(text)
+        | Token::NationalStringLiteral(text) => text,
+        Token::DollarQuotedString(text) => text.value,
+        _ => return parser.expected("comment string or NULL", next),
+    };
+    parser.advance_token();
+    Ok(Some(text))
 }
 
 #[cfg(test)]
