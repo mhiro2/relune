@@ -7,6 +7,17 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      gha-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      gha-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: cargo
     directory: /
@@ -33,6 +44,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      cargo-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: npm
     directory: /
@@ -56,3 +71,7 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
