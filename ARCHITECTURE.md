@@ -186,6 +186,8 @@ Supported paths into a `Schema`:
 
 Property tests feed arbitrary text, keyword soup, and mutated DDL to the parser in every dialect, and generated schema JSON documents to import, lint, diff, and review: none may panic, and every schema the parser produces must survive the schema JSON round trip unchanged.
 
+SQL recovery is statement by statement: a statement the grammar rejects becomes a `PARSE001` error and parsing resumes after its semicolon (or right away when the failed parse already consumed it). For SQLite, a rejected statement first gets a second reading from a rescue grammar (`relune-parser-sql` module `sqlite`) that accepts what sqlparser's `SQLiteDialect` does not — bare-word, boolean, and signed `PRAGMA` values, `CREATE TRIGGER IF NOT EXISTS`, `NOT GLOB` / `NOT MATCH` / `ISNULL`, and multi-word type names such as `UNSIGNED BIG INT` — and otherwise delegates to `SQLiteDialect`. It only sees statements the stock grammar rejected, so it never changes how an accepted statement is read; migration parsing uses the same fallback.
+
 ---
 
 ## 7. Output adapters

@@ -50,6 +50,7 @@ pub(crate) fn parse_statements_with_recovery(
             break;
         }
 
+        let start = parser.index();
         let parsed = if postgres && parser.peek_keyword(Keyword::COMMENT) {
             parse_comment(&mut parser).map(|comment| match comment {
                 Comment::Applied(statement) => Some(*statement),
@@ -86,12 +87,13 @@ pub(crate) fn parse_statements_with_recovery(
                 }
                 ctx.diagnostics.push(diagnostic);
 
-                // Skip tokens until the next semicolon or EOF for recovery
-                loop {
-                    let tok = parser.next_token();
-                    if matches!(tok.token, Token::SemiColon | Token::EOF) {
-                        break;
-                    }
+                // Skip tokens until the next semicolon or EOF for recovery,
+                // unless the failed parse already consumed its semicolon:
+                // skipping on would swallow the following statement.
+                let consumed_terminator =
+                    parser.index() > start && parser.get_current_token().token == Token::SemiColon;
+                if !consumed_terminator {
+                    while !matches!(parser.next_token().token, Token::SemiColon | Token::EOF) {}
                 }
             }
         }

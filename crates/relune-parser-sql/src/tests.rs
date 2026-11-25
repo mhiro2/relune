@@ -773,6 +773,20 @@ fn recovery_is_semicolon_delimited_and_consumes_unterminated_errors() {
 }
 
 #[test]
+fn recovery_keeps_the_next_statement_when_an_error_consumes_the_semicolon() {
+    // The grammar reads the `;` while looking for the missing operand, so
+    // skipping to the next semicolon would swallow `after`.
+    for dialect in [SqlDialect::Postgres, SqlDialect::Mysql, SqlDialect::Sqlite] {
+        let sql = "CREATE TABLE before (id INT); SELECT 1 + ; CREATE TABLE after (id INT);";
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, dialect);
+        assert!(output.has_errors(), "{dialect:?}");
+        let schema = output.schema.unwrap();
+        let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["before", "after"], "{dialect:?}");
+    }
+}
+
+#[test]
 fn strict_parse_rejects_error_diagnostics() {
     let sql = "THIS IS NOT VALID SQL";
 
@@ -2398,6 +2412,7 @@ fn sqlite_multi_word_type_names_take_at_most_two_sizes() {
 #[test]
 fn sqlite_rescue_still_reports_malformed_statements() {
     for statement in [
+        "PRAGMA cache_size = ;",
         "PRAGMA journal_mode(WAL;",
         "CREATE TRIGGER IF NOT EXISTS t AFTER BOGUS ON t BEGIN SELECT 1; END;",
     ] {
