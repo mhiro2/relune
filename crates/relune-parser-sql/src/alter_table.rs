@@ -593,6 +593,9 @@ fn apply_alter_column(
                 always: matches!(generated_as, Some(GeneratedAs::Always)),
             });
         }
+        // Foreign-table column `OPTIONS (...)` only configure the FDW and do not
+        // change the column's schema shape.
+        AlterColumnOperation::GenericOptions { .. } => {}
     }
 }
 
