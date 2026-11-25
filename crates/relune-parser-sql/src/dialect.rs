@@ -243,15 +243,34 @@ pub(crate) fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
 }
 
 /// Tokenizes `sql` the way `dialect` reads it, including the lexical rules
-/// sqlparser's dialect leaves out.
+/// sqlparser's dialect leaves out. On an error, the tokens read before it
+/// come back with it.
 pub(crate) fn tokenize(
     dialect: &dyn Dialect,
     sql: &str,
-) -> Result<Vec<TokenWithSpan>, TokenizerError> {
-    let tokens = Tokenizer::new(dialect, sql).tokenize_with_location()?;
-    Ok(if dialect.is::<PostgreSqlDialect>() {
-        crate::postgres::join_string_continuations(tokens)
-    } else {
-        tokens
-    })
+) -> (Vec<TokenWithSpan>, Option<TokenizerError>) {
+    let mut tokens = Vec::new();
+    let error = Tokenizer::new(dialect, sql)
+        .tokenize_with_location_into_buf(&mut tokens)
+        .err();
+    if dialect.is::<PostgreSqlDialect>() {
+        tokens = crate::postgres::join_string_continuations(tokens);
+    }
+    (tokens, error)
+}
+
+/// The tokens of the statements that end before a tokenizer `error`, which
+/// is everything when there is none.
+pub(crate) fn complete_statements(
+    mut tokens: Vec<TokenWithSpan>,
+    error: Option<&TokenizerError>,
+) -> Vec<TokenWithSpan> {
+    if error.is_some() {
+        let end = tokens
+            .iter()
+            .rposition(|token| token.token == Token::SemiColon)
+            .map_or(0, |semicolon| semicolon + 1);
+        tokens.truncate(end);
+    }
+    tokens
 }

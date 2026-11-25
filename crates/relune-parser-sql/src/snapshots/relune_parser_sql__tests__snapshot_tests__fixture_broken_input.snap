@@ -1,16 +1,444 @@
 ---
-source: crates/relune-parser-sql/src/lib.rs
-assertion_line: 1859
+source: crates/relune-parser-sql/src/tests.rs
+assertion_line: 1563
 expression: snapshot_data(&output)
 ---
 {
   "diagnostics": [
     {
       "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: ',' or ')' after column definition, found: CREATE at Line: 15, Column: 1",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: ',' or ')' after column definition, found: name at Line: 23, Column: 5",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: a data type name, found: ) at Line: 91, Column: 1",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: literal int, found: - at Line: 96, Column: 18",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: ), found: , at Line: 108, Column: 21",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: (, found: ) at Line: 119, Column: 1",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
+      "message": "SQL parse error: sql parser error: Expected: ',' or ')' after column definition, found: ON at Line: 124, Column: 31",
+      "severity": "error"
+    },
+    {
+      "code": "PARSE001",
       "message": "SQL parse error: sql parser error: Unterminated string literal at Line: 165, Column: 31",
       "severity": "error"
+    },
+    {
+      "code": "SCHEMA002",
+      "message": "Duplicate table definition: duplicate_table. The first definition will be used.",
+      "severity": "warning"
+    },
+    {
+      "code": "SCHEMA002",
+      "message": "Duplicate table definition: duplicate_table. The first definition will be used.",
+      "severity": "warning"
+    },
+    {
+      "code": "SCHEMA001",
+      "message": "CREATE INDEX references unknown table: nonexistent_table",
+      "severity": "warning"
     }
   ],
   "dialect": "postgres",
-  "schema": null
+  "schema": {
+    "enums": [],
+    "tables": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "NOT_A_REAL_TYPE",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "value",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 1,
+        "indexes": [],
+        "name": "broken_syntax_4",
+        "schema_name": null,
+        "stable_id": "broken_syntax_4"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "user_id",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": null,
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "nonexistent_table"
+          }
+        ],
+        "id": 2,
+        "indexes": [],
+        "name": "invalid_fk_1",
+        "schema_name": null,
+        "stable_id": "invalid_fk_1"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "order_id",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "order_id"
+            ],
+            "name": null,
+            "to_columns": [
+              "nonexistent_column"
+            ],
+            "to_table": "orders"
+          }
+        ],
+        "id": 3,
+        "indexes": [],
+        "name": "invalid_fk_2",
+        "schema_name": null,
+        "stable_id": "invalid_fk_2"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "parent_id",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "parent_id"
+            ],
+            "name": null,
+            "to_columns": [
+              "wrong_column"
+            ],
+            "to_table": "invalid_fk_3"
+          }
+        ],
+        "id": 4,
+        "indexes": [],
+        "name": "invalid_fk_3",
+        "schema_name": null,
+        "stable_id": "invalid_fk_3"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "other_id",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "other_id"
+            ],
+            "name": null,
+            "to_columns": [
+              "id"
+            ],
+            "to_table": "invalid..name"
+          }
+        ],
+        "id": 5,
+        "indexes": [],
+        "name": "invalid_fk_4",
+        "schema_name": null,
+        "stable_id": "invalid_fk_4"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 6,
+        "indexes": [],
+        "name": "duplicate_table",
+        "schema_name": null,
+        "stable_id": "duplicate_table"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DECIMAL(0,0)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "amount",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 9,
+        "indexes": [],
+        "name": "malformed_type_3",
+        "schema_name": null,
+        "stable_id": "malformed_type_3"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "TIMESTAMP",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "created_at",
+            "nullable": true,
+            "semantics": {
+              "default_expression": "NOT_VALID_FUNCTION()"
+            }
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 10,
+        "indexes": [],
+        "name": "broken_default",
+        "schema_name": null,
+        "stable_id": "broken_default"
+      },
+      {
+        "columns": [],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 11,
+        "indexes": [],
+        "name": "empty_table",
+        "schema_name": null,
+        "stable_id": "empty_table"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 12,
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "missing_column"
+                }
+              }
+            ],
+            "name": "idx_missing_column"
+          }
+        ],
+        "name": "has_index_target",
+        "schema_name": null,
+        "stable_id": "has_index_target"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "VARCHAR(100)",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "value",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 13,
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "value"
+                }
+              }
+            ],
+            "name": "idx_duplicate_name"
+          },
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "id"
+                }
+              }
+            ],
+            "name": "idx_duplicate_name"
+          }
+        ],
+        "name": "index_test",
+        "schema_name": null,
+        "stable_id": "index_test"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "SERIAL",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 14,
+        "indexes": [],
+        "name": "bad_table",
+        "schema_name": "invalid..schema",
+        "stable_id": "\"invalid..schema\".bad_table"
+      }
+    ],
+    "views": []
+  }
 }

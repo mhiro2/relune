@@ -1,7 +1,24 @@
 ---
 source: crates/relune-cli/tests/integration_tests.rs
+assertion_line: 144
 expression: "format!(\"exit_code: {exit_code}\\nstderr:\\n{stderr}\")"
 ---
 exit_code: 1
 stderr:
-Error: Failed to render schema: Input error (sql_file): Failed to parse SQL: no schema produced
+error[PARSE001]: SQL parse error: sql parser error: Expected: ',' or ')' after column definition, found: CREATE at Line: 15, Column: 1
+error[PARSE001]: SQL parse error: sql parser error: Expected: ',' or ')' after column definition, found: name at Line: 23, Column: 5
+error[PARSE001]: SQL parse error: sql parser error: Expected: a data type name, found: ) at Line: 91, Column: 1
+error[PARSE001]: SQL parse error: sql parser error: Expected: literal int, found: - at Line: 96, Column: 18
+error[PARSE001]: SQL parse error: sql parser error: Expected: ), found: , at Line: 108, Column: 21
+error[PARSE001]: SQL parse error: sql parser error: Expected: (, found: ) at Line: 119, Column: 1
+error[PARSE001]: SQL parse error: sql parser error: Expected: ',' or ')' after column definition, found: ON at Line: 124, Column: 31
+error[PARSE001]: SQL parse error: sql parser error: Unterminated string literal at Line: 165, Column: 31
+warning[SCHEMA002]: Duplicate table definition: duplicate_table. The first definition will be used.
+warning[SCHEMA002]: Duplicate table definition: duplicate_table. The first definition will be used.
+warning[SCHEMA001]: CREATE INDEX references unknown table: nonexistent_table
+warning[SCHEMA004]: table 'invalid_fk_1': FK references unknown table 'nonexistent_table'
+warning[SCHEMA004]: table 'invalid_fk_2': FK references unknown table 'orders'
+warning[SCHEMA004]: table 'invalid_fk_3': FK to_column 'wrong_column' does not exist in table 'invalid_fk_3'
+warning[SCHEMA004]: table 'invalid_fk_4': FK references unknown table 'invalid..name'
+warning[SCHEMA004]: table 'has_index_target': index 'idx_missing_column' references unknown column 'missing_column'
+Error: Errors were encountered during processing

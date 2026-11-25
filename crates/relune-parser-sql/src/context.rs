@@ -56,6 +56,13 @@ impl LineOffsets {
             None
         }
     }
+
+    /// The location of byte `offset`, which must lie on a character boundary.
+    pub(crate) fn offset_to_location(&self, input: &str, offset: usize) -> Location {
+        let line = self.starts[1..].partition_point(|&start| start <= offset);
+        let column = input[self.starts[line]..offset].chars().count() + 1;
+        Location::new(line as u64, column as u64)
+    }
 }
 
 pub(crate) struct ParseContext {

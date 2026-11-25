@@ -1309,6 +1309,29 @@ fn postgres_string_continuations_follow_server_rules() {
 }
 
 #[test]
+fn tokenizer_errors_keep_the_statements_before_them() {
+    for dialect in [SqlDialect::Postgres, SqlDialect::Mysql, SqlDialect::Sqlite] {
+        let sql = "CREATE TABLE a (id INT);\nCREATE TABLE b (id INT REFERENCES a(id));\nCREATE TABLE c (name TEXT DEFAULT 'unterminated);\n";
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, dialect);
+        let errors: Vec<_> = output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "{dialect:?}: {:?}", output.diagnostics);
+        assert_eq!(errors[0].code.full_code(), "PARSE001");
+        let span = errors[0].span.expect("tokenizer errors carry a span");
+        assert!(
+            span.offset > sql.find("CREATE TABLE c").unwrap(),
+            "{dialect:?}"
+        );
+        let schema = output.schema.unwrap();
+        assert_eq!(schema.tables.len(), 2, "{dialect:?}");
+        assert_eq!(schema.tables[1].foreign_keys.len(), 1, "{dialect:?}");
+    }
+}
+
+#[test]
 fn parses_create_view() {
     let sql = r"
     CREATE TABLE users (
