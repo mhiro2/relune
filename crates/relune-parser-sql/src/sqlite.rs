@@ -7,11 +7,14 @@
 
 use std::any::TypeId;
 
-use sqlparser::ast::{Statement, Value, ValueWithSpan};
+use sqlparser::ast::{
+    BinaryOperator, DataType, Expr, Ident, ObjectName, Statement, TypeModifier, Value,
+    ValueWithSpan,
+};
 use sqlparser::dialect::{BindPlaceholderStyle, Dialect, Precedence, SQLiteDialect};
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
-use sqlparser::tokenizer::Token;
+use sqlparser::tokenizer::{Span, Token};
 
 /// `SQLiteDialect` plus the `SQLite` forms it rejects.
 #[derive(Debug)]
@@ -110,6 +113,50 @@ impl Dialect for SqliteRescue {
         }
         SQLiteDialect {}.parse_statement(parser)
     }
+
+    fn parse_data_type(&self, parser: &mut Parser<'_>) -> Option<Result<DataType, ParserError>> {
+        SQLiteDialect {}
+            .parse_data_type(parser)
+            .or_else(|| parse_multi_word_type(parser))
+    }
+
+    fn get_next_precedence(&self, parser: &Parser<'_>) -> Option<Result<u8, ParserError>> {
+        if is_bare_word(&parser.peek_token().token, "ISNULL") {
+            return Some(Ok(self.prec_value(Precedence::Is)));
+        }
+        SQLiteDialect {}.get_next_precedence(parser)
+    }
+
+    fn parse_infix(
+        &self,
+        parser: &mut Parser<'_>,
+        expr: &Expr,
+        precedence: u8,
+    ) -> Option<Result<Expr, ParserError>> {
+        if is_bare_word(&parser.peek_token().token, "ISNULL") {
+            parser.advance_token();
+            return Some(Ok(Expr::IsNull(Box::new(expr.clone()))));
+        }
+        for operator in [Keyword::GLOB, Keyword::MATCH] {
+            if parser.parse_keywords(&[Keyword::NOT, operator]) {
+                // The AST has no negated GLOB or MATCH; keep the spelling.
+                return Some(
+                    parser
+                        .parse_subexpr(precedence)
+                        .map(|right| Expr::BinaryOp {
+                            left: Box::new(expr.clone()),
+                            op: BinaryOperator::Custom(format!("NOT {operator}")),
+                            right: Box::new(right),
+                        }),
+                );
+            }
+        }
+        SQLiteDialect {}.parse_infix(parser, expr, precedence)
+    }
+}
+
+fn is_bare_word(token: &Token, expected: &str) -> bool {
+    matches!(token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case(expected))
 }
 
 /// `PRAGMA [schema.]name [= value | (value)]`, where `SQLite` also accepts a
@@ -173,4 +220,74 @@ fn trigger_if_not_exists(parser: &mut Parser<'_>) -> Option<bool> {
         parser.advance_token();
     }
     Some(temporary)
+}
+
+/// Words that end a column's type name and start its constraints.
+const COLUMN_CONSTRAINT_WORDS: &[Keyword] = &[
+    Keyword::AS,
+    Keyword::CHECK,
+    Keyword::COLLATE,
+    Keyword::CONSTRAINT,
+    Keyword::DEFAULT,
+    Keyword::DEFERRABLE,
+    Keyword::GENERATED,
+    Keyword::NOT,
+    Keyword::NULL,
+    Keyword::PRIMARY,
+    Keyword::REFERENCES,
+    Keyword::UNIQUE,
+];
+
+/// A type name of several words, such as `UNSIGNED BIG INT` or
+/// `VARYING CHARACTER(255)`. `SQLite` accepts any sequence of names (with up
+/// to two signed-number modifiers) and derives the column affinity from it.
+fn parse_multi_word_type(parser: &mut Parser<'_>) -> Option<Result<DataType, ParserError>> {
+    let word_at = |n| match parser.peek_nth_token(n).token {
+        Token::Word(word)
+            if word.quote_style.is_none() && !COLUMN_CONSTRAINT_WORDS.contains(&word.keyword) =>
+        {
+            Some(word.value)
+        }
+        _ => None,
+    };
+    let words: Vec<String> = (0..).map_while(word_at).collect();
+    if words.len() < 2 {
+        return None;
+    }
+    for _ in &words {
+        parser.advance_token();
+    }
+    let modifiers = match parse_type_modifiers(parser) {
+        Ok(modifiers) => modifiers,
+        Err(error) => return Some(Err(error)),
+    };
+    let name = ObjectName::from(vec![Ident::with_span(Span::empty(), words.join(" "))]);
+    Some(Ok(DataType::Custom(name, modifiers)))
+}
+
+fn parse_type_modifiers(parser: &mut Parser<'_>) -> Result<Vec<TypeModifier>, ParserError> {
+    if !parser.consume_token(&Token::LParen) {
+        return Ok(Vec::new());
+    }
+    let mut modifiers = Vec::new();
+    // SQLite takes one or two signed numbers.
+    while modifiers.len() < 2 {
+        let sign = if parser.consume_token(&Token::Minus) {
+            "-"
+        } else {
+            // A leading `+` changes nothing.
+            let _ = parser.consume_token(&Token::Plus);
+            ""
+        };
+        let next = parser.next_token();
+        let Token::Number(digits, long) = next.token else {
+            return parser.expected("type size", next);
+        };
+        modifiers.push(TypeModifier::Number(format!("{sign}{digits}"), long));
+        if !parser.consume_token(&Token::Comma) {
+            break;
+        }
+    }
+    parser.expect_token(&Token::RParen)?;
+    Ok(modifiers)
 }

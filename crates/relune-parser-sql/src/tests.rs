@@ -2330,6 +2330,72 @@ fn sqlite_dump_pragmas_and_triggers_parse_without_errors() {
 }
 
 #[test]
+fn sqlite_check_operators_keep_their_table() {
+    // A CHECK using NOT GLOB, NOT MATCH, or ISNULL dropped its whole table.
+    let sql = "CREATE TABLE t (id TEXT PRIMARY KEY, parent TEXT REFERENCES t(id),
+        digest TEXT CHECK (digest ISNULL OR (length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')),
+        body TEXT,
+        CONSTRAINT body_terms CHECK (body NOT MATCH 'spam' AND body NOT REGEXP 'x+'));";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    let table = &schema.tables[0];
+    assert_eq!(table.foreign_keys.len(), 1);
+    assert_eq!(
+        table.columns[2].semantics.check_constraints[0].expression,
+        "digest IS NULL OR (length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')"
+    );
+    assert_eq!(
+        table.check_constraints[0].expression,
+        "body NOT MATCH 'spam' AND body NOT REGEXP 'x+'"
+    );
+}
+
+#[test]
+fn sqlite_multi_word_type_names_keep_their_table() {
+    // SQLite takes any sequence of names as a type and derives the affinity
+    // from it; the documentation's own examples dropped the table.
+    let sql = "CREATE TABLE t (
+        id UNSIGNED BIG INT PRIMARY KEY,
+        code VARYING CHARACTER(255) NOT NULL,
+        label NATIVE CHARACTER(70) COLLATE NOCASE,
+        ratio DOUBLE PRECISION DEFAULT 1.0,
+        amount BIG DECIMAL(10, -2),
+        owner UNSIGNED BIG INT REFERENCES t(id) DEFERRABLE INITIALLY DEFERRED
+    );";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    let columns: Vec<(&str, &str, bool)> = schema.tables[0]
+        .columns
+        .iter()
+        .map(|c| (c.name.as_str(), c.data_type.as_str(), c.nullable))
+        .collect();
+    assert_eq!(
+        columns,
+        [
+            ("id", "UNSIGNED BIG INT", false),
+            ("code", "VARYING CHARACTER(255)", false),
+            ("label", "NATIVE CHARACTER(70)", true),
+            ("ratio", "DOUBLE PRECISION", true),
+            ("amount", "BIG DECIMAL(10, -2)", true),
+            ("owner", "UNSIGNED BIG INT", true),
+        ]
+    );
+    assert!(schema.tables[0].columns[0].is_primary_key);
+}
+
+#[test]
+fn sqlite_multi_word_type_names_take_at_most_two_sizes() {
+    let sql = "CREATE TABLE t (amount BIG DECIMAL(1, 2, 3)); CREATE TABLE after_it (id INT);";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(output.has_errors());
+    let schema = output.schema.unwrap();
+    let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["after_it"]);
+}
+
+#[test]
 fn sqlite_rescue_still_reports_malformed_statements() {
     for statement in [
         "PRAGMA journal_mode(WAL;",
