@@ -20,7 +20,9 @@ use sqlparser::parser::{Parser, ParserError};
 use sqlparser::tokenizer::{Token, TokenWithSpan};
 
 use crate::context::LineOffsets;
-use crate::dialect::{complete_statements, dialect_impl, resolve_dialect, tokenize};
+use crate::dialect::{
+    complete_statements, dialect_impl, rescue_dialect, resolve_dialect, tokenize,
+};
 use crate::names::{normalized_stable_id, split_object_name};
 use crate::postgres::parse_comment;
 
@@ -278,11 +280,11 @@ fn classify(
         _ => {}
     }
 
-    let operations = match tokenize(grammar, &raw.sql) {
+    let parse = |dialect: &dyn sqlparser::dialect::Dialect| match tokenize(dialect, &raw.sql) {
         (_, Some(error)) => Err(ParserError::from(error)),
         (tokens, None) => {
-            let mut parser = Parser::new(grammar).with_tokens_with_locations(tokens);
-            if grammar.is::<PostgreSqlDialect>() && parser.peek_keyword(Keyword::COMMENT) {
+            let mut parser = Parser::new(dialect).with_tokens_with_locations(tokens);
+            if dialect.is::<PostgreSqlDialect>() && parser.peek_keyword(Keyword::COMMENT) {
                 // A comment changes no table, whatever object it describes.
                 parse_comment(&mut parser).map(|_| vec![MigrationOperation::Other])
             } else {
@@ -292,6 +294,10 @@ fn classify(
             }
         }
     };
+    let operations = parse(grammar).or_else(|error| match rescue_dialect(grammar) {
+        Some(rescue) => parse(rescue).map_err(|_| error),
+        None => Err(error),
+    });
     operations.unwrap_or_else(|error| unanalyzed(format!("SQL parse error: {error}")))
 }
 
@@ -801,5 +807,23 @@ mod tests {
         ));
         assert!(statements[2].is_unanalyzed());
         assert_eq!(output.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_pragmas_are_analyzed() {
+        let files = [MigrationFile {
+            name: "001.sql".to_string(),
+            sql: "PRAGMA foreign_keys=OFF;\nALTER TABLE t ADD COLUMN x TEXT;\nPRAGMA foreign_keys=ON;"
+                .to_string(),
+        }];
+        let output = parse_migration(&files, SqlDialect::Sqlite, TransactionMode::Explicit);
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert!(
+            output
+                .script
+                .statements
+                .iter()
+                .all(|statement| !statement.is_unanalyzed())
+        );
     }
 }

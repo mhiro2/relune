@@ -2297,6 +2297,58 @@ fn test_parse_sqlite_foreign_keys() {
 }
 
 #[test]
+fn sqlite_dump_pragmas_and_triggers_parse_without_errors() {
+    // `sqlite3 .dump` starts with `PRAGMA foreign_keys=OFF;`, which the stock
+    // grammar rejected along with other bare-word and signed pragma values.
+    let sql = r"
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        PRAGMA journal_mode = WAL;
+        PRAGMA main.journal_mode(WAL);
+        PRAGMA cache_size = -2000;
+        PRAGMA defer_foreign_keys = true;
+        PRAGMA user_version = 3;
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TRIGGER IF NOT EXISTS touch AFTER UPDATE ON users BEGIN
+            UPDATE users SET name = 'END;' WHERE id = NEW.id;
+        END;
+        CREATE TEMP TRIGGER IF NOT EXISTS audit AFTER INSERT ON users BEGIN SELECT 1; END;
+        CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id));
+        COMMIT;
+    ";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let triggers = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("CREATE TRIGGER"))
+        .count();
+    assert_eq!(triggers, 2);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.tables.len(), 2);
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+}
+
+#[test]
+fn sqlite_rescue_still_reports_malformed_statements() {
+    for statement in [
+        "PRAGMA journal_mode(WAL;",
+        "CREATE TRIGGER IF NOT EXISTS t AFTER BOGUS ON t BEGIN SELECT 1; END;",
+    ] {
+        let sql = format!("CREATE TABLE t (id INT); {statement} CREATE TABLE after_it (id INT);");
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Sqlite);
+        assert!(output.has_errors(), "{statement}");
+        assert!(
+            output.diagnostics[0].message.starts_with("SQL parse error"),
+            "{statement}"
+        );
+        let schema = output.schema.unwrap();
+        let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["t", "after_it"], "{statement}");
+    }
+}
+
+#[test]
 fn test_sql_dialect_from_str() {
     assert_eq!(
         "postgres".parse::<SqlDialect>().unwrap(),

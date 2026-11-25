@@ -274,3 +274,13 @@ pub(crate) fn complete_statements(
     }
     tokens
 }
+
+/// The grammar that re-reads statements `dialect` rejects, if it has one.
+///
+/// It is only consulted after the stock grammar fails, so it can never change
+/// how an accepted statement is read.
+pub(crate) fn rescue_dialect(dialect: &dyn Dialect) -> Option<&'static dyn Dialect> {
+    dialect
+        .is::<SQLiteDialect>()
+        .then_some(&crate::sqlite::SqliteRescue as &dyn Dialect)
+}

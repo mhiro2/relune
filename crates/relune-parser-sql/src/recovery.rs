@@ -1,7 +1,7 @@
 //! Statement-level parsing with error recovery.
 
 use crate::context::{LineOffsets, ParseContext, source_span_from_sql_span};
-use crate::dialect::{complete_statements, tokenize};
+use crate::dialect::{complete_statements, rescue_dialect, tokenize};
 use crate::postgres::{Comment, parse_comment};
 use relune_core::{Diagnostic, diagnostic::codes};
 use sqlparser::ast::Statement;
@@ -33,6 +33,10 @@ pub(crate) fn parse_statements_with_recovery(
     // that end before it are still parsed.
     let (tokens, tokenizer_error) = tokenize(dialect, input);
     let tokens = complete_statements(tokens, tokenizer_error.as_ref());
+    // Statements the stock grammar rejects get a second reading from a
+    // dialect-specific rescue grammar over the same tokens.
+    let mut rescue = rescue_dialect(dialect)
+        .map(|rescue| Parser::new(rescue).with_tokens_with_locations(tokens.clone()));
     let mut parser = Parser::new(dialect).with_tokens_with_locations(tokens);
 
     let postgres = dialect.is::<PostgreSqlDialect>();
@@ -58,7 +62,11 @@ pub(crate) fn parse_statements_with_recovery(
                 }
             })
         } else {
-            parser.parse_statement().map(Some)
+            match rescue.as_mut() {
+                Some(rescue) => parse_with_rescue(&mut parser, rescue),
+                None => parser.parse_statement(),
+            }
+            .map(Some)
         };
         match parsed {
             Ok(Some(stmt)) => {
@@ -105,4 +113,32 @@ pub(crate) fn parse_statements_with_recovery(
     }
 
     statements
+}
+
+/// Parses the next statement with the stock grammar and, only if that fails,
+/// with `rescue`, so the rescue grammar never changes how an accepted
+/// statement is read. Both parsers walk the same tokens and are kept in step.
+// The closures are needed for try_parse's higher-ranked parser lifetime.
+#[allow(clippy::redundant_closure_for_method_calls)]
+fn parse_with_rescue(
+    parser: &mut Parser<'_>,
+    rescue: &mut Parser<'_>,
+) -> Result<Statement, ParserError> {
+    let start = parser.index();
+    if let Ok(statement) = parser.try_parse(|parser| parser.parse_statement()) {
+        return Ok(statement);
+    }
+    while rescue.index() < start {
+        rescue.next_token_no_skip();
+    }
+    match rescue.try_parse(|parser| parser.parse_statement()) {
+        Ok(statement) => {
+            while parser.index() < rescue.index() {
+                parser.next_token_no_skip();
+            }
+            Ok(statement)
+        }
+        // Report the stock grammar's error at the position it stopped.
+        Err(_) => parser.parse_statement(),
+    }
 }
