@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::export::{ColumnExport, ForeignKeyExport, IndexExport, export_fk};
 use crate::model::{Column, Enum, ForeignKey, Schema, Table, View};
@@ -100,52 +100,78 @@ struct MatchedItems<'a, T> {
     paired: Vec<(&'a T, &'a T)>,
 }
 
-/// Matches `old` and `new` items by `key`, then pairs leftover items whose
-/// `shape` matches when at least one side is unnamed.
+/// How `match_items` identifies an old and a new item as the same object.
+#[derive(Clone, Copy)]
+enum MatchBy {
+    /// Equal keys: the same name, or the same shape for unnamed items.
+    Key,
+    /// Equal keys where the old item is named.
+    Name,
+    /// Equal shapes where at least one side is unnamed.
+    Shape,
+}
+
+/// Matches `old` and `new` items by `key`, and by `shape` when at least one
+/// side is unnamed.
 ///
-/// The second pass lets an unnamed constraint written in DDL match the same
+/// Matching by shape lets an unnamed constraint written in DDL match the same
 /// constraint under the name the database generated for it (e.g.
 /// `orders_user_id_fkey`), instead of reporting a drop and a re-create. Two
-/// named items are never paired by shape, so a rename stays visible. Every
-/// list follows key order, so the output is deterministic.
+/// named items are never paired by shape, so a rename stays visible.
+///
+/// Several items can share a key or shape, such as an unnamed `UNIQUE (email)`
+/// and an unnamed plain index on `(email)`, so pairs are committed in passes:
+/// unchanged items by key (`differs` is false), changed named items by name,
+/// unchanged items by shape, and finally changed items by shape. A changed
+/// item therefore never takes the unchanged counterpart of another item, and
+/// a surplus is reported as removed or added rather than dropped. Items are
+/// visited in key order (input order within a key), so the output is
+/// deterministic.
 fn match_items<'a, T, K: Ord>(
     old: &'a [T],
     new: &'a [T],
     key: impl Fn(&'a T) -> K,
     shape: impl Fn(&'a T) -> K,
     is_named: impl Fn(&T) -> bool,
+    differs: impl Fn(&T, &T) -> bool,
 ) -> MatchedItems<'a, T> {
-    let old_map: BTreeMap<K, &T> = old.iter().map(|item| (key(item), item)).collect();
-    let new_map: BTreeMap<K, &T> = new.iter().map(|item| (key(item), item)).collect();
-
-    let mut removed = Vec::new();
+    let keyed = |items: &'a [T]| {
+        let mut keyed: Vec<(K, &'a T)> = items.iter().map(|item| (key(item), item)).collect();
+        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+        keyed
+    };
+    let mut removed = keyed(old);
+    let mut added = keyed(new);
     let mut paired = Vec::new();
-    for (item_key, old_item) in &old_map {
-        match new_map.get(item_key) {
-            Some(new_item) => paired.push((*old_item, *new_item)),
-            None => removed.push(*old_item),
-        }
-    }
-    let mut added: Vec<&T> = new_map
-        .iter()
-        .filter(|(item_key, _)| !old_map.contains_key(*item_key))
-        .map(|(_, item)| *item)
-        .collect();
 
-    removed.retain(|old_item| {
-        let old_shape = shape(old_item);
-        let Some(position) = added.iter().position(|new_item| {
-            (!is_named(old_item) || !is_named(new_item)) && shape(new_item) == old_shape
-        }) else {
-            return true;
-        };
-        paired.push((*old_item, added.remove(position)));
-        false
-    });
+    for (match_by, unchanged_only) in [
+        (MatchBy::Key, true),
+        (MatchBy::Name, false),
+        (MatchBy::Shape, true),
+        (MatchBy::Shape, false),
+    ] {
+        removed.retain(|(old_key, old_item)| {
+            let Some(position) = added.iter().position(|(new_key, new_item)| {
+                let same = match match_by {
+                    MatchBy::Key => new_key == old_key,
+                    MatchBy::Name => is_named(old_item) && new_key == old_key,
+                    MatchBy::Shape => {
+                        (!is_named(old_item) || !is_named(new_item))
+                            && shape(new_item) == shape(old_item)
+                    }
+                };
+                same && (!unchanged_only || !differs(old_item, new_item))
+            }) else {
+                return true;
+            };
+            paired.push((*old_item, added.remove(position).1));
+            false
+        });
+    }
 
     MatchedItems {
-        removed,
-        added,
+        removed: removed.into_iter().map(|(_, item)| item).collect(),
+        added: added.into_iter().map(|(_, item)| item).collect(),
         paired,
     }
 }
@@ -628,9 +654,16 @@ impl TableDiff {
             format!("e:{}", normalize_sql_case(&check.expression))
         }
 
-        let matched = match_items(old_checks, new_checks, key, shape, |check| {
-            check.name.as_ref().is_some_and(|name| !name.is_empty())
-        });
+        let matched = match_items(
+            old_checks,
+            new_checks,
+            key,
+            shape,
+            |check| check.name.as_ref().is_some_and(|name| !name.is_empty()),
+            |old_c, new_c| {
+                normalize_sql_case(&old_c.expression) != normalize_sql_case(&new_c.expression)
+            },
+        );
 
         let mut diffs: Vec<CheckConstraintDiff> = matched
             .removed
@@ -666,9 +699,14 @@ impl TableDiff {
     }
 
     fn diff_foreign_keys(old_fks: &[ForeignKey], new_fks: &[ForeignKey]) -> Vec<ForeignKeyDiff> {
-        let matched = match_items(old_fks, new_fks, Self::fk_key, Self::fk_shape_key, |fk| {
-            fk.name.is_some()
-        });
+        let matched = match_items(
+            old_fks,
+            new_fks,
+            Self::fk_key,
+            Self::fk_shape_key,
+            |fk| fk.name.is_some(),
+            Self::fks_differ,
+        );
 
         let mut diffs: Vec<ForeignKeyDiff> = matched
             .removed
@@ -772,6 +810,7 @@ impl TableDiff {
             Self::index_key,
             |idx| Cow::Owned(Self::index_shape_key(idx)),
             |idx| idx.name.as_ref().is_some_and(|name| !name.is_empty()),
+            Self::indexes_differ,
         );
 
         let mut diffs: Vec<IndexDiff> = matched
@@ -2636,6 +2675,103 @@ mod tests {
         let index_diffs = &diff.modified_tables[0].index_diffs;
         assert_eq!(index_diffs.len(), 1);
         assert_eq!(index_diffs[0].change_kind, ChangeKind::Modified);
+    }
+
+    fn unnamed_email_index(is_unique: bool) -> crate::model::Index {
+        crate::model::Index::from_columns(None, vec!["email".to_string()], is_unique)
+    }
+
+    #[test]
+    fn unnamed_indexes_sharing_a_key_are_all_diffed() {
+        // `email text UNIQUE` plus `CREATE INDEX ON users (email)`: both are
+        // unnamed and share the same key, so neither may hide the other.
+        let mut before = create_test_table("users", vec![("email", "text", false, false)], vec![]);
+        before.indexes = vec![unnamed_email_index(true), unnamed_email_index(false)];
+        let mut after = before.clone();
+        after.indexes = vec![unnamed_email_index(false)];
+
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        let index_diffs = &diff.modified_tables[0].index_diffs;
+        assert_eq!(index_diffs.len(), 1, "{index_diffs:?}");
+        assert_eq!(index_diffs[0].change_kind, ChangeKind::Removed);
+        assert!(
+            index_diffs[0]
+                .old_value
+                .as_ref()
+                .is_some_and(|old| old.unique)
+        );
+    }
+
+    #[test]
+    fn same_shape_indexes_pair_with_their_unchanged_generated_names() {
+        let mut before = create_test_table("users", vec![("email", "text", false, false)], vec![]);
+        before.indexes = vec![unnamed_email_index(true), unnamed_email_index(false)];
+        let mut after = before.clone();
+        after.indexes[0].name = Some("users_email_key".to_string());
+        after.indexes[1].name = Some("users_email_idx".to_string());
+
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        assert!(diff.is_empty(), "{diff:?}");
+    }
+
+    #[test]
+    fn changed_index_does_not_take_another_unchanged_counterpart() {
+        // The unnamed partial UNIQUE only gains a generated name, and the plain
+        // index gains the predicate. Pairing them by their shared key would
+        // report the UNIQUE as modified into a plain index.
+        let partial = |mut idx: crate::model::Index| {
+            idx.predicate = Some("active".to_string());
+            idx
+        };
+        let mut before = create_test_table("users", vec![("email", "text", false, false)], vec![]);
+        before.indexes = vec![
+            partial(unnamed_email_index(true)),
+            unnamed_email_index(false),
+        ];
+        let mut after = before.clone();
+        after.indexes = vec![
+            crate::model::Index {
+                name: Some("users_email_key".to_string()),
+                ..partial(unnamed_email_index(true))
+            },
+            partial(unnamed_email_index(false)),
+        ];
+
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        let index_diffs = &diff.modified_tables[0].index_diffs;
+        assert_eq!(index_diffs.len(), 1, "{index_diffs:?}");
+        assert_eq!(index_diffs[0].change_kind, ChangeKind::Modified);
+        let (old, new) = (
+            index_diffs[0].old_value.as_ref().unwrap(),
+            index_diffs[0].new_value.as_ref().unwrap(),
+        );
+        assert!(!old.unique && !new.unique);
+        assert_eq!(new.predicate.as_deref(), Some("active"));
+    }
+
+    #[test]
+    fn unnamed_fks_sharing_a_key_are_all_diffed() {
+        let before = create_test_table(
+            "orders",
+            vec![("user_id", "int", false, false)],
+            vec![
+                ("", vec!["user_id"], "users", vec!["id"]),
+                ("", vec!["user_id"], "users", vec!["id"]),
+            ],
+        );
+        let after = create_test_table(
+            "orders",
+            vec![("user_id", "int", false, false)],
+            vec![("", vec!["user_id"], "users", vec!["id"])],
+        );
+
+        let diff = diff_schemas(&single_table_schema(before), &single_table_schema(after));
+        let kinds: Vec<ChangeKind> = diff.modified_tables[0]
+            .fk_diffs
+            .iter()
+            .map(|fk| fk.change_kind)
+            .collect();
+        assert_eq!(kinds, vec![ChangeKind::Removed]);
     }
 
     #[test]

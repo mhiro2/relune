@@ -1159,10 +1159,13 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
         }
     }
 
-    // NUMERIC(P, S).
+    // NUMERIC(P, S) holds `P - S` integer digits and `S` fractional digits;
+    // losing either rejects or rounds existing values, as in
+    // NUMERIC(10,2) -> NUMERIC(10,4) (12345678.00 no longer fits).
     if let (Some((old_p, old_s)), Some((new_p, new_s))) =
         (parse_numeric(&old_norm), parse_numeric(&new_norm))
-        && (new_p < old_p || new_s < old_s)
+        && (i64::from(new_p) - i64::from(new_s) < i64::from(old_p) - i64::from(old_s)
+            || new_s < old_s)
     {
         return Some((
             format!("NUMERIC({old_p},{old_s})"),
@@ -1170,9 +1173,11 @@ fn detect_type_narrowing(old: &str, new: &str) -> Option<(String, String)> {
         ));
     }
 
-    // Integer width shrink.
-    if let (Some(old_rank), Some(new_rank)) = (int_rank(&old_norm), int_rank(&new_norm))
-        && new_rank < old_rank
+    // Integer range shrink: a signed type cannot become unsigned without
+    // losing negatives, and the new type needs as many magnitude bits.
+    if let (Some(old_int), Some(new_int)) = (parse_int(&old_norm), parse_int(&new_norm))
+        && ((new_int.unsigned && !old_int.unsigned)
+            || new_int.magnitude_bits() < old_int.magnitude_bits())
     {
         return Some((old_norm, new_norm));
     }
@@ -1219,34 +1224,54 @@ fn parse_string_type(value: &str) -> Option<(&'static str, Option<u32>)> {
     Some((kind, Some(n)))
 }
 
+/// Parse `NUMERIC(P, S)` / `DECIMAL(P, S)` into precision and scale. A
+/// missing scale is 0 in standard SQL, `PostgreSQL`, and `MySQL`. A bare
+/// `NUMERIC` is not parsed: it is unbounded in `PostgreSQL` but
+/// `DECIMAL(10,0)` in `MySQL`.
 fn parse_numeric(value: &str) -> Option<(u32, u32)> {
     let rest = value
         .strip_prefix("NUMERIC")
         .or_else(|| value.strip_prefix("DECIMAL"))?
         .trim();
     let inner = rest.strip_prefix('(')?.strip_suffix(')')?;
-    let mut parts = inner.split(',');
-    let p = parts.next()?.trim().parse::<u32>().ok()?;
-    let s = parts.next()?.trim().parse::<u32>().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((p, s))
+    let (p, s) = inner.split_once(',').unwrap_or((inner, "0"));
+    Some((p.trim().parse().ok()?, s.trim().parse().ok()?))
 }
 
-fn int_rank(value: &str) -> Option<u32> {
-    // Drop the MySQL display width and any signedness/zerofill modifiers so
-    // that e.g. `BIGINT(20) UNSIGNED` ranks the same as `BIGINT`. `value` is
-    // already upper-cased.
-    let base = value.split_whitespace().next()?.split('(').next()?;
-    match base {
-        "BIGINT" | "INT8" => Some(64),
-        "INT" | "INTEGER" | "INT4" => Some(32),
-        "MEDIUMINT" => Some(24),
-        "SMALLINT" | "INT2" => Some(16),
-        "TINYINT" => Some(8),
-        _ => None,
+/// An integer type's storage width and signedness.
+#[derive(Debug, Clone, Copy)]
+struct IntType {
+    bits: u32,
+    unsigned: bool,
+}
+
+impl IntType {
+    /// Bits available for the absolute value of a non-negative value.
+    const fn magnitude_bits(self) -> u32 {
+        if self.unsigned {
+            self.bits
+        } else {
+            self.bits - 1
+        }
     }
+}
+
+fn parse_int(value: &str) -> Option<IntType> {
+    // Drop the MySQL display width so that e.g. `BIGINT(20) UNSIGNED` reads as
+    // `BIGINT UNSIGNED`. `value` is already upper-cased, and ZEROFILL implies
+    // UNSIGNED in MySQL.
+    let mut words = value.split_whitespace();
+    let base = words.next()?.split('(').next()?;
+    let bits = match base {
+        "BIGINT" | "INT8" => 64,
+        "INT" | "INTEGER" | "INT4" => 32,
+        "MEDIUMINT" => 24,
+        "SMALLINT" | "INT2" => 16,
+        "TINYINT" => 8,
+        _ => return None,
+    };
+    let unsigned = words.any(|word| matches!(word, "UNSIGNED" | "ZEROFILL"));
+    Some(IntType { bits, unsigned })
 }
 
 /// `risk/drop-pk-or-unique` (column path) — primary key column going
@@ -3807,15 +3832,48 @@ mod tests {
     }
 
     #[test]
+    fn detect_type_narrowing_compares_numeric_integer_and_fraction_digits() {
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(8,2)").is_some());
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(10,1)").is_some());
+        // Same precision with a larger scale drops integer digits (8 -> 6).
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(10,4)").is_some());
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(12,4)").is_none());
+        assert!(detect_type_narrowing("NUMERIC(10,2)", "NUMERIC(11,2)").is_none());
+        // A missing scale is 0.
+        assert!(detect_type_narrowing("DECIMAL(10)", "DECIMAL(5)").is_some());
+        assert!(detect_type_narrowing("DECIMAL(10)", "DECIMAL(10,2)").is_some());
+        assert!(detect_type_narrowing("DECIMAL(10)", "DECIMAL(12,2)").is_none());
+        assert!(detect_type_narrowing("NUMERIC(10, 0)", "NUMERIC(10)").is_none());
+        // Bare NUMERIC differs by dialect, so it is not compared.
+        assert!(detect_type_narrowing("NUMERIC", "NUMERIC(10,2)").is_none());
+        assert!(detect_type_narrowing("NUMERIC(10,2,1)", "NUMERIC(1,0)").is_none());
+    }
+
+    #[test]
     fn detect_type_narrowing_ranks_mediumint_and_ignores_modifiers() {
         // MEDIUMINT sits between SMALLINT and INT.
         assert!(detect_type_narrowing("INT", "MEDIUMINT").is_some());
         assert!(detect_type_narrowing("MEDIUMINT", "SMALLINT").is_some());
         assert!(detect_type_narrowing("MEDIUMINT", "INT").is_none());
-        // Display width / UNSIGNED / ZEROFILL must not defeat the rank match.
+        // Display width / UNSIGNED / ZEROFILL must not defeat the width match.
         assert!(detect_type_narrowing("BIGINT(20) UNSIGNED", "INT UNSIGNED").is_some());
         assert!(detect_type_narrowing("BIGINT UNSIGNED ZEROFILL", "SMALLINT").is_some());
-        assert!(detect_type_narrowing("INT", "BIGINT UNSIGNED").is_none());
+        assert!(detect_type_narrowing("INT(11)", "INT").is_none());
+    }
+
+    #[test]
+    fn detect_type_narrowing_compares_integer_ranges_with_signedness() {
+        // Signed -> unsigned loses negative values at any width.
+        assert!(detect_type_narrowing("INT", "INT UNSIGNED").is_some());
+        assert!(detect_type_narrowing("INT", "BIGINT UNSIGNED").is_some());
+        assert!(detect_type_narrowing("TINYINT", "BIGINT ZEROFILL").is_some());
+        // Unsigned -> signed of the same width loses the upper half.
+        assert!(detect_type_narrowing("BIGINT UNSIGNED", "BIGINT").is_some());
+        assert!(detect_type_narrowing("INT UNSIGNED", "INT").is_some());
+        // A wider signed type holds the whole unsigned range.
+        assert!(detect_type_narrowing("INT UNSIGNED", "BIGINT").is_none());
+        assert!(detect_type_narrowing("SMALLINT UNSIGNED", "MEDIUMINT").is_none());
+        assert!(detect_type_narrowing("INT UNSIGNED", "INT UNSIGNED ZEROFILL").is_none());
     }
 
     #[test]
