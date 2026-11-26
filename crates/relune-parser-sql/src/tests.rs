@@ -1173,6 +1173,187 @@ fn handles_comment_on_unknown_column() {
 }
 
 #[test]
+fn postgres_comment_on_accepts_every_object_and_text_form() {
+    // pg_dump writes routine signatures and table-relative objects that
+    // sqlparser rejected, failing the whole run on a comment the schema
+    // ignores anyway.
+    let sql = r#"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, name TEXT, email TEXT);
+    COMMENT ON TABLE users IS $$Registered 'accounts'$$;
+    COMMENT ON COLUMN users.name IS E'Display\tname';
+    COMMENT ON COLUMN users.email IS U&'e\0301mail';
+    COMMENT ON FUNCTION public.calc(integer, text) IS 'calc';
+    COMMENT ON FUNCTION "app"."f"(IN "a" NUMERIC(10, 2), TEXT[]) IS NULL;
+    COMMENT ON PROCEDURE run() IS 'routine';
+    COMMENT ON AGGREGATE total(*) IS 'agg';
+    COMMENT ON CONSTRAINT users_pkey ON users IS 'pk';
+    COMMENT ON TRIGGER touch ON users IS 'trigger';
+    COMMENT ON MATERIALIZED VIEW mv IS 'view';
+    COMMENT ON TEXT SEARCH CONFIGURATION cfg IS 'search';
+    CREATE TABLE posts (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users(id));
+    "#;
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let ignored: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == codes::parse_unsupported())
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(ignored.len(), 8, "{ignored:?}");
+    for object in [
+        "FUNCTION",
+        "PROCEDURE",
+        "AGGREGATE",
+        "CONSTRAINT",
+        "TRIGGER",
+        "MATERIALIZED VIEW",
+        "TEXT SEARCH CONFIGURATION",
+    ] {
+        let construct = format!("COMMENT ON {object}.");
+        assert!(ignored.iter().any(|m| m.contains(&construct)), "{object}");
+    }
+
+    let schema = output.schema.unwrap();
+    let users = &schema.tables[0];
+    assert_eq!(users.comment.as_deref(), Some("Registered 'accounts'"));
+    assert_eq!(users.columns[1].comment.as_deref(), Some("Display\tname"));
+    assert_eq!(users.columns[2].comment.as_deref(), Some("e\u{301}mail"));
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+}
+
+#[test]
+fn postgres_comment_on_still_rejects_malformed_statements() {
+    for comment in [
+        "COMMENT ON FUNCTION f(INTERVAL IS 'unclosed';",
+        "COMMENT ON FUNCTION f()) IS 'extra paren';",
+        "COMMENT ON FUNCTION f() IS;",
+        "COMMENT ON FUNCTION IS 'no object';",
+        "COMMENT ON TABLE t IS 42;",
+        "COMMENT ON TABLE t IS 'text' trailing;",
+        "COMMENT ON WIDGET w IS 'unknown object';",
+        "COMMENT ON TABLE t;",
+    ] {
+        let sql =
+            format!("CREATE TABLE t (id INT); {comment} CREATE TABLE after_comment (id INT);");
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Postgres);
+        assert!(output.has_errors(), "{comment}");
+        let schema = output.schema.unwrap();
+        assert_eq!(schema.tables.len(), 2, "{comment}");
+        assert_eq!(schema.tables[0].comment, None, "{comment}");
+    }
+}
+
+#[test]
+fn postgres_string_continuations_are_one_literal_in_every_statement() {
+    // PostgreSQL joins string literals separated by a newline. A split
+    // DEFAULT used to drop the whole table, and a split comment kept only its
+    // first fragment.
+    let sql = r"
+    CREATE TYPE mood AS ENUM ('ha'
+        'ppy', 'sad');
+    CREATE TABLE users (
+        id BIGINT PRIMARY KEY,
+        name TEXT DEFAULT 'anon'
+            'ymous' NOT NULL,
+        status TEXT CHECK (status IN ('act'
+            'ive', 'gone'))
+    );
+    COMMENT ON TABLE users IS 'Registered; '
+        -- the server joins across line comments too
+        'it''s every account.';
+    COMMENT ON COLUMN users.name IS 'Display '
+        'name';
+    CREATE TABLE posts (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users(id));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.enums[0].values, ["happy", "sad"]);
+    let users = &schema.tables[0];
+    assert_eq!(
+        users.comment.as_deref(),
+        Some("Registered; it's every account.")
+    );
+    assert_eq!(users.columns[1].comment.as_deref(), Some("Display name"));
+    assert_eq!(
+        users.columns[1].semantics.default_expression.as_deref(),
+        Some("'anonymous'")
+    );
+    assert_eq!(
+        users.columns[2].semantics.check_constraints[0].expression,
+        "status IN ('active', 'gone')"
+    );
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+}
+
+#[test]
+fn postgres_string_continuations_follow_server_rules() {
+    // Literals on one line, or split by a block comment, stay separate and
+    // are rejected as the server rejects them; the next statement recovers.
+    for comment in [
+        "COMMENT ON TABLE t IS 'first' 'same line';",
+        "COMMENT ON TABLE t IS 'first' /* c */\n'second';",
+    ] {
+        let sql =
+            format!("CREATE TABLE t (id INT);\n{comment}\nCREATE TABLE after_comment (id INT);");
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Postgres);
+        assert!(output.has_errors(), "{comment}");
+        let schema = output.schema.unwrap();
+        // The server rejects the whole statement, so no comment is applied.
+        assert_eq!(schema.tables[0].comment, None, "{comment}");
+        assert_eq!(schema.tables.len(), 2, "{comment}");
+    }
+}
+
+#[test]
+fn postgres_string_constants_are_read_in_their_lexer_mode() {
+    // An escape string continuation ends at the server's quote, not at `\'`,
+    // and UESCAPE picks the escape character of a Unicode string. Either used
+    // to fail tokenizing and lose every table.
+    let sql = r"
+    CREATE TABLE users (id BIGINT PRIMARY KEY, name TEXT);
+    COMMENT ON TABLE users IS E'User''s '
+        'table\'s data';
+    COMMENT ON COLUMN users.name IS U&'d!0061t!+01F600' UESCAPE '!';
+    CREATE TABLE posts (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users(id));
+    ";
+
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Postgres);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.tables.len(), 2);
+    let users = &schema.tables[0];
+    assert_eq!(users.comment.as_deref(), Some("User's table's data"));
+    assert_eq!(users.columns[1].comment.as_deref(), Some("dat😀"));
+}
+
+#[test]
+fn tokenizer_errors_keep_the_statements_before_them() {
+    for dialect in [SqlDialect::Postgres, SqlDialect::Mysql, SqlDialect::Sqlite] {
+        let sql = "CREATE TABLE a (id INT);\nCREATE TABLE b (id INT REFERENCES a(id));\nCREATE TABLE c (name TEXT DEFAULT 'unterminated);\n";
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, dialect);
+        let errors: Vec<_> = output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "{dialect:?}: {:?}", output.diagnostics);
+        assert_eq!(errors[0].code.full_code(), "PARSE001");
+        let span = errors[0].span.expect("tokenizer errors carry a span");
+        assert!(
+            span.offset > sql.find("CREATE TABLE c").unwrap(),
+            "{dialect:?}"
+        );
+        let schema = output.schema.unwrap();
+        assert_eq!(schema.tables.len(), 2, "{dialect:?}");
+        assert_eq!(schema.tables[1].foreign_keys.len(), 1, "{dialect:?}");
+    }
+}
+
+#[test]
 fn parses_create_view() {
     let sql = r"
     CREATE TABLE users (

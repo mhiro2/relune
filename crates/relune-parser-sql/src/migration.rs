@@ -14,13 +14,15 @@ use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, Ident, ObjectName, RenameTableNameKind, Statement,
     TableConstraint, TableFactor,
 };
+use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::keywords::Keyword;
-use sqlparser::parser::Parser;
-use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
+use sqlparser::parser::{Parser, ParserError};
+use sqlparser::tokenizer::{Token, TokenWithSpan};
 
 use crate::context::LineOffsets;
-use crate::dialect::{dialect_impl, resolve_dialect};
+use crate::dialect::{complete_statements, dialect_impl, resolve_dialect, tokenize};
 use crate::names::{normalized_stable_id, split_object_name};
+use crate::postgres::parse_comment;
 
 /// One migration file, in the order it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,33 +150,48 @@ struct RawStatement {
     tokens: Vec<Token>,
 }
 
-/// Splits a file on top-level semicolons. A file the tokenizer rejects is
-/// one unanalyzable statement.
+/// Splits a file on top-level semicolons. Where the tokenizer fails, the
+/// rest of the file from the statement it failed in is one unanalyzable
+/// statement.
 fn split_statements(
     grammar: &dyn sqlparser::dialect::Dialect,
     file: &MigrationFile,
 ) -> Vec<RawStatement> {
     let offsets = LineOffsets::new(&file.sql);
-    let tokens = match Tokenizer::new(grammar, &file.sql).tokenize_with_location() {
-        Ok(tokens) => tokens,
-        Err(error) => {
-            // The whole file is one statement starting at its first content;
-            // the error position (which can lie past the last line) goes in
-            // the reason instead.
-            let (line, column) = first_content(&file.sql);
-            return vec![RawStatement {
-                line,
-                column,
-                sql: file.sql.trim().to_string(),
-                tokens: vec![Token::Word(sqlparser::tokenizer::Word {
-                    value: format!("tokenizer error: {error}"),
-                    quote_style: None,
-                    keyword: Keyword::NoKeyword,
-                })],
-            }];
-        }
-    };
+    let (tokens, error) = tokenize(grammar, &file.sql);
+    let tokens = complete_statements(tokens, error.as_ref());
 
+    let mut statements = split_tokens(&tokens, &offsets, file);
+    if let Some(error) = error {
+        // The rest starts at its first content; the error position (which
+        // can lie past the last line) goes in the reason instead.
+        let start = tokens
+            .last()
+            .and_then(|semicolon| offsets.location_to_offset(&file.sql, semicolon.span.end))
+            .unwrap_or(0);
+        let rest = &file.sql[start..];
+        let content = start + (rest.len() - rest.trim_start().len());
+        let location = offsets.offset_to_location(&file.sql, content);
+        statements.push(RawStatement {
+            line: usize::try_from(location.line).unwrap_or(1),
+            column: usize::try_from(location.column).unwrap_or(1),
+            sql: rest.trim().to_string(),
+            tokens: vec![Token::Word(sqlparser::tokenizer::Word {
+                value: format!("tokenizer error: {error}"),
+                quote_style: None,
+                keyword: Keyword::NoKeyword,
+            })],
+        });
+    }
+    statements
+}
+
+/// Splits tokens into statements on top-level semicolons.
+fn split_tokens(
+    tokens: &[TokenWithSpan],
+    offsets: &LineOffsets,
+    file: &MigrationFile,
+) -> Vec<RawStatement> {
     let mut statements = Vec::new();
     let mut current: Vec<&TokenWithSpan> = Vec::new();
     for token in tokens
@@ -200,18 +217,6 @@ fn split_statements(
         }
     }
     statements
-}
-
-/// 1-based line and column of the first non-whitespace character.
-fn first_content(sql: &str) -> (usize, usize) {
-    sql.lines()
-        .enumerate()
-        .find_map(|(index, line)| {
-            line.char_indices()
-                .position(|(_, ch)| !ch.is_whitespace())
-                .map(|column| (index + 1, column + 1))
-        })
-        .unwrap_or((1, 1))
 }
 
 fn keyword_at(tokens: &[Token], index: usize) -> Option<Keyword> {
@@ -273,13 +278,21 @@ fn classify(
         _ => {}
     }
 
-    let statement = Parser::new(grammar)
-        .try_with_sql(&raw.sql)
-        .and_then(|mut parser| parser.parse_statement());
-    match statement {
-        Ok(statement) => statement_operations(&statement),
-        Err(error) => unanalyzed(format!("SQL parse error: {error}")),
-    }
+    let operations = match tokenize(grammar, &raw.sql) {
+        (_, Some(error)) => Err(ParserError::from(error)),
+        (tokens, None) => {
+            let mut parser = Parser::new(grammar).with_tokens_with_locations(tokens);
+            if grammar.is::<PostgreSqlDialect>() && parser.peek_keyword(Keyword::COMMENT) {
+                // A comment changes no table, whatever object it describes.
+                parse_comment(&mut parser).map(|_| vec![MigrationOperation::Other])
+            } else {
+                parser
+                    .parse_statement()
+                    .map(|statement| statement_operations(&statement))
+            }
+        }
+    };
+    operations.unwrap_or_else(|error| unanalyzed(format!("SQL parse error: {error}")))
 }
 
 fn table_name(name: &ObjectName) -> String {
@@ -713,6 +726,27 @@ mod tests {
     }
 
     #[test]
+    fn statements_before_a_tokenizer_error_are_analyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "CREATE TABLE t (id INT);\nALTER TABLE t ADD COLUMN x TEXT;\n  SELECT $$ \n;",
+            )],
+            TransactionMode::Explicit,
+        );
+        let statements = &output.script.statements;
+        assert_eq!(statements.len(), 3);
+        assert!(!statements[0].is_unanalyzed());
+        assert!(!statements[1].is_unanalyzed());
+        assert!(statements[2].is_unanalyzed());
+        assert_eq!(
+            (statements[2].location.line, statements[2].location.column),
+            (3, 3)
+        );
+        assert_eq!(statements[2].sql, "SELECT $$ \n;");
+    }
+
+    #[test]
     fn unreadable_statements_stay_unanalyzed_with_a_warning() {
         let output = parse(
             &[(
@@ -729,5 +763,43 @@ mod tests {
             codes::review_migration_unanalyzed()
         );
         assert!(output.diagnostics[0].message.contains("001.sql:1"));
+    }
+
+    #[test]
+    fn split_postgres_literals_do_not_leave_a_statement_unanalyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'act'\n  'ive';",
+            )],
+            TransactionMode::Explicit,
+        );
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert!(matches!(
+            output.script.statements[0].operations[..],
+            [MigrationOperation::AddColumn { .. }]
+        ));
+    }
+
+    #[test]
+    fn postgres_comments_on_any_object_are_analyzed() {
+        let output = parse(
+            &[(
+                "001.sql",
+                "COMMENT ON FUNCTION calc(integer, text) IS 'calc';\nCOMMENT ON CONSTRAINT pk ON t IS $$pk$$;\nCOMMENT ON FUNCTION f(INTERVAL IS 'unclosed';",
+            )],
+            TransactionMode::Explicit,
+        );
+        let statements = &output.script.statements;
+        assert!(matches!(
+            statements[0].operations[..],
+            [MigrationOperation::Other]
+        ));
+        assert!(matches!(
+            statements[1].operations[..],
+            [MigrationOperation::Other]
+        ));
+        assert!(statements[2].is_unanalyzed());
+        assert_eq!(output.diagnostics.len(), 1);
     }
 }

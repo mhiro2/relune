@@ -133,7 +133,7 @@ pub(crate) fn parse_comment(
         _ => {
             // Other comment types (view, function, etc.) are not supported
             ctx.warn_unsupported(
-                &format!("COMMENT ON {object_type:?}"),
+                &format!("COMMENT ON {object_type}"),
                 span_from_spanned(input, offsets, object_name),
             );
         }

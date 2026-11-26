@@ -2,7 +2,7 @@
 
 use relune_core::SqlDialect;
 use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
-use sqlparser::tokenizer::{Token, Tokenizer};
+use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer, TokenizerError};
 
 /// Detect the SQL dialect from the content of the SQL string.
 ///
@@ -240,4 +240,37 @@ pub(crate) fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
         SqlDialect::Mysql => Box::new(MySqlDialect {}),
         SqlDialect::Sqlite => Box::new(SQLiteDialect {}),
     }
+}
+
+/// Tokenizes `sql` the way `dialect` reads it, including the lexical rules
+/// sqlparser's dialect leaves out. On an error, the tokens read before it
+/// come back with it.
+pub(crate) fn tokenize(
+    dialect: &dyn Dialect,
+    sql: &str,
+) -> (Vec<TokenWithSpan>, Option<TokenizerError>) {
+    if dialect.is::<PostgreSqlDialect>() {
+        return crate::postgres::tokenize(sql);
+    }
+    let mut tokens = Vec::new();
+    let error = Tokenizer::new(dialect, sql)
+        .tokenize_with_location_into_buf(&mut tokens)
+        .err();
+    (tokens, error)
+}
+
+/// The tokens of the statements that end before a tokenizer `error`, which
+/// is everything when there is none.
+pub(crate) fn complete_statements(
+    mut tokens: Vec<TokenWithSpan>,
+    error: Option<&TokenizerError>,
+) -> Vec<TokenWithSpan> {
+    if error.is_some() {
+        let end = tokens
+            .iter()
+            .rposition(|token| token.token == Token::SemiColon)
+            .map_or(0, |semicolon| semicolon + 1);
+        tokens.truncate(end);
+    }
+    tokens
 }
