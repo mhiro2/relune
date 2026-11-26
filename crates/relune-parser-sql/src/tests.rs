@@ -773,6 +773,20 @@ fn recovery_is_semicolon_delimited_and_consumes_unterminated_errors() {
 }
 
 #[test]
+fn recovery_keeps_the_next_statement_when_an_error_consumes_the_semicolon() {
+    // The grammar reads the `;` while looking for the missing operand, so
+    // skipping to the next semicolon would swallow `after`.
+    for dialect in [SqlDialect::Postgres, SqlDialect::Mysql, SqlDialect::Sqlite] {
+        let sql = "CREATE TABLE before (id INT); SELECT 1 + ; CREATE TABLE after (id INT);";
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, dialect);
+        assert!(output.has_errors(), "{dialect:?}");
+        let schema = output.schema.unwrap();
+        let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["before", "after"], "{dialect:?}");
+    }
+}
+
+#[test]
 fn strict_parse_rejects_error_diagnostics() {
     let sql = "THIS IS NOT VALID SQL";
 
@@ -1621,6 +1635,12 @@ mod snapshot_tests {
     }
 
     #[test]
+    fn snapshot_pg_dump() {
+        let sql = read_sql_fixture("pg_dump.sql");
+        snapshot_fixture_with_dialect("pg_dump", &sql, SqlDialect::Postgres);
+    }
+
+    #[test]
     fn snapshot_sqlite_blog() {
         let sql = read_sql_fixture("sqlite_blog.sql");
         snapshot_fixture_with_dialect("sqlite_blog", &sql, SqlDialect::Sqlite);
@@ -2294,6 +2314,125 @@ fn test_parse_sqlite_foreign_keys() {
     let posts = &schema.tables[1];
     assert_eq!(posts.foreign_keys.len(), 1);
     assert_eq!(posts.foreign_keys[0].to_table, "users");
+}
+
+#[test]
+fn sqlite_dump_pragmas_and_triggers_parse_without_errors() {
+    // `sqlite3 .dump` starts with `PRAGMA foreign_keys=OFF;`, which the stock
+    // grammar rejected along with other bare-word and signed pragma values.
+    let sql = r"
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        PRAGMA journal_mode = WAL;
+        PRAGMA main.journal_mode(WAL);
+        PRAGMA cache_size = -2000;
+        PRAGMA defer_foreign_keys = true;
+        PRAGMA user_version = 3;
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TRIGGER IF NOT EXISTS touch AFTER UPDATE ON users BEGIN
+            UPDATE users SET name = 'END;' WHERE id = NEW.id;
+        END;
+        CREATE TEMP TRIGGER IF NOT EXISTS audit AFTER INSERT ON users BEGIN SELECT 1; END;
+        CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id));
+        COMMIT;
+    ";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let triggers = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("CREATE TRIGGER"))
+        .count();
+    assert_eq!(triggers, 2);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.tables.len(), 2);
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+}
+
+#[test]
+fn sqlite_check_operators_keep_their_table() {
+    // A CHECK using NOT GLOB, NOT MATCH, or ISNULL dropped its whole table.
+    let sql = "CREATE TABLE t (id TEXT PRIMARY KEY, parent TEXT REFERENCES t(id),
+        digest TEXT CHECK (digest ISNULL OR (length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')),
+        body TEXT,
+        CONSTRAINT body_terms CHECK (body NOT MATCH 'spam' AND body NOT REGEXP 'x+'));";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    let table = &schema.tables[0];
+    assert_eq!(table.foreign_keys.len(), 1);
+    assert_eq!(
+        table.columns[2].semantics.check_constraints[0].expression,
+        "digest IS NULL OR (length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')"
+    );
+    assert_eq!(
+        table.check_constraints[0].expression,
+        "body NOT MATCH 'spam' AND body NOT REGEXP 'x+'"
+    );
+}
+
+#[test]
+fn sqlite_multi_word_type_names_keep_their_table() {
+    // SQLite takes any sequence of names as a type and derives the affinity
+    // from it; the documentation's own examples dropped the table.
+    let sql = "CREATE TABLE t (
+        id UNSIGNED BIG INT PRIMARY KEY,
+        code VARYING CHARACTER(255) NOT NULL,
+        label NATIVE CHARACTER(70) COLLATE NOCASE,
+        ratio DOUBLE PRECISION DEFAULT 1.0,
+        amount BIG DECIMAL(10, -2),
+        owner UNSIGNED BIG INT REFERENCES t(id) DEFERRABLE INITIALLY DEFERRED
+    );";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    let columns: Vec<(&str, &str, bool)> = schema.tables[0]
+        .columns
+        .iter()
+        .map(|c| (c.name.as_str(), c.data_type.as_str(), c.nullable))
+        .collect();
+    assert_eq!(
+        columns,
+        [
+            ("id", "UNSIGNED BIG INT", false),
+            ("code", "VARYING CHARACTER(255)", false),
+            ("label", "NATIVE CHARACTER(70)", true),
+            ("ratio", "DOUBLE PRECISION", true),
+            ("amount", "BIG DECIMAL(10, -2)", true),
+            ("owner", "UNSIGNED BIG INT", true),
+        ]
+    );
+    assert!(schema.tables[0].columns[0].is_primary_key);
+}
+
+#[test]
+fn sqlite_multi_word_type_names_take_at_most_two_sizes() {
+    let sql = "CREATE TABLE t (amount BIG DECIMAL(1, 2, 3)); CREATE TABLE after_it (id INT);";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(output.has_errors());
+    let schema = output.schema.unwrap();
+    let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["after_it"]);
+}
+
+#[test]
+fn sqlite_rescue_still_reports_malformed_statements() {
+    for statement in [
+        "PRAGMA cache_size = ;",
+        "PRAGMA journal_mode(WAL;",
+        "CREATE TRIGGER IF NOT EXISTS t AFTER BOGUS ON t BEGIN SELECT 1; END;",
+    ] {
+        let sql = format!("CREATE TABLE t (id INT); {statement} CREATE TABLE after_it (id INT);");
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Sqlite);
+        assert!(output.has_errors(), "{statement}");
+        assert!(
+            output.diagnostics[0].message.starts_with("SQL parse error"),
+            "{statement}"
+        );
+        let schema = output.schema.unwrap();
+        let names: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["t", "after_it"], "{statement}");
+    }
 }
 
 #[test]
@@ -3587,4 +3726,34 @@ fn mysql_inline_column_comment_is_captured() {
         .find(|c| c.name == "email")
         .expect("email column");
     assert_eq!(email.comment.as_deref(), Some("login email"));
+}
+
+#[test]
+fn pg_dump_output_parses_without_errors() {
+    let sql = read_sql_fixture("pg_dump.sql");
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Postgres);
+    let errors: Vec<_> = output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let schema = output.schema.expect("schema");
+    let tables: Vec<&str> = schema
+        .tables
+        .iter()
+        .map(|table| table.name.as_str())
+        .collect();
+    assert_eq!(tables, ["orders", "orders_2026", "users"]);
+    // The materialized view `pg_dump` writes WITH NO DATA is kept.
+    assert_eq!(schema.views.len(), 1);
+    // The index on the partitioned parent is read from `ON ONLY`.
+    assert!(
+        schema.tables[0]
+            .indexes
+            .iter()
+            .any(|index| index.name.as_deref() == Some("orders_user_idx"))
+    );
+    // The identity column added with `SEQUENCE NAME` keeps its identity.
+    assert!(schema.tables[2].columns[0].semantics.identity.is_some());
 }

@@ -110,6 +110,11 @@ calling the action.
 - run: pg_dump --schema-only "$DATABASE_URL" > schema.sql
 ```
 
+`pg_dump` output is read as written: statements for objects the diagram does not model
+(procedures, publications, ownership, storage settings, psql meta-commands such as
+`\restrict`) are skipped with `PARSE002` warnings, so leave `fail_on_warning` off for
+this input.
+
 For a workflow that materializes the schema from both the base and the head ref, see
 [`docs/examples/migration-diff.yaml`](examples/migration-diff.yaml). The same materialize
 step works for review — only the action invocation differs.

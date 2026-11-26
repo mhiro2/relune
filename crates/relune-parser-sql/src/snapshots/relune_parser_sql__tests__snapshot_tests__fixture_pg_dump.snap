@@ -1,0 +1,447 @@
+---
+source: crates/relune-parser-sql/src/tests.rs
+expression: snapshot_data(&output)
+---
+{
+  "diagnostics": [
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: psql meta-command \\restrict. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER DOMAIN. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TYPE OWNER TO. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE CAST. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE PROCEDURE. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER PROCEDURE. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE OPERATOR. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER OPERATOR. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE ALTER COLUMN SET STATISTICS. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE ALTER COLUMN SET COMPRESSION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE CLUSTER ON. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER INDEX ATTACH PARTITION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER INDEX ATTACH PARTITION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE STATISTICS. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER STATISTICS. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE PUBLICATION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER PUBLICATION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER PUBLICATION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE EVENT TRIGGER. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER EVENT TRIGGER. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: SECURITY LABEL. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: psql meta-command \\unrestrict. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE operation (unsupported): OwnerTo { new_owner: Ident(Ident { value: \"postgres\", quote_style: None, span.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE operation (unsupported): OwnerTo { new_owner: Ident(Ident { value: \"postgres\", quote_style: None, span.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE operation (unsupported): OwnerTo { new_owner: Ident(Ident { value: \"postgres\", quote_style: None, span.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: ALTER TABLE operation (unsupported): AttachPartitionOf { partition: ObjectName([Identifier(Ident { value: \"public\".... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE003",
+      "message": "Skipped DML statement: SELECT. Only DDL statements are processed.",
+      "severity": "info"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CreateDomain(CreateDomain { name: ObjectName([Identifier(Ident { value: \"publ.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CREATE FUNCTION. This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: AlterFunction(AlterFunction { kind: Function, function: FunctionDesc { name: .... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: CreateAggregate(CreateAggregate { or_replace: false, name: ObjectName([Identi.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: AlterFunction(AlterFunction { kind: Aggregate, function: FunctionDesc { name:.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: Set(SingleAssignment { scope: None, hivevar: false, variable: ObjectName([Ide.... This statement will be skipped.",
+      "severity": "warning"
+    },
+    {
+      "code": "PARSE002",
+      "message": "Unsupported SQL construct: AlterView(AlterView { materialized: true, name: ObjectName([Identifier(Ident .... This statement will be skipped.",
+      "severity": "warning"
+    }
+  ],
+  "dialect": "postgres",
+  "schema": {
+    "enums": [
+      {
+        "id": "public.mood",
+        "name": "mood",
+        "schema_name": "public",
+        "values": [
+          "sad",
+          "ok",
+          "happy"
+        ]
+      }
+    ],
+    "tables": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "BIGINT",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 3,
+            "is_primary_key": true,
+            "name": "placed_at",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [
+          {
+            "from_columns": [
+              "user_id"
+            ],
+            "name": "orders_user_id_fkey",
+            "to_columns": [
+              "id"
+            ],
+            "to_schema": "public",
+            "to_table": "users"
+          }
+        ],
+        "id": 1,
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
+            "method": "btree",
+            "name": "orders_user_idx"
+          }
+        ],
+        "name": "orders",
+        "primary_key_name": "orders_pkey",
+        "schema_name": "public",
+        "stable_id": "public.orders"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "BIGINT",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "user_id",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "DATE",
+            "id": 3,
+            "is_primary_key": true,
+            "name": "placed_at",
+            "nullable": false
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 2,
+        "indexes": [
+          {
+            "is_unique": false,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "user_id"
+                }
+              }
+            ],
+            "method": "btree",
+            "name": "orders_2026_user_id_idx"
+          }
+        ],
+        "name": "orders_2026",
+        "primary_key_name": "orders_2026_pkey",
+        "schema_name": "public",
+        "stable_id": "public.orders_2026"
+      },
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "INTEGER",
+            "id": 1,
+            "is_primary_key": true,
+            "name": "id",
+            "nullable": false,
+            "semantics": {
+              "identity": {
+                "always": true
+              }
+            }
+          },
+          {
+            "comment": null,
+            "data_type": "public.email",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "email",
+            "nullable": false
+          },
+          {
+            "comment": null,
+            "data_type": "public.mood",
+            "id": 3,
+            "is_primary_key": false,
+            "name": "mood",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "TEXT",
+            "id": 4,
+            "is_primary_key": false,
+            "name": "name",
+            "nullable": true
+          }
+        ],
+        "comment": null,
+        "foreign_keys": [],
+        "id": 3,
+        "indexes": [
+          {
+            "is_unique": true,
+            "key_parts": [
+              {
+                "column": {
+                  "name": "email"
+                }
+              }
+            ],
+            "name": "users_email_key"
+          }
+        ],
+        "name": "users",
+        "primary_key_name": "users_pkey",
+        "schema_name": "public",
+        "stable_id": "public.users"
+      }
+    ],
+    "views": [
+      {
+        "columns": [
+          {
+            "comment": null,
+            "data_type": "unknown",
+            "id": 1,
+            "is_primary_key": false,
+            "name": "user_id",
+            "nullable": true
+          },
+          {
+            "comment": null,
+            "data_type": "unknown",
+            "id": 2,
+            "is_primary_key": false,
+            "name": "n",
+            "nullable": true
+          }
+        ],
+        "definition": "SELECT user_id, count(*) AS n FROM public.orders GROUP BY user_id",
+        "id": "public.order_counts",
+        "name": "order_counts",
+        "schema_name": "public"
+      }
+    ]
+  }
+}
