@@ -38,11 +38,7 @@ jobs:
             | jq -r '.packages[] | select(.name=="relune-cli") | .version')"
           test "${TAG_VERSION}" = "${CARGO_VERSION}"
       - name: Install Zig
-        # Pin to 0.15.x: zig 0.16.0 breaks cargo-zigbuild's `ar` wrapper when
-        # building ring/psm. See https://github.com/rust-cross/cargo-zigbuild/issues/433
-        run: |
-          brew install zig@0.15
-          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
+        run: brew install zig
       - name: Install cargo-zigbuild
         # The tool version follows the install-action pin that Dependabot bumps.
         uses: taiki-e/install-action@v2.90.6
